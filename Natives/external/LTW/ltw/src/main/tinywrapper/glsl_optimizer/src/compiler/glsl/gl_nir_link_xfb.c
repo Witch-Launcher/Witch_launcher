@@ -65,6 +65,7 @@ gl_nir_link_assign_xfb_resources(const struct gl_constants *consts,
    for (unsigned i = 0; i < prog->TransformFeedback.NumVarying; i++)
       free(prog->TransformFeedback.VaryingNames[i]);
    free(prog->TransformFeedback.VaryingNames);
+   prog->TransformFeedback.VaryingNames = NULL;
 
    nir_xfb_info *xfb_info = NULL;
    nir_xfb_varyings_info *varyings_info = NULL;
@@ -115,6 +116,13 @@ gl_nir_link_assign_xfb_resources(const struct gl_constants *consts,
    int xfb_buffer =
       (varyings_info->varying_count > 0) ?
       xfb_info->outputs[0].buffer : 0;
+
+   prog->TransformFeedback.NumVarying = varyings_info->varying_count;
+   prog->TransformFeedback.VaryingNames =
+      rzalloc_array(prog, char *, prog->TransformFeedback.NumVarying);
+   if (prog->TransformFeedback.NumVarying > 0 &&
+       prog->TransformFeedback.VaryingNames == NULL)
+      return;
 
    for (unsigned i = 0; i < varyings_info->varying_count; i++) {
       nir_xfb_varying_info *xfb_varying = &varyings_info->varyings[i];
