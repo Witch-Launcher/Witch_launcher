@@ -289,7 +289,7 @@ java: lwgjl
 	# parallelism low: running 10+ javac VMs concurrently with the parallel
 	# native/lwgjl/dep_mg jobs exhausts CI runner memory and crashes javac
 	# (SIGABRT in _platform_memmove).
-	$(MAKE) -C JavaApp -j4 BOOTJDK=$(BOOTJDK)
+	$(MAKE) -C JavaApp -j2 BOOTJDK=$(BOOTJDK)
 	echo '[Amethyst v$(VERSION)] java - end'
 
 jre: native
@@ -302,6 +302,9 @@ jre: native
 	$(call METHOD_JAVA_UNPACK,25,'https://assets.angelauramc.dev/openjdk/ios-arm64/jre25-ios-aarch64.zip'); \
 	if [ -f "$(ls jre*.tar.xz)" ]; then rm $(SOURCEDIR)/depends/jre*.tar.xz; fi; \
 	rm -rf $(SOURCEDIR)/depends/java-{8,17,21,25}-openjdk/{ASSEMBLY_EXCEPTION,bin,include,jre,legal,LICENSE,man,THIRD_PARTY_README,lib/{ct.sym,jspawnhelper,libjsig.dylib,src.zip,tools.jar}}; \
+	printf 'amethyst-mirror-mapping-v1\n' > $(SOURCEDIR)/depends/java-17-openjdk/.amethyst-mirror-mapping; \
+	printf 'amethyst-mirror-mapping-v1\n' > $(SOURCEDIR)/depends/java-21-openjdk/.amethyst-mirror-mapping; \
+	printf 'amethyst-mirror-mapping-v1\n' > $(SOURCEDIR)/depends/java-25-openjdk/.amethyst-mirror-mapping; \
 	$(call METHOD_DIRCHECK,$(OUTPUTDIR)/java_runtimes); \
 	cp -R $(POJAV_JRE8_DIR) $(OUTPUTDIR)/java_runtimes; \
 	cp -R $(POJAV_JRE17_DIR) $(OUTPUTDIR)/java_runtimes; \

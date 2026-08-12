@@ -7,7 +7,7 @@
 
 @implementation SurfaceViewController(Navigation)
 
-static UIView *menuSwipeView;
+static CGPoint lastCenterPoint;
 - (void)initCategory_Navigation {
     UIPanGestureRecognizer *menuPanGesture = [[UIPanGestureRecognizer alloc] initWithTarget:self action:@selector(handleRightEdge:)];
     menuPanGesture.delegate = self;
@@ -24,6 +24,7 @@ static UIView *menuSwipeView;
     [menuSwipeView addGestureRecognizer:menuPanGesture];
     [menuSwipeView addSubview:menuSwipeLineView];
     [self.rootView addSubview:menuSwipeView];
+    self.menuSwipeView = menuSwipeView;
 
     self.menuArray = @[@"game.menu.force_close", @"game.menu.log_output", @"game.menu.custom_controls", @"Settings"];
 
@@ -220,6 +221,10 @@ static CGPoint lastCenterPoint;
 
     self.menuView.frame = CGRectMake(self.rootView.frame.size.width, self.rootView.frame.origin.y,
         frame.size.width*0.3 - 30.0*0.7, self.menuView.contentSize.height);
+}
+
+- (void)setEdgeSwipeUIHidden:(BOOL)hidden {
+    self.menuSwipeView.hidden = hidden;
 }
 
 @end

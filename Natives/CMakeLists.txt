@@ -229,6 +229,7 @@ set_target_properties(TouchControllerGameBridge PROPERTIES
 add_executable(AngelAuraAmethyst
   dyld_bypass_validation.m
   dyld_patch_platform.m
+  jit_vm_remap_hook.m
   main.m
   main_hook.m
   JavaLauncher.m
@@ -293,7 +294,9 @@ add_executable(AngelAuraAmethyst
   SurfaceViewController+ExternalDisplay.m
   SurfaceViewController+LogView.m
   SurfaceViewController+Navigation.m
+  SurfaceViewController+Widget.m
   TrackedTextField.m
+  system_monitor.m
 egl_bridge.m
     ZinkConfig.m
     input_bridge_v3.m

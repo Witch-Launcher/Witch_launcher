@@ -20,10 +20,74 @@
 #include "utils.h"
 #include "ZinkConfig.h"
 
-void aasdl_setMainReady(void);
+void aasdl_setMainReady(NSString *nativesDir);
 
 int clientAPI;
 __thread basic_render_window_t* currentBundle;
+
+// Counts every game frame swap so the in-game widget can show real FPS.
+// The game may present through different paths depending on renderer:
+//   * pojavSwapBuffers() called straight from the game's JNI (GL renderers)
+//   * libmobileglues.dylib's exported eglSwapBuffers (mobileglues_swap_count)
+//   * MoltenVK/Vulkan (e.g. Minecraft 26.3 snapshot): frames bypass the bridge
+//     entirely and only surface as a Metal drawable, so we also count
+//     CAMetalLayer -nextDrawable calls, which every renderer makes once per
+//     presented frame. MAX() is safe: for GL renderers the drawable count is
+//     identical to the swap count, and for Vulkan the swap counts stay 0.
+#include <dlfcn.h>
+#include <stdatomic.h>
+#import <objc/runtime.h>
+#import <QuartzCore/QuartzCore.h>
+
+static atomic_uint_fast64_t widgetSwapCountOwn;
+static atomic_uint_fast64_t widgetMetalFrameCount;
+
+static IMP origNextDrawable;
+static id widgetSwizzledNextDrawable(id self, SEL _cmd) {
+    atomic_fetch_add_explicit(&widgetMetalFrameCount, 1, memory_order_relaxed);
+    return ((id (*)(id, SEL))origNextDrawable)(self, _cmd);
+}
+
+static IMP origNextDrawableWithSize;
+static id widgetSwizzledNextDrawableWithSize(id self, SEL _cmd, CGSize size) {
+    atomic_fetch_add_explicit(&widgetMetalFrameCount, 1, memory_order_relaxed);
+    return ((id (*)(id, SEL, CGSize))origNextDrawableWithSize)(self, _cmd, size);
+}
+
+static void widgetHookMetalOnce(void) {
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        Class cls = CAMetalLayer.class;
+        Method m = class_getInstanceMethod(cls, @selector(nextDrawable));
+        if (m) {
+            origNextDrawable = method_getImplementation(m);
+            method_setImplementation(m, (IMP)widgetSwizzledNextDrawable);
+        }
+        SEL sizeSel = NSSelectorFromString(@"nextDrawableWithSize:");
+        Method m2 = class_getInstanceMethod(cls, sizeSel);
+        if (m2) {
+            origNextDrawableWithSize = method_getImplementation(m2);
+            method_setImplementation(m2, (IMP)widgetSwizzledNextDrawableWithSize);
+        }
+    });
+}
+
+uint64_t pojavSwapCount(void) {
+    widgetHookMetalOnce();
+    static uint64_t (*mobilegluesSwapCountFn)(void);
+    if (!mobilegluesSwapCountFn) {
+        mobilegluesSwapCountFn = (uint64_t (*)(void))dlsym(RTLD_DEFAULT, "mobileglues_swap_count");
+    }
+    uint64_t mg = mobilegluesSwapCountFn ? mobilegluesSwapCountFn() : 0;
+    uint64_t own = atomic_load_explicit(&widgetSwapCountOwn, memory_order_relaxed);
+    uint64_t metal = atomic_load_explicit(&widgetMetalFrameCount, memory_order_relaxed);
+    static BOOL loggedSource;
+    if (!loggedSource) {
+        loggedSource = YES;
+        NSLog(@"[WidgetFPS] mobileglues=%llu own=%llu metal=%llu", mg, own, metal);
+    }
+    return MAX(MAX(mg, own), metal);
+}
 
 void JNI_LWJGL_changeRenderer(const char* value_c) {
     JNIEnv *env;
@@ -49,7 +113,7 @@ int pojavInit(BOOL useStackQueue) {
     clientAPI = GLFW_OPENGL_API;
     isInputReady = 1;
     isUseStackQueueCall = useStackQueue;
-    aasdl_setMainReady();
+    aasdl_setMainReady(@"lwjgl41_natives");
     return JNI_TRUE;
 }
 
@@ -110,6 +174,7 @@ void pojavSetWindowHint(int hint, int value) {
 }
 
 void pojavSwapBuffers() {
+    atomic_fetch_add_explicit(&widgetSwapCountOwn, 1, memory_order_relaxed);
     if (!br_swap_buffers) return;
     br_swap_buffers();
 }

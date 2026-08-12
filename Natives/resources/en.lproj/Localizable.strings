@@ -8,6 +8,25 @@
 "game.menu.log_output" = "Log output";
 "game.menu.custom_controls" = "Custom controls";
 
+"In-Game Widget" = "In-Game Widget";
+"preference.title.widget_menu" = "Widget Menu";
+"preference.title.widget_show_fps" = "Show FPS";
+"preference.title.widget_show_cpu" = "Show CPU";
+"preference.title.widget_show_gpu" = "Show GPU";
+"preference.title.widget_cpu_style" = "CPU/GPU Display";
+"preference.title.widget_cpu_style.bars" = "Diagram";
+"preference.title.widget_cpu_style.percent" = "Percent";
+"preference.title.widget_cpu_style.ring" = "Circle";
+"preference.title.widget_ram_style" = "RAM Display";
+"preference.title.widget_ram_style.none" = "Off";
+"preference.title.widget_size" = "Widget Size";
+"preference.title.widget_show_temp" = "Show Temperature";
+"preference.title.widget_temp_unit" = "Temperature Unit";
+"preference.title.widget_temp_unit.c" = "Celsius (°C)";
+"preference.title.widget_temp_unit.f" = "Fahrenheit (°F)";
+"preference.title.widget_show_batt" = "Show Battery";
+"preference.title.widget_bg_opacity" = "Widget Background";
+
 "game.note.airplay" = "Minecraft is being displayed in AirPlay mirrored display";
 
 "game.title.exit_code" = "Game exited with code %d";

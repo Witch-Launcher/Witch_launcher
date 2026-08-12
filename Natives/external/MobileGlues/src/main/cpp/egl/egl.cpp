@@ -11,7 +11,15 @@
 #include "../glx/lookup.h"
 #include "loader.h"
 
+#include <atomic>
+
 #define DEBUG 0
+
+static std::atomic<uint64_t> g_eglSwapCount{0};
+
+extern "C" uint64_t mobileglues_swap_count(void) {
+  return g_eglSwapCount.load(std::memory_order_relaxed);
+}
 
 extern "C" {
 #define EGL_API __attribute__((visibility("default")))
@@ -244,6 +252,7 @@ EGL_API EGLBoolean eglWaitNative(EGLint engine) {
 }
 
 EGL_API EGLBoolean eglSwapBuffers(EGLDisplay dpy, EGLSurface surface) {
+  g_eglSwapCount.fetch_add(1, std::memory_order_relaxed);
   LOG_D("eglSwapBuffers, dpy: %p, surface: %p", dpy, surface);
   LOAD_EGL(eglSwapBuffers)
   EGLBoolean result;

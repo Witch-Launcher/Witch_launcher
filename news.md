@@ -30,7 +30,8 @@
 # AngelAuraAmethyst iOS — 1.1.3
 
 ```Cảm ơn L4d đã hỗ trợ mình trong việc sửa chữa vấn đề trên iOS 27(But not working :< I'm Sorry)```
-```Thanks for Development247```
+```Thanks for Development247, Han```
+
 ## 🇬🇧 English
 
 - Fixed the Distant Horizons mod not working on iOS 26.
@@ -75,6 +76,20 @@
 
 ---
 
+# AngelAuraAmethyst iOS — 1.1.3-beta.10
+
+```Cảm ơn L4d đã hỗ trợ mình trong việc sửa chữa vấn đề trên iOS 27(But not working :< I'm Sorry)```
+
+## 🇬🇧 English
+
+- 
+
+## 🇻🇳 Tiếng Việt
+
+- 
+
+---
+
 # AngelAuraAmethyst iOS — 1.1.3-beta.9
 
 ```Cảm ơn L4d đã hỗ trợ mình trong việc sửa chữa vấn đề trên iOS 27(But not working :< I'm Sorry)```
@@ -84,12 +99,14 @@
 - Fixed the Distant Horizons mod not working on iOS 26.
 - Fixed the crash issue when reaching 1000MB RAM on all devices.
 - Reviewed and fixed the Touch Controller not working.
+- iOS 26.6/27 JIT: TXM detection rewritten to match StikDebug 3.1.6+ exactly — A13/A14/M1 devices (e.g. iPhone 12) now use the correct non-TXM path on iOS 26, and on iOS 27 every device except the M1 iPad Pro (iPad8,11/iPad8,12) is treated as TXM so the Universal JIT script is actually served. Use StikDebug 3.1.6 or newer (3.1.9 recommended). New hidden preference `debug.force_txm` to override detection.
 
 ## 🇻🇳 Tiếng Việt
 
 - Sửa lỗi Distant Horizons mod không hoạt động trên iOS 26.
 - Sửa lỗi crash khi đạt 1000MB RAM trên mọi thiết bị.
 - Xem và sửa mod Touch Controller không hoạt động.
+- Sửa JIT trên iOS 26.6/27: viết lại cách nhận diện TXM cho khớp hoàn toàn với StikDebug 3.1.6+ — máy A13/A14/M1 (vd iPhone 12) giờ dùng đúng đường non-TXM trên iOS 26, còn trên iOS 27 mọi thiết bị trừ iPad Pro M1 (iPad8,11/iPad8,12) được xem là TXM để debugger thực sự phục vụ script Universal JIT. Hãy dùng StikDebug 3.1.6 trở lên (khuyến nghị 3.1.9). Thêm pref ẩn `debug.force_txm` để ép nhận diện TXM.
 
 ---
 

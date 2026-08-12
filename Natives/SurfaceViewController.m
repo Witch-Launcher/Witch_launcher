@@ -321,6 +321,7 @@ static GameSurfaceView* pojavWindow;
     [self updatePreferenceChanges];
     [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(updateSavedResolution) name:@"ResolutionDidChangeNotification" object:nil];
     [self loadCustomControls];
+    [self performSelector:@selector(setupCategory_Widget)];
 
     if (UIApplication.sharedApplication.connectedScenes.count > 1 &&
       getPrefBool(@"video.fullscreen_airplay")) {
@@ -333,6 +334,11 @@ static GameSurfaceView* pojavWindow;
 - (void)viewDidAppear:(BOOL)animated {
     [super viewDidAppear:animated];
     [self setNeedsUpdateOfPrefersPointerLocked];
+}
+
+- (void)viewWillDisappear:(BOOL)animated {
+    [super viewWillDisappear:animated];
+    [self performSelector:@selector(widgetStopTimer)];
 }
 
 - (void)updateAudioSettings {
@@ -647,6 +653,9 @@ static GameSurfaceView* pojavWindow;
         // Update custom controls button position
         self.ctrlView.frame = getSafeArea(self.view.frame);
         [self.ctrlView.subviews makeObjectsPerformSelector:@selector(update)];
+
+        // Reposition in-game widget (keeps user's relative position)
+        [self performSelector:@selector(widgetRepositionFromDefaults)];
 
         // Update game resolution
         [self updateSavedResolution];

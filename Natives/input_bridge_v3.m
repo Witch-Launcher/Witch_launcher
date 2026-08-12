@@ -608,16 +608,33 @@ static BOOL aasdl_available(void) {
  * liblwjgl.dylib already loaded in another classloader". Set the flag
  * directly on the native SDL3 instead, so whichever classloader the game
  * uses finds it already set. */
-void aasdl_setMainReady(void) {
+void aasdl_setMainReady(NSString *nativesDir) {
     static BOOL done;
     if (done) return;
     done = YES;
-    NSString *sdlDir = [[NSBundle.mainBundle.bundlePath stringByAppendingPathComponent:@"libs"] stringByAppendingPathComponent:@"lwjgl41_natives"];
-    NSString *sdlPath = [sdlDir stringByAppendingPathComponent:@"libSDL3.dylib"];
-    if (![NSFileManager.defaultManager fileExistsAtPath:sdlPath]) {
-        NSLog(@"[SDLInject] libSDL3.dylib not found, skipping SDL_SetMainReady");
+    /* nativesDir should be the bare dir name (e.g. "lwjgl41_natives") matching
+     * org.lwjgl.librarypath: dlopen'ing a *different* copy registers a second
+     * SDL instance under its own install name, and SDL_SetMainReady on one
+     * instance is invisible to the other. Fall back to the other dirs in case
+     * the version resolution disagrees with the installed bundle layout. */
+    NSArray<NSString *> *candidates = @[ @"lwjgl41_natives", @"lwjgl36_natives", @"lwjgl33_natives" ];
+    if (nativesDir.length > 0 && [candidates indexOfObject:nativesDir] == NSNotFound) {
+        candidates = [candidates arrayByAddingObject:nativesDir];
+    }
+    NSString *sdlPath = nil;
+    for (NSString *candidate in candidates) {
+        NSString *sdlDir = [[NSBundle.mainBundle.bundlePath stringByAppendingPathComponent:@"libs"] stringByAppendingPathComponent:candidate];
+        NSString *probe = [sdlDir stringByAppendingPathComponent:@"libSDL3.dylib"];
+        if ([NSFileManager.defaultManager fileExistsAtPath:probe]) {
+            sdlPath = probe;
+            break;
+        }
+    }
+    if (!sdlPath) {
+        NSLog(@"[SDLInject] libSDL3.dylib not found in any natives dir, skipping SDL_SetMainReady");
         return;
     }
+    NSLog(@"[SDLInject] using libSDL3.dylib from %@", sdlPath.stringByDeletingLastPathComponent);
     void *handle = dlopen(sdlPath.UTF8String, RTLD_LAZY | RTLD_GLOBAL);
     if (!handle) {
         NSLog(@"[SDLInject] dlopen libSDL3.dylib failed: %s", dlerror());

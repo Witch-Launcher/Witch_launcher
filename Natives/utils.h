@@ -80,6 +80,7 @@ typedef enum {
 } JITFlags;
 JITFlags DeviceGetJITFlags(BOOL refresh);
 BOOL DeviceHasJITFlags(JITFlags flags);
+BOOL DeviceNeedsDebugJITMapping(void);
 BOOL DeviceHasTXMReal(void);
 BOOL JIT26IsLikelyDebuggerKeepAttached(void);
 
@@ -87,6 +88,10 @@ void handle_fatal_exit(int code);
 
 // Init functions
 void init_bypassDyldLibValidation();
+void init_jit_vm_remap_hook();
+void rebind_jit_vm_hooks_after_libjvm_load();
+void start_jit_mirror_prepare_poll_thread();
+void AmethystJIT26PrepareMirrorPair(void *rx, void *rw, size_t size);
 void init_hookFunctions();
 void init_hookUIKitConstructor();
 void init_setupMultiDir();

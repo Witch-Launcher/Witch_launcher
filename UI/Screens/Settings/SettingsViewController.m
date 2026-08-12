@@ -61,6 +61,30 @@
             @{@"type": @"navigate", @"label": localize(@"Mouse Cursors", nil), @"vc": @"CursorManageViewController"},
             @{@"type": @"navigate", @"label": localize(@"Edit Controls Layout", nil), @"vc": @"CustomControlsViewController"},
         ]},
+        @{@"title": localize(@"In-Game Widget", nil), @"items": @[
+            @{@"type": @"switch", @"label": localize(@"preference.title.widget_menu", nil), @"key": @"general.widget_menu"},
+            @{@"type": @"switch", @"label": localize(@"preference.title.widget_show_fps", nil), @"key": @"general.widget_show_fps"},
+            @{@"type": @"switch", @"label": localize(@"preference.title.widget_show_cpu", nil), @"key": @"general.widget_show_cpu"},
+            @{@"type": @"switch", @"label": localize(@"preference.title.widget_show_gpu", nil), @"key": @"general.widget_show_gpu"},
+            @{@"type": @"picker", @"label": localize(@"preference.title.widget_cpu_style", nil), @"key": @"general.widget_cpu_style", @"default": @"percent", @"options": @[
+                @{@"key": @"bars", @"name": localize(@"preference.title.widget_cpu_style.bars", nil)},
+                @{@"key": @"percent", @"name": localize(@"preference.title.widget_cpu_style.percent", nil)},
+                @{@"key": @"ring", @"name": localize(@"preference.title.widget_cpu_style.ring", nil)},
+            ]},
+            @{@"type": @"picker", @"label": localize(@"preference.title.widget_ram_style", nil), @"key": @"general.widget_ram_style", @"default": @"none", @"options": @[
+                @{@"key": @"none", @"name": localize(@"preference.title.widget_ram_style.none", nil)},
+                @{@"key": @"text", @"name": @"RAM (1)"},
+                @{@"key": @"bar", @"name": @"RAM (2)"},
+            ]},
+            @{@"type": @"slider", @"label": localize(@"preference.title.widget_size", nil), @"key": @"general.widget_scale", @"min": @50, @"max": @200, @"suffix": @"%"},
+            @{@"type": @"switch", @"label": localize(@"preference.title.widget_show_temp", nil), @"key": @"general.widget_show_temp"},
+            @{@"type": @"picker", @"label": localize(@"preference.title.widget_temp_unit", nil), @"key": @"general.widget_temp_unit", @"default": @"c", @"options": @[
+                @{@"key": @"c", @"name": localize(@"preference.title.widget_temp_unit.c", nil)},
+                @{@"key": @"f", @"name": localize(@"preference.title.widget_temp_unit.f", nil)},
+            ]},
+            @{@"type": @"switch", @"label": localize(@"preference.title.widget_show_batt", nil), @"key": @"general.widget_show_batt"},
+            @{@"type": @"slider", @"label": localize(@"preference.title.widget_bg_opacity", nil), @"key": @"general.widget_bg_opacity", @"min": @0, @"max": @80, @"suffix": @"%"},
+        ]},
         @{@"title": localize(@"Game", nil), @"items": @[
             @{@"type": @"picker", @"label": localize(@"LWJGL Version", nil), @"key": @"java.lwjgl_version", @"options": lwjglItems, @"default": @"(auto)"},
             @{@"type": @"switch", @"label": localize(@"preference.title.fullscreen_airplay", nil), @"key": @"video.fullscreen_airplay"},
@@ -430,7 +454,7 @@
                 setPrefFloat(@"java.allocated_memory", val);
             }
         }
-        if (val == 0 && ![item[@"key"] isEqualToString:@"amethyst_bg_blur"] && ![item[@"key"] isEqualToString:@"amethyst_ui_opacity"] && !disabled) val = [item[@"min"] floatValue] + ([item[@"max"] floatValue] - [item[@"min"] floatValue]) / 2;
+        if (val == 0 && ![item[@"key"] isEqualToString:@"amethyst_bg_blur"] && ![item[@"key"] isEqualToString:@"amethyst_ui_opacity"] && ![item[@"key"] isEqualToString:@"general.widget_bg_opacity"] && !disabled) val = [item[@"min"] floatValue] + ([item[@"max"] floatValue] - [item[@"min"] floatValue]) / 2;
         sl.minimumValue = [item[@"min"] floatValue];
         sl.maximumValue = [item[@"max"] floatValue];
         sl.value = val;
@@ -576,7 +600,7 @@
 
     UIAlertController *sheet = [UIAlertController alertControllerWithTitle:item[@"label"] message:nil preferredStyle:UIAlertControllerStyleActionSheet];
 
-    if ([item[@"key"] isEqualToString:@"video.renderer"] && [options.firstObject isKindOfClass:[NSDictionary class]]) {
+    if ([options.firstObject isKindOfClass:[NSDictionary class]]) {
         for (NSDictionary *opt in options) {
             NSString *key = opt[@"key"];
             NSString *name = opt[@"name"];

@@ -18,6 +18,18 @@
             @"cosmetica": @YES,
             @"debug_logging": @(!CONFIG_RELEASE),
             @"liquid_glass": @NO,
+            @"widget_menu": @NO,
+            @"widget_show_fps": @NO,
+            @"widget_show_cpu": @NO,
+            @"widget_show_gpu": @NO,
+            @"widget_show_temp": @NO,
+            @"widget_temp_unit": @"c",
+            @"widget_show_batt": @NO,
+            @"widget_bg_opacity": @(0),
+            @"widget_ram_style": @"none",
+            @"widget_cpu_style": @"percent",
+            @"widget_scale": @(100),
+            @"widget_position": @"",
         }.mutableCopy,
         @"video": @{ // Video & Audio
             @"renderer": @"auto",
@@ -103,6 +115,8 @@
         [defaults[@"general"] addEntriesFromDictionary:general];
         defaults[@"debug"] = @{
             @"debug_always_attached_jit": @NO,
+            @"debug_mirror_mapped_code_cache": @(-1),
+            @"debug_force_txm": @NO,
             @"debug_skip_wait_jit": @NO,
             @"debug_hide_home_indicator": @NO,
             @"debug_ipad_ui": @(realUIIdiom == UIUserInterfaceIdiomPad),
