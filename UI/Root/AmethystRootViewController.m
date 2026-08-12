@@ -5,6 +5,7 @@
 #import "TransitionAnimator.h"
 #import "MainCoordinator.h"
 #import "LauncherPreferences.h"
+#import "ios_uikit_bridge.h"
 #import <AVFoundation/AVFoundation.h>
 
 @interface AmethystRootViewController () <RightPanelDelegate, TopBarDelegate>
@@ -125,10 +126,7 @@
 }
 
 - (UIInterfaceOrientationMask)supportedInterfaceOrientations {
-    if (getPrefBool(@"general.lock_landscape")) {
-        return UIInterfaceOrientationMaskLandscape;
-    }
-    return [super supportedInterfaceOrientations];
+    return amethyst_orientation_mask();
 }
 
 - (void)updateColors {
@@ -314,9 +312,6 @@
 
 @implementation UINavigationController (LockLandscape)
 - (UIInterfaceOrientationMask)supportedInterfaceOrientations {
-    if (getPrefBool(@"general.lock_landscape")) {
-        return UIInterfaceOrientationMaskLandscape;
-    }
-    return [super supportedInterfaceOrientations];
+    return amethyst_orientation_mask();
 }
 @end

@@ -22,8 +22,6 @@ NSString * const ThemeDidChangeNotification = @"ThemeDidChangeNotification";
 - (instancetype)init {
     self = [super init];
     if (self) {
-        _accentColor = [UIColor colorWithRed:0.067 green:0.235 blue:0.522 alpha:1.0];
-        _accentHoverColor = [UIColor colorWithRed:0.098 green:0.345 blue:0.714 alpha:1.0];
         _interfaceStyle = UIUserInterfaceStyleUnspecified;
         _colorOverrides = [NSMutableDictionary dictionary];
         _backgroundBlurIntensity = 0;
@@ -42,16 +40,13 @@ NSString * const ThemeDidChangeNotification = @"ThemeDidChangeNotification";
     if (style > 0) {
         _interfaceStyle = style;
     }
-    NSString *accentHex = [defaults stringForKey:@"amethyst_accent_color"];
-    if (accentHex) {
-        _accentColor = [self colorFromHex:accentHex];
-        _accentHoverColor = [self lighterColor:_accentColor];
+
+    NSArray *colorKeys = @[@"amethyst_accent_color", @"amethyst_bg_color", @"amethyst_card_bg_color",
+                           @"amethyst_sidebar_bg_color", @"amethyst_topbar_bg_color", @"amethyst_rightpanel_bg_color",
+                           @"amethyst_text_color", @"amethyst_secondary_text_color"];
+    for (NSString *key in colorKeys) {
+        [self loadModeColorsForKey:key legacyHex:[defaults stringForKey:key]];
     }
-    [self loadColorOverrideForKey:@"amethyst_bg_color" into:&_backgroundColor];
-    [self loadColorOverrideForKey:@"amethyst_card_bg_color" into:&_cardBackgroundColor];
-    [self loadColorOverrideForKey:@"amethyst_sidebar_bg_color" into:&_sidebarBackgroundColor];
-    [self loadColorOverrideForKey:@"amethyst_topbar_bg_color" into:&_topBarBackgroundColor];
-    [self loadColorOverrideForKey:@"amethyst_rightpanel_bg_color" into:&_rightPanelBackgroundColor];
 
     _backgroundBlurIntensity = [defaults floatForKey:@"amethyst_bg_blur"];
     _uiOpacity = [defaults floatForKey:@"amethyst_ui_opacity"];
@@ -68,13 +63,37 @@ NSString * const ThemeDidChangeNotification = @"ThemeDidChangeNotification";
     }
 }
 
-- (void)loadColorOverrideForKey:(NSString *)key into:(UIColor *__strong *)ptr {
+- (void)loadModeColorsForKey:(NSString *)key legacyHex:(NSString *)legacyHex {
     NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
-    NSString *hex = [defaults stringForKey:key];
-    if (hex) {
-        *ptr = [self colorFromHex:hex];
-        _colorOverrides[key] = @YES;
+    NSString *darkKey = [self modePrefKeyFor:key dark:YES];
+    NSString *lightKey = [self modePrefKeyFor:key dark:NO];
+    NSString *darkHex = [defaults stringForKey:darkKey];
+    NSString *lightHex = [defaults stringForKey:lightKey];
+
+    if (legacyHex && !darkHex && !lightHex) {
+        [defaults setObject:legacyHex forKey:darkKey];
+        [defaults setObject:legacyHex forKey:lightKey];
+        [defaults removeObjectForKey:key];
+        _colorOverrides[darkKey] = [self colorFromHex:legacyHex];
+        _colorOverrides[lightKey] = [self colorFromHex:legacyHex];
+        return;
     }
+    if (darkHex) _colorOverrides[darkKey] = [self colorFromHex:darkHex];
+    if (lightHex) _colorOverrides[lightKey] = [self colorFromHex:lightHex];
+}
+
+- (NSString *)modePrefKeyFor:(NSString *)key dark:(BOOL)dark {
+    return [key stringByAppendingFormat:@".%@", dark ? @"dark" : @"light"];
+}
+
+- (UIColor *)colorOverrideForKey:(NSString *)key {
+    return [self colorOverrideForKey:key darkMode:self.isDarkMode];
+}
+
+- (UIColor *)colorOverrideForKey:(NSString *)key darkMode:(BOOL)dark {
+    UIColor *color = _colorOverrides[[self modePrefKeyFor:key dark:dark]];
+    if (!color) color = _colorOverrides[key];
+    return color;
 }
 
 - (void)setBackgroundImage:(UIImage *)backgroundImage {
@@ -190,47 +209,58 @@ NSString * const ThemeDidChangeNotification = @"ThemeDidChangeNotification";
     return _interfaceStyle == UIUserInterfaceStyleDark;
 }
 
+- (UIColor *)accentColor {
+    return [self colorOverrideForKey:@"amethyst_accent_color"]
+        ?: [UIColor colorWithRed:0.067 green:0.235 blue:0.522 alpha:1.0];
+}
+
+- (UIColor *)accentHoverColor {
+    return [self lighterColor:self.accentColor];
+}
+
 - (UIColor *)backgroundColor {
-    UIColor *color;
-    if (_colorOverrides[@"amethyst_bg_color"]) color = _backgroundColor;
-    else color = [self isDarkMode] ? [UIColor colorWithRed:0.039 green:0.039 blue:0.047 alpha:1.0] : [UIColor colorWithRed:0.949 green:0.949 blue:0.957 alpha:1.0];
+    UIColor *override = [self colorOverrideForKey:@"amethyst_bg_color"];
+    UIColor *color = override;
+    if (!color) color = [self isDarkMode] ? [UIColor colorWithRed:0.039 green:0.039 blue:0.047 alpha:1.0] : [UIColor colorWithRed:0.949 green:0.949 blue:0.957 alpha:1.0];
     return [color colorWithAlphaComponent:_uiOpacity];
 }
 
 - (UIColor *)cardBackgroundColor {
-    UIColor *color;
-    if (_colorOverrides[@"amethyst_card_bg_color"]) color = _cardBackgroundColor;
-    else color = [self isDarkMode] ? [UIColor colorWithRed:0.086 green:0.086 blue:0.094 alpha:1.0] : [UIColor whiteColor];
+    UIColor *override = [self colorOverrideForKey:@"amethyst_card_bg_color"];
+    UIColor *color = override;
+    if (!color) color = [self isDarkMode] ? [UIColor colorWithRed:0.086 green:0.086 blue:0.094 alpha:1.0] : [UIColor whiteColor];
     return [color colorWithAlphaComponent:_uiOpacity];
 }
 
 - (UIColor *)sidebarBackgroundColor {
-    UIColor *color;
-    if (_colorOverrides[@"amethyst_sidebar_bg_color"]) color = _sidebarBackgroundColor;
-    else color = [self isDarkMode] ? [UIColor colorWithRed:0.051 green:0.051 blue:0.059 alpha:1.0] : [UIColor colorWithRed:0.969 green:0.969 blue:0.973 alpha:1.0];
+    UIColor *override = [self colorOverrideForKey:@"amethyst_sidebar_bg_color"];
+    UIColor *color = override;
+    if (!color) color = [self isDarkMode] ? [UIColor colorWithRed:0.051 green:0.051 blue:0.059 alpha:1.0] : [UIColor colorWithRed:0.969 green:0.969 blue:0.973 alpha:1.0];
     return [color colorWithAlphaComponent:_uiOpacity];
 }
 
 - (UIColor *)topBarBackgroundColor {
-    UIColor *color;
-    if (_colorOverrides[@"amethyst_topbar_bg_color"]) color = _topBarBackgroundColor;
-    else color = [self isDarkMode] ? [UIColor colorWithRed:0.055 green:0.055 blue:0.063 alpha:1.0] : [UIColor colorWithRed:0.973 green:0.973 blue:0.976 alpha:1.0];
+    UIColor *override = [self colorOverrideForKey:@"amethyst_topbar_bg_color"];
+    UIColor *color = override;
+    if (!color) color = [self isDarkMode] ? [UIColor colorWithRed:0.055 green:0.055 blue:0.063 alpha:1.0] : [UIColor colorWithRed:0.973 green:0.973 blue:0.976 alpha:1.0];
     return [color colorWithAlphaComponent:_uiOpacity];
 }
 
 - (UIColor *)rightPanelBackgroundColor {
-    UIColor *color;
-    if (_colorOverrides[@"amethyst_rightpanel_bg_color"]) color = _rightPanelBackgroundColor;
-    else color = self.cardBackgroundColor;
+    UIColor *override = [self colorOverrideForKey:@"amethyst_rightpanel_bg_color"];
+    UIColor *color = override;
+    if (!color) color = self.cardBackgroundColor;
     return [color colorWithAlphaComponent:_uiOpacity];
 }
 
 - (UIColor *)primaryTextColor {
-    return [self isDarkMode] ? [UIColor whiteColor] : [UIColor blackColor];
+    return [self colorOverrideForKey:@"amethyst_text_color"]
+        ?: ([self isDarkMode] ? [UIColor whiteColor] : [UIColor blackColor]);
 }
 
 - (UIColor *)secondaryTextColor {
-    return [self isDarkMode] ? [UIColor colorWithRed:0.596 green:0.596 blue:0.620 alpha:1.0] : [UIColor colorWithRed:0.557 green:0.557 blue:0.576 alpha:1.0];
+    return [self colorOverrideForKey:@"amethyst_secondary_text_color"]
+        ?: ([self isDarkMode] ? [UIColor colorWithRed:0.596 green:0.596 blue:0.620 alpha:1.0] : [UIColor colorWithRed:0.557 green:0.557 blue:0.576 alpha:1.0]);
 }
 
 - (UIColor *)separatorColor {
@@ -254,28 +284,26 @@ NSString * const ThemeDidChangeNotification = @"ThemeDidChangeNotification";
 }
 
 - (void)applyAccentColor:(UIColor *)color {
-    _accentColor = color;
-    _accentHoverColor = [self lighterColor:color];
+    [self applyAccentColor:color darkMode:self.isDarkMode];
+}
+
+- (void)applyAccentColor:(UIColor *)color darkMode:(BOOL)dark {
+    NSString *modeKey = [self modePrefKeyFor:@"amethyst_accent_color" dark:dark];
+    _colorOverrides[modeKey] = color;
     NSString *hex = [self hexStringFromColor:color];
-    [[NSUserDefaults standardUserDefaults] setObject:hex forKey:@"amethyst_accent_color"];
+    [[NSUserDefaults standardUserDefaults] setObject:hex forKey:modeKey];
     [self broadcastThemeChange];
 }
 
 - (void)applyColor:(UIColor *)color forKey:(NSString *)key {
-    _colorOverrides[key] = @YES;
-    if ([key isEqualToString:@"amethyst_bg_color"]) {
-        _backgroundColor = color;
-    } else if ([key isEqualToString:@"amethyst_card_bg_color"]) {
-        _cardBackgroundColor = color;
-    } else if ([key isEqualToString:@"amethyst_sidebar_bg_color"]) {
-        _sidebarBackgroundColor = color;
-    } else if ([key isEqualToString:@"amethyst_topbar_bg_color"]) {
-        _topBarBackgroundColor = color;
-    } else if ([key isEqualToString:@"amethyst_rightpanel_bg_color"]) {
-        _rightPanelBackgroundColor = color;
-    }
+    [self applyColor:color forKey:key darkMode:self.isDarkMode];
+}
+
+- (void)applyColor:(UIColor *)color forKey:(NSString *)key darkMode:(BOOL)dark {
+    NSString *modeKey = [self modePrefKeyFor:key dark:dark];
+    _colorOverrides[modeKey] = color;
     NSString *hex = [self hexStringFromColor:color];
-    [[NSUserDefaults standardUserDefaults] setObject:hex forKey:key];
+    [[NSUserDefaults standardUserDefaults] setObject:hex forKey:modeKey];
     [self broadcastThemeChange];
 }
 
@@ -304,31 +332,27 @@ NSString * const ThemeDidChangeNotification = @"ThemeDidChangeNotification";
 }
 
 - (void)resetAppearance {
-    _accentColor = [UIColor colorWithRed:0.067 green:0.235 blue:0.522 alpha:1.0];
-    _accentHoverColor = [UIColor colorWithRed:0.098 green:0.345 blue:0.714 alpha:1.0];
     [_colorOverrides removeAllObjects];
-    _backgroundColor = nil;
-    _cardBackgroundColor = nil;
-    _sidebarBackgroundColor = nil;
-    _topBarBackgroundColor = nil;
-    _rightPanelBackgroundColor = nil;
+
+    NSArray *colorKeys = @[@"amethyst_accent_color", @"amethyst_bg_color", @"amethyst_card_bg_color",
+                           @"amethyst_sidebar_bg_color", @"amethyst_topbar_bg_color", @"amethyst_rightpanel_bg_color",
+                           @"amethyst_text_color", @"amethyst_secondary_text_color"];
+    NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
+    for (NSString *key in colorKeys) {
+        [defaults removeObjectForKey:[self modePrefKeyFor:key dark:YES]];
+        [defaults removeObjectForKey:[self modePrefKeyFor:key dark:NO]];
+        [defaults removeObjectForKey:key];
+    }
+    [defaults removeObjectForKey:@"amethyst_bg_image"];
+    [defaults removeObjectForKey:@"amethyst_bg_video"];
+    [defaults removeObjectForKey:@"amethyst_bg_blur"];
+    [defaults removeObjectForKey:@"amethyst_ui_opacity"];
+
     _backgroundImage = nil;
     _blurredBackgroundImage = nil;
     _backgroundVideoURL = nil;
     _backgroundBlurIntensity = 0;
     _uiOpacity = 1.0;
-
-    NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
-    [defaults removeObjectForKey:@"amethyst_accent_color"];
-    [defaults removeObjectForKey:@"amethyst_bg_color"];
-    [defaults removeObjectForKey:@"amethyst_card_bg_color"];
-    [defaults removeObjectForKey:@"amethyst_sidebar_bg_color"];
-    [defaults removeObjectForKey:@"amethyst_topbar_bg_color"];
-    [defaults removeObjectForKey:@"amethyst_rightpanel_bg_color"];
-    [defaults removeObjectForKey:@"amethyst_bg_image"];
-    [defaults removeObjectForKey:@"amethyst_bg_video"];
-    [defaults removeObjectForKey:@"amethyst_bg_blur"];
-    [defaults removeObjectForKey:@"amethyst_ui_opacity"];
 
     NSArray *paths = NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES);
     NSString *imgPath = [paths.firstObject stringByAppendingPathComponent:@"amethyst_bg.png"];

@@ -166,6 +166,20 @@ void UIKit_launchJarFileWithArgs(UIWindow* window, NSString* jarPath, NSArray<NS
     });
 }
 
+UIInterfaceOrientationMask amethyst_orientation_mask(void) {
+    NSString *mode = getPrefObject(@"general.orientation_lock");
+    if ([mode isEqualToString:@"portrait"]) {
+        return UIInterfaceOrientationMaskPortrait;
+    }
+    if ([mode isEqualToString:@"landscape"]) {
+        return UIInterfaceOrientationMaskLandscape;
+    }
+    if (getPrefBool(@"general.lock_landscape")) {
+        return UIInterfaceOrientationMaskLandscape;
+    }
+    return UIInterfaceOrientationMaskAllButUpsideDown;
+}
+
 void UIKit_returnToSplitView() {
     dispatch_async(dispatch_get_main_queue(), ^{
         UIWindow *window = UIWindow.mainWindow;

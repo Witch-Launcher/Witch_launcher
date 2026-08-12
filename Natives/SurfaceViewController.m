@@ -736,6 +736,16 @@ static GameSurfaceView* pojavWindow;
 
     // TouchController integration
     if (event == ACTION_DOWN) {
+        // UIKit can drop the matching touchesEnded during a frame stall, which
+        // would leave this touch's pointer held down in the mod forever. The
+        // system may also reuse the same UITouch object for a later sequence,
+        // so before assigning a fresh index, release any leftover pointer that
+        // is still mapped to this exact key. onTouchUp is a no-op if the mod
+        // already released it, so this is always safe.
+        NSNumber* existingTouchIndex = [touchControllerIndexMap objectForKey:touchEvent];
+        if (existingTouchIndex != nil) {
+            touchcontroller_onTouchUp([existingTouchIndex intValue]);
+        }
         int index = touchcontroller_onTouchDown(normX, normY);
         if (index >= 0) {
             [touchControllerIndexMap setObject:@(index) forKey:touchEvent];

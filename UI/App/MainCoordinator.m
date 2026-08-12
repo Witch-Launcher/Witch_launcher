@@ -164,7 +164,8 @@
 - (void)showSettings {
     SettingsViewController *vc = [[SettingsViewController alloc] init];
     vc.coordinator = self;
-    [self.rootVC presentContentAsSheet:vc];
+    UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:vc];
+    [self.rootVC presentContentAsSheet:nav];
 }
 
 - (void)showFileManager {
