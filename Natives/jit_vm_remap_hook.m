@@ -126,6 +126,8 @@ static kern_return_t hooked_vm_remap(
     }
 
     if (looksLikeMirrorCodeCacheRemap(src_address, size)) {
+        NSLog(@"[JIT26] vm_remap mirror: RX=%p RW=%p size=%zu MB",
+              (void *)(uintptr_t)src_address, (void *)(uintptr_t)*target_address, size / (1024 * 1024));
         prepareMirrorPair(src_address, *target_address, size);
     }
     return result;
@@ -144,7 +146,10 @@ static kern_return_t hooked_vm_protect(
 
     kern_return_t result = real_vm_protect(target_task, address, size, set_maximum, new_protection);
     if (result == KERN_SUCCESS && looksLikeMirrorRWProtect(address, size, new_protection)) {
-        prepareMirrorPair(address - size, address, size);
+        vm_address_t rx = address - size;
+        NSLog(@"[JIT26] vm_protect mirror RW=%p RX=%p size=%zu MB",
+              (void *)(uintptr_t)address, (void *)(uintptr_t)rx, size / (1024 * 1024));
+        prepareMirrorPair(rx, address, size);
     }
     return result;
 }

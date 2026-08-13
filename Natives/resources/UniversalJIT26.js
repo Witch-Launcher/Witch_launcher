@@ -214,6 +214,19 @@ function JIT26PrepareRegion(brkResponse) {
     }
     log(`prepareJITPageResponse = ${prepareJITPageResponse}`);
 
+    // Mirror-mapped code cache uses a paired RW view at RX+size on iOS 26+/27.
+    const mirrorMin = 16n * 1024n * 1024n;
+    if (x1 >= mirrorMin && jitPageAddress >= 0x700000000n && jitPageAddress < 0x800000000n) {
+        const rwAddress = jitPageAddress + x1;
+        try {
+            prepare_memory_region(rwAddress, x1);
+            prepare_memory_region(jitPageAddress, x1);
+            log(`Prepared mirror pair RX=0x${jitPageAddress.toString(16)} RW=0x${rwAddress.toString(16)}`);
+        } catch (e) {
+            log_verbose(`Mirror RW prepare deferred (vm_remap may not have run yet): ${e}`);
+        }
+    }
+
     let putX0Response = send_command(`P0=${numberToLittleEndianHexString(jitPageAddress)};thread:${tid};`);
     log(`putX0Response = ${putX0Response}`);
 }

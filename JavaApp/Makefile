@@ -4,6 +4,10 @@ OUTPUTDIR := build
 # javac/mktemp defaults to /var/folders on the system volume; on a nearly-full
 # boot drive that fails with "No space left on device". Keep staging on the
 # project volume instead (see root Makefile java -j2 note).
+# NOTE: JDK 8 on macOS ignores the TMPDIR env var for its own java.io.tmpdir,
+# so -J-Djava.io.tmpdir must be passed explicitly, otherwise the javac JVM's
+# own temp files (native library extraction etc.) still land on the boot
+# volume and fail with "could not create parent directories" when it is full.
 JAVAC_TMPDIR := $(abspath $(OUTPUTDIR)/.javac-tmp)
 export TMPDIR := $(JAVAC_TMPDIR)
 
@@ -17,7 +21,7 @@ TARGETS := $(TARGETS:$(SOURCEDIR)/%=$(OUTPUTDIR)/%.jar)
 TARGETS += $(OUTPUTDIR)/lwjgl-3.3.3.jar $(OUTPUTDIR)/lwjgl-3.3.6.jar $(OUTPUTDIR)/lwjgl-3.4.1.jar $(OUTPUTDIR)/cacio-init-agent.jar
 
 # Add all jars to classpath and allow compiling with private API
-JCFLAGS := -cp "$(subst $() $(),:,$(wildcard $(SOURCEDIR)/*/):$(wildcard libs/*/*.jar))" -XDignore.symbol.file
+JCFLAGS := -J-Djava.io.tmpdir=$(JAVAC_TMPDIR) -cp "$(subst $() $(),:,$(wildcard $(SOURCEDIR)/*/):$(wildcard libs/*/*.jar))" -XDignore.symbol.file
 
 all: $(TARGETS)
 	

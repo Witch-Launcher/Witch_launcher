@@ -116,10 +116,10 @@
             @{@"type": @"switch", @"label": localize(@"preference.title.check_sha", nil), @"key": @"general.check_sha"},
             @{@"type": @"switch", @"label": localize(@"preference.title.cosmetica", nil), @"key": @"general.cosmetica"},
             @{@"type": @"picker", @"label": localize(@"Screen Orientation", nil), @"key": @"general.orientation_lock", @"options": @[
-                @{@"key": @"auto", @"name": localize(@"Auto", nil)},
+                @{@"key": @"off", @"name": localize(@"Off", nil)},
                 @{@"key": @"portrait", @"name": localize(@"Portrait", nil)},
                 @{@"key": @"landscape", @"name": localize(@"Landscape", nil)},
-            ], @"default": @"auto"},
+            ], @"default": @"off"},
             @{@"type": @"picker", @"label": localize(@"Theme", nil), @"key": @"launcher.theme", @"options": @[@"System", @"Dark", @"Light"], @"default": @"System"},
             @{@"type": @"text", @"label": localize(@"CurseForge API Key", nil), @"key": @"curseforge.api_key", @"placeholder": localize(@"Paste your CurseForge API key here", nil)},
             @{@"type": @"switch", @"label": localize(@"preference.title.debug_logging", nil), @"key": @"general.debug_logging"},

@@ -2,11 +2,13 @@
 
 ## 🇬🇧 English
 
+- Fixed Distant Horizons crashing the game at startup (NoClassDefFoundError: org.lwjgl.system.Pointer$Default on 1.20/1.20.1 Fabric). Root cause: patched GLFW's static `SharedLibrary` field was created during `GLFW.<clinit>`, which runs inside `MemoryUtil.<clinit>` → `Library.<clinit>` → `System.load` before `MemoryUtil.UNSAFE` is assigned — `Pointer$Default` got permanently poisoned and any later LWJGL use (e.g. DH's TinyFileDialogs message box) crashed with "UNSAFE is null". The library handle is now created lazily on first use, keeping `GLFW.<clinit>` pure Java.
 - Reviewed and fixed the Super resolution not working.
 - Fixed Distant Horizons crashing on iOS 26 (A12+ devices): the mod's zstd-jni native library is now pre-extracted from the DH jar and ad-hoc signed with a bundled ldid, so it loads from `java.library.path` instead of failing with "code signature invalid".
 
 ## 🇻🇳 Tiếng Việt
 
+- Sửa Distant Horizons crash ngay khi khởi động game (NoClassDefFoundError: org.lwjgl.system.Pointer$Default trên Fabric 1.20/1.20.1). Nguyên nhân: thư viện `SharedLibrary` tĩnh trong GLFW (patched) được tạo trong lúc `GLFW.<clinit>` chạy bên trong `MemoryUtil.<clinit>` → `Library.<clinit>` → `System.load`, trước khi `MemoryUtil.UNSAFE` được gán — class `Pointer$Default` bị "đầu độc" vĩnh viễn và mọi truy cập LWJGL sau đó (vd: hộp thoại TinyFileDialogs của DH) crash với lỗi "UNSAFE is null". Giờ handle thư viện được tạo delay khi dùng lần đầu, giữ cho `GLFW.<clinit>` hoàn toàn pure Java.
 - Xem và sửa mod Super resolution không hoạt động.
 - Sửa Distant Horizons crash trên iOS 26 (máy A12+): thư viện zstd-jni của mod giờ được lấy sẵn từ jar DH và ký ad-hoc bằng ldid đi kèm trong app, load từ `java.library.path` thay vì báo lỗi "code signature invalid".
 

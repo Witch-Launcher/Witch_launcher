@@ -591,8 +591,25 @@ public class GLFW
         throw new UnsupportedOperationException();
     }
 
-    private static final SharedLibrary GLFW = new MacOSXLibraryDL("AngelAuraAmethyst", DynamicLinkLoader.RTLD_DEFAULT);
+    // Lazily created holder: `new MacOSXLibraryDL(...)` instantiates a
+    // SharedLibrary, whose class-init chain runs Pointer$Default.<clinit>,
+    // which reads MemoryUtil.UNSAFE. If GLFW.<clinit> runs while
+    // MemoryUtil.<clinit> is still in progress (the JDK 25+ eager class init
+    // window inside org.lwjgl.system.Library.<clinit>'s System.load, where
+    // UNSAFE is not assigned yet - it is null), Pointer$Default gets
+    // permanently poisoned with UnsupportedOperationException/NoClassDefFoundError,
+    // crashing any later LWJGL user (e.g. Distant Horizons' TinyFileDialogs).
+    // Defer creation until first use, when MemoryUtil is fully initialized.
+    private static final class LibraryHolder {
 
+        private LibraryHolder() {}
+
+        static final SharedLibrary GLFW = new MacOSXLibraryDL("AngelAuraAmethyst", DynamicLinkLoader.RTLD_DEFAULT);
+    }
+
+    public static SharedLibrary getLibrary() {
+        return LibraryHolder.GLFW;
+    }
 
     /** Contains the function pointers loaded from the glfw {@link SharedLibrary}. */
     public static final class Functions {
@@ -601,21 +618,17 @@ public class GLFW
 
         /** Function address. */
         public static final long
-        Init = apiGetFunctionAddress(GLFW, "pojavInit"),
-        CreateContext = apiGetFunctionAddress(GLFW, "pojavCreateContext"),
-        GetCurrentContext = apiGetFunctionAddress(GLFW, "pojavGetCurrentContext"),
-        //DetachOnCurrentThread = apiGetFunctionAddress(GLFW, "pojavDetachOnCurrentThread"),
-        MakeContextCurrent = apiGetFunctionAddress(GLFW, "pojavMakeCurrent"),
-        Terminate = apiGetFunctionAddress(GLFW, "pojavTerminate"),
-        SetWindowHint = apiGetFunctionAddress(GLFW, "pojavSetWindowHint"),
-        SwapBuffers = apiGetFunctionAddress(GLFW, "pojavSwapBuffers"),
-        SwapInterval = apiGetFunctionAddress(GLFW, "pojavSwapInterval"),
-        PumpEvents = apiGetFunctionAddress(GLFW, "pojavPumpEvents"),
-        RewindEvents = apiGetFunctionAddress(GLFW, "pojavRewindEvents");
-    }
-
-    public static SharedLibrary getLibrary() {
-        return GLFW;
+        Init = apiGetFunctionAddress(getLibrary(), "pojavInit"),
+        CreateContext = apiGetFunctionAddress(getLibrary(), "pojavCreateContext"),
+        GetCurrentContext = apiGetFunctionAddress(getLibrary(), "pojavGetCurrentContext"),
+        //DetachOnCurrentThread = apiGetFunctionAddress(getLibrary(), "pojavDetachOnCurrentThread"),
+        MakeContextCurrent = apiGetFunctionAddress(getLibrary(), "pojavMakeCurrent"),
+        Terminate = apiGetFunctionAddress(getLibrary(), "pojavTerminate"),
+        SetWindowHint = apiGetFunctionAddress(getLibrary(), "pojavSetWindowHint"),
+        SwapBuffers = apiGetFunctionAddress(getLibrary(), "pojavSwapBuffers"),
+        SwapInterval = apiGetFunctionAddress(getLibrary(), "pojavSwapInterval"),
+        PumpEvents = apiGetFunctionAddress(getLibrary(), "pojavPumpEvents"),
+        RewindEvents = apiGetFunctionAddress(getLibrary(), "pojavRewindEvents");
     }
 
     public static void internalChangeMonitorSize(int width, int height) {

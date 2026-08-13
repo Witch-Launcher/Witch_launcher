@@ -400,8 +400,18 @@ int launchJVMWithArgs(NSString *username, id launchTarget, int width, int height
         UIKit_returnToSplitView();
         showDialog(localize(@"Error", nil),
             @"The selected Java runtime does not support JIT on this iOS version. "
-             "Open Settings and choose a bundled Java 17, 21, or 25 runtime.");
+             "Open Settings and choose a bundled Java 21 or 25 runtime.");
         return 1;
+    }
+
+    BOOL needsMirrorJITPrepare = requiresDebugJITMapping && RuntimeSupportsDebugJITMapping(javaHome);
+    if (needsMirrorJITPrepare) {
+        // Java 21/25 patched runtimes use mirror_w/x on every iOS 26.6+/27 device.
+        // StikDebug must stay attached through vm_remap and follow-up prepare calls.
+        JIT26SetDetachAfterFirstBr(NO);
+        NSLog(@"[JavaLauncher] Mirror-capable runtime: debugger kept attached for JIT prepare");
+    } else if (requiresDebugJITMapping && !jit26AlwaysAttached) {
+        JIT26SetDetachAfterFirstBr(YES);
     }
 
     if ([javaHome hasPrefix:@(getenv("POJAV_HOME"))]) {
@@ -594,12 +604,10 @@ int launchJVMWithArgs(NSString *username, id launchTarget, int width, int height
     if (mirrorOverride >= 0) {
         mirrorEnabled = mirrorOverride > 0;
         NSLog(@"[JavaLauncher] MirrorMappedCodeCache override set to %s", mirrorEnabled ? "ON" : "OFF");
-    } else if (@available(iOS 27.0, *)) {
-        // iOS 27: mirror-mapped code cache SIGBUS in StubRoutines::call_stub during
-        // VM init (W^X / prepare_memory_region race). Classic JIT26 path is stable.
-        mirrorEnabled = NO;
     } else if (@available(iOS 26.0, *)) {
-        mirrorEnabled = requiresDebugJITMapping && RuntimeSupportsDebugJITMapping(javaHome);
+        // Patched Java 21/25 always route code-cache writes through mirror_w even
+        // when this flag is off; keep it enabled so RX comes from the debugger path.
+        mirrorEnabled = needsMirrorJITPrepare;
     } else {
         mirrorEnabled = NO;
     }
@@ -769,14 +777,15 @@ int launchJVMWithArgs(NSString *username, id launchTarget, int width, int height
     // reuses one SDL instance (a different copy would ignore the flag).
     aasdl_setMainReady([javaLibraryPath componentsSeparatedByString:@":"].firstObject.lastPathComponent);
 
-    if (mirrorEnabled && requiresDebugJITMapping) {
+    if (needsMirrorJITPrepare) {
         // Mirror setup needs prepare_memory_region on RX *and* RW after vm_remap.
         // StikDebug must stay attached through those extra brk calls.
         JIT26SetDetachAfterFirstBr(NO);
         task_set_exception_ports(mach_task_self(), EXC_MASK_ALL & ~EXC_MASK_BREAKPOINT, 0,
             EXCEPTION_DEFAULT, THREAD_STATE_NONE);
         start_jit_mirror_prepare_poll_thread();
-        NSLog(@"[JavaLauncher] Mirror path: debugger kept attached for TXM re-prepare");
+        rebind_jit_vm_hooks_after_libjvm_load();
+        NSLog(@"[JavaLauncher] Mirror JIT prepare: debugger kept attached, vm_remap hooks active");
     }
 
     // Cr4shed known issue: exit after crash dump,

@@ -174,6 +174,9 @@ UIInterfaceOrientationMask amethyst_orientation_mask(void) {
     if ([mode isEqualToString:@"landscape"]) {
         return UIInterfaceOrientationMaskLandscape;
     }
+    if ([mode isEqualToString:@"off"] || !mode.length) {
+        return UIInterfaceOrientationMaskAllButUpsideDown;
+    }
     if (getPrefBool(@"general.lock_landscape")) {
         return UIInterfaceOrientationMaskLandscape;
     }

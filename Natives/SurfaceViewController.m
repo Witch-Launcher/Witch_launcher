@@ -109,10 +109,7 @@ static GameSurfaceView* pojavWindow;
 }
 
 - (UIInterfaceOrientationMask)supportedInterfaceOrientations {
-    if (getPrefBool(@"general.lock_landscape")) {
-        return UIInterfaceOrientationMaskLandscape;
-    }
-    return [super supportedInterfaceOrientations];
+    return amethyst_orientation_mask();
 }
 - (void)viewDidLoad
 {
