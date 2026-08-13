@@ -269,6 +269,29 @@ void init_loadCustomJvmFlags(int* argc, const char** argv) {
     }
 }
 
+static BOOL JIT26ProbeLooksValid(void *result) {
+    if (!result || result == MAP_FAILED) {
+        return NO;
+    }
+    uintptr_t addr = (uintptr_t)result;
+    uint32_t lo = (uint32_t)addr;
+    uint32_t hi = (uint32_t)(addr >> 32);
+    // Legacy / broken handlers return these instead of a real mapping.
+    if (lo == 0x690000E0u || lo == 0xE0000069u) {
+        return NO;
+    }
+    // Uninitialized register garbage seen when StikDebug did not set x0.
+    if (hi == 0xCCCCCCCCu || hi == 0xDEADBEEFu || hi == 0xFFFFFFFFu) {
+        return NO;
+    }
+    // Small probe allocations from _M are often outside the 240 MB superpage;
+    // accept any page-aligned userspace RX pointer.
+    if (addr < 0x10000 || (addr & (getpagesize() - 1)) != 0) {
+        return NO;
+    }
+    return YES;
+}
+
 static BOOL RuntimeSupportsDebugJITMapping(NSString *javaHome) {
     NSString *marker = [javaHome
         stringByAppendingPathComponent:@".amethyst-mirror-mapping"];
@@ -293,29 +316,42 @@ int launchJVMWithArgs(NSString *username, id launchTarget, int width, int height
     BOOL jit26AlwaysAttached = getPrefBool(@"debug.debug_always_attached_jit");
     NSLog(@"[JavaLauncher] JIT flags 0x%X -> requiresDebugJITMapping=%d", (unsigned)DeviceGetJITFlags(NO), requiresDebugJITMapping);
     if (requiresDebugJITMapping) {
-        static void *result;
-        if(!result) result = JIT26CreateRegionLegacy(getpagesize());
-        if ((uint32_t)result != 0x690000E0) {
-            munmap(result, getpagesize());
-            // we can't continue since legacy script only allows calling breakpoint once
+        // Keep StikDebug attached through probe, JVM init, and mirror prepare.
+        JIT26SetDetachAfterFirstBr(NO);
+        JIT26SendJITScript([NSString stringWithContentsOfFile:[NSBundle.mainBundle pathForResource:@"UniversalJIT26Extension" ofType:@"js"]]);
+        // Use the same brk #0xf00d path as patched libjvm (not legacy brk #0x69).
+        void *probeMapping = JIT26PrepareRegion(NULL, getpagesize());
+        NSLog(@"[JavaLauncher] JIT26 probe returned %p", probeMapping);
+        if (!JIT26ProbeLooksValid(probeMapping)) {
             NSString *inBundleScriptPath = [NSBundle.mainBundle pathForResource:@"UniversalJIT26" ofType:@"js"];
+            NSString *documentsScriptPath = [NSString stringWithFormat:@"%s/UniversalJIT26.js", getenv("POJAV_HOME")];
+            if (inBundleScriptPath) {
+                [[NSFileManager defaultManager] removeItemAtPath:documentsScriptPath error:nil];
+                [NSFileManager.defaultManager copyItemAtPath:inBundleScriptPath toPath:documentsScriptPath error:nil];
+            }
             NSString *lcAppInfoPath = [NSBundle.mainBundle.bundlePath stringByAppendingPathComponent:@"LCAppInfo.plist"];
             NSMutableDictionary *lcAppInfo = [NSMutableDictionary dictionaryWithContentsOfFile:lcAppInfoPath];
-            if(lcAppInfo) {
-                // if this is inside LiveContainer, we assign script ourselves and prompt user to restart Amethyst
+            if (lcAppInfo && inBundleScriptPath) {
                 lcAppInfo[@"jitLaunchScriptJs"] = [[NSData dataWithContentsOfFile:inBundleScriptPath] base64EncodedStringWithOptions:0];
-                if([lcAppInfo writeToFile:lcAppInfoPath atomically:YES]) {
-                    showDialog(localize(@"Error", nil), @"Amethyst was launched with a legacy script. We have updated the script to Universal, please restart LiveContainer to continue.");
+                if ([lcAppInfo writeToFile:lcAppInfoPath atomically:YES]) {
+                    showDialog(localize(@"Error", nil),
+                        [NSString stringWithFormat:
+                            @"StikDebug probe failed (got %p). Expected a real RX page, not a legacy error code. "
+                             @"Amethyst refreshed UniversalJIT26.js — restart LiveContainer, re-enable JIT, then try again.",
+                            probeMapping]);
                     [PLLogOutputView handleExitCode:1];
                     return 1;
                 }
             }
-            [NSFileManager.defaultManager copyItemAtPath:inBundleScriptPath toPath:[NSString stringWithFormat:@"%s/UniversalJIT26.js", getenv("POJAV_HOME")] error:nil];
-            showDialog(localize(@"Error", nil), @"Support for legacy script has been removed. Please switch to Universal JIT script. To import it, long-press on Amethyst when enabling JIT in StikDebug and tap \"Assign Script\", then go to Amethyst's Documents directory and pick it. (on sideloaded StikDebug, the builtin script is named Amethyst-MeloNX.js). Note: StikDebug 3.1.6 or newer is required for iOS 26.6+/27.");
+            showDialog(localize(@"Error", nil),
+                [NSString stringWithFormat:
+                    @"StikDebug probe failed (got %p). Your assigned script may be outdated, or StikDebug is below 3.1.6. "
+                     @"UniversalJIT26.js was refreshed in Amethyst Documents — re-assign it in StikDebug (long-press → Assign Script), "
+                     @"re-enable JIT, then launch again.",
+                    probeMapping]);
             [PLLogOutputView handleExitCode:1];
             return 1;
         }
-        JIT26SendJITScript([NSString stringWithContentsOfFile:[NSBundle.mainBundle pathForResource:@"UniversalJIT26Extension" ofType:@"js"]]);
         JIT26SetDetachAfterFirstBr(!jit26AlwaysAttached);
         init_jit_vm_remap_hook();
         // make sure we don't get stuck in EXC_BAD_ACCESS
@@ -656,6 +692,7 @@ int launchJVMWithArgs(NSString *username, id launchTarget, int width, int height
         if ([fm fileExistsAtPath:libjvmPath]) {
             dlopen(libjvmPath.UTF8String, RTLD_NOW | RTLD_GLOBAL);
         }
+        verify_libjvm_mirror_brk_patch();
         rebind_jit_vm_hooks_after_libjvm_load();
     }
 
@@ -783,9 +820,8 @@ int launchJVMWithArgs(NSString *username, id launchTarget, int width, int height
         JIT26SetDetachAfterFirstBr(NO);
         task_set_exception_ports(mach_task_self(), EXC_MASK_ALL & ~EXC_MASK_BREAKPOINT, 0,
             EXCEPTION_DEFAULT, THREAD_STATE_NONE);
-        start_jit_mirror_prepare_poll_thread();
         rebind_jit_vm_hooks_after_libjvm_load();
-        NSLog(@"[JavaLauncher] Mirror JIT prepare: debugger kept attached, vm_remap hooks active");
+        NSLog(@"[JavaLauncher] Mirror JIT prepare: debugger kept attached, brk 0x6a handler active");
     }
 
     // Cr4shed known issue: exit after crash dump,

@@ -35,11 +35,12 @@ const commands = {
 const legacyCommands = {
     [0x68]: JIT26NewBreakpoints,
     [0x69]: JIT26HandleBrk0x69,
+    [0x6a]: JIT26HandleBrk0x6a,
     [0xf00d]: JIT26HandleBrk0xf00d
 };
 
-// Log levels
-//const LOG_NONE = 0;
+let detachAfterFirstBr = false;
+
 const LOG_INFO = 1;
 const LOG_VERBOSE = 2;
 let logLevel = LOG_VERBOSE;
@@ -157,13 +158,53 @@ function JIT26NewBreakpoints(brkResponse) {
     }
 }
 
-// brk 0x69
+function parseRegNum(brkResponse, regNum) {
+    const hex = regNum.toString(16).padStart(2, '0');
+    const match = new RegExp(`${hex}:(?<reg>[0-9a-f]{16});`).exec(brkResponse);
+    return match ? littleEndianHexStringToNumber(match.groups['reg']) : null;
+}
+
+// brk 0x6a: patched libjvm stops after mirror vm_remap (replaces printf).
+function JIT26HandleBrk0x6a(brkResponse) {
+    let rw = x1;
+    let rx = parseRegNum(brkResponse, 0x02);
+    let size = parseRegNum(brkResponse, 0x13);
+    if (!rx) {
+        rx = parseRegNum(brkResponse, 0x14);
+    }
+    if (!rw) {
+        rw = parseRegNum(brkResponse, 0x08);
+    }
+    if (!rx || !rw) {
+        log(`Mirror prepare brk 0x6a: missing rx/rw (x1=${x1}, x2=${parseRegNum(brkResponse, 0x02)})`);
+        return;
+    }
+    if (!size || size < 16n * 1024n * 1024n) {
+        if (rw > rx) {
+            size = rw - rx;
+        } else {
+            log(`Mirror prepare brk 0x6a: invalid mirror layout rx=${rx} rw=${rw}`);
+            return;
+        }
+    }
+    log(`Mirror prepare brk 0x6a: RX=0x${rx.toString(16)} RW=0x${rw.toString(16)} size=0x${size.toString(16)}`);
+    try {
+        prepare_memory_region(rx, size);
+        prepare_memory_region(rw, size);
+        log(`Prepared mirror pair RX=0x${rx.toString(16)} RW=0x${rw.toString(16)}`);
+    } catch (e) {
+        log(`ERROR: mirror prepare failed: ${e}`);
+    }
+}
+
+// brk 0x69 — allocate/prepare RX JIT region (BreakGetJITMapping)
 function JIT26HandleBrk0x69(brkResponse) {
-    // in the old script we chose 0x69, so now we check here and return error
-    // if you wish to keep using this, you can set your own handler like `legacyCommands[0x69] = yourHandler;` using BreakSendJITScript
-    log(`Error: It seems you are using legacy breakpoint 0x69. Please set your legacy handler using \`legacyCommands[0x69] = yourHandler;\` or migrate to universal jitcalls to use this script. The function will now return 0xE0000069.`);
-    let putX0Response = send_command(`P0=E0000069;thread:${tid};`);
-    log(`putX0Response = ${putX0Response}`);
+    x1 = x0;
+    x0 = 0;
+    JIT26PrepareRegion(brkResponse);
+    if (detachAfterFirstBr) {
+        JIT26Detach();
+    }
 }
 
 // brk 0xf00d
@@ -185,26 +226,40 @@ function JIT26PrepareRegion(brkResponse) {
     let brkImmediate = extractBrkImmediate(instrU32);
     
     if (x0 == 0n && x1 == 0n) {
+        send_command(`P0=0000000000000000;thread:${tid};`);
         return;
+    }
+
+    let allocSize = x1;
+    const freshX1 = parseRegNum(brkResponse, 0x01);
+    if (freshX1 != null && freshX1 > allocSize) {
+        allocSize = freshX1;
+    }
+    const mirrorMin = 16n * 1024n * 1024n;
+    const mirrorSize = 0xf000000n;
+    if (x0 == 0n && allocSize > 0n && allocSize < mirrorMin && allocSize < 0x4000n) {
+        log(`JIT26PrepareRegion: suspicious alloc size 0x${allocSize.toString(16)}, using 0x${mirrorSize.toString(16)} for mirror superpage`);
+        allocSize = mirrorSize;
     }
 
     let jitPageAddress = x0;
     if (x0 == 0n) {
-        let requestRXResponse = send_command(`_M${x1.toString(16)},rx`);
+        let requestRXResponse = send_command(`_M${allocSize.toString(16)},rx`);
         log_verbose(`requestRXResponse = ${requestRXResponse}`);
         
         if (!requestRXResponse || requestRXResponse.length === 0) {
             log(`Failed to allocate RX memory`);
+            send_command(`P0=0000000000000000;thread:${tid};`);
             return;
         }
         
         jitPageAddress = BigInt(`0x${requestRXResponse}`);
-        log(`Allocated JIT page at address: 0x${jitPageAddress.toString(16)}`);
+        log(`Allocated JIT page at address: 0x${jitPageAddress.toString(16)} (size=0x${allocSize.toString(16)})`);
     }
 
     let prepareJITPageResponse;
     try {
-        prepareJITPageResponse = prepare_memory_region(jitPageAddress, x1);
+        prepareJITPageResponse = prepare_memory_region(jitPageAddress, allocSize);
     } catch (e) {
         log(`ERROR: prepare_memory_region threw: ${e}`);
         log(`ERROR: JIT execution grant FAILED. This debugger build is too old for iOS 26.4+/27.`);
@@ -215,12 +270,11 @@ function JIT26PrepareRegion(brkResponse) {
     log(`prepareJITPageResponse = ${prepareJITPageResponse}`);
 
     // Mirror-mapped code cache uses a paired RW view at RX+size on iOS 26+/27.
-    const mirrorMin = 16n * 1024n * 1024n;
-    if (x1 >= mirrorMin && jitPageAddress >= 0x700000000n && jitPageAddress < 0x800000000n) {
-        const rwAddress = jitPageAddress + x1;
+    if (allocSize >= mirrorMin && jitPageAddress >= 0x700000000n && jitPageAddress < 0x800000000n) {
+        const rwAddress = jitPageAddress + allocSize;
         try {
-            prepare_memory_region(rwAddress, x1);
-            prepare_memory_region(jitPageAddress, x1);
+            prepare_memory_region(rwAddress, allocSize);
+            prepare_memory_region(jitPageAddress, allocSize);
             log(`Prepared mirror pair RX=0x${jitPageAddress.toString(16)} RW=0x${rwAddress.toString(16)}`);
         } catch (e) {
             log_verbose(`Mirror RW prepare deferred (vm_remap may not have run yet): ${e}`);
@@ -287,6 +341,20 @@ function runScriptAndCapture(scriptText) {
         };
     }
 }
+
+// JIT26SetDetachAfterFirstBr(BOOL) — cmd 3
+commands[3] = function(brkResponse) {
+    detachAfterFirstBr = x0 != 0;
+    log(`JIT26SetDetachAfterFirstBr(${detachAfterFirstBr}) called`);
+};
+
+// JIT26PrepareRegionForPatching(void *addr, size_t len) — cmd 4
+commands[4] = function(brkResponse) {
+    let x0str = x0.toString(16);
+    let x1str = x1.toString(16);
+    let bytes = send_command(`m${x0str},${x1str}`);
+    send_command(`M${x0str},${x1str}:${bytes}`);
+};
 
 // For making your own script / adding your own breakpoints. you can send this string to BreakSendJITScript and it'll add it for any subsequent breakpoints
 // x0, x1, x16, pc and tid are global variables. If you need more registers, parse them like:
