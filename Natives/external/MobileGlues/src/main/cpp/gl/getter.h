@@ -1,6 +1,9 @@
-//
-// Created by BZLZHH on 2025/1/28.
-//
+// MobileGlues - gl/getter.h
+// Copyright (c) 2025-2026 MobileGL-Dev
+// Licensed under the GNU Lesser General Public License v2.1:
+//   https://www.gnu.org/licenses/old-licenses/lgpl-2.1.txt
+// SPDX-License-Identifier: LGPL-2.1-only
+// End of Source File Header
 
 #include "../includes.h"
 #include <GL/gl.h>
@@ -15,19 +18,20 @@
 #define MOBILEGLUES_GETTER_H
 
 #ifdef __cplusplus
-extern "C" {
+extern "C"
+{
 #endif
 
-GLAPI GLAPIENTRY const GLubyte *glGetString(GLenum name);
-GLAPI GLAPIENTRY const GLubyte *glGetStringi(GLenum name, GLuint index);
-GLAPI GLAPIENTRY GLenum glGetError();
-GLAPI GLAPIENTRY void glGetIntegerv(GLenum pname, GLint *params);
-GLAPI GLAPIENTRY void glGetQueryObjectiv(GLuint id, GLenum pname, GLint* params);
-GLAPI GLAPIENTRY void glGetQueryObjecti64v(GLuint id, GLenum pname, GLint64* params);
+    GLAPI GLAPIENTRY const GLubyte* glGetString(GLenum name);
+    GLAPI GLAPIENTRY const GLubyte* glGetStringi(GLenum name, GLuint index);
+    GLAPI GLAPIENTRY GLenum glGetError();
+    GLAPI GLAPIENTRY void glGetIntegerv(GLenum pname, GLint* params);
+    GLAPI GLAPIENTRY void glGetQueryObjectiv(GLuint id, GLenum pname, GLint* params);
+    GLAPI GLAPIENTRY void glGetQueryObjecti64v(GLuint id, GLenum pname, GLint64* params);
 
-void AppendExtension(const char* ext);
-void InitGLESBaseExtensions();
-void set_es_version();
+    void AppendExtension(const char* ext);
+    void InitGLESBaseExtensions();
+    void set_es_version();
 
 #ifdef __cplusplus
 }
@@ -35,4 +39,4 @@ void set_es_version();
 
 extern Version GLVersion;
 
-#endif //MOBILEGLUES_GETTER_H
+#endif // MOBILEGLUES_GETTER_H

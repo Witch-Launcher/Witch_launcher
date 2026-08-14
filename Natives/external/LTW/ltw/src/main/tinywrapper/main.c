@@ -19,6 +19,7 @@
 #include "swizzle.h"
 #include "libraryinternal.h"
 #include "env.h"
+#include "texture_buffer.h"
 
 void glClearDepth(GLdouble depth) {
     if(!current_context) return;
@@ -192,6 +193,7 @@ void glTexParameterf( 	GLenum target,
                          GLenum pname,
                          GLfloat param) {
     if(!current_context) return;
+    if(target == GL_TEXTURE_BUFFER) return;
     if(!filter_params_integer(target, pname, (GLint) param)) return;
     if(!filter_params_float(target, pname, param)) return;
     es3_functions.glTexParameterf(target, pname, param);
@@ -200,6 +202,7 @@ void glTexParameteri( 	GLenum target,
                          GLenum pname,
                          GLint param) {
     if(!current_context) return;
+    if(target == GL_TEXTURE_BUFFER) return;
     if(!filter_params_integer(target, pname, param)) return;
     if(!filter_params_float(target, pname, (GLfloat)param)) return;
     swizzle_process_swizzle_param(target, pname, &param);
@@ -210,6 +213,7 @@ void glTexParameterfv( 	GLenum target,
                           GLenum pname,
                           const GLfloat * params) {
     if(!current_context) return;
+    if(target == GL_TEXTURE_BUFFER) return;
     if(!filter_params_integer(target, pname, (GLint)*params)) return;
     if(!filter_params_float(target, pname, *params)) return;
     es3_functions.glTexParameterfv(target, pname, params);
@@ -218,6 +222,7 @@ void glTexParameteriv( 	GLenum target,
                           GLenum pname,
                           const GLint * params) {
     if(!current_context) return;
+    if(target == GL_TEXTURE_BUFFER) return;
     if(!filter_params_integer(target, pname, *params)) return;
     if(!filter_params_float(target, pname, (GLfloat)*params)) return;
     swizzle_process_swizzle_param(target, pname, params);
@@ -268,7 +273,13 @@ void glBufferStorage(GLenum target,
                      GLsizeiptr size,
                      const void * data,
                      GLbitfield flags) {
-    if(!current_context || !current_context->buffer_storage) return;
+    if(!current_context) return;
+    if(tbo_is_emulated_buffer(target)) {
+        tbo_mirror_buffer_data(target, 0, size, data, true);
+        if(target != GL_TEXTURE_BUFFER) es3_functions.glBufferStorageEXT(target, size, data, flags);
+        return;
+    }
+    if(!current_context->buffer_storage) return;
     // Enable coherence to make sure the buffers are synced without flushing.
     if(never_flush_buffers && ((flags & GL_MAP_PERSISTENT_BIT) != 0)) {
         flags |= GL_MAP_COHERENT_BIT;
@@ -284,6 +295,10 @@ void *glMapBufferRange( 	GLenum target,
                            GLintptr offset,
                            GLsizeiptr length,
                            GLbitfield access) {
+    if(!current_context) return NULL;
+    if(tbo_is_emulated_buffer(target)) {
+        return tbo_map_buffer(target, offset, length);
+    }
     if(never_flush_buffers) access &= ~GL_MAP_FLUSH_EXPLICIT_BIT;
     return es3_functions.glMapBufferRange(target, offset, length, access);
 }
@@ -291,6 +306,11 @@ void *glMapBufferRange( 	GLenum target,
 void glFlushMappedBufferRange( 	GLenum target,
                                   GLintptr offset,
                                   GLsizeiptr length) {
+    if(!current_context) return;
+    if(tbo_is_emulated_buffer(target)) {
+        tbo_map_sync(target);
+        return;
+    }
     if(!never_flush_buffers) es3_functions.glFlushMappedBufferRange(target, offset, length);
 }
 
@@ -311,7 +331,7 @@ const GLubyte* glGetString(GLenum name) {
         case GL_SHADING_LANGUAGE_VERSION:
             return (const GLubyte*)"4.60 LTW";
         case GL_VENDOR:
-            return (const GLubyte*)"congcq (ported to iOS), artDev, SerpentSpirale, CADIndie";
+            return (const GLubyte*)"artDev, SerpentSpirale, CADIndie";
         case GL_EXTENSIONS:
             if(current_context->extensions_string != NULL) return (const GLubyte*)current_context->extensions_string;
             return (const GLubyte*)es3_functions.glGetString(GL_EXTENSIONS);
@@ -365,6 +385,12 @@ INTERNAL GLenum get_base_buffer_enum(int buffer_index) {
 
 void glBindBuffer(GLenum buffer, GLuint name) {
     if(!current_context) return;
+    if(buffer == GL_TEXTURE_BUFFER) {
+        /* not supported by the host ES 3.0 backend; only tracked for the
+         * texture buffer emulation */
+        tbo_set_bound_buffer(name);
+        return;
+    }
     es3_functions.glBindBuffer(buffer, name);
     int buffer_index = get_buffer_index(buffer);
     if(buffer_index == -1) return;
@@ -455,36 +481,11 @@ void glDepthRange(GLdouble nearVal,
 
 void glDeleteTextures(GLsizei n, const GLuint *textures) {
     if(!current_context) return;
+    tbo_delete_textures(n, textures);
     es3_functions.glDeleteTextures(n, textures);
     for(int i = 0; i < n; i++) {
         void* tracker = unordered_map_remove(current_context->texture_swztrack_map, (void*)textures[i]);
         free(tracker);
-    }
-}
-
-static bool buf_tex_trigger = false;
-
-void glTexBuffer(GLenum target, GLenum internalFormat, GLuint buffer) {
-    if(!current_context) return;
-    if(current_context->es32) es3_functions.glTexBuffer(target, internalFormat, buffer);
-    else if(current_context->buffer_texture_ext) es3_functions.glTexBufferEXT(target, internalFormat, buffer);
-    else if(!buf_tex_trigger) {
-        buf_tex_trigger = true;
-        printf("LTW: Buffer textures aren't supported on your device\n");
-    }
-}
-
-void glTexBufferARB(GLenum target, GLenum internalFormat, GLuint buffer) {
-    glTexBuffer(target, internalFormat, buffer);
-}
-
-void glTexBufferRange(GLenum target, GLenum internalFormat, GLuint buffer, GLintptr offset, GLsizeiptr size) {
-    if(!current_context) return;
-    if(current_context->es32) es3_functions.glTexBufferRange(target, internalFormat, buffer, offset, size);
-    else if(current_context->buffer_texture_ext) es3_functions.glTexBufferRangeEXT(target, internalFormat, buffer, offset, size);
-    else if(!buf_tex_trigger) {
-        buf_tex_trigger = true;
-        printf("LTW: Buffer textures aren't supported on your device\n");
     }
 }
 

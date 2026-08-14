@@ -181,6 +181,18 @@ METHOD_MACHO = \
 		fi; \
 	done
 
+# Like METHOD_MACHO but skip libjvm.dylib — pre-built iOS JREs are already tagged;
+# vtool/ldid on the ~100 MB JVM can corrupt dyld rebase metadata.
+METHOD_MACHO_JRE = \
+	for file in $$(find $(1)); do \
+		if [[ "$$file" == *"/lib/server/libjvm.dylib" ]]; then \
+			continue; \
+		fi; \
+		if [[ "$$(file $$file)" == *"Mach-O"* ]]; then \
+			$(2); \
+		fi; \
+	done
+
 # Make sure everything is already available for use. Error if they require something
 ifneq ($(call METHOD_DEPCHECK,cmake --version),1)
 $(error You need to install cmake)
@@ -305,6 +317,17 @@ jre: native
 	printf 'amethyst-mirror-mapping-v1\n' > $(SOURCEDIR)/depends/java-17-openjdk/.amethyst-mirror-mapping; \
 	printf 'amethyst-mirror-mapping-v1\n' > $(SOURCEDIR)/depends/java-21-openjdk/.amethyst-mirror-mapping; \
 	printf 'amethyst-mirror-mapping-v1\n' > $(SOURCEDIR)/depends/java-25-openjdk/.amethyst-mirror-mapping; \
+	for ver in 21 25; do \
+		jvm="$(SOURCEDIR)/depends/java-$$ver-openjdk/lib/server/libjvm.dylib"; \
+		if [ -f "$$jvm" ]; then \
+			python3 $(SOURCEDIR)/scripts/patch_libjvm_mirror_brk.py "$$jvm"; \
+			python3 $(SOURCEDIR)/scripts/patch_libjvm_jit_alloc.py "$$jvm"; \
+			if ! otool -l "$$jvm" >/dev/null 2>&1; then \
+				echo "[jre] ERROR: libjvm.dylib for Java $$ver failed Mach-O validation (corrupt download?)"; \
+				exit 1; \
+			fi; \
+		fi; \
+	done; \
 	$(call METHOD_DIRCHECK,$(OUTPUTDIR)/java_runtimes); \
 	cp -R $(POJAV_JRE8_DIR) $(OUTPUTDIR)/java_runtimes; \
 	cp -R $(POJAV_JRE17_DIR) $(OUTPUTDIR)/java_runtimes; \
@@ -452,8 +475,8 @@ payload: native dep_mg lwgjl java jre assets
 	# Originally guarded by `[ PLATFORM != 2 ]` on the assumption that all
 	# committed dylibs were already iOS-tagged — that broke when v19 added
 	# the 3.3.5 lwjgl-stb dylib straight from upstream.
-	$(call METHOD_MACHO,$(OUTPUTDIR)/Payload/AngelAuraAmethyst.app,$(call METHOD_CHANGE_PLAT,$(PLATFORM),$$file)); \
-	$(call METHOD_MACHO,$(OUTPUTDIR)/java_runtimes,$(call METHOD_CHANGE_PLAT,$(PLATFORM),$$file));
+	$(call METHOD_MACHO_JRE,$(OUTPUTDIR)/Payload/AngelAuraAmethyst.app,$(call METHOD_CHANGE_PLAT,$(PLATFORM),$$file)); \
+	$(call METHOD_MACHO_JRE,$(OUTPUTDIR)/java_runtimes,$(call METHOD_CHANGE_PLAT,$(PLATFORM),$$file));
 	echo '[Amethyst v$(VERSION)] payload - end'
 
 deploy:
@@ -507,8 +530,8 @@ dsym: payload
 codesign:
 	echo '[Amethyst v$(VERSION)] codesign - start'
 	cp '$(PROVISIONING)' $(OUTPUTDIR)/Payload/AngelAuraAmethyst.app/embedded.mobileprovision
-	$(call METHOD_MACHO,$(OUTPUTDIR)/Payload/AngelAuraAmethyst.app,$(call METHOD_CODESIGN,$(SIGNING_TEAMID),$$file))
-	$(call METHOD_MACHO,$(OUTPUTDIR)/java_runtimes,$(call METHOD_CODESIGN,$(SIGNING_TEAMID),$$file))
+	$(call METHOD_MACHO_JRE,$(OUTPUTDIR)/Payload/AngelAuraAmethyst.app,$(call METHOD_CODESIGN,$(SIGNING_TEAMID),$$file))
+	$(call METHOD_MACHO_JRE,$(OUTPUTDIR)/java_runtimes,$(call METHOD_CODESIGN,$(SIGNING_TEAMID),$$file))
 	echo '[Amethyst v$(VERSION)] codesign - end'
 
 clean:

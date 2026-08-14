@@ -1,0 +1,29 @@
+name: Format docs on PR with Prettier
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  format:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: 'recursive'
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '22'
+
+      - name: Install dependencies
+        run: npm i -g prettier
+
+      - name: Format code with Prettier
+        run: npx prettier -cw .
+
+      - uses: pre-commit-ci/lite-action@v1.1.0
+        if: always()
+        with:
+          msg: 'style: :rotating_light: auto fix [skip ci]'

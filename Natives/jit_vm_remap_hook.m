@@ -10,6 +10,7 @@
 #include <stdarg.h>
 #include <stdatomic.h>
 #include <string.h>
+#include <unistd.h>
 
 typedef kern_return_t (*vm_remap_fn)(
     vm_map_t target_task,
@@ -229,6 +230,16 @@ static BOOL looksLikeMirrorRWProtect(vm_address_t addr, vm_size_t size, vm_prot_
     return looksLikeJITSuperpage(rx);
 }
 
+static BOOL looksLikeJITExecProtect(vm_address_t addr, vm_size_t size, vm_prot_t prot) {
+    if ((prot & VM_PROT_EXECUTE) == 0) {
+        return NO;
+    }
+    if (!looksLikeJITSuperpage(addr)) {
+        return NO;
+    }
+    return size >= (vm_size_t)getpagesize();
+}
+
 void AmethystJIT26PrepareMirrorPair(void *rx, void *rw, size_t size) {
     if (!DeviceNeedsDebugJITMapping() || size < 16 * 1024 * 1024) {
         return;
@@ -359,6 +370,11 @@ static kern_return_t hooked_vm_protect(
         NSLog(@"[JIT26] vm_protect mirror RW=%p RX=%p size=%zu MB",
               (void *)(uintptr_t)address, (void *)(uintptr_t)rx, size / (1024 * 1024));
         prepareMirrorPair(rx, address, size);
+    } else if (result == KERN_SUCCESS && looksLikeJITExecProtect(address, size, new_protection)) {
+        NSLog(@"[JIT26] vm_protect RX prepare: addr=%p size=%zu KB",
+              (void *)(uintptr_t)address, size / 1024);
+        JIT26PrepareRegion((void *)(uintptr_t)address, size);
+        sys_icache_invalidate((void *)(uintptr_t)address, size);
     }
     return result;
 }
@@ -427,6 +443,23 @@ static void *mirror_prepare_poll_thread(void *arg) {
     }
     NSLog(@"[JIT26] mirror prepare poll thread timed out");
     return NULL;
+}
+
+void prewarm_jit_mirror_superpage(void) {
+    if (!DeviceNeedsDebugJITMapping()) {
+        return;
+    }
+    static const size_t kMirrorSuperpageSize = 0xf000000; // 240 MB
+    void *rx = JIT26PrepareRegion(NULL, kMirrorSuperpageSize);
+    if (!rx) {
+        NSLog(@"[JIT26] mirror superpage prewarm failed (got NULL)");
+        return;
+    }
+    vm_address_t rxAddr = (vm_address_t)(uintptr_t)rx;
+    vm_address_t rwAddr = rxAddr + kMirrorSuperpageSize;
+    NSLog(@"[JIT26] mirror superpage prewarm: RX=%p RW=%p size=%zu MB",
+          (void *)(uintptr_t)rxAddr, (void *)(uintptr_t)rwAddr, kMirrorSuperpageSize / (1024 * 1024));
+    AmethystJIT26PrepareMirrorPair(rx, (void *)(uintptr_t)rwAddr, kMirrorSuperpageSize);
 }
 
 void start_jit_mirror_prepare_poll_thread(void) {
@@ -508,4 +541,5 @@ void init_jit_vm_remap_hook(void) {
         _dyld_register_func_for_add_image(rebind_vm_hooks_on_image_load);
     }
     NSLog(@"[JIT26] fishhook vm_remap/mach_vm_remap/vm_protect/printf registered");
+    start_jit_mirror_prepare_poll_thread();
 }

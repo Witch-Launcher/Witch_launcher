@@ -1,9 +1,16 @@
-//
-// Created by BZLZHH on 2025/1/28.
-//
+// MobileGlues - gl/buffer.cpp
+// Copyright (c) 2025-2026 MobileGL-Dev
+// Licensed under the GNU Lesser General Public License v2.1:
+//   https://www.gnu.org/licenses/old-licenses/lgpl-2.1.txt
+// SPDX-License-Identifier: LGPL-2.1-only
+// End of Source File Header
 
 #include "buffer.h"
-#include "ankerl/unordered_dense.h"
+#include "../egl/context.h"
+#include <mutex>
+#include <memory>
+#include <ska/flat_hash_map.hpp>
+#include <array>
 #include "texture.h"
 
 #define DEBUG 0
@@ -12,17 +19,88 @@ GLuint bound_array;
 static GLint maxBufferId = 0;
 static GLint maxArrayId = 0;
 
-static std::vector<GLuint> g_gen_buffers;
-static std::vector<char> g_gen_buffer_exists;
-static std::vector<GLuint> g_free_buffer_ids;
+// ---------------------------------------------------------------------------
+// Per-share-group and per-context storage
+//
+// GL scopes buffer names to the share group -- two contexts created against each
+// other see one set of names -- while vertex array objects and the current
+// bindings are container state and belong to the context alone, even inside a
+// share group. All of it used to be one process-wide set, so a second context
+// inherited the first one's names, sizes and bindings.
+//
+// The tables stay private to this file and are selected by a thread_local
+// pointer that eglMakeCurrent swaps, which is why the ~90 access sites only
+// changed shape rather than routing through an accessor on every use.
+// The state is held by pointer: the map moves its elements when it grows, and
+// these thread_local pointers have to outlive other contexts being added.
+// ---------------------------------------------------------------------------
 
-static std::vector<GLuint> g_gen_arrays;
-static std::vector<char> g_gen_array_exists;
-static std::vector<GLuint> g_free_array_ids;
+namespace {
 
-static std::vector<size_t> g_buffer_datasize;
+struct buffer_group_state_t { // shared across a share group
+    std::vector<GLuint> gen_buffers;
+    std::vector<char> gen_buffer_exists;
+    std::vector<GLuint> free_buffer_ids;
+    std::vector<size_t> buffer_datasize;
+};
 
-static std::vector<GLuint> g_element_array_buffer_per_vao;
+struct buffer_ctx_state_t { // private to one context
+    std::vector<GLuint> gen_arrays;
+    std::vector<char> gen_array_exists;
+    std::vector<GLuint> free_array_ids;
+    std::vector<GLuint> element_array_buffer_per_vao;
+    std::array<GLuint, 13> bound_buffers{};
+};
+
+std::mutex g_buf_mutex;
+// The tables hold their state by pointer. A thread_local pointer into an entry is
+// the whole point of the design -- the ~90 access sites read through g_bg/g_bc
+// rather than looking anything up -- and the map moves its elements when it
+// grows, so the entry itself must not be what moves. The unique_ptr stays put
+// while the map rehashes around it.
+ska::flat_hash_map<unsigned long long, std::unique_ptr<buffer_group_state_t>> g_buf_groups;
+ska::flat_hash_map<unsigned long long, std::unique_ptr<buffer_ctx_state_t>> g_buf_ctxs;
+
+buffer_group_state_t g_buf_group_default;
+buffer_ctx_state_t g_buf_ctx_default;
+
+thread_local buffer_group_state_t* g_bg = &g_buf_group_default;
+thread_local buffer_ctx_state_t* g_bc = &g_buf_ctx_default;
+
+} // namespace
+
+void mg_buffer_bind_context(unsigned long long ctx_id, unsigned long long group_id) {
+    if (ctx_id == 0) {
+        g_bg = &g_buf_group_default;
+        g_bc = &g_buf_ctx_default;
+        return;
+    }
+    std::lock_guard<std::mutex> lock(g_buf_mutex);
+    std::unique_ptr<buffer_group_state_t>& group = g_buf_groups[group_id];
+    if (!group) group = std::make_unique<buffer_group_state_t>();
+    std::unique_ptr<buffer_ctx_state_t>& ctx = g_buf_ctxs[ctx_id];
+    if (!ctx) ctx = std::make_unique<buffer_ctx_state_t>();
+    g_bg = group.get();
+    g_bc = ctx.get();
+}
+
+void mg_buffer_forget_context(unsigned long long ctx_id) {
+    if (ctx_id == 0) return;
+    std::lock_guard<std::mutex> lock(g_buf_mutex);
+    const auto it = g_buf_ctxs.find(ctx_id);
+    if (it == g_buf_ctxs.end()) return;
+    if (g_bc == it->second.get()) g_bc = &g_buf_ctx_default;
+    g_buf_ctxs.erase(it);
+}
+
+#define g_gen_buffers (g_bg->gen_buffers)
+#define g_gen_buffer_exists (g_bg->gen_buffer_exists)
+#define g_free_buffer_ids (g_bg->free_buffer_ids)
+#define g_buffer_datasize (g_bg->buffer_datasize)
+#define g_gen_arrays (g_bc->gen_arrays)
+#define g_gen_array_exists (g_bc->gen_array_exists)
+#define g_free_array_ids (g_bc->free_array_ids)
+#define g_element_array_buffer_per_vao (g_bc->element_array_buffer_per_vao)
 
 enum BindingIndex : int {
     BI_ARRAY_BUFFER = 0,
@@ -37,9 +115,11 @@ enum BindingIndex : int {
     BI_SHADER_STORAGE,
     BI_TRANSFORM_FEEDBACK,
     BI_UNIFORM_BUFFER,
+    BI_PARAMETER_BUFFER,
     BINDING_COUNT
 };
-static std::array<GLuint, BINDING_COUNT> g_bound_buffers_arr = {0};
+#define g_bound_buffers_arr (g_bc->bound_buffers)
+static_assert(BINDING_COUNT == 13, "buffer_ctx_state_t::bound_buffers must match BindingIndex");
 
 static inline int ensure_buffer_capacity(GLuint id) {
     if ((int)g_gen_buffers.size() <= (int)id) {
@@ -153,6 +233,8 @@ static inline int binding_target_to_index(GLenum target) {
         return BI_TRANSFORM_FEEDBACK;
     case GL_UNIFORM_BUFFER:
         return BI_UNIFORM_BUFFER;
+    case GL_PARAMETER_BUFFER:
+        return BI_PARAMETER_BUFFER;
     default:
         return -1;
     }
@@ -161,6 +243,81 @@ static inline int binding_target_to_index(GLenum target) {
 void set_bound_buffer_by_target(GLenum target, GLuint buffer) {
     int idx = binding_target_to_index(target);
     if (idx >= 0) g_bound_buffers_arr[idx] = buffer;
+}
+
+// find_bound_buffer below answers the *_BINDING query enums, which is what
+// glGetIntegerv passes it. Callers holding a bind target need this one instead:
+// handing a target to find_bound_buffer falls through to its default and comes
+// back 0, which is a valid buffer name and so goes unnoticed.
+GLuint find_bound_buffer_by_target(GLenum target) {
+    if (target == GL_ELEMENT_ARRAY_BUFFER) return get_ibo_by_vao(find_bound_array());
+    const int idx = binding_target_to_index(target);
+    return idx >= 0 ? g_bound_buffers_arr[idx] : 0;
+}
+
+// The name the *driver* has bound to `target`, i.e. what
+// GLES.glGetIntegerv(<target>_BINDING) would answer, worked out from the tracked
+// bindings rather than by asking the driver.
+//
+// Buffer names are renamed across this boundary: the application sees names
+// gen_buffer() hands out and the driver sees the ones glGenBuffers gave back, so
+// find_bound_buffer_by_target's answer must not be passed to GLES.glBindBuffer
+// unmapped. This one may. A name the application bound without ever generating it
+// is forwarded verbatim by glBindBuffer -- GLES creates the object on first bind
+// -- so it is its own driver name.
+//
+// Two limits, both shared with this layer's own glGetIntegerv:
+//   - It reports the last name bound to the target, and glDeleteBuffers does not
+//     clear the binding slots (only GL_PARAMETER_BUFFER, which has no driver-side
+//     binding to fall back on). Deleting a still-bound buffer resets the driver's
+//     binding to 0 while this keeps reporting the dead name.
+//   - It is the tracked state, so it is only the driver's state where the two
+//     agree. Every internal path that binds GL_ELEMENT_ARRAY_BUFFER or
+//     GL_DRAW_INDIRECT_BUFFER through GLES.* directly (gl/multidraw.cpp,
+//     gl/drawing.cpp, gl/restart.cpp) saves and restores around its own work, so
+//     they disagree only inside those windows -- ask before the temporary bind,
+//     never during it. gl/gl.cpp's depth-clear triangle is the one path that does
+//     not: it leaves the driver on vertex array 0 and GL_ARRAY_BUFFER 0 without
+//     putting the application's back, which desynchronises the element array
+//     binding too, since that is vertex array state.
+//
+// GL_PARAMETER_BUFFER has no GLES binding at all; the mapped name is returned for
+// it anyway, because gl/multidraw.cpp is the only thing that asks and it needs the
+// real object to bind somewhere else.
+GLuint mg_driver_bound_buffer(GLenum target) {
+    const GLuint name = find_bound_buffer_by_target(target);
+    const GLuint real = (name == 0 || !has_buffer(name)) ? name : find_real_buffer(name);
+#if GLOBAL_DEBUG
+    // The divergence this answer is vulnerable to -- driver state mutated
+    // behind the frontend's back -- is undetectable at runtime: the tracked
+    // state always has an answer and cannot know it is stale. So debug builds
+    // pay the round-trip this function exists to avoid, and scream on a
+    // mismatch instead of letting a wrong binding surface three calls later as
+    // a skipped draw or a corrupted restore. Release builds trust the tracking.
+    if (GLES.glGetIntegerv) {
+        GLenum pname = 0;
+        switch (target) {
+        case GL_ARRAY_BUFFER:          pname = GL_ARRAY_BUFFER_BINDING; break;
+        case GL_ELEMENT_ARRAY_BUFFER:  pname = GL_ELEMENT_ARRAY_BUFFER_BINDING; break;
+        case GL_DRAW_INDIRECT_BUFFER:  pname = GL_DRAW_INDIRECT_BUFFER_BINDING; break;
+        case GL_PIXEL_UNPACK_BUFFER:   pname = GL_PIXEL_UNPACK_BUFFER_BINDING; break;
+        case GL_PIXEL_PACK_BUFFER:     pname = GL_PIXEL_PACK_BUFFER_BINDING; break;
+        case GL_COPY_READ_BUFFER:      pname = GL_COPY_READ_BUFFER_BINDING; break;
+        case GL_COPY_WRITE_BUFFER:     pname = GL_COPY_WRITE_BUFFER_BINDING; break;
+        default: break;
+        }
+        if (pname != 0) {
+            GLint driver = 0;
+            GLES.glGetIntegerv(pname, &driver);
+            if (static_cast<GLuint>(driver) != real) {
+                LOG_E("mg_driver_bound_buffer(0x%X): tracked %u (real %u) but the driver holds %u -- "
+                      "something mutated this binding without going through the frontend",
+                      target, name, real, static_cast<GLuint>(driver))
+            }
+        }
+    }
+#endif
+    return real;
 }
 
 GLuint find_bound_buffer(GLenum key) {
@@ -201,6 +358,9 @@ GLuint find_bound_buffer(GLenum key) {
         break;
     case GL_UNIFORM_BUFFER_BINDING:
         target = GL_UNIFORM_BUFFER;
+        break;
+    case GL_PARAMETER_BUFFER_BINDING:
+        target = GL_PARAMETER_BUFFER;
         break;
     default:
         target = 0;
@@ -319,6 +479,14 @@ void glDeleteBuffers(GLsizei n, const GLuint* buffers) {
     LOG()
     LOG_D("glDeleteBuffers(%i, %p)", n, buffers)
     for (int i = 0; i < n; ++i) {
+        // GL resets a binding to 0 when the bound buffer is deleted. The
+        // parameter buffer slot is the only source of truth gl/multidraw.cpp has
+        // for where the draw count lives -- there is no driver-side binding to
+        // cross-check it against -- and deleted ids are recycled by gen_buffer(),
+        // so a stale slot would silently point at somebody else's buffer.
+        if (buffers[i] != 0 && find_bound_buffer(GL_PARAMETER_BUFFER_BINDING) == buffers[i]) {
+            set_bound_buffer_by_target(GL_PARAMETER_BUFFER, 0);
+        }
         if (find_real_buffer(buffers[i])) {
             GLuint real_buff = find_real_buffer(buffers[i]);
             GLES.glDeleteBuffers(1, &real_buff);
@@ -338,6 +506,21 @@ void glBindBuffer(GLenum target, GLuint buffer) {
     LOG()
     LOG_D("glBindBuffer, target = %s, buffer = %d", glEnumToString(target), buffer)
     set_bound_buffer_by_target(target, buffer);
+
+    if (target == GL_PARAMETER_BUFFER) {
+        // GLES has no GL_PARAMETER_BUFFER. The binding is tracked here and read
+        // back by gl/multidraw.cpp for glMultiDraw*IndirectCount; forwarding the
+        // target to the driver would only raise GL_INVALID_ENUM. The backing
+        // object still has to exist, because nothing else will create it.
+        if (buffer != 0 && has_buffer(buffer) && !find_real_buffer(buffer)) {
+            GLuint real_buffer = 0;
+            GLES.glGenBuffers(1, &real_buffer);
+            modify_buffer(buffer, real_buffer);
+            CHECK_GL_ERROR
+        }
+        return;
+    }
+
     // save ibo binding to vao
     if (target == GL_ELEMENT_ARRAY_BUFFER) {
         update_vao_ibo_binding(find_bound_array(), buffer);
@@ -359,26 +542,7 @@ void glBindBuffer(GLenum target, GLuint buffer) {
     CHECK_GL_ERROR
 }
 
-struct atomic_buffer {
-    GLuint id;
-    GLsizeiptr size;
-    GLintptr offset;
-};
-
-static std::vector<atomic_buffer> g_buffer_map_atomic_buffer_info;
-static std::vector<GLuint> g_buffer_map_ssbo_id; // shall we use this in the future?
-
-void bindAllAtomicCounterAsSSBO() {
-    const size_t count = g_buffer_map_atomic_buffer_info.size();
-    for (size_t i = 0; i < count; ++i) {
-        atomic_buffer buf = g_buffer_map_atomic_buffer_info[i];
-        if (buf.id != 0) {
-            GLuint realID = find_real_buffer(buf.id);
-            GLES.glBindBufferRange(GL_SHADER_STORAGE_BUFFER, i, realID, buf.offset, buf.size);
-            LOG_D("Bound atomic counter buffer %u(real: %u) as SSBO at index %zu", buf, realID, i);
-        }
-    }
-}
+static std::vector<GLuint> g_buffer_map_ssbo_id;
 
 void glBindBufferRange(GLenum target, GLuint index, GLuint buffer, GLintptr offset, GLsizeiptr size) {
     LOG()
@@ -397,12 +561,6 @@ void glBindBufferRange(GLenum target, GLuint index, GLuint buffer, GLintptr offs
         CHECK_GL_ERROR
     }
     GLES.glBindBufferRange(target, index, real_buffer, offset, size);
-    if (target == GL_ATOMIC_COUNTER_BUFFER) {
-        if (g_buffer_map_atomic_buffer_info.empty()) {
-            g_buffer_map_atomic_buffer_info.resize(GL_MAX_ATOMIC_COUNTER_BUFFER_BINDINGS, {});
-        }
-        g_buffer_map_atomic_buffer_info[index] = {buffer, size, offset};
-    }
     CHECK_GL_ERROR
 }
 
@@ -450,6 +608,75 @@ void glBindVertexBuffer(GLuint bindingindex, GLuint buffer, GLintptr offset, GLs
     }
     GLES.glBindVertexBuffer(bindingindex, real_buffer, offset, stride);
     CHECK_GL_ERROR
+}
+
+// The transfer pair GLES accepts for a given sized internalformat.
+//
+// The texture-buffer emulation used to allocate and upload with a hardcoded
+// GL_RED_INTEGER + GL_BYTE whatever the internalformat was. ES validates
+// internalformat/format/type as a triple, and that one is legal for exactly one
+// format -- GL_R8I. Everything else (GL_R32I, GL_RGBA32F, even GL_R8UI, which
+// wants GL_UNSIGNED_BYTE) failed the glTexImage2D with GL_INVALID_OPERATION,
+// left level 0 undefined, and the emulated texelFetch read zeros from an
+// incomplete texture. Sized here from the same table as the texel size, so the
+// two cannot drift apart.
+//
+// Returns false for a format with no ES-legal pair -- the normalised 16-bit ones
+// need EXT_texture_norm16, and depth formats are not texture-buffer formats at
+// all. The caller drops the call instead of guessing.
+//
+// Deliberately wider than GL 4.6 table 8.16, which lists only the 32-bit
+// three-component forms among the RGB ones: the extra entries here (GL_RGB8,
+// GL_RGB8I/UI, GL_RGB16I/UI/F) are all valid ES triples, so emulating them costs
+// nothing, while refusing them would only break an application that already works
+// against the permissive desktop drivers. Being stricter than the hardware buys
+// no correctness.
+bool get_internal_format_transfer(GLenum internalformat, GLenum* format, GLenum* type) {
+    switch (internalformat) {
+    // clang-format off
+    case GL_R8:        *format = GL_RED;           *type = GL_UNSIGNED_BYTE;  return true;
+    case GL_R8I:       *format = GL_RED_INTEGER;   *type = GL_BYTE;           return true;
+    case GL_R8UI:      *format = GL_RED_INTEGER;   *type = GL_UNSIGNED_BYTE;  return true;
+    case GL_R16I:      *format = GL_RED_INTEGER;   *type = GL_SHORT;          return true;
+    case GL_R16UI:     *format = GL_RED_INTEGER;   *type = GL_UNSIGNED_SHORT; return true;
+    case GL_R16F:      *format = GL_RED;           *type = GL_HALF_FLOAT;     return true;
+    case GL_R32I:      *format = GL_RED_INTEGER;   *type = GL_INT;            return true;
+    case GL_R32UI:     *format = GL_RED_INTEGER;   *type = GL_UNSIGNED_INT;   return true;
+    case GL_R32F:      *format = GL_RED;           *type = GL_FLOAT;          return true;
+
+    case GL_RG8:       *format = GL_RG;            *type = GL_UNSIGNED_BYTE;  return true;
+    case GL_RG8I:      *format = GL_RG_INTEGER;    *type = GL_BYTE;           return true;
+    case GL_RG8UI:     *format = GL_RG_INTEGER;    *type = GL_UNSIGNED_BYTE;  return true;
+    case GL_RG16I:     *format = GL_RG_INTEGER;    *type = GL_SHORT;          return true;
+    case GL_RG16UI:    *format = GL_RG_INTEGER;    *type = GL_UNSIGNED_SHORT; return true;
+    case GL_RG16F:     *format = GL_RG;            *type = GL_HALF_FLOAT;     return true;
+    case GL_RG32I:     *format = GL_RG_INTEGER;    *type = GL_INT;            return true;
+    case GL_RG32UI:    *format = GL_RG_INTEGER;    *type = GL_UNSIGNED_INT;   return true;
+    case GL_RG32F:     *format = GL_RG;            *type = GL_FLOAT;          return true;
+
+    case GL_RGB8:      *format = GL_RGB;           *type = GL_UNSIGNED_BYTE;  return true;
+    case GL_RGB8I:     *format = GL_RGB_INTEGER;   *type = GL_BYTE;           return true;
+    case GL_RGB8UI:    *format = GL_RGB_INTEGER;   *type = GL_UNSIGNED_BYTE;  return true;
+    case GL_RGB16I:    *format = GL_RGB_INTEGER;   *type = GL_SHORT;          return true;
+    case GL_RGB16UI:   *format = GL_RGB_INTEGER;   *type = GL_UNSIGNED_SHORT; return true;
+    case GL_RGB16F:    *format = GL_RGB;           *type = GL_HALF_FLOAT;     return true;
+    case GL_RGB32I:    *format = GL_RGB_INTEGER;   *type = GL_INT;            return true;
+    case GL_RGB32UI:   *format = GL_RGB_INTEGER;   *type = GL_UNSIGNED_INT;   return true;
+    case GL_RGB32F:    *format = GL_RGB;           *type = GL_FLOAT;          return true;
+
+    case GL_RGBA8:     *format = GL_RGBA;          *type = GL_UNSIGNED_BYTE;  return true;
+    case GL_RGBA8I:    *format = GL_RGBA_INTEGER;  *type = GL_BYTE;           return true;
+    case GL_RGBA8UI:   *format = GL_RGBA_INTEGER;  *type = GL_UNSIGNED_BYTE;  return true;
+    case GL_RGBA16I:   *format = GL_RGBA_INTEGER;  *type = GL_SHORT;          return true;
+    case GL_RGBA16UI:  *format = GL_RGBA_INTEGER;  *type = GL_UNSIGNED_SHORT; return true;
+    case GL_RGBA16F:   *format = GL_RGBA;          *type = GL_HALF_FLOAT;     return true;
+    case GL_RGBA32I:   *format = GL_RGBA_INTEGER;  *type = GL_INT;            return true;
+    case GL_RGBA32UI:  *format = GL_RGBA_INTEGER;  *type = GL_UNSIGNED_INT;   return true;
+    case GL_RGBA32F:   *format = GL_RGBA;          *type = GL_FLOAT;          return true;
+    // clang-format on
+    default:
+        return false;
+    }
 }
 
 size_t get_internal_format_size(GLenum internalformat) {
@@ -548,6 +775,20 @@ size_t get_internal_format_size(GLenum internalformat) {
 }
 
 extern std::string bufSampelerName;
+
+// Report a rejected argument once per site. This layer cannot raise a GL error
+// -- glGetError always answers GL_NO_ERROR by design -- so an unusable argument
+// means "do nothing" plus one line a user can paste into a bug report. LOG_W and
+// LOG_E compile to nothing in release builds, hence LOG_W_FORCE.
+#define BU_WARN_ONCE(...)                                                                                              \
+    do {                                                                                                               \
+        static bool mg_bu_warned = false;                                                                              \
+        if (!mg_bu_warned) {                                                                                           \
+            mg_bu_warned = true;                                                                                       \
+            LOG_W_FORCE(__VA_ARGS__)                                                                                   \
+        }                                                                                                              \
+    } while (0)
+
 // Todo: any glGet* related to this function?
 void glTexBuffer(GLenum target, GLenum internalformat, GLuint buffer) {
     LOG()
@@ -570,6 +811,31 @@ void glTexBuffer(GLenum target, GLenum internalformat, GLuint buffer) {
     if (hardware->emulate_texture_buffer) {
         LOG_D("Emulating glTexBuffer");
 
+        // internalformat arrives unvalidated -- a format outside GL 4.6 table 8.16
+        // is GL_INVALID_ENUM in real GL and this layer raises nothing -- so
+        // get_internal_format_size answers 0 for it, as its own default case says.
+        // That 0 used to reach "bufferSize / pixelSize" below: undefined, and on
+        // arm64 it divides to zero, giving a 0 x 1 texture that the emulated
+        // texelFetch then indexes modulo zero. Size the texel first and drop the
+        // call if we cannot, before any binding is disturbed.
+        GLuint pixelSize = get_internal_format_size(internalformat);
+        if (pixelSize == 0) {
+            BU_WARN_ONCE("glTexBuffer: no texel size known for internalformat %s, texture buffer left untouched",
+                         glEnumToString(internalformat));
+            mg_set_gl_error(GL_INVALID_ENUM);
+            return;
+        }
+
+        // The transfer pair this internalformat actually accepts. Hardcoding one
+        // pair here is what made every format but GL_R8I fail to allocate.
+        GLenum tb_format = GL_RED_INTEGER, tb_type = GL_BYTE;
+        if (!get_internal_format_transfer(internalformat, &tb_format, &tb_type)) {
+            BU_WARN_ONCE("glTexBuffer: no GLES transfer pair for internalformat %s, texture buffer left untouched",
+                         glEnumToString(internalformat));
+            mg_set_gl_error(GL_INVALID_ENUM);
+            return;
+        }
+
         GLint boundTexture = 0;
         GLint prev_pixel_buffer_binding = 0;
 
@@ -582,6 +848,10 @@ void glTexBuffer(GLenum target, GLenum internalformat, GLuint buffer) {
 
         if (!boundTexture) {
             LOG_D("No texture bound to GL_TEXTURE_BUFFER, skipping emulation.");
+            // Unit 15 is only ever borrowed for the emulated buffer texture; every
+            // other borrower hands it back. Returning from here without doing so
+            // left the app's next glBindTexture landing on unit 15.
+            GLES.glActiveTexture(GL_TEXTURE0 + gl_state->current_tex_unit);
             return;
         }
 
@@ -598,8 +868,18 @@ void glTexBuffer(GLenum target, GLenum internalformat, GLuint buffer) {
         LOG_D("Binding texture %u to GL_TEXTURE_2D", boundTexture);
 
         const GLuint MAX_WIDTH = 8192;
-        GLuint pixelSize = get_internal_format_size(internalformat);
         GLuint numElements = bufferSize / pixelSize;
+        if (numElements == 0) {
+            // A buffer too small to hold one texel. The pixelSize == 0 guard above
+            // exists because a zero-sized texture makes the emulated texelFetch
+            // index modulo zero; this reaches the same place by the other road,
+            // through a 0 x 1 glTexImage2D and a u_BufferTexWidth of 0.
+            BU_WARN_ONCE("glTexBuffer: buffer of %d bytes holds no %u-byte texel, texture buffer left untouched",
+                         bufferSize, pixelSize);
+            mg_set_gl_error(GL_INVALID_VALUE);
+            GLES.glActiveTexture(GL_TEXTURE0 + gl_state->current_tex_unit);
+            return;
+        }
 
         GLuint width = numElements;
         GLuint height = 1;
@@ -622,13 +902,21 @@ void glTexBuffer(GLenum target, GLenum internalformat, GLuint buffer) {
         GLES.glPixelStorei(GL_UNPACK_SKIP_ROWS, 0);
 
         // TODO: Optimize the glTexImage2D call
-        GLES.glTexImage2D(GL_TEXTURE_2D, 0, internalformat, width, height, 0, GL_RED_INTEGER, GL_BYTE, nullptr);
+        GLES.glTexImage2D(GL_TEXTURE_2D, 0, internalformat, width, height, 0, tb_format, tb_type, nullptr);
 
         GLES.glBindBuffer(GL_PIXEL_UNPACK_BUFFER, real_buffer);
 
         for (GLuint row = 0; row < height; ++row) {
-            void* offset = (void*)(row * width * pixelSize);
-            GLES.glTexSubImage2D(GL_TEXTURE_2D, 0, 0, row, width, 1, GL_RED_INTEGER, GL_BYTE, offset);
+            // The last row is short whenever the element count is not a multiple
+            // of the row width. Asking for a full row anyway made the driver read
+            // past the end of the unpack buffer, which GLES answers with
+            // GL_INVALID_OPERATION and a no-op -- so the tail of the buffer was
+            // never uploaded and texelFetch read it back as whatever the
+            // allocation left there.
+            const GLuint row_texels = (row + 1 == height) ? (numElements - row * width) : width;
+            if (row_texels == 0) break;
+            void* offset = (void*)(static_cast<size_t>(row) * width * pixelSize);
+            GLES.glTexSubImage2D(GL_TEXTURE_2D, 0, 0, row, row_texels, 1, tb_format, tb_type, offset);
         }
 
         GLES.glPixelStorei(GL_UNPACK_ALIGNMENT, prev_alignment);
@@ -690,12 +978,64 @@ void glTexBufferRange(GLenum target, GLenum internalformat, GLuint buffer, GLint
     CHECK_GL_ERROR
 }
 
+// GLES has no GL_PARAMETER_BUFFER, so glBindBuffer above tracks the binding
+// without ever handing that target to the driver. GL 4.6 still lets an
+// application fill and query the buffer through it, which used to reach GLES
+// verbatim and come back GL_INVALID_ENUM -- the buffer stayed empty, and
+// glMultiDraw*IndirectCount then found a zero-byte parameter buffer and drew
+// nothing.
+//
+// GL_COPY_WRITE_BUFFER is borrowed for the duration of one call and put back
+// afterwards. GLES defines it as a generic target with no meaning of its own, so
+// the swap is invisible: nothing observes it, and no draw depends on it.
+namespace {
+struct borrowed_target_t {
+    GLenum target;
+    GLint saved = 0;
+    bool borrowed = false;
+
+    explicit borrowed_target_t(GLenum requested) : target(requested) {
+        if (requested != GL_PARAMETER_BUFFER) return;
+        const GLuint real = find_real_buffer(find_bound_buffer(GL_PARAMETER_BUFFER_BINDING));
+        GLES.glGetIntegerv(GL_COPY_WRITE_BUFFER_BINDING, &saved);
+        GLES.glBindBuffer(GL_COPY_WRITE_BUFFER, real);
+        target = GL_COPY_WRITE_BUFFER;
+        borrowed = true;
+    }
+    ~borrowed_target_t() {
+        if (borrowed) GLES.glBindBuffer(GL_COPY_WRITE_BUFFER, static_cast<GLuint>(saved));
+    }
+
+    borrowed_target_t(const borrowed_target_t&) = delete;
+    borrowed_target_t& operator=(const borrowed_target_t&) = delete;
+};
+} // namespace
+
 void glBufferData(GLenum target, GLsizeiptr size, const void* data, GLenum usage) {
     LOG()
     LOG_D("glBufferData, target = %s, size = %d, data = 0x%x, usage = %s", glEnumToString(target), size, data,
           glEnumToString(usage))
-    GLES.glBufferData(target, size, data, usage);
-    set_buffer_data_size(find_bound_buffer(target), size);
+    borrowed_target_t t(target);
+    GLES.glBufferData(t.target, size, data, usage);
+    set_buffer_data_size(find_bound_buffer_by_target(target), size);
+    CHECK_GL_ERROR
+}
+
+// Both of these were plain pass-throughs in gl/gl_native.cpp. They live here now
+// so that GL_PARAMETER_BUFFER reaches the driver as a target it understands.
+void glBufferSubData(GLenum target, GLintptr offset, GLsizeiptr size, const void* data) {
+    LOG()
+    LOG_D("glBufferSubData, target = %s, offset = %p, size = %zi", glEnumToString(target), (void*)offset, size)
+    borrowed_target_t t(target);
+    GLES.glBufferSubData(t.target, offset, size, data);
+    CHECK_GL_ERROR
+}
+
+void glGetBufferParameteriv(GLenum target, GLenum pname, GLint* params) {
+    LOG()
+    LOG_D("glGetBufferParameteriv, target = %s, pname = %s", glEnumToString(target), glEnumToString(pname))
+    borrowed_target_t t(target);
+    GLES.glGetBufferParameteriv(t.target, pname, params);
     CHECK_GL_ERROR
 }
 
@@ -703,10 +1043,11 @@ void* glMapBuffer(GLenum target, GLenum access) {
     LOG()
     LOG_D("glMapBuffer, target = %s, access = %s", glEnumToString(target), glEnumToString(access))
     if (g_gles_caps.GL_OES_mapbuffer) {
-        return GLES.glMapBufferOES(target, access);
+        borrowed_target_t t(target);
+        return GLES.glMapBufferOES(t.target, access);
     }
     GLint buffer_size;
-    GLES.glGetBufferParameteriv(target, GL_BUFFER_SIZE, &buffer_size);
+    glGetBufferParameteriv(target, GL_BUFFER_SIZE, &buffer_size);
     if (buffer_size <= 0 || glGetError() != GL_NO_ERROR) {
         return nullptr;
     }
@@ -750,15 +1091,17 @@ void* glMapBufferRange(GLenum target, GLintptr offset, GLsizeiptr length, GLbitf
     LOG()
     if (global_settings.buffer_coherent_as_flush) access &= ~GL_MAP_FLUSH_EXPLICIT_BIT;
     //    access |= GL_MAP_UNSYNCHRONIZED_BIT;
-    return GLES.glMapBufferRange(target, offset, length, access);
+    borrowed_target_t t(target);
+    return GLES.glMapBufferRange(t.target, offset, length, access);
 }
 
 GLboolean glUnmapBuffer(GLenum target) {
     LOG()
     LOG_D("%s(%s)", __func__, glEnumToString(target));
-    if (g_gles_caps.GL_OES_mapbuffer) return GLES.glUnmapBuffer(target);
+    borrowed_target_t t(target);
+    if (g_gles_caps.GL_OES_mapbuffer) return GLES.glUnmapBuffer(t.target);
 
-    GLboolean result = GLES.glUnmapBuffer(target);
+    GLboolean result = GLES.glUnmapBuffer(t.target);
     CHECK_GL_ERROR
     return result;
 }
@@ -766,17 +1109,23 @@ GLboolean glUnmapBuffer(GLenum target) {
 void glBufferStorage(GLenum target, GLsizeiptr size, const void* data, GLbitfield flags) {
     LOG()
     if (GLES.glBufferStorageEXT) {
-        if (global_settings.buffer_coherent_as_flush && ((flags & GL_MAP_PERSISTENT_BIT) != 0 ||
-            (flags & GL_DYNAMIC_STORAGE_BIT) != 0))
+        if (global_settings.buffer_coherent_as_flush &&
+            ((flags & GL_MAP_PERSISTENT_BIT) != 0 || (flags & GL_DYNAMIC_STORAGE_BIT) != 0))
             flags |= (GL_MAP_WRITE_BIT | GL_MAP_COHERENT_BIT | GL_MAP_PERSISTENT_BIT);
-        GLES.glBufferStorageEXT(target, size, data, flags);
+        borrowed_target_t t(target);
+        GLES.glBufferStorageEXT(t.target, size, data, flags);
+        // Allocates storage just as glBufferData does, so it owes the same record.
+        set_buffer_data_size(find_bound_buffer_by_target(target), size);
     }
     CHECK_GL_ERROR
 }
 
 void glFlushMappedBufferRange(GLenum target, GLintptr offset, GLsizeiptr length) {
     LOG()
-    if (!global_settings.buffer_coherent_as_flush) GLES.glFlushMappedBufferRange(target, offset, length);
+    if (!global_settings.buffer_coherent_as_flush) {
+        borrowed_target_t t(target);
+        GLES.glFlushMappedBufferRange(t.target, offset, length);
+    }
 }
 
 void glGenVertexArrays(GLsizei n, GLuint* arrays) {

@@ -197,10 +197,18 @@ void glShaderSource(GLuint shader, GLsizei count, const GLchar *const*string, co
         printf("LTWShdrWp: failed to convert&optimize shader %u, skipping\n", shader);
         goto end;
     } else {
+        GLchar* tbo_converted = NULL;
+        if(!(current_context->es32 || current_context->buffer_texture_ext)) {
+            tbo_converted = ConvertShaderBufferTextures(new_source);
+        }
+        if(tbo_converted != NULL) {
+            free(new_source);
+            new_source = tbo_converted;
+        }
         //printf("\n\n\nShader Result\n%s\n\n\n", new_source);
         shader_info->source = new_source;
+        es3_functions.glShaderSource(shader, 1, &shader_info->source, 0);
     }
-    es3_functions.glShaderSource(shader, 1, &shader_info->source, 0);
     end:
     free(target_string);
 }

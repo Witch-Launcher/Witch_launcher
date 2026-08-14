@@ -633,7 +633,11 @@ int launchJVMWithArgs(NSString *username, id launchTarget, int width, int height
     // Universal JIT script has been selected for a device that cannot create
     // RX mappings (JIT_FLAG_FORCE_MIRRORED), regardless of TXM presence, since
     // iOS 26.6+/27 blocks direct executable mappings on every device.
-    // Override with debug.debug_mirror_mapped_code_cache: -1 = auto, 0 = off, 1 = on.
+    // Patched Java 21/25 always route code-cache writes through mirror_w on iOS 26+,
+    // including iOS 27. Turning MirrorMappedCodeCache off does not disable mirror
+    // usage — it only skips the debugger-backed RX prepare and SIGBUSes in
+    // StubRoutines::call_stub during JVM init. Override with
+    // debug.debug_mirror_mapped_code_cache: -1 = auto, 0 = off, 1 = on.
     BOOL mirrorEnabled;
     id mirrorOverrideObj = getPrefObject(@"debug.debug_mirror_mapped_code_cache");
     NSInteger mirrorOverride = mirrorOverrideObj ? [mirrorOverrideObj integerValue] : -1;
@@ -641,8 +645,6 @@ int launchJVMWithArgs(NSString *username, id launchTarget, int width, int height
         mirrorEnabled = mirrorOverride > 0;
         NSLog(@"[JavaLauncher] MirrorMappedCodeCache override set to %s", mirrorEnabled ? "ON" : "OFF");
     } else if (@available(iOS 26.0, *)) {
-        // Patched Java 21/25 always route code-cache writes through mirror_w even
-        // when this flag is off; keep it enabled so RX comes from the debugger path.
         mirrorEnabled = needsMirrorJITPrepare;
     } else {
         mirrorEnabled = NO;
@@ -689,9 +691,26 @@ int launchJVMWithArgs(NSString *username, id launchTarget, int width, int height
     }
     if (requiresDebugJITMapping) {
         NSString *libjvmPath = [NSString stringWithFormat:@"%@/lib/server/libjvm.dylib", javaHome];
-        if ([fm fileExistsAtPath:libjvmPath]) {
-            dlopen(libjvmPath.UTF8String, RTLD_NOW | RTLD_GLOBAL);
+        if (![fm fileExistsAtPath:libjvmPath]) {
+            UIKit_returnToSplitView();
+            showDialog(localize(@"Error", nil),
+                [NSString stringWithFormat:@"Java runtime is missing libjvm.dylib at:\n%@", libjvmPath]);
+            return 1;
         }
+        void *libjvm = dlopen(libjvmPath.UTF8String, RTLD_NOW | RTLD_GLOBAL);
+        if (!libjvm) {
+            const char *error = dlerror();
+            NSLog(@"[JavaLauncher] libjvm preload failed: %s", error ?: "unknown");
+            UIKit_returnToSplitView();
+            showDialog(localize(@"Error", nil),
+                [NSString stringWithFormat:
+                    @"The bundled Java runtime (libjvm.dylib) is damaged and cannot load.\n\n"
+                     @"%@\n\n"
+                     @"Reinstall the app or rebuild with “make jre” to re-download the JRE.",
+                    error ? @(error) : @"unknown error"]);
+            return 1;
+        }
+        NSLog(@"[JavaLauncher] libjvm preloaded at %p", libjvm);
         verify_libjvm_mirror_brk_patch();
         rebind_jit_vm_hooks_after_libjvm_load();
     }
@@ -821,6 +840,10 @@ int launchJVMWithArgs(NSString *username, id launchTarget, int width, int height
         task_set_exception_ports(mach_task_self(), EXC_MASK_ALL & ~EXC_MASK_BREAKPOINT, 0,
             EXCEPTION_DEFAULT, THREAD_STATE_NONE);
         rebind_jit_vm_hooks_after_libjvm_load();
+        start_jit_mirror_prepare_poll_thread();
+        if (mirrorEnabled) {
+            prewarm_jit_mirror_superpage();
+        }
         NSLog(@"[JavaLauncher] Mirror JIT prepare: debugger kept attached, brk 0x6a handler active");
     }
 

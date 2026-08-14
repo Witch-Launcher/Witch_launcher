@@ -91,6 +91,8 @@ void init_bypassDyldLibValidation();
 void init_jit_vm_remap_hook();
 void rebind_jit_vm_hooks_after_libjvm_load();
 void verify_libjvm_mirror_brk_patch(void);
+void start_jit_mirror_prepare_poll_thread(void);
+void prewarm_jit_mirror_superpage(void);
 void AmethystJIT26PrepareMirrorPair(void *rx, void *rw, size_t size);
 void init_hookFunctions();
 void init_hookUIKitConstructor();

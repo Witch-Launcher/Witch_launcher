@@ -1,6 +1,9 @@
-//
-// Created by BZLZHH on 2025/1/28.
-//
+// MobileGlues - gl/buffer.h
+// Copyright (c) 2025-2026 MobileGL-Dev
+// Licensed under the GNU Lesser General Public License v2.1:
+//   https://www.gnu.org/licenses/old-licenses/lgpl-2.1.txt
+// SPDX-License-Identifier: LGPL-2.1-only
+// End of Source File Header
 
 #ifndef MOBILEGLUES_BUFFER_H
 #define GL_GLEXT_PROTOTYPES
@@ -29,7 +32,21 @@ extern "C"
 
     GLuint find_real_buffer(GLuint key);
 
+    // key is a *_BINDING query enum, the kind glGetIntegerv is given.
     GLuint find_bound_buffer(GLenum key);
+    // target is a bind target, the kind glBindBuffer is given. Not interchangeable
+    // with the above: each rejects the other's enums and returns 0.
+    GLuint find_bound_buffer_by_target(GLenum target);
+
+    // The real/driver name bound to target, as GLES.glGetIntegerv(<target>_BINDING)
+    // would report it -- the two functions above answer with this layer's own
+    // names, which the driver has never heard of. Computed from tracked state, so
+    // it costs nothing and is safe to call per draw, and it is the value to hand
+    // straight back to GLES.glBindBuffer when restoring a temporary bind.
+    //
+    // Only valid where the driver's binding still agrees with the tracked one; the
+    // comment on the definition in gl/buffer.cpp lists where it does not.
+    GLuint mg_driver_bound_buffer(GLenum target);
 
     GLuint gen_array();
 
