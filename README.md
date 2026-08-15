@@ -1,3 +1,4 @@
+Fork by Za_d626(DuyAnh662)
 Thanks to vibecodest and [Catsruledogs](https://github.com/catsruledogs/Amethyst-iOS-25.git), T1k-T1k for the source code!
 
 ```Thanks to L4d for helping me fix the bug on iOS 27 (but it didn't work :< I'm sorry)```
