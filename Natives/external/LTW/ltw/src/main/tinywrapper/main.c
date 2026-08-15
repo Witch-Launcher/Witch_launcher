@@ -169,9 +169,29 @@ void glTexImage2D(GLenum target, GLint level, GLint internalformat, GLsizei widt
         current_context->proxy_intformat = internalformat;
     } else {
         if(data != NULL) swizzle_process_upload(target, &format, &type);
-        pick_internalformat(&internalformat, &type, &format, &data);
+        {
+            GLenum old_i = internalformat, old_f = format, old_t = type;
+            pick_internalformat(&internalformat, &type, &format, &data);
+            if (old_i != internalformat || old_f != format || old_t != type)
+                printf("LTW: glTexImage2D override: 0x%x/0x%x/0x%x -> 0x%x/0x%x/0x%x (%dx%d level=%d)\n",
+                       old_i, old_f, old_t, internalformat, format, type, width, height, level);
+        }
         es3_functions.glTexImage2D(target, level, internalformat, width, height, border, format, type, data);
     }
+}
+
+GLsync glFenceSync(GLenum condition, GLbitfield flags) {
+    GLsync s = es3_functions.glFenceSync(condition, flags);
+    printf("LTW: glFenceSync(cond=0x%x flags=0x%x) -> %p err=0x%x\n", condition, flags, s,
+           s ? 0 : es3_functions.glGetError());
+    return s;
+}
+
+GLenum glClientWaitSync(GLsync sync, GLbitfield flags, GLuint64 timeout) {
+    GLenum r = es3_functions.glClientWaitSync(sync, flags, timeout);
+    printf("LTW: glClientWaitSync(sync=%p flags=0x%x timeout=%llu) -> 0x%x err=0x%x\n", sync, flags,
+           (unsigned long long)timeout, r, es3_functions.glGetError());
+    return r;
 }
 
 INTERNAL bool filter_params_integer(GLenum target, GLenum pname, GLint param) {

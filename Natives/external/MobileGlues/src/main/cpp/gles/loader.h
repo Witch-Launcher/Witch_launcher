@@ -105,30 +105,25 @@ extern "C"
     while (ERR != GL_NO_ERROR)                                                                                         \
         ERR = GLES.glGetError();
 
-#if GLOBAL_DEBUG
 #define CHECK_GL_ERROR                                                                                                 \
-    GLenum ERR = GLES.glGetError();                                                                                    \
-    while (ERR != GL_NO_ERROR) {                                                                                       \
-        LOG_E("ERROR: %d @ %s:%d", ERR, __FILE__, __LINE__)                                                            \
-        ERR = GLES.glGetError();                                                                                       \
+    {                                                                                                                  \
+        GLenum ERR = GLES.glGetError();                                                                                \
+        while (ERR != GL_NO_ERROR) {                                                                                   \
+            printf("[MG-CHECKERR] ERROR 0x%x @ %s:%d\n", (unsigned int)ERR, __FILE__, __LINE__);                      \
+            ERR = GLES.glGetError();                                                                                   \
+        }                                                                                                              \
     }
 
 #define INIT_CHECK_GL_ERROR GLenum ERR = GL_NO_ERROR;
 
 #define CHECK_GL_ERROR_NO_INIT                                                                                         \
-    ERR = GLES.glGetError();                                                                                           \
-    while (ERR != GL_NO_ERROR) {                                                                                       \
-        LOG_E("ERROR: %d @ %s:%d", ERR, __FILE__, __LINE__)                                                            \
+    {                                                                                                                  \
         ERR = GLES.glGetError();                                                                                       \
+        while (ERR != GL_NO_ERROR) {                                                                                   \
+            printf("[MG-CHECKERR] ERROR 0x%x @ %s:%d\n", (unsigned int)ERR, __FILE__, __LINE__);                      \
+            ERR = GLES.glGetError();                                                                                   \
+        }                                                                                                              \
     }
-#else
-#define CHECK_GL_ERROR                                                                                                 \
-    {}
-#define INIT_CHECK_GL_ERROR                                                                                            \
-    {}
-#define CHECK_GL_ERROR_NO_INIT                                                                                         \
-    {}
-#endif
 
 #define INIT_CHECK_GL_ERROR_FORCE GLenum ERR = GL_NO_ERROR;
 

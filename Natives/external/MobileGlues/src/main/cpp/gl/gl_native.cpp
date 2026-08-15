@@ -66,7 +66,10 @@ NATIVE_FUNCTION_HEAD(void, glFlush) NATIVE_FUNCTION_END_NO_RETURN(void, glFlush)
 NATIVE_FUNCTION_HEAD(void, glFrontFace, GLenum mode) NATIVE_FUNCTION_END_NO_RETURN(void, glFrontFace, mode)
 //NATIVE_FUNCTION_HEAD(void, glGenBuffers, GLsizei n, GLuint *buffers) NATIVE_FUNCTION_END_NO_RETURN(void, glGenBuffers, n,buffers)
 NATIVE_FUNCTION_HEAD(void, glGenerateMipmap, GLenum target) NATIVE_FUNCTION_END_NO_RETURN(void, glGenerateMipmap, target)
-NATIVE_FUNCTION_HEAD(void, glGenFramebuffers, GLsizei n, GLuint *framebuffers) NATIVE_FUNCTION_END_NO_RETURN(void, glGenFramebuffers, n,framebuffers)
+extern "C" GLAPI GLAPIENTRY void glGenFramebuffers(GLsizei n, GLuint *framebuffers) {
+    GLES.glGenFramebuffers(n, framebuffers);
+    for (GLsizei i = 0; i < n; ++i) printf("[MG-GEN-FB] id=%u isFB=%d\n", framebuffers[i], GLES.glIsFramebuffer(framebuffers[i]));
+}
 NATIVE_FUNCTION_HEAD(void, glGenRenderbuffers, GLsizei n, GLuint *renderbuffers) NATIVE_FUNCTION_END_NO_RETURN(void, glGenRenderbuffers, n,renderbuffers)
 NATIVE_FUNCTION_HEAD(void, glGenTextures, GLsizei n, GLuint *textures) NATIVE_FUNCTION_END_NO_RETURN(void, glGenTextures, n,textures)
 NATIVE_FUNCTION_HEAD(void, glGetActiveAttrib, GLuint program, GLuint index, GLsizei bufSize, GLsizei *length, GLint *size, GLenum *type, GLchar *name) NATIVE_FUNCTION_END_NO_RETURN(void, glGetActiveAttrib, program,index,bufSize,length,size,type,name)
@@ -330,7 +333,23 @@ NATIVE_FUNCTION_HEAD(void, glBlendBarrier) NATIVE_FUNCTION_END_NO_RETURN(void, g
 NATIVE_FUNCTION_HEAD(void, glCopyImageSubData, GLuint srcName, GLenum srcTarget, GLint srcLevel, GLint srcX, GLint srcY, GLint srcZ, GLuint dstName, GLenum dstTarget, GLint dstLevel, GLint dstX, GLint dstY, GLint dstZ, GLsizei srcWidth, GLsizei srcHeight, GLsizei srcDepth) NATIVE_FUNCTION_END_NO_RETURN(void, glCopyImageSubData, srcName,srcTarget,srcLevel,srcX,srcY,srcZ,dstName,dstTarget,dstLevel,dstX,dstY,dstZ,srcWidth,srcHeight,srcDepth)
 NATIVE_FUNCTION_HEAD(void, glDebugMessageControl, GLenum source, GLenum type, GLenum severity, GLsizei count, const GLuint *ids, GLboolean enabled) NATIVE_FUNCTION_END_NO_RETURN(void, glDebugMessageControl, source,type,severity,count,ids,enabled)
 NATIVE_FUNCTION_HEAD(void, glDebugMessageInsert, GLenum source, GLenum type, GLuint id, GLenum severity, GLsizei length, const GLchar *buf) NATIVE_FUNCTION_END_NO_RETURN(void, glDebugMessageInsert, source,type,id,severity,length,buf)
-NATIVE_FUNCTION_HEAD(void, glDebugMessageCallback, GLDEBUGPROC callback, const void *userParam) NATIVE_FUNCTION_END_NO_RETURN(void, glDebugMessageCallback, callback,userParam)
+static GLDEBUGPROC g_mg_debug_callback = nullptr;
+static const void *g_mg_debug_userparam = nullptr;
+
+static void GLAPIENTRY mg_debug_forward(GLenum source, GLenum type, GLuint id, GLenum severity, GLsizei length,
+                                        const GLchar *message, const void *userParam) {
+    printf("[MG-DEBUG] src=0x%x type=0x%x id=%u severity=0x%x msg=%.*s\n", source, type, id, severity,
+           (int)length, message ? message : "");
+    if (g_mg_debug_callback) {
+        g_mg_debug_callback(source, type, id, severity, length, message, g_mg_debug_userparam);
+    }
+}
+
+extern "C" GLAPI GLAPIENTRY void glDebugMessageCallback(GLDEBUGPROC callback, const void *userParam) {
+    g_mg_debug_callback = callback;
+    g_mg_debug_userparam = userParam;
+    GLES.glDebugMessageCallback(callback ? (GLDEBUGPROC)mg_debug_forward : nullptr, nullptr);
+}
 NATIVE_FUNCTION_HEAD(GLuint, glGetDebugMessageLog, GLuint count, GLsizei bufSize, GLenum *sources, GLenum *types, GLuint *ids, GLenum *severities, GLsizei *lengths, GLchar *messageLog) NATIVE_FUNCTION_END(GLuint, glGetDebugMessageLog, count,bufSize,sources,types,ids,severities,lengths,messageLog)
 NATIVE_FUNCTION_HEAD(void, glPushDebugGroup, GLenum source, GLuint id, GLsizei length, const GLchar *message) NATIVE_FUNCTION_END_NO_RETURN(void, glPushDebugGroup, source,id,length,message)
 NATIVE_FUNCTION_HEAD(void, glPopDebugGroup) NATIVE_FUNCTION_END_NO_RETURN(void, glPopDebugGroup)

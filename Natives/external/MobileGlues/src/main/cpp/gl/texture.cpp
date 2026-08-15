@@ -524,27 +524,24 @@ void internal_convert(GLenum* internal_format, GLenum* type, GLenum* format, boo
         LOG_D("Find GL_DEPTH_COMPONENT: internalFormat: %s, format: %s, type: %s", glEnumToString(*internal_format),
               format ? glEnumToString(*format) : "(none)", type ? glEnumToString(*type) : "(none)");
         if (type && has_data) {
-            // A glTexImage* that carries bytes. Deliberately left unsized:
-            // deriving a sized format from format/type here is what used to make
-            // drivers reject otherwise valid uploads, and ES2 compatibility --
-            // which every ES3 driver carries -- accepts the unsized form with
-            // data.
+            // A glTexImage* that carries bytes. Derive the sized form from
+            // format/type: ANGLE's GLES 3.x validation rejects the unsized
+            // GL_DEPTH_COMPONENT internalformat outright (it only exists in the
+            // OES_depth_texture extension table), while ES2-compatibility
+            // reasoning that accepts it is what used to make drivers reject
+            // otherwise valid uploads.
             //
-            // GL_FLOAT is the one type that compatibility does not reach. ES2
+            // GL_FLOAT is the one type that ES2 compatibility does not reach. ES2
             // depth textures predate float depth entirely, so the unsized form
             // with GL_FLOAT is rejected outright, and a rejected glTexImage2D
             // leaves the level at its defaults -- the application is then holding
             // a GL_RGBA texture with no depth bits, and nothing says so.
-            // Measured on Mali-G77: GL_TEXTURE_INTERNAL_FORMAT came back 0x1908
-            // with GL_TEXTURE_DEPTH_SIZE 0, and sampling it returned 0.
             // GL_DEPTH_COMPONENT32F is the only destination ES 3.0 offers for
-            // float depth, and here the type is evidence: there really are float
-            // bits, and GL 4.6 sec. 8.5 lets the effective internal format of a
-            // base internal format depend on format and type.
+            // float depth.
             if (*type == GL_FLOAT) {
                 *internal_format = GL_DEPTH_COMPONENT32F;
             } else {
-                *internal_format = GL_DEPTH_COMPONENT;
+                *internal_format = GL_DEPTH_COMPONENT24;
                 *type = GL_UNSIGNED_INT;
             }
         } else if (type) {
@@ -552,16 +549,11 @@ void internal_convert(GLenum* internal_format, GLenum* type, GLenum* format, boo
             // must not choose the storage class: the ordinary shadow-map
             // allocation is glTexImage2D(GL_DEPTH_COMPONENT, ..., GL_FLOAT, NULL)
             // with GL_FLOAT written out of habit, and honouring it there silently
-            // makes the whole texture floating-point. That matters because
-            // glTexSubImage2D never revisits this function and never inspects the
-            // level, so every later fixed-point upload into a level turned 32F is
-            // rejected by ES -- which binds GL_DEPTH_COMPONENT32F to GL_FLOAT
-            // alone, where GL 4.6 converts -- and the rejection is invisible.
-            // Measured on Mali-G77: the allocation and a following
-            // glTexSubImage2D(GL_UNSIGNED_INT) both succeed as written here, and
-            // resolving to 32F turned that second call into GL_INVALID_OPERATION
-            // with the texture left holding its old contents.
-            *internal_format = GL_DEPTH_COMPONENT;
+            // makes the whole texture floating-point. Resolve to sized
+            // GL_DEPTH_COMPONENT24 instead: ANGLE's GLES 3.x validation rejects
+            // the unsized internalformat, and 24-bit unorm keeps the fixed-point
+            // distribution the name promises.
+            *internal_format = GL_DEPTH_COMPONENT24;
             *type = GL_UNSIGNED_INT;
         } else {
             // glTexStorage*. There is no data and no type to be wrong about, and
@@ -881,6 +873,9 @@ void glTexImage1D(GLenum target, GLint level, GLint internalFormat, GLsizei widt
 void glTexImage2D(GLenum target, GLint level, GLint internalFormat, GLsizei width, GLsizei height, GLint border,
                   GLenum format, GLenum type, const GLvoid* pixels) {
     LOG()
+    printf("[MG-TEX2D-ENTRY] target=%s level=%d internalFormat=%s w=%d h=%d border=%d format=%s type=%s pixels=%p\n",
+           glEnumToString(target), level, glEnumToString(internalFormat), width, height, border,
+           glEnumToString(format), glEnumToString(type), pixels);
     LOG_D("mg_glTexImage2D,target: %s,level: %d,internalFormat: %s->%s,width: "
           "%d,height: %d,border: %d,format: %s,type: %s, pixels: 0x%x",
           glEnumToString(target), level, glEnumToString(internalFormat), glEnumToString(internalFormat), width, height,
@@ -932,6 +927,9 @@ void glTexImage2D(GLenum target, GLint level, GLint internalFormat, GLsizei widt
     }
 
     GET_TEXTURE_OBJECT(target);
+    printf("[MG-TEX2D-ID] tex=%u target=%s level=%d internalFormat=%s w=%d h=%d format=%s type=%s\n", tex->texture,
+           glEnumToString(target), level, glEnumToString(internalFormat), width, height, glEnumToString(format),
+           glEnumToString(type));
     tex->target = ConvertGLEnumToTextureTarget(target);
     tex->internal_format = internalFormat;
     tex->width = width;
@@ -945,6 +943,15 @@ void glTexImage2D(GLenum target, GLint level, GLint internalFormat, GLsizei widt
     tex->format = format;
 
     GLES.glTexImage2D(target, level, internalFormat, width, height, border, format, type, fix.pixels);
+
+    {
+        GLenum mg_err = GLES.glGetError();
+        if (mg_err != GL_NO_ERROR) {
+            printf("[MG-TEX2D] ERROR 0x%x in glTexImage2D(target=%s level=%d internalFormat=%s w=%d h=%d border=%d format=%s type=%s pixels=%p)\n",
+                   mg_err, glEnumToString(rtarget), level, glEnumToString(internalFormat), width, height, border,
+                   glEnumToString(format), glEnumToString(type), pixels);
+        }
+    }
 
     CHECK_GL_ERROR
 }
@@ -1487,6 +1494,7 @@ void glBindTexture(GLenum target, GLuint texture) {
     LOG()
     LOG_D("glBindTexture(%s, %d)", glEnumToString(target), texture)
     INIT_CHECK_GL_ERROR
+    printf("[MG-BIND-TEX] target=%s tex=%u\n", glEnumToString(target), texture);
 
     int currentUnitIndex = GetCurrentTextureUnitIndex();
     auto& currentUnit = GetTextureUnit(currentUnitIndex);

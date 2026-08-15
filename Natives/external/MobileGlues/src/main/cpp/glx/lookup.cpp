@@ -51,6 +51,28 @@ void* glXGetProcAddress(const char* name) {
     LOG()
     std::string real_func_name = handle_multidraw_func_name(std::string(name));
 #ifdef __APPLE__
+    // Serve this layer's own exported wrapper for names we implement: the app
+    // must call into MobileGlues (shader translation, format fixes, state
+    // tracking), not the raw ANGLE driver. Fall back to ANGLE's
+    // eglGetProcAddress for names only it knows, then to RTLD_NEXT as a last
+    // resort.
+    void* self_proc = dlsym(RTLD_SELF, real_func_name.c_str());
+    if (self_proc) return self_proc;
+
+    static void* (*angle_ega)(const char*) = nullptr;
+    static void* angle_handle = nullptr;
+    if (angle_ega == nullptr) {
+        if (angle_handle == nullptr) {
+            angle_handle = dlopen("@rpath/libEGL.framework/libEGL", RTLD_LAZY | RTLD_GLOBAL);
+        }
+        if (angle_handle != nullptr) {
+            angle_ega = (void*(*)(const char*))dlsym(angle_handle, "eglGetProcAddress");
+        }
+    }
+    if (angle_ega != nullptr) {
+        void* p = angle_ega(name);
+        if (p) return p;
+    }
     return dlsym((void*)(~(uintptr_t)0), real_func_name.c_str());
 #else
 

@@ -144,6 +144,12 @@ const resolved_program_t& resolve_program(GLuint program) {
 
 } // namespace
 
+static uint64_t g_mg_draws = 0;
+static inline void mg_log_draw(const char* name) {
+    if ((++g_mg_draws % 100) == 0)
+        printf("[MG-DRAW] %s total=%llu\n", name, static_cast<unsigned long long>(g_mg_draws));
+}
+
 void setupBufferTextureUniforms(GLuint program) {
     LOG_D("setupBufferTextureUniforms, program: %d", program);
 
@@ -202,6 +208,7 @@ void prepareForDraw() {
 
 void glDrawElementsInstanced(GLenum mode, GLsizei count, GLenum type, const void* indices, GLsizei primcount) {
     LOG()
+    mg_log_draw("glDrawElementsInstanced");
     LOG_D("glDrawElementsInstanced, mode: %d, count: %d, type: %d, indices: %p, primcount: %d", mode, count, type,
           indices, primcount)
     prepareForDraw();
@@ -215,6 +222,7 @@ void glDrawElementsInstanced(GLenum mode, GLsizei count, GLenum type, const void
 
 void glDrawElements(GLenum mode, GLsizei count, GLenum type, const void* indices) {
     LOG()
+    mg_log_draw("glDrawElements");
     LOG_D("glDrawElements, mode: %d, count: %d, type: %d, indices: %p", mode, count, type, indices)
     prepareForDraw();
     if (mg_restart_needs_rewrite(type) && mg_draw_elements_restart(mode, count, type, indices, 0, -1)) return;
@@ -451,6 +459,7 @@ struct restart_guard_t {
 
 void glDrawRangeElements(GLenum mode, GLuint start, GLuint end, GLsizei count, GLenum type, const void* indices) {
     LOG()
+    mg_log_draw("glDrawRangeElements");
     LOG_D("glDrawRangeElements, mode: %d, start: %u, end: %u, count: %d, type: %d", mode, start, end, count, type)
     prepareForDraw();
     // The rewritten stream is 32-bit with 0xFFFFFFFF sentinels, so start/end no

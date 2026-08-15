@@ -144,13 +144,49 @@ void load_libs() {
         LOG_E("ANGLE was requested but was not loaded; running on the system driver\n")
     }
 #else
-    gles = (void*)(~(uintptr_t)0);
-    egl = (void*)(~(uintptr_t)0);
+    // Apple has no system EGL/GLES the way Android does; the process gets its
+    // GL exclusively from the ANGLE frameworks shipped with the launcher. MG's
+    // static init (proc_init) runs the moment the app dlopens this library, at
+    // an arbitrary point in the app's own dlopen sequence, so a relative lookup
+    // like dlsym(RTLD_NEXT, ...) has no reliable target. dlopen ANGLE right
+    // here and resolve every backend entry point from these handles instead.
+    g_angle_in_use = true;
+    gles = dlopen("@rpath/libGLESv2.framework/libGLESv2", RTLD_LAZY | RTLD_GLOBAL);
+    egl = dlopen("@rpath/libEGL.framework/libEGL", RTLD_LAZY | RTLD_GLOBAL);
+    if (gles == nullptr || egl == nullptr) {
+        LOG_E("LIBGL:failed to dlopen ANGLE frameworks: %s", dlerror())
+    }
 #endif
 }
 
+#ifdef __APPLE__
+static void* angle_proc_address(const char* name) {
+    static void* (*angle_ega)(const char*) = nullptr;
+    static void* angle_handle = nullptr;
+    if (angle_ega == nullptr) {
+        if (angle_handle == nullptr) {
+            angle_handle = dlopen("@rpath/libEGL.framework/libEGL", RTLD_LAZY | RTLD_GLOBAL);
+        }
+        if (angle_handle != nullptr) {
+            angle_ega = (void*(*)(const char*))dlsym(angle_handle, "eglGetProcAddress");
+        }
+    }
+    return angle_ega != nullptr ? angle_ega(name) : nullptr;
+}
+#endif
+
 void* proc_address(void* lib, const char* name) {
-    return dlsym(lib, name);
+    void* p = dlsym(lib, name);
+    if (p) return p;
+    // Some names ANGLE only answers through its own eglGetProcAddress magic
+    // (extension aliases, desktop compat entry points).
+#ifdef __APPLE__
+    if (lib == gles || lib == egl) {
+        void* q = angle_proc_address(name);
+        if (q) return q;
+    }
+#endif
+    return nullptr;
 }
 
 void set_hardware() {

@@ -168,7 +168,6 @@ void glBindFramebuffer(GLenum target, GLuint framebuffer) {
     LOG()
     LOG_D("glBindFramebuffer, target = %s, framebuffer = %u", glEnumToString(target), framebuffer)
     ensure_max_attachments();
-
     // Resolve the redirect before touching the table: this used to take the
     // reference for the id the application passed and then initialise that
     // record, while the id that actually became current was g_renderFBO -- so
@@ -201,6 +200,8 @@ void glBindFramebuffer(GLenum target, GLuint framebuffer) {
     if (target == GL_READ_FRAMEBUFFER || target == GL_FRAMEBUFFER) {
         current_read_fbo = framebuffer;
     }
+    printf("[MG-BIND-FB] target=%s fb=%u -> draw=%u read=%u isFB=%d status=0x%x\n", glEnumToString(target), framebuffer,
+           draw_fb, current_read_fbo, GLES.glIsFramebuffer(draw_fb), GLES.glCheckFramebufferStatus(target));
 
     if (target == GL_FRAMEBUFFER && draw_fb != framebuffer) {
         GLES.glBindFramebuffer(GL_DRAW_FRAMEBUFFER, draw_fb);
@@ -296,13 +297,31 @@ void reattach(GLenum target, GLenum attachment, const attachment_t& a) {
 void glFramebufferTexture2D(GLenum target, GLenum attachment, GLenum textarget, GLuint texture, GLint level) {
     update_attachment(target, attachment, {attach_kind_t::Texture2D, textarget, texture, level, 0});
     GLES.glFramebufferTexture2D(target, attachment, textarget, texture, level);
+    {
+        GLenum err2 = GLES.glGetError();
+        if (err2 != GL_NO_ERROR)
+            printf("[MG-FB-ATTACH] ERROR 0x%x glFramebufferTexture2D(target=%s attachment=0x%x textarget=%s texture=%u level=%d)\n",
+                   err2, glEnumToString(target), attachment, glEnumToString(textarget), texture, level);
+        else
+            printf("[MG-FB-ATTACH] ok glFramebufferTexture2D(target=%s attachment=0x%x textarget=%s texture=%u level=%d)\n",
+                   glEnumToString(target), attachment, glEnumToString(textarget), texture, level);
+    }
 }
 void glFramebufferTexture(GLenum target, GLenum attachment, GLuint texture, GLint level) {
     // Kind rather than a made-up GL_TEXTURE_2D. This entry point attaches the
     // whole texture, whatever its target is, and recording it as a 2D attachment
     // meant a replay re-attached an array or 3D texture as if it were flat.
     update_attachment(target, attachment, {attach_kind_t::TextureAll, 0, texture, level, 0});
-    GLES.glFramebufferTexture(target, attachment, texture, level);
+    GLES.glFramebufferTexture2D(target, attachment, GL_TEXTURE_2D, texture, level);
+    {
+        GLenum err2 = GLES.glGetError();
+        if (err2 != GL_NO_ERROR)
+            printf("[MG-FB-ATTACH] ERROR 0x%x glFramebufferTexture->2D(target=%s attachment=0x%x texture=%u level=%d)\n",
+                   err2, glEnumToString(target), attachment, texture, level);
+        else
+            printf("[MG-FB-ATTACH] ok glFramebufferTexture->2D(target=%s attachment=0x%x texture=%u level=%d)\n",
+                   glEnumToString(target), attachment, texture, level);
+    }
 }
 // Wrapped rather than passed straight through, so the record knows about them.
 // While these bypassed the table, the record for an attachment they wrote stayed
@@ -382,9 +401,16 @@ GLAPI GLAPIENTRY void glFramebufferTextureLayerARB(GLenum target, GLenum attachm
 void glBlitFramebuffer(GLint srcX0, GLint srcY0, GLint srcX1, GLint srcY1, GLint dstX0, GLint dstY0, GLint dstX1,
                        GLint dstY1, GLbitfield mask, GLenum filter) {
     LOG()
+    printf("[MG-BLIT] src=(%d,%d %dx%d) dst=(%d,%d %dx%d) mask=0x%x filter=0x%x draw_fb=%u read_fb=%u\n", srcX0, srcY0,
+           srcX1 - srcX0, srcY1 - srcY0, dstX0, dstY0, dstX1 - dstX0, dstY1 - dstY0, mask, filter, current_draw_fbo,
+           current_read_fbo);
     mg_fsr_read_scope_t fsr_read;
     GLES.glBlitFramebuffer(srcX0, srcY0, srcX1, srcY1, dstX0, dstY0, dstX1, dstY1, mask, filter);
     CHECK_GL_ERROR
+}
+
+GLuint mg_current_draw_fbo() {
+    return current_draw_fbo;
 }
 
 void glDeleteFramebuffers(GLsizei n, const GLuint* names) {
@@ -572,6 +598,8 @@ void glReadBuffer(GLenum src) {
 }
 GLenum glCheckFramebufferStatus(GLenum target) {
     GLenum status = GLES.glCheckFramebufferStatus(target);
+    printf("[MG-FBO-STATUS] target=%s status=0x%x draw_fbo=%u read_fbo=%u\n", glEnumToString(target), status,
+           current_draw_fbo, current_read_fbo);
     if (global_settings.ignore_error == IgnoreErrorLevel::Full && status != GL_FRAMEBUFFER_COMPLETE) {
         return GL_FRAMEBUFFER_COMPLETE;
     }

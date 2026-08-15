@@ -188,6 +188,9 @@ GLenum glGetError() {
     const GLenum frontend = g_frontend_error;
     g_frontend_error = GL_NO_ERROR;
 
+    printf("[MG-GETERR] returning NO_ERROR (backend=%s frontend=%s)\n", glEnumToString(backend),
+           glEnumToString(frontend));
+
     // GL_NO_ERROR, always, in every configuration and whatever ignoreError says.
     //
     // Deliberate, and not the same thing as not knowing. This layer emulates
@@ -203,6 +206,8 @@ GLenum glGetError() {
     // logcat even though the application will never be told.
     const GLenum swallowed = frontend != GL_NO_ERROR ? frontend : backend;
     if (swallowed != GL_NO_ERROR) {
+        printf("[MG-ERROR] glGetError delivering %s (backend=%s frontend=%s)\n", glEnumToString(swallowed),
+               glEnumToString(backend), glEnumToString(frontend));
         LOG_W("glGetError -> %s, reported to the application as GL_NO_ERROR", glEnumToString(swallowed))
     }
     return GL_NO_ERROR;
@@ -283,7 +288,11 @@ std::string getBeforeThirdSpace(const std::string& str) {
 }
 
 std::string getGpuName() {
-    std::string gpuName = std::string((char*)GLES.glGetString(GL_RENDERER));
+    const char* glRenderer = (const char*)GLES.glGetString(GL_RENDERER);
+    if (glRenderer == nullptr) {
+        return "<unknown>";
+    }
+    std::string gpuName = std::string(glRenderer);
 
     if (gpuName.empty()) {
         return "<unknown>";
@@ -321,7 +330,8 @@ std::string getGpuName() {
 }
 
 void set_es_version() {
-    std::string ESVersionStr = getBeforeThirdSpace(std::string((const char*)GLES.glGetString(GL_VERSION)));
+    const char* glVersion = (const char*)GLES.glGetString(GL_VERSION);
+    std::string ESVersionStr = glVersion ? getBeforeThirdSpace(std::string(glVersion)) : std::string();
     int major, minor;
 
     if (sscanf(ESVersionStr.c_str(), "OpenGL ES %d.%d", &major, &minor) == 2) {
@@ -336,7 +346,8 @@ void set_es_version() {
 }
 
 std::string getGLESName() {
-    return getBeforeThirdSpace(std::string((char*)GLES.glGetString(GL_VERSION)));
+    const char* glVersion = (const char*)GLES.glGetString(GL_VERSION);
+    return glVersion ? getBeforeThirdSpace(std::string(glVersion)) : std::string();
 }
 
 static std::string rendererString;
