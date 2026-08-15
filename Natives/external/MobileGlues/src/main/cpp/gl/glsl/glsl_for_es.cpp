@@ -346,6 +346,9 @@ std::string processOutColorLocations(const std::string& glslCode) {
     return std::regex_replace(glslCode, pattern, replacement);
 }
 
+static std::string rewrite_desktop_version_to_essl(const std::string& glsl, GLenum glsl_type);
+static std::string preprocess_glsl(const std::string& glsl, GLenum shaderType);
+
 std::string GLSLtoGLSLES(const char* glsl_code, GLenum glsl_type, uint essl_version, uint glsl_version,
                          int& return_code) {
     std::string sha256_string(glsl_code);
@@ -367,7 +370,24 @@ std::string GLSLtoGLSLES(const char* glsl_code, GLenum glsl_type, uint essl_vers
         Cache::get_instance().put(sha256_string.c_str(), converted.c_str());
     }
 
-    return (return_code >= 0) ? converted : glsl_code;
+    if (return_code >= 0)
+        return converted;
+    return rewrite_desktop_version_to_essl(glsl_code, glsl_type);
+}
+
+static std::string rewrite_desktop_version_to_essl(const std::string& glsl, GLenum glsl_type) {
+    std::string ret = preprocess_glsl(glsl, glsl_type);
+    static const std::regex desktop_version_pattern(R"(#version\s+\d+(?:\s+(?:core|compatibility))?\b)");
+    ret = std::regex_replace(ret, desktop_version_pattern, "#version 310 es ",
+                             std::regex_constants::format_first_only);
+    size_t first_newline = ret.find('\n');
+    size_t insert_pos = (first_newline == std::string::npos) ? ret.length() : first_newline + 1;
+    if (glsl_type == GL_FRAGMENT_SHADER && ret.find("precision highp float;") == std::string::npos) {
+        ret.insert(insert_pos, "precision highp float;\nprecision highp int;\n");
+    }
+    LOG_W_FORCE("Desktop GLSL conversion failed, using direct source with rewritten ES version directive.")
+    LOG_W_FORCE("Rewritten shader head: %s", ret.substr(0, 80).c_str())
+    return ret;
 }
 
 std::string replace_line_starting_with(const std::string& glslCode, const std::string& starting,
@@ -724,7 +744,7 @@ std::vector<unsigned int> glsl_to_spirv(GLenum shader_type, int glsl_version, co
     TBuiltInResource TBuiltInResource_resources = InitResources();
 
     if (!shader.parse(&TBuiltInResource_resources, glsl_version, true, EShMsgDefault)) {
-        LOG_D("GLSL Compiling ERROR: \n%s", shader.getInfoLog())
+        LOG_W_FORCE("GLSL parse ERROR (version %d): \n%s", glsl_version, shader.getInfoLog())
         errc = -1;
         return {};
     }
@@ -734,7 +754,7 @@ std::vector<unsigned int> glsl_to_spirv(GLenum shader_type, int glsl_version, co
     program.addShader(&shader);
 
     if (!program.link(EShMsgDefault)) {
-        LOG_D("Shader Linking ERROR: %s", program.getInfoLog())
+        LOG_W_FORCE("Shader Linking ERROR: %s", program.getInfoLog())
         errc = -1;
         return {};
     }

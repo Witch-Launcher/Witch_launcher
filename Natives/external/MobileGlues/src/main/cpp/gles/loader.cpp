@@ -189,10 +189,26 @@ void* proc_address(void* lib, const char* name) {
     return nullptr;
 }
 
+static bool gles_has_extension(const char* name) {
+    if (!GLES.glGetStringi)
+        return false;
+    GLint num_es_extensions = 0;
+    GLES.glGetIntegerv(GL_NUM_EXTENSIONS, &num_es_extensions);
+    for (GLint i = 0; i < num_es_extensions; ++i) {
+        const char* extension = (const char*)GLES.glGetStringi(GL_EXTENSIONS, i);
+        if (extension && strcmp(extension, name) == 0)
+            return true;
+    }
+    return false;
+}
+
 void set_hardware() {
     hardware = new hardware_s;
     set_es_version();
-    if (hardware->es_version <= 310)
+    // Texture buffer emulation only when the backend lacks GL_EXT_texture_buffer;
+    // on ANGLE-Vulkan the EXT exists and the emulation's regex rewrite mangles
+    // desktop GLSL with nested texelFetch arguments.
+    if (hardware->es_version <= 310 && !gles_has_extension("GL_EXT_texture_buffer"))
         hardware->emulate_texture_buffer = true;
     else
         hardware->emulate_texture_buffer = false;
