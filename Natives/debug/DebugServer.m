@@ -23,7 +23,7 @@
 // + bind() + listen() bypasses that permission entirely.
 
 // Embedded HTML dashboard. Single page, vanilla JS, dark theme.
-static NSString *const kHTML = @"<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><title>Amethyst Debug</title><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><style>"
+static NSString *const kHTML = @"<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><title>Witch Debug</title><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><style>"
 "*{box-sizing:border-box;font-family:-apple-system,system-ui,monospace}"
 "body{margin:0;background:#1a1d21;color:#e6e6e6;font-size:14px}"
 "header{background:#0f1114;padding:10px 14px;border-bottom:1px solid #333;display:flex;align-items:center;gap:10px}"
@@ -48,7 +48,7 @@ static NSString *const kHTML = @"<!doctype html><html lang=\"en\"><head><meta ch
 ".kv{display:grid;grid-template-columns:max-content 1fr;gap:6px 14px;font-size:13px}"
 ".kv .k{color:#888}.kv .v{font-family:ui-monospace,Menlo,monospace;word-break:break-all}"
 "</style></head><body>"
-"<header><h1>Amethyst Debug</h1><span class=\"url\" id=\"hostUrl\"></span></header>"
+"<header><h1>Witch Debug</h1><span class=\"url\" id=\"hostUrl\"></span></header>"
 "<div class=\"tabs\">"
 "<div class=\"tab active\" data-panel=\"files\">Files</div>"
 "<div class=\"tab\" data-panel=\"logs\">Logs</div>"
@@ -71,7 +71,7 @@ static NSString *const kHTML = @"<!doctype html><html lang=\"en\"><head><meta ch
 "<div class=\"row\"><button class=\"danger\" onclick=\"if(confirm('Restart app?'))doRestart()\">Restart Minecraft</button></div>"
 "<p style=\"color:#888;font-size:12px\">Restart kills the process — iOS will close the app and you'll need to relaunch from the home screen.</p>"
 "<div class=\"row\"><button onclick=\"clearToken()\">Clear saved token</button></div></div>"
-"<div id=\"tokenBox\"><div class=\"box\"><h2>Auth required</h2><p>Paste the token from the Amethyst settings page:</p><div class=\"row\"><input id=\"tokenIn\" style=\"flex:1\" type=\"text\" autocomplete=\"off\"/><button onclick=\"submitToken()\">Connect</button></div></div></div>"
+"<div id=\"tokenBox\"><div class=\"box\"><h2>Auth required</h2><p>Paste the token from the Witch settings page:</p><div class=\"row\"><input id=\"tokenIn\" style=\"flex:1\" type=\"text\" autocomplete=\"off\"/><button onclick=\"submitToken()\">Connect</button></div></div></div>"
 "<script>"
 "let token=localStorage.getItem('amethystToken')||'';"
 "document.getElementById('hostUrl').textContent=location.host;"

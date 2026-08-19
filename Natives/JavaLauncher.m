@@ -294,10 +294,10 @@ static BOOL JIT26ProbeLooksValid(void *result) {
 
 static BOOL RuntimeSupportsDebugJITMapping(NSString *javaHome) {
     NSString *marker = [javaHome
-        stringByAppendingPathComponent:@".amethyst-mirror-mapping"];
+        stringByAppendingPathComponent:@".witch-mirror-mapping"];
     NSString *contents = [NSString stringWithContentsOfFile:marker
         encoding:NSUTF8StringEncoding error:nil];
-    return [contents isEqualToString:@"amethyst-mirror-mapping-v1\n"];
+    return [contents isEqualToString:@"witch-mirror-mapping-v1\n"];
 }
 
 int launchJVM(NSString *username, id launchTarget, int width, int height, int minVersion) {
@@ -337,7 +337,7 @@ int launchJVMWithArgs(NSString *username, id launchTarget, int width, int height
                     showDialog(localize(@"Error", nil),
                         [NSString stringWithFormat:
                             @"StikDebug probe failed (got %p). Expected a real RX page, not a legacy error code. "
-                             @"Amethyst refreshed UniversalJIT26.js — restart LiveContainer, re-enable JIT, then try again.",
+                             @"Witch refreshed UniversalJIT26.js — restart LiveContainer, re-enable JIT, then try again.",
                             probeMapping]);
                     [PLLogOutputView handleExitCode:1];
                     return 1;
@@ -346,7 +346,7 @@ int launchJVMWithArgs(NSString *username, id launchTarget, int width, int height
             showDialog(localize(@"Error", nil),
                 [NSString stringWithFormat:
                     @"StikDebug probe failed (got %p). Your assigned script may be outdated, or StikDebug is below 3.1.6. "
-                     @"UniversalJIT26.js was refreshed in Amethyst Documents — re-assign it in StikDebug (long-press → Assign Script), "
+                     @"UniversalJIT26.js was refreshed in Witch Documents — re-assign it in StikDebug (long-press → Assign Script), "
                      @"re-enable JIT, then launch again.",
                     probeMapping]);
             [PLLogOutputView handleExitCode:1];

@@ -360,7 +360,7 @@ static NSString *const kVerCell = @"VerCell";
     if ([iconURL isKindOfClass:[NSString class]] && iconURL.length > 0) {
         __weak typeof(self) weakSelf = self;
         NSMutableURLRequest *request = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:iconURL]];
-        [request setValue:@"Amethyst/1.0" forHTTPHeaderField:@"User-Agent"];
+        [request setValue:@"Witch/1.0" forHTTPHeaderField:@"User-Agent"];
         [_iconView setImageWithURLRequest:request placeholderImage:[UIImage systemImageNamed:@"wrench.and.screwdriver"] success:^(NSURLRequest *req, NSHTTPURLResponse *resp, UIImage *img) {
             weakSelf.iconView.image = img;
             weakSelf.iconView.tintColor = [UIColor clearColor];
@@ -845,7 +845,7 @@ static NSString *const kVerCell = @"VerCell";
         if ([iconURL isKindOfClass:[NSString class]] && iconURL.length > 0) {
             __weak typeof(self) weakSelf = self;
             NSMutableURLRequest *req = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:iconURL]];
-            [req setValue:@"Amethyst/1.0" forHTTPHeaderField:@"User-Agent"];
+            [req setValue:@"Witch/1.0" forHTTPHeaderField:@"User-Agent"];
             [depIcon setImageWithURLRequest:req placeholderImage:[UIImage systemImageNamed:@"puzzlepiece.extension"] success:^(NSURLRequest *r, NSHTTPURLResponse *resp, UIImage *img) {
                 depIcon.image = img;
                 depIcon.tintColor = [UIColor clearColor];

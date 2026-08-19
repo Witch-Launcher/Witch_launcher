@@ -18,6 +18,18 @@ void (*orig_exit)(int code);
 void* (*orig_dlopen)(const char* path, int mode);
 int (*orig_open)(const char *path, int oflag, ...);
 
+void crashScreenCloseLauncher(void) {
+    dispatch_async(dispatch_get_main_queue(), ^{
+        [UIApplication.sharedApplication performSelector:@selector(suspend)];
+    });
+    usleep(300*1000);
+    if (fatalExitGroup != nil) {
+        dispatch_group_leave(fatalExitGroup);
+    } else {
+        orig_exit(0);
+    }
+}
+
 void handle_fatal_exit(int code) {
     if (NSThread.isMainThread) {
         return;
@@ -64,7 +76,6 @@ void hooked_exit(int code) {
     // any Java exception stack traces logged right before System.exit().
     usleep(500*1000);
     handle_fatal_exit(code);
-
     orig_exit(code);
 }
 

@@ -75,7 +75,7 @@ IOS         := 0
 BOOTJDK     ?= /usr/bin
 $(warning Building on Linux. Note that all targets may not compile or require external components.)
 else
-$(error This platform is not currently supported for building Angel Aura Amethyst.)
+$(error This platform is not currently supported for building Witch.)
 endif
 
 # Define PLATFORM_NAME from PLATFORM
@@ -104,7 +104,7 @@ else
 $(error PLATFORM is not valid.)
 endif
 
-POJAV_BUNDLE_DIR      ?= $(OUTPUTDIR)/AngelAuraAmethyst.app
+POJAV_BUNDLE_DIR      ?= $(OUTPUTDIR)/Witch.app
 POJAV_JRE8_DIR        ?= $(SOURCEDIR)/depends/java-8-openjdk
 POJAV_JRE17_DIR       ?= $(SOURCEDIR)/depends/java-17-openjdk
 POJAV_JRE21_DIR       ?= $(SOURCEDIR)/depends/java-21-openjdk
@@ -148,11 +148,13 @@ METHOD_PACKAGE = \
 	else \
 		IPA_SUFFIX=".ipa"; \
 	fi; \
+	rm -f $(OUTPUTDIR)/Witch-$(VERSION)-$(PLATFORM_NAME)$$IPA_SUFFIX; \
 	if [ '$(SLIMMED_ONLY)' = '0' ]; then \
-		zip --symlinks -r $(OUTPUTDIR)/org.angelauramc.amethyst-$(VERSION)-$(PLATFORM_NAME)$$IPA_SUFFIX Payload; \
+		zip --symlinks -r $(OUTPUTDIR)/Witch-$(VERSION)-$(PLATFORM_NAME)$$IPA_SUFFIX Payload; \
 	fi; \
 	if [ '$(SLIMMED)' = '1' ] || [ '$(SLIMMED_ONLY)' = '1' ]; then \
-		zip --symlinks -r $(OUTPUTDIR)/org.angelauramc.amethyst.slimmed-$(VERSION)-$(PLATFORM_NAME)$$IPA_SUFFIX Payload --exclude='Payload/AngelAuraAmethyst.app/java_runtimes/*'; \
+		rm -f $(OUTPUTDIR)/Witch-slimmed-$(VERSION)-$(PLATFORM_NAME)$$IPA_SUFFIX; \
+		zip --symlinks -r $(OUTPUTDIR)/Witch-slimmed-$(VERSION)-$(PLATFORM_NAME)$$IPA_SUFFIX Payload --exclude='Payload/Witch.app/java_runtimes/*'; \
 	fi
 
 # Function to download and unpack Java runtimes.
@@ -244,7 +246,7 @@ endif
 all: clean lwgjl native java jre assets payload package dsym
 
 help:
-	echo 'Makefile to compile Angel Aura Amethyst'
+	echo 'Makefile to compile Witch'
 	echo ''
 	echo 'Usage:'
 	echo '    make                                Makes everything under all'
@@ -255,8 +257,8 @@ help:
 	echo '    make lwgjl                          Builds LWGJL 3.3.3 and 3.4.1 from source'
 	echo '    make jre                            Downloads/unpacks the iOS JREs'
 	echo '    make assets                         Compiles Assets.xcassets'
-	echo '    make payload                        Makes Payload/AngelAuraAmethyst.app'
-	echo '    make package                        Builds ipa of Angel Aura Amethyst'
+	echo '    make payload                        Makes Payload/Witch.app'
+	echo '    make package                        Builds ipa of Witch'
 	echo '    make deploy                         Copies files to local iDevice'
 	echo '    make dsym                           Generate debug symbol files'
 	echo '    make clean                          Cleans build directories'
@@ -270,7 +272,7 @@ check:
 	)
 
 native: dep_mg
-	echo '[Amethyst v$(VERSION)] native - start'
+	echo '[Witch v$(VERSION)] native - start'
 	mkdir -p $(WORKINGDIR)
 	cd $(WORKINGDIR) && cmake \
 		-DCMAKE_BUILD_TYPE=$(CMAKE_BUILD_TYPE) \
@@ -288,12 +290,12 @@ native: dep_mg
 		..
 
 	cmake --build $(WORKINGDIR) --config $(CMAKE_BUILD_TYPE) -j$(JOBS)
-	#	--target awt_headless awt_xawt libOSMesaOverride.dylib tinygl4angle AngelAuraAmethyst
+	#	--target awt_headless awt_xawt libOSMesaOverride.dylib tinygl4angle Witch
 	-rm -f $(WORKINGDIR)/libawt_headless.dylib
-	echo '[Amethyst v$(VERSION)] native - end'
+	echo '[Witch v$(VERSION)] native - end'
 
 java: lwgjl
-	echo '[Amethyst v$(VERSION)] java - start'
+	echo '[Witch v$(VERSION)] java - start'
 	# lwgjl must finish first: the java compile classpath includes
 	# libs/lwjgl{,36,41}/lwjgl.jar, and the lwgjl target writes those jars.
 	# Running java in parallel reads partially-written/empty zip files.
@@ -302,10 +304,10 @@ java: lwgjl
 	# native/lwgjl/dep_mg jobs exhausts CI runner memory and crashes javac
 	# (SIGABRT in _platform_memmove).
 	$(MAKE) -C JavaApp -j2 BOOTJDK=$(BOOTJDK)
-	echo '[Amethyst v$(VERSION)] java - end'
+	echo '[Witch v$(VERSION)] java - end'
 
 jre: native
-	echo '[Amethyst v$(VERSION)] jre - start'
+	echo '[Witch v$(VERSION)] jre - start'
 	mkdir -p $(SOURCEDIR)/depends
 	cd $(SOURCEDIR)/depends; \
 	$(call METHOD_JAVA_UNPACK,8,'https://assets.angelauramc.dev/openjdk/ios-arm64/jre8-ios-aarch64.zip'); \
@@ -314,9 +316,10 @@ jre: native
 	$(call METHOD_JAVA_UNPACK,25,'https://assets.angelauramc.dev/openjdk/ios-arm64/jre25-ios-aarch64.zip'); \
 	if [ -f "$(ls jre*.tar.xz)" ]; then rm $(SOURCEDIR)/depends/jre*.tar.xz; fi; \
 	rm -rf $(SOURCEDIR)/depends/java-{8,17,21,25}-openjdk/{ASSEMBLY_EXCEPTION,bin,include,jre,legal,LICENSE,man,THIRD_PARTY_README,lib/{ct.sym,jspawnhelper,libjsig.dylib,src.zip,tools.jar}}; \
-	printf 'amethyst-mirror-mapping-v1\n' > $(SOURCEDIR)/depends/java-17-openjdk/.amethyst-mirror-mapping; \
-	printf 'amethyst-mirror-mapping-v1\n' > $(SOURCEDIR)/depends/java-21-openjdk/.amethyst-mirror-mapping; \
-	printf 'amethyst-mirror-mapping-v1\n' > $(SOURCEDIR)/depends/java-25-openjdk/.amethyst-mirror-mapping; \
+	rm -f $(SOURCEDIR)/depends/java-{8,17,21,25}-openjdk/.amethyst-mirror-mapping; \
+	printf 'witch-mirror-mapping-v1\n' > $(SOURCEDIR)/depends/java-17-openjdk/.witch-mirror-mapping; \
+	printf 'witch-mirror-mapping-v1\n' > $(SOURCEDIR)/depends/java-21-openjdk/.witch-mirror-mapping; \
+	printf 'witch-mirror-mapping-v1\n' > $(SOURCEDIR)/depends/java-25-openjdk/.witch-mirror-mapping; \
 	for ver in 21 25; do \
 		jvm="$(SOURCEDIR)/depends/java-$$ver-openjdk/lib/server/libjvm.dylib"; \
 		if [ -f "$$jvm" ]; then \
@@ -337,10 +340,10 @@ jre: native
 	cp $(WORKINGDIR)/libawt_xawt.dylib $(OUTPUTDIR)/java_runtimes/java-17-openjdk/lib;
 	cp $(WORKINGDIR)/libawt_xawt.dylib $(OUTPUTDIR)/java_runtimes/java-21-openjdk/lib
 	cp $(WORKINGDIR)/libawt_xawt.dylib $(OUTPUTDIR)/java_runtimes/java-25-openjdk/lib
-	echo '[Amethyst v$(VERSION)] jre - end'
+	echo '[Witch v$(VERSION)] jre - end'
 
  dep_mg:
-	echo '[Amethyst v$(VERSION)] dep_mg - start'
+	echo '[Witch v$(VERSION)] dep_mg - start'
 	mkdir -p $(WORKINGDIR)/mobileglues
 	cd $(WORKINGDIR)/mobileglues && cmake \
 		-DMACOS="1" \
@@ -358,12 +361,12 @@ $(SOURCEDIR)/Natives/external/MobileGlues/src/main/cpp/
 	cmake --build $(WORKINGDIR)/mobileglues --config RelWithDebInfo -j$(JOBS) --target mobileglues
 	cp $(WORKINGDIR)/mobileglues/libmobileglues*.dylib $(WORKINGDIR)/
 	cp $(WORKINGDIR)/mobileglues/libspirv-cross*.dylib $(WORKINGDIR)/ 2>/dev/null || true
-	echo '[Amethyst v$(VERSION)] dep_mg - end'
+	echo '[Witch v$(VERSION)] dep_mg - end'
 
 assets:
-	echo '[Amethyst v$(VERSION)] assets - start'
+	echo '[Witch v$(VERSION)] assets - start'
 	if [ -d /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneOS.platform ]; then \
-		mkdir -p $(WORKINGDIR)/AngelAuraAmethyst.app/Base.lproj; \
+		mkdir -p $(WORKINGDIR)/Witch.app/Base.lproj; \
 		xcrun actool $(SOURCEDIR)/Natives/Assets.xcassets \
 			--compile $(SOURCEDIR)/Natives/resources \
 			--platform iphoneos \
@@ -373,10 +376,10 @@ assets:
 	else \
 		echo 'Skipping actool - not available'; \
 	fi
-	echo '[Amethyst v$(VERSION)] assets - end'
+	echo '[Witch v$(VERSION)] assets - end'
 
 lwgjl:
-	echo '[Amethyst v$(VERSION)] lwgjl - start'
+	echo '[Witch v$(VERSION)] lwgjl - start'
 	@set -e; \
 	LWJGL33_DIR="$(SOURCEDIR)/lwgjl/lwjgl3-wip-rebase_3.3.3"; \
 	if [ ! -f "$$LWJGL33_DIR/bin/out/liblwjgl.dylib" ]; then \
@@ -400,73 +403,73 @@ lwgjl:
 	fi; \
 	echo "Copying 3.4.1 JARs to libs/lwjgl41..."; \
 	find "$$LWJGL41_DIR/bin/RELEASE" -name '*.jar' ! -name '*-natives-*' ! -name '*-sources.jar' -exec cp {} "$(SOURCEDIR)/JavaApp/libs/lwjgl41/" \; ; \
-	echo '[Amethyst v$(VERSION)] lwgjl - end'
+	echo '[Witch v$(VERSION)] lwgjl - end'
 
 payload: native dep_mg lwgjl java jre assets
-	echo '[Amethyst v$(VERSION)] payload - start'
-	$(call METHOD_DIRCHECK,$(WORKINGDIR)/AngelAuraAmethyst.app/libs)
-	$(call METHOD_DIRCHECK,$(WORKINGDIR)/AngelAuraAmethyst.app/libs_caciocavallo)
-	$(call METHOD_DIRCHECK,$(WORKINGDIR)/AngelAuraAmethyst.app/libs_caciocavallo17)
-	cp -R $(SOURCEDIR)/Natives/resources/en.lproj/LaunchScreen.storyboardc $(WORKINGDIR)/AngelAuraAmethyst.app/Base.lproj/ || exit 1
-	cp -R $(SOURCEDIR)/Natives/resources/* $(WORKINGDIR)/AngelAuraAmethyst.app/ || exit 1
-	cp $(WORKINGDIR)/*.dylib $(WORKINGDIR)/AngelAuraAmethyst.app/Frameworks/ || exit 1
-	cp -R $(SOURCEDIR)/JavaApp/libs/others/* $(WORKINGDIR)/AngelAuraAmethyst.app/libs/ || exit 1
-	cp $(SOURCEDIR)/JavaApp/build/launcher.jar $(SOURCEDIR)/JavaApp/build/patchjna_agent.jar $(SOURCEDIR)/JavaApp/build/cacio-init-agent.jar $(WORKINGDIR)/AngelAuraAmethyst.app/libs/ || exit 1
-	mkdir -p $(WORKINGDIR)/AngelAuraAmethyst.app/libs/lwjgl33 $(WORKINGDIR)/AngelAuraAmethyst.app/libs/lwjgl36 $(WORKINGDIR)/AngelAuraAmethyst.app/libs/lwjgl41
-	cp $(SOURCEDIR)/JavaApp/build/lwjgl-3.3.3.jar $(WORKINGDIR)/AngelAuraAmethyst.app/libs/lwjgl33/lwjgl.jar || exit 1
-	cp $(SOURCEDIR)/JavaApp/build/lwjgl-3.3.6.jar $(WORKINGDIR)/AngelAuraAmethyst.app/libs/lwjgl36/lwjgl.jar || exit 1
-	cp $(SOURCEDIR)/JavaApp/build/lwjgl-3.4.1.jar $(WORKINGDIR)/AngelAuraAmethyst.app/libs/lwjgl41/lwjgl.jar || exit 1
-	mkdir -p $(WORKINGDIR)/AngelAuraAmethyst.app/libs/lwjgl33_natives $(WORKINGDIR)/AngelAuraAmethyst.app/libs/lwjgl36_natives $(WORKINGDIR)/AngelAuraAmethyst.app/libs/lwjgl41_natives
-	cp $(SOURCEDIR)/lwgjl/lwjgl3-wip-rebase_3.3.3/bin/out/*.dylib $(WORKINGDIR)/AngelAuraAmethyst.app/libs/lwjgl33_natives/ || exit 1
-	cp $(SOURCEDIR)/lwgjl/lwjgl3-wip-rebase_3.3.6/bin/out/*.dylib $(WORKINGDIR)/AngelAuraAmethyst.app/libs/lwjgl36_natives/ || exit 1
-	cp $(SOURCEDIR)/lwgjl/lwjgl3-wip-rebase_3.4.1/bin/out/*.dylib $(WORKINGDIR)/AngelAuraAmethyst.app/libs/lwjgl41_natives/ || exit 1
+	echo '[Witch v$(VERSION)] payload - start'
+	$(call METHOD_DIRCHECK,$(WORKINGDIR)/Witch.app/libs)
+	$(call METHOD_DIRCHECK,$(WORKINGDIR)/Witch.app/libs_caciocavallo)
+	$(call METHOD_DIRCHECK,$(WORKINGDIR)/Witch.app/libs_caciocavallo17)
+	cp -R $(SOURCEDIR)/Natives/resources/en.lproj/LaunchScreen.storyboardc $(WORKINGDIR)/Witch.app/Base.lproj/ || exit 1
+	cp -R $(SOURCEDIR)/Natives/resources/* $(WORKINGDIR)/Witch.app/ || exit 1
+	cp $(WORKINGDIR)/*.dylib $(WORKINGDIR)/Witch.app/Frameworks/ || exit 1
+	cp -R $(SOURCEDIR)/JavaApp/libs/others/* $(WORKINGDIR)/Witch.app/libs/ || exit 1
+	cp $(SOURCEDIR)/JavaApp/build/launcher.jar $(SOURCEDIR)/JavaApp/build/patchjna_agent.jar $(SOURCEDIR)/JavaApp/build/cacio-init-agent.jar $(WORKINGDIR)/Witch.app/libs/ || exit 1
+	mkdir -p $(WORKINGDIR)/Witch.app/libs/lwjgl33 $(WORKINGDIR)/Witch.app/libs/lwjgl36 $(WORKINGDIR)/Witch.app/libs/lwjgl41
+	cp $(SOURCEDIR)/JavaApp/build/lwjgl-3.3.3.jar $(WORKINGDIR)/Witch.app/libs/lwjgl33/lwjgl.jar || exit 1
+	cp $(SOURCEDIR)/JavaApp/build/lwjgl-3.3.6.jar $(WORKINGDIR)/Witch.app/libs/lwjgl36/lwjgl.jar || exit 1
+	cp $(SOURCEDIR)/JavaApp/build/lwjgl-3.4.1.jar $(WORKINGDIR)/Witch.app/libs/lwjgl41/lwjgl.jar || exit 1
+	mkdir -p $(WORKINGDIR)/Witch.app/libs/lwjgl33_natives $(WORKINGDIR)/Witch.app/libs/lwjgl36_natives $(WORKINGDIR)/Witch.app/libs/lwjgl41_natives
+	cp $(SOURCEDIR)/lwgjl/lwjgl3-wip-rebase_3.3.3/bin/out/*.dylib $(WORKINGDIR)/Witch.app/libs/lwjgl33_natives/ || exit 1
+	cp $(SOURCEDIR)/lwgjl/lwjgl3-wip-rebase_3.3.6/bin/out/*.dylib $(WORKINGDIR)/Witch.app/libs/lwjgl36_natives/ || exit 1
+	cp $(SOURCEDIR)/lwgjl/lwjgl3-wip-rebase_3.4.1/bin/out/*.dylib $(WORKINGDIR)/Witch.app/libs/lwjgl41_natives/ || exit 1
 	# LWJGL's libopenal.dylib links ApplicationServices.framework (macOS-only).
 	# Replace with iOS-compatible openal-soft build so LWJGL finds it at the
 	# expected path but loads a dylib that works on iOS.
 	cp $(SOURCEDIR)/Natives/resources/Frameworks/libopenal.dylib \
-	   $(WORKINGDIR)/AngelAuraAmethyst.app/libs/lwjgl33_natives/libopenal.dylib
+	   $(WORKINGDIR)/Witch.app/libs/lwjgl33_natives/libopenal.dylib
 	cp $(SOURCEDIR)/Natives/resources/Frameworks/libopenal.dylib \
-	   $(WORKINGDIR)/AngelAuraAmethyst.app/libs/lwjgl36_natives/libopenal.dylib
+	   $(WORKINGDIR)/Witch.app/libs/lwjgl36_natives/libopenal.dylib
 	cp $(SOURCEDIR)/Natives/resources/Frameworks/libopenal.dylib \
-	   $(WORKINGDIR)/AngelAuraAmethyst.app/libs/lwjgl41_natives/libopenal.dylib
+	   $(WORKINGDIR)/Witch.app/libs/lwjgl41_natives/libopenal.dylib
 	# LWJGL's libfreetype.dylib links CoreGraphics.framework (macOS-only).
 	# Replace with the JDK's freetype build which is statically compiled
 	# against iOS and doesn't need macOS frameworks.
 	cp $(SOURCEDIR)/depends/java-25-openjdk/lib/libfreetype.dylib \
-	   $(WORKINGDIR)/AngelAuraAmethyst.app/libs/lwjgl33_natives/libfreetype.dylib
+	   $(WORKINGDIR)/Witch.app/libs/lwjgl33_natives/libfreetype.dylib
 	cp $(SOURCEDIR)/depends/java-25-openjdk/lib/libfreetype.dylib \
-	   $(WORKINGDIR)/AngelAuraAmethyst.app/libs/lwjgl36_natives/libfreetype.dylib
+	   $(WORKINGDIR)/Witch.app/libs/lwjgl36_natives/libfreetype.dylib
 	cp $(SOURCEDIR)/depends/java-25-openjdk/lib/libfreetype.dylib \
-	   $(WORKINGDIR)/AngelAuraAmethyst.app/libs/lwjgl41_natives/libfreetype.dylib
+	   $(WORKINGDIR)/Witch.app/libs/lwjgl41_natives/libfreetype.dylib
 	# LWJGL 3.4.x SDL binding (org.lwjgl.sdl.SDL) loads "SDL3"; provide the
 	# prebuilt iOS arm64 libSDL3 from amethyst-prebuilt-libraries in every
 	# natives dir so the game's SDL bootstrap always finds it.
 	cp -L $(SOURCEDIR)/amethyst-prebuilt-libraries/SDL/SDL3/build_ios/libSDL3.dylib \
-	   $(WORKINGDIR)/AngelAuraAmethyst.app/libs/lwjgl33_natives/libSDL3.dylib
+	   $(WORKINGDIR)/Witch.app/libs/lwjgl33_natives/libSDL3.dylib
 	cp $(SOURCEDIR)/amethyst-prebuilt-libraries/SDL/SDL3/build_ios/libSDL3.0.dylib \
-	   $(WORKINGDIR)/AngelAuraAmethyst.app/libs/lwjgl33_natives/libSDL3.0.dylib
+	   $(WORKINGDIR)/Witch.app/libs/lwjgl33_natives/libSDL3.0.dylib
 	cp -L $(SOURCEDIR)/amethyst-prebuilt-libraries/SDL/SDL3/build_ios/libSDL3.dylib \
-	   $(WORKINGDIR)/AngelAuraAmethyst.app/libs/lwjgl36_natives/libSDL3.dylib
+	   $(WORKINGDIR)/Witch.app/libs/lwjgl36_natives/libSDL3.dylib
 	cp $(SOURCEDIR)/amethyst-prebuilt-libraries/SDL/SDL3/build_ios/libSDL3.0.dylib \
-	   $(WORKINGDIR)/AngelAuraAmethyst.app/libs/lwjgl36_natives/libSDL3.0.dylib
+	   $(WORKINGDIR)/Witch.app/libs/lwjgl36_natives/libSDL3.0.dylib
 	cp -L $(SOURCEDIR)/amethyst-prebuilt-libraries/SDL/SDL3/build_ios/libSDL3.dylib \
-	   $(WORKINGDIR)/AngelAuraAmethyst.app/libs/lwjgl41_natives/libSDL3.dylib
+	   $(WORKINGDIR)/Witch.app/libs/lwjgl41_natives/libSDL3.dylib
 	cp $(SOURCEDIR)/amethyst-prebuilt-libraries/SDL/SDL3/build_ios/libSDL3.0.dylib \
-	   $(WORKINGDIR)/AngelAuraAmethyst.app/libs/lwjgl41_natives/libSDL3.0.dylib
-	cp -R $(SOURCEDIR)/JavaApp/libs/caciocavallo/* $(WORKINGDIR)/AngelAuraAmethyst.app/libs_caciocavallo || exit 1
-	cp -R $(SOURCEDIR)/JavaApp/libs/caciocavallo17/* $(WORKINGDIR)/AngelAuraAmethyst.app/libs_caciocavallo17 || exit 1
+	   $(WORKINGDIR)/Witch.app/libs/lwjgl41_natives/libSDL3.0.dylib
+	cp -R $(SOURCEDIR)/JavaApp/libs/caciocavallo/* $(WORKINGDIR)/Witch.app/libs_caciocavallo || exit 1
+	cp -R $(SOURCEDIR)/JavaApp/libs/caciocavallo17/* $(WORKINGDIR)/Witch.app/libs_caciocavallo17 || exit 1
 	$(call METHOD_DIRCHECK,$(OUTPUTDIR)/Payload)
-	cp -R $(WORKINGDIR)/AngelAuraAmethyst.app $(OUTPUTDIR)/Payload
+	cp -R $(WORKINGDIR)/Witch.app $(OUTPUTDIR)/Payload
 	if [ '$(SLIMMED_ONLY)' != '1' ]; then \
-		cp -R $(OUTPUTDIR)/java_runtimes $(OUTPUTDIR)/Payload/AngelAuraAmethyst.app; \
+		cp -R $(OUTPUTDIR)/java_runtimes $(OUTPUTDIR)/Payload/Witch.app; \
 	fi
-	ldid -S $(OUTPUTDIR)/Payload/AngelAuraAmethyst.app; \
+	ldid -S $(OUTPUTDIR)/Payload/Witch.app; \
 	if [ '$(TROLLSTORE_JIT_ENT)' == '1' ]; then \
-		ldid -S$(SOURCEDIR)/entitlements.trollstore.xml $(OUTPUTDIR)/Payload/AngelAuraAmethyst.app/AngelAuraAmethyst; \
+		ldid -S$(SOURCEDIR)/entitlements.trollstore.xml $(OUTPUTDIR)/Payload/Witch.app/Witch; \
 	elif [ '$(PLATFORM)' == '6' ]; then \
-		ldid -S$(SOURCEDIR)/entitlements.codesign.xml $(OUTPUTDIR)/Payload/AngelAuraAmethyst.app/AngelAuraAmethyst; \
+		ldid -S$(SOURCEDIR)/entitlements.codesign.xml $(OUTPUTDIR)/Payload/Witch.app/Witch; \
 	else \
-		ldid -S$(SOURCEDIR)/entitlements.sideload.xml $(OUTPUTDIR)/Payload/AngelAuraAmethyst.app/AngelAuraAmethyst; \
+		ldid -S$(SOURCEDIR)/entitlements.sideload.xml $(OUTPUTDIR)/Payload/Witch.app/Witch; \
 	fi
 	chmod -R 755 $(OUTPUTDIR)/Payload
 	# Always run the platform retag — it's idempotent on already-iOS-tagged
@@ -475,21 +478,21 @@ payload: native dep_mg lwgjl java jre assets
 	# Originally guarded by `[ PLATFORM != 2 ]` on the assumption that all
 	# committed dylibs were already iOS-tagged — that broke when v19 added
 	# the 3.3.5 lwjgl-stb dylib straight from upstream.
-	$(call METHOD_MACHO_JRE,$(OUTPUTDIR)/Payload/AngelAuraAmethyst.app,$(call METHOD_CHANGE_PLAT,$(PLATFORM),$$file)); \
+	$(call METHOD_MACHO_JRE,$(OUTPUTDIR)/Payload/Witch.app,$(call METHOD_CHANGE_PLAT,$(PLATFORM),$$file)); \
 	$(call METHOD_MACHO_JRE,$(OUTPUTDIR)/java_runtimes,$(call METHOD_CHANGE_PLAT,$(PLATFORM),$$file));
-	echo '[Amethyst v$(VERSION)] payload - end'
+	echo '[Witch v$(VERSION)] payload - end'
 
 deploy:
-	echo '[Amethyst v$(VERSION)] deploy - start'
+	echo '[Witch v$(VERSION)] deploy - start'
 	cd $(OUTPUTDIR); \
 	if [ '$(IOS)' = '1' ]; then \
-		ldid -S $(WORKINGDIR)/AngelAuraAmethyst.app || exit 1; \
-		ldid -S$(SOURCEDIR)/entitlements.trollstore.xml $(WORKINGDIR)/AngelAuraAmethyst.app/AngelAuraAmethyst || exit 1; \
-		sudo mv $(WORKINGDIR)/*.dylib $(PREFIX)Applications/AngelAuraAmethyst.app/Frameworks/ || exit 1; \
-		sudo mv $(WORKINGDIR)/AngelAuraAmethyst.app/AngelAuraAmethyst $(PREFIX)Applications/AngelAuraAmethyst.app/AngelAuraAmethyst || exit 1; \
-		sudo mv $(SOURCEDIR)/JavaApp/build/*.jar $(PREFIX)Applications/AngelAuraAmethyst.app/libs/ || exit 1; \
-		cd $(PREFIX)Applications/AngelAuraAmethyst.app/Frameworks || exit 1; \
-		sudo chown -R 501:501 $(PREFIX)Applications/AngelAuraAmethyst.app/* || exit 1; \
+		ldid -S $(WORKINGDIR)/Witch.app || exit 1; \
+		ldid -S$(SOURCEDIR)/entitlements.trollstore.xml $(WORKINGDIR)/Witch.app/Witch || exit 1; \
+		sudo mv $(WORKINGDIR)/*.dylib $(PREFIX)Applications/Witch.app/Frameworks/ || exit 1; \
+		sudo mv $(WORKINGDIR)/Witch.app/Witch $(PREFIX)Applications/Witch.app/Witch || exit 1; \
+		sudo mv $(SOURCEDIR)/JavaApp/build/*.jar $(PREFIX)Applications/Witch.app/libs/ || exit 1; \
+		cd $(PREFIX)Applications/Witch.app/Frameworks || exit 1; \
+		sudo chown -R 501:501 $(PREFIX)Applications/Witch.app/* || exit 1; \
 	elif [ '$(IOS)' = '0' ] && [ '$(DETECTPLAT)' = 'Darwin' ]; then \
 		if [ '$(PLATFORM)' != '2' ] || [ '$(TEAMID)' = '-1' ] || [ '$(SIGNING_TEAMID)' = '-1' ] || [ '$(PROVISIONING)' = '-1' ]; then \
 			echo 'Configuration not supported for deploy recipe.'; \
@@ -504,10 +507,10 @@ deploy:
 	else \
 		echo 'Device not supported for deploy recipe.'; \
 	fi
-	echo '[Amethyst v$(VERSION)] deploy - end'
+	echo '[Witch v$(VERSION)] deploy - end'
 
 package: payload
-	echo '[Amethyst v$(VERSION)] package - start'
+	echo '[Witch v$(VERSION)] package - start'
 	if [ '$(TEAMID)' != '-1' ] && [ '$(SIGNING_TEAMID)' != '-1' ] && [ -f '$(PROVISIONING)' ] && [ '$(DETECTPLAT)' = 'Darwin' ]; then \
 		printf '<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n<plist version="1.0">\n<dict>\n	<key>application-identifier</key>\n	<string>$(TEAMID).org.angelauramc.amethyst</string>\n	<key>com.apple.developer.team-identifier</key>\n	<string>$(TEAMID)</string>\n	<key>get-task-allow</key>\n	<true/>\n	<key>keychain-access-groups</key>\n	<array>\n	<string>$(TEAMID).*</string>\n	<string>com.apple.token</string>\n	</array>\n</dict>\n</plist>' > entitlements.codesign.xml; \
 		$(MAKE) codesign; \
@@ -518,28 +521,28 @@ package: payload
 	cd $(OUTPUTDIR); \
 	$(call METHOD_PACKAGE); \
 	zip --symlinks -r $(OUTPUTDIR)/java_runtimes.zip java_runtimes; \
-	echo '[Amethyst v$(VERSION)] package - end'
+	echo '[Witch v$(VERSION)] package - end'
 	
 dsym: payload
-	echo '[Amethyst v$(VERSION)] dsym - start'
-	dsymutil --arch arm64 $(OUTPUTDIR)/Payload/AngelAuraAmethyst.app/AngelAuraAmethyst; \
-	rm -rf $(OUTPUTDIR)/AngelAuraAmethyst.dSYM; \
-	mv $(OUTPUTDIR)/Payload/AngelAuraAmethyst.app/AngelAuraAmethyst.dSYM $(OUTPUTDIR)/AngelAuraAmethyst.dSYM
-	echo '[Amethyst v$(VERSION)] dsym - end'
+	echo '[Witch v$(VERSION)] dsym - start'
+	dsymutil --arch arm64 $(OUTPUTDIR)/Payload/Witch.app/Witch; \
+	rm -rf $(OUTPUTDIR)/Witch.dSYM; \
+	mv $(OUTPUTDIR)/Payload/Witch.app/Witch.dSYM $(OUTPUTDIR)/Witch.dSYM
+	echo '[Witch v$(VERSION)] dsym - end'
 	
 codesign:
-	echo '[Amethyst v$(VERSION)] codesign - start'
-	cp '$(PROVISIONING)' $(OUTPUTDIR)/Payload/AngelAuraAmethyst.app/embedded.mobileprovision
-	$(call METHOD_MACHO_JRE,$(OUTPUTDIR)/Payload/AngelAuraAmethyst.app,$(call METHOD_CODESIGN,$(SIGNING_TEAMID),$$file))
+	echo '[Witch v$(VERSION)] codesign - start'
+	cp '$(PROVISIONING)' $(OUTPUTDIR)/Payload/Witch.app/embedded.mobileprovision
+	$(call METHOD_MACHO_JRE,$(OUTPUTDIR)/Payload/Witch.app,$(call METHOD_CODESIGN,$(SIGNING_TEAMID),$$file))
 	$(call METHOD_MACHO_JRE,$(OUTPUTDIR)/java_runtimes,$(call METHOD_CODESIGN,$(SIGNING_TEAMID),$$file))
-	echo '[Amethyst v$(VERSION)] codesign - end'
+	echo '[Witch v$(VERSION)] codesign - end'
 
 clean:
-	echo '[Amethyst v$(VERSION)] clean - start'
+	echo '[Witch v$(VERSION)] clean - start'
 	rm -rf $(WORKINGDIR)
 	rm -rf JavaApp/build
 	rm -rf $(OUTPUTDIR)
-	echo '[Amethyst v$(VERSION)] clean - end'
+	echo '[Witch v$(VERSION)] clean - end'
 
 		
 

@@ -102,8 +102,8 @@ bool init_checkForJailbreak() {
 }
 
 void init_logDeviceAndVer(char *argument) {
-    // Amethyst version
-    NSLog(@"[Pre-Init] Amethyst INIT!");
+    // Witch version
+    NSLog(@"[Pre-Init] Witch INIT!");
     NSLog(@"[Pre-Init] Version: %@-%s", NSBundle.mainBundle.infoDictionary[@"CFBundleShortVersionString"], CONFIG_TYPE);
     NSLog(@"[Pre-Init] Commit: %s (%s)", CONFIG_COMMIT, CONFIG_BRANCH);
     

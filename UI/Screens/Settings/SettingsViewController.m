@@ -5,6 +5,7 @@
 #import "HapticManager.h"
 #import "ios_uikit_bridge.h"
 #import "CurseForgeService.h"
+#import "CreditsService.h"
 #import "CustomControlsViewController.h"
 #import <PhotosUI/PhotosUI.h>
 #import <UniformTypeIdentifiers/UniformTypeIdentifiers.h>
@@ -28,6 +29,7 @@
     [self buildSections];
     [self setup];
     [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(updateColors) name:ThemeDidChangeNotification object:nil];
+    [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(creditsDidUpdate) name:CreditsDidUpdateNotification object:nil];
     [self updateColors];
 }
 
@@ -170,17 +172,62 @@
             @{@"type": @"import", @"label": localize(@"Import Appearance Theme", nil)},
             @{@"type": @"color", @"label": localize(@"Reset Appearance", nil), @"key": @"amethyst_reset_appearance"},
         ]},
+        @{@"title": localize(@"credits.title", nil), @"items": [self creditsItems]},
     ];
 
-    NSMutableArray *appearanceItems = [_sections.lastObject[@"items"] mutableCopy];
+    NSUInteger appearanceIndex = NSNotFound;
+    for (NSUInteger i = 0; i < _sections.count; i++) {
+        if ([_sections[i][@"title"] isEqualToString:localize(@"Appearance", nil)]) {
+            appearanceIndex = i;
+            break;
+        }
+    }
+    NSMutableArray *appearanceItems = [_sections[appearanceIndex][@"items"] mutableCopy];
     if (@available(iOS 16, *)) {
         [appearanceItems insertObject:@{@"type": @"switch", @"label": @"Liquid Glass", @"key": @"general.liquid_glass"} atIndex:0];
     }
-    NSMutableDictionary *appearanceSection = [_sections.lastObject mutableCopy];
+    NSMutableDictionary *appearanceSection = [_sections[appearanceIndex] mutableCopy];
     appearanceSection[@"items"] = appearanceItems;
     NSMutableArray *mutableSections = [_sections mutableCopy];
-    mutableSections[mutableSections.count - 1] = appearanceSection;
+    mutableSections[appearanceIndex] = appearanceSection;
     _sections = mutableSections;
+}
+
+- (NSArray *)creditsItems {
+    CreditsService *service = CreditsService.shared;
+    NSMutableArray *items = [NSMutableArray array];
+
+    if (service.authorName.length > 0) {
+        [items addObject:@{@"type": @"author", @"label": localize(@"credits.author", nil), @"detail": service.authorName}];
+    }
+    for (CreditsSocial *social in service.socials) {
+        [items addObject:@{@"type": @"link", @"label": social.label, @"detail": @"", @"url": social.url}];
+    }
+    if (service.components.count == 0) {
+        [items addObject:@{@"type": @"label", @"label": localize(@"credits.unavailable", nil), @"detail": @""}];
+    } else {
+        for (CreditsComponent *component in service.components) {
+            [items addObject:@{@"type": @"credit", @"label": component.name, @"detail": component.license ?: @"", @"license": component.license ?: @"", @"url": component.url ?: @"", @"licenseUrl": component.licenseUrl ?: @""}];
+        }
+    }
+    return items;
+}
+
+- (void)creditsDidUpdate {
+    NSUInteger creditsIndex = NSNotFound;
+    for (NSUInteger i = 0; i < _sections.count; i++) {
+        if ([_sections[i][@"title"] isEqualToString:localize(@"credits.title", nil)]) {
+            creditsIndex = i;
+            break;
+        }
+    }
+    if (creditsIndex == NSNotFound) return;
+    NSMutableDictionary *creditsSection = [_sections[creditsIndex] mutableCopy];
+    creditsSection[@"items"] = [self creditsItems];
+    NSMutableArray *mutableSections = [_sections mutableCopy];
+    mutableSections[creditsIndex] = creditsSection;
+    _sections = mutableSections;
+    [self reloadTables];
 }
 
 - (NSArray *)getRendererOptions {
@@ -424,6 +471,10 @@
 }
 
 - (CGFloat)tableView:(UITableView *)tableView heightForRowAtIndexPath:(NSIndexPath *)indexPath {
+    NSDictionary *item = [self itemAtIndexPath:indexPath inTable:tableView];
+    if ([item[@"type"] isEqualToString:@"label"]) {
+        return 64;
+    }
     return 48;
 }
 
@@ -562,16 +613,47 @@
             cell.backgroundColor = ThemeManager.shared.cardBackgroundColor;
             cell.textLabel.textColor = ThemeManager.shared.primaryTextColor;
             cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
+        } else if ([type isEqualToString:@"credit"]) {
+            cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleValue1 reuseIdentifier:cellId];
+            cell.textLabel.font = [UIFont systemFontOfSize:15];
+            cell.detailTextLabel.font = [UIFont systemFontOfSize:13];
+            cell.backgroundColor = ThemeManager.shared.cardBackgroundColor;
+            cell.textLabel.textColor = ThemeManager.shared.primaryTextColor;
+            cell.detailTextLabel.textColor = ThemeManager.shared.secondaryTextColor;
+            cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
+        } else if ([type isEqualToString:@"author"]) {
+            cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleValue1 reuseIdentifier:cellId];
+            cell.textLabel.font = [UIFont systemFontOfSize:15];
+            cell.detailTextLabel.font = [UIFont systemFontOfSize:14 weight:UIFontWeightSemibold];
+            cell.backgroundColor = ThemeManager.shared.cardBackgroundColor;
+            cell.textLabel.textColor = ThemeManager.shared.secondaryTextColor;
+            cell.detailTextLabel.textColor = ThemeManager.shared.accentColor;
+            cell.selectionStyle = UITableViewCellSelectionStyleNone;
+        } else if ([type isEqualToString:@"link"]) {
+            cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleDefault reuseIdentifier:cellId];
+            cell.textLabel.font = [UIFont systemFontOfSize:15];
+            cell.backgroundColor = ThemeManager.shared.cardBackgroundColor;
+            cell.textLabel.textColor = ThemeManager.shared.primaryTextColor;
+            cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
+        } else if ([type isEqualToString:@"label"]) {
+            cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleDefault reuseIdentifier:cellId];
+            cell.textLabel.font = [UIFont systemFontOfSize:13];
+            cell.textLabel.numberOfLines = 0;
+            cell.backgroundColor = ThemeManager.shared.cardBackgroundColor;
+            cell.textLabel.textColor = ThemeManager.shared.secondaryTextColor;
+            cell.selectionStyle = UITableViewCellSelectionStyleNone;
         }
     }
 
     cell.textLabel.text = nil;
     cell.detailTextLabel.text = nil;
-    if ([type isEqualToString:@"switch"] || [type isEqualToString:@"picker"] || [type isEqualToString:@"navigate"] || [type isEqualToString:@"color"] || [type isEqualToString:@"image"] || [type isEqualToString:@"export"] || [type isEqualToString:@"import"]) {
+    if ([type isEqualToString:@"switch"] || [type isEqualToString:@"picker"] || [type isEqualToString:@"navigate"] || [type isEqualToString:@"color"] || [type isEqualToString:@"image"] || [type isEqualToString:@"export"] || [type isEqualToString:@"import"] || [type isEqualToString:@"credit"] || [type isEqualToString:@"author"] || [type isEqualToString:@"link"] || [type isEqualToString:@"label"]) {
         cell.textLabel.text = item[@"label"];
     }
 
-    if ([type isEqualToString:@"picker"]) {
+    if ([type isEqualToString:@"credit"] || [type isEqualToString:@"author"]) {
+        cell.detailTextLabel.text = item[@"detail"];
+    } else if ([type isEqualToString:@"picker"]) {
         id value = getPrefObject(item[@"key"]) ?: item[@"default"];
         NSString *display = [value isKindOfClass:[NSString class]] ? value : [value description];
         NSArray *options = item[@"options"];
@@ -672,6 +754,27 @@
 
     if ([type isEqualToString:@"picker"]) {
         [self showPickerForItem:item fromTable:tableView];
+    } else if ([type isEqualToString:@"link"]) {
+        NSString *urlString = item[@"url"];
+        if (urlString.length > 0) {
+            NSURL *url = [NSURL URLWithString:urlString];
+            if (url) [UIApplication.sharedApplication openURL:url options:@{} completionHandler:nil];
+        }
+    } else if ([type isEqualToString:@"credit"]) {
+        UIAlertController *alert = [UIAlertController alertControllerWithTitle:item[@"label"] message:item[@"license"] preferredStyle:UIAlertControllerStyleAlert];
+        if ([item[@"licenseUrl"] length] > 0) {
+            [alert addAction:[UIAlertAction actionWithTitle:localize(@"credits.open_license", nil) style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
+                NSURL *url = [NSURL URLWithString:item[@"licenseUrl"]];
+                if (url) [UIApplication.sharedApplication openURL:url options:@{} completionHandler:nil];
+            }]];
+        } else if ([item[@"url"] length] > 0) {
+            [alert addAction:[UIAlertAction actionWithTitle:localize(@"credits.open_project", nil) style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
+                NSURL *url = [NSURL URLWithString:item[@"url"]];
+                if (url) [UIApplication.sharedApplication openURL:url options:@{} completionHandler:nil];
+            }]];
+        }
+        [alert addAction:[UIAlertAction actionWithTitle:localize(@"Done", nil) style:UIAlertActionStyleCancel handler:nil]];
+        [self presentViewController:alert animated:YES completion:nil];
     } else if ([type isEqualToString:@"navigate"]) {
         [self navigateToVC:item[@"vc"] title:item[@"label"]];
     } else if ([type isEqualToString:@"color"]) {

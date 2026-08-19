@@ -1,6 +1,7 @@
 #import "PLLogOutputView.h"
 #import "SurfaceViewController.h"
 #import "utils.h"
+#import "CrashScreenViewController.h"
 
 @interface PLLogOutputView()<UITableViewDataSource, UITableViewDelegate>
 @property(nonatomic) UITableView* logTableView;
@@ -171,41 +172,18 @@ static PLLogOutputView* current;
 }
 
 + (void)handleExitCode:(int)code {
-    if (!current) return;
     dispatch_async(dispatch_get_main_queue(), ^(void){
-        if (current.navController.view.hidden) {
-            [current actionToggleLogOutput];
+        UIWindow *window = UIWindow.mainWindow;
+        if (!window) {
+            window = [UIApplication.sharedApplication windows].firstObject;
         }
-        // Cleanup navigation bar
-        UINavigationBar *navigationBar = current.navigationBar;
-        navigationBar.topItem.title = [NSString stringWithFormat:
-            localize(@"game.title.exit_code", nil), code];
-        navigationBar.items[0].leftBarButtonItem = [[UIBarButtonItem alloc]
-            initWithBarButtonSystemItem:UIBarButtonSystemItemAction
-            target:current action:@selector(actionShareLatestlog)];
-        UIBarButtonItem *exitItem = navigationBar.items[0].rightBarButtonItems[0];
-        navigationBar.items[0].rightBarButtonItems = nil;
-        navigationBar.items[0].rightBarButtonItem = exitItem;
-
-        if (canAppendToLog) {
-            canAppendToLog = NO;
-            fatalErrorOccurred = YES;
-            return;
+        UIViewController *presenter = window.rootViewController;
+        while (presenter.presentedViewController) {
+            presenter = presenter.presentedViewController;
         }
-        [current actionClearLogOutput];
-        [self _appendToLog:@"... (latestlog.txt)"];
-        NSString *latestlogPath = [NSString stringWithFormat:@"%s/latestlog.txt", getenv("POJAV_HOME")];
-        NSString *linesStr = [NSString stringWithContentsOfFile:latestlogPath
-            encoding:NSUTF8StringEncoding error:nil];
-        NSArray *lines = [linesStr componentsSeparatedByCharactersInSet:
-            NSCharacterSet.newlineCharacterSet];
-
-        // Print last 100 lines from latestlog.txt
-        for (int i = (lines.count > 100) ? lines.count - 100 : 0; i < lines.count; i++) {
-            [self _appendToLog:lines[i]];
-        }
-
-        fatalErrorOccurred = YES;
+        CrashScreenViewController *crashVC = [[CrashScreenViewController alloc] initWithExitCode:code];
+        crashVC.modalPresentationStyle = UIModalPresentationFullScreen;
+        [presenter presentViewController:crashVC animated:YES completion:nil];
     });
 }
 

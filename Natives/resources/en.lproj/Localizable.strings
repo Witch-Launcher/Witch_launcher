@@ -31,6 +31,15 @@
 
 "game.title.exit_code" = "Game exited with code %d";
 
+"crash.screen.title" = "Game crash";
+"crash.screen.code" = "Crash code: %d";
+"crash.screen.close" = "Close";
+"crash.screen.share" = "Share log";
+"crash.screen.toggle_full" = "Show full log";
+"crash.screen.toggle_excerpt" = "Show summary";
+"crash.screen.category.mod" = "Missing or conflicting mods";
+"crash.screen.category.error" = "Game error";
+"crash.screen.category.raw" = "Unknown error";
 // The play button
 "Play" = "Play";
 "Details" = "Details";
@@ -462,3 +471,9 @@
 "controller_configurator.mouse.title.mouse_middle" = "Middle click";
 "controller_configurator.mouse.title.mouse_scroll_up" = "Scroll up";
 "controller_configurator.mouse.title.mouse_scroll_down" = "Scroll down";
+"credits.title" = "Credits";
+"credits.author" = "Author";
+"credits.author_placeholder" = "Your name";
+"credits.open_license" = "Open License";
+"credits.open_project" = "Open Project";
+"credits.unavailable" = "Credits could not be loaded. Check your internet connection.";

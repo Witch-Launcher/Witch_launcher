@@ -93,7 +93,30 @@ public class UIKit {
     }
 
     static {
-        System.load(System.getenv("BUNDLE_PATH") + "/AngelAuraAmethyst");
+        // The executable name lives in the bundle's Info.plist
+        // (CFBundleExecutable). Load it dynamically so renaming the app
+        // (e.g. AngelAuraAmethyst -> Witch) does not break the JVM.
+        String bundlePath = System.getenv("BUNDLE_PATH");
+        String executableName = "Witch";
+        try (BufferedReader reader = new BufferedReader(new FileReader(new File(bundlePath, "Info.plist")))) {
+            String line;
+            boolean inExecutableKey = false;
+            while ((line = reader.readLine()) != null) {
+                if (line.contains("<key>CFBundleExecutable</key>")) {
+                    inExecutableKey = true;
+                } else if (inExecutableKey && line.contains("<string>")) {
+                    int start = line.indexOf("<string>") + 8;
+                    int end = line.indexOf("</string>");
+                    if (start > 8 && end > start) {
+                        executableName = line.substring(start, end);
+                    }
+                    break;
+                }
+            }
+        } catch (Exception ignored) {
+            // fall back to the default executable name
+        }
+        System.load(bundlePath + "/" + executableName);
     }
 
 

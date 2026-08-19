@@ -1,15 +1,18 @@
-Fork by Za_d626(DuyAnh662)
+## Author
+DuyAnh662 (Za_d626)
 
-Thanks to vibecodest and [Catsruledogs](https://github.com/catsruledogs/Amethyst-iOS-25.git), T1k-T1k for the source code!
-
-```Thanks to L4d for helping me fix the bug on iOS 27 (but it didn't work :< I'm sorry)```
+## Socials
+[Discord](https://discord.gg/9JYymD7EY)
+[TikTok](https://tiktok.com/@za_d626)
+[Youtube](https://youtube.com/@za_d626)
+[X](https://x.com/duyanh662)
 
 ## Third party components and their licenses
 - [Witch](https://github.com/Ynnyny/Witch_launcher): [GNU General Public License v3.0](https://github.com/Ynnyny/Witch_launcher/blob/main/LICENSE)
 - [Catsruledogs](https://github.com/catsruledogs/Amethyst-iOS-25.git): [GNU General Public License v3.0](https://github.com/catsruledogs/Amethyst-iOS-25/blob/main/LICENSE)
 - [Caciocavallo](https://github.com/PojavLauncherTeam/caciocavallo): [GNU GPLv2 License](https://github.com/PojavLauncherTeam/caciocavallo/blob/master/LICENSE).
 - [jsr305](https://code.google.com/p/jsr-305): [3-Clause BSD License](http://opensource.org/licenses/BSD-3-Clause).
-- [Boardwalk](https://github.com/zhuowei/Boardwalk): [Apache 2.0 License](https://github.com/zhuowei/Boardwalk/blob/master/LICENSE) 
+- [Boardwalk](https://github.com/zhuowei/Boardwalk): [Apache 2.0 License](https://github.com/zhuowei/Boardwalk/blob/master/LICENSE)
 - [GL4ES](https://github.com/ptitSeb/gl4es) by @lunixbochs @ptitSeb: [MIT License](https://github.com/ptitSeb/gl4es/blob/master/LICENSE).
 - [Mesa 3D Graphics Library](https://gitlab.freedesktop.org/mesa/mesa): [MIT License](https://docs.mesa3d.org/license.html).
 - [MetalANGLE](https://github.com/khanhduytran0/metalangle) by @kakashidinho and ANGLE team: [BSD 2.0 License](https://github.com/kakashidinho/metalangle/blob/master/LICENSE).

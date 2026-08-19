@@ -604,7 +604,7 @@ public class GLFW
 
         private LibraryHolder() {}
 
-        static final SharedLibrary GLFW = new MacOSXLibraryDL("AngelAuraAmethyst", DynamicLinkLoader.RTLD_DEFAULT);
+        static final SharedLibrary GLFW = new MacOSXLibraryDL("Witch", DynamicLinkLoader.RTLD_DEFAULT);
     }
 
     public static SharedLibrary getLibrary() {

@@ -31,6 +31,16 @@
 
 "game.title.exit_code" = "Trò chơi thoát với mã %d";
 
+"crash.screen.title" = "Game crash";
+"crash.screen.code" = "Mã lỗi: %d";
+"crash.screen.close" = "Đóng";
+"crash.screen.share" = "Chia sẻ log";
+"crash.screen.toggle_full" = "Xem toàn bộ log";
+"crash.screen.toggle_excerpt" = "Xem đoạn trích";
+"crash.screen.category.mod" = "Thiếu hoặc xung đột mod";
+"crash.screen.category.error" = "Lỗi game";
+"crash.screen.category.raw" = "Lỗi không xác định";
+
 // The play button
 "Play" = "Chơi";
 
@@ -338,3 +348,9 @@
 "controller_configurator.mouse.title.mouse_middle" = "Chuột giữa";
 "controller_configurator.mouse.title.mouse_scroll_up" = "Lăn lên";
 "controller_configurator.mouse.title.mouse_scroll_down" = "Lăn xuống";
+"credits.title" = "Ghi công";
+"credits.author" = "Tác giả";
+"credits.author_placeholder" = "Tên của bạn";
+"credits.open_license" = "Mở giấy phép";
+"credits.open_project" = "Mở dự án";
+"credits.unavailable" = "Không tải được credits. Kiểm tra kết nối internet của bạn.";

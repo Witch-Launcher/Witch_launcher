@@ -16,4 +16,6 @@ void UIKit_launchJarFileWithArgs(UIWindow *window, NSString *jarPath, NSArray<NS
 void UIKit_returnToSplitView();
 void launchInitialViewController(UIWindow *window);
 
+void crashScreenCloseLauncher(void);
+
 void AWTInputBridge_sendKey(int keycode);
