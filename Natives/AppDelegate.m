@@ -11,6 +11,16 @@ extern dispatch_group_t fatalExitGroup;
 #pragma mark - UISceneSession lifecycle
 
 
+- (BOOL)application:(UIApplication *)application didFinishLaunchingWithOptions:(NSDictionary *)launchOptions {
+    // Re-apply the chosen home-screen icon on every launch; keeps the icon in
+    // sync with the launcher.logo_style preference (and flushes stale caches).
+    dispatch_async(dispatch_get_main_queue(), ^{
+        applyLauncherAppIcon();
+    });
+    return YES;
+}
+
+
 - (UISceneConfiguration *)application:(UIApplication *)application configurationForConnectingSceneSession:(UISceneSession *)connectingSceneSession options:(UISceneConnectionOptions *)options {
     // Called when a new scene session is being created.
     // Use this method to select a configuration to create the new scene with.

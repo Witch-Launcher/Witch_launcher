@@ -6,6 +6,7 @@
 #import "ios_uikit_bridge.h"
 #import "CurseForgeService.h"
 #import "CreditsService.h"
+#import "config.h"
 #import "CustomControlsViewController.h"
 #import <PhotosUI/PhotosUI.h>
 #import <UniformTypeIdentifiers/UniformTypeIdentifiers.h>
@@ -123,6 +124,11 @@
                 @{@"key": @"landscape", @"name": localize(@"Landscape", nil)},
             ], @"default": @"off"},
             @{@"type": @"picker", @"label": localize(@"Theme", nil), @"key": @"launcher.theme", @"options": @[@"System", @"Dark", @"Light"], @"default": @"System"},
+            @{@"type": @"picker", @"label": localize(@"Launcher Logo", nil), @"key": @"launcher.logo_style", @"options": @[
+                @{@"key": @"purple", @"name": localize(@"Purple", nil)},
+                @{@"key": @"blue", @"name": localize(@"Blue", nil)},
+                @{@"key": @"dev", @"name": localize(@"Dev", nil)},
+            ], @"default": (CONFIG_RELEASE ? @"purple" : @"dev"), @"preview": @YES},
             @{@"type": @"text", @"label": localize(@"CurseForge API Key", nil), @"key": @"curseforge.api_key", @"placeholder": localize(@"Paste your CurseForge API key here", nil)},
             @{@"type": @"switch", @"label": localize(@"preference.title.debug_logging", nil), @"key": @"general.debug_logging"},
             @{@"type": @"switch", @"label": localize(@"preference.title.debug_ipad_ui", nil), @"key": @"debug.debug_ipad_ui"},
@@ -666,6 +672,18 @@
             }
         }
         cell.detailTextLabel.text = display;
+        if ([item[@"preview"] boolValue]) {
+            UIImageView *preview = [[UIImageView alloc] initWithFrame:CGRectMake(0, 0, 44, 44)];
+            preview.contentMode = UIViewContentModeScaleAspectFit;
+            preview.layer.cornerRadius = 9;
+            preview.layer.masksToBounds = YES;
+            preview.layer.borderWidth = 1;
+            preview.layer.borderColor = ThemeManager.shared.separatorColor.CGColor;
+            preview.image = [UIImage imageNamed:[self logoImageNameForStyle:value]];
+            cell.accessoryView = preview;
+        } else {
+            cell.accessoryView = nil;
+        }
     } else if ([type isEqualToString:@"switch"]) {
         UISwitch *sw = (UISwitch *)cell.accessoryView;
         sw.on = getPrefBool(item[@"key"]);
@@ -715,6 +733,16 @@
     }
 
     return cell;
+}
+
+- (NSString *)logoImageNameForStyle:(NSString *)style {
+    if ([style isEqualToString:@"blue"]) {
+        return ThemeManager.shared.isDarkMode ? @"logo-main-dark" : @"logo-main-light";
+    }
+    if ([style isEqualToString:@"dev"]) {
+        return @"logo-dev";
+    }
+    return ThemeManager.shared.isDarkMode ? @"logo-dark" : @"logo-light";
 }
 
 - (UIColor *)colorForKey:(NSString *)key {
@@ -902,6 +930,9 @@
                 setPrefObject(item[@"key"], key);
                 if ([item[@"key"] isEqualToString:@"general.orientation_lock"]) {
                     [self applyOrientationLock];
+                } else if ([item[@"key"] isEqualToString:@"launcher.logo_style"]) {
+                    applyLauncherAppIcon();
+                    [[NSNotificationCenter defaultCenter] postNotificationName:@"LauncherLogoDidChangeNotification" object:nil];
                 }
                 [self reloadTables];
             }]];
