@@ -32,7 +32,11 @@ extern NSString * const ThemeDidChangeNotification;
 @property (nonatomic) CGFloat uiOpacity;
 
 - (void)applyAccentColor:(UIColor *)color;
+- (void)applyAccentColor:(UIColor *)color darkMode:(BOOL)dark;
 - (void)applyColor:(UIColor *)color forKey:(NSString *)key;
+- (void)applyColor:(UIColor *)color forKey:(NSString *)key darkMode:(BOOL)dark;
+- (UIColor *)colorOverrideForKey:(NSString *)key;
+- (UIColor *)colorOverrideForKey:(NSString *)key darkMode:(BOOL)dark;
 - (void)applyInterfaceStyle:(UIUserInterfaceStyle)style;
 - (void)applyThemeToAllWindows;
 - (void)resetAppearance;

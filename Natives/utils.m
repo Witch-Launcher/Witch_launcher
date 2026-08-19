@@ -6,8 +6,10 @@
 #include <stdlib.h>
 #include <unistd.h>
 #include <dirent.h>
+#include <sys/sysctl.h>
 
 #include "utils.h"
+#import "LauncherPreferences.h"
 
 CFTypeRef SecTaskCopyValueForEntitlement(void* task, NSString* entitlement, CFErrorRef  _Nullable *error);
 void* SecTaskCreateFromSelf(CFAllocatorRef allocator);
@@ -205,35 +207,57 @@ BOOL DeviceCanCreateRXMap(void) {
     munmap(map, getpagesize());
     return ret == 0;
 }
+static NSString* hardwareMachineIdentifier(void) {
+    char buffer[64];
+    size_t len = sizeof(buffer);
+    if (sysctlbyname("hw.machine", buffer, &len, NULL, 0) != 0) {
+        return nil;
+    }
+    return @(buffer);
+}
+
+// "iPhone13,2" -> 13.2 ; "iPad8,11" -> 8.11 (same parsing as StikDebug)
+static double hardwareDeviceVersion(NSString *identifier) {
+    if (!identifier) return -1;
+    NSCharacterSet *nonNumbers = [[NSCharacterSet characterSetWithCharactersInString:@"0123456789,"] invertedSet];
+    NSString *digits = [[identifier componentsSeparatedByCharactersInSet:nonNumbers] componentsJoinedByString:@""];
+    digits = [digits stringByReplacingOccurrencesOfString:@"," withString:@"."];
+    return digits.doubleValue;
+}
+
 BOOL DeviceHasTXMReal(void) {
-    DIR *d = opendir("/private/preboot");
-    if(!d) {
-        // /private/preboot is not accessible in 27.0 and 26.6?, fallback to speculation
-        NSUInteger (*MGGetSInt64Answer)(NSString *) = dlsym(RTLD_DEFAULT, "MGGetSInt64Answer");
-        NSUInteger chipID = MGGetSInt64Answer(@"ChipID");
-        switch(chipID) {
-            case 0x8020: // A12
-            case 0x8027: // A12X/Z
-                return NO;
-            case 0x8030: // A13
-            case 0x8101: // A14
-            case 0x8103: // M1
-                if (@available(iOS 27.0, *)) return YES; return NO;
-            default:
-                if (@available(iOS 19.0, *)) return YES; return NO;
-        }
+    // The launcher's TXM classification MUST match the debugger's (StikDebug
+    // 3.1.6+, ProcessInfo+TXM.swift / PR #416): StikDebug decides whether to
+    // run the app's JIT26 universal script from its own TXM detection, while
+    // this app decides whether to send the brk 0x69/0xf00d protocol from
+    // these flags. Any mismatch leaves the handshake unanswered (hang or
+    // "switch to Universal script") or grants plain JIT on a W^X-enforced
+    // device (SIGBUS/SIGSEGV).
+    if (getPrefBool(@"debug.force_txm")) {
+        NSLog(@"[JIT] TXM forced via debug.force_txm");
+        return YES;
     }
-    // deterministically detect TXM for 17.0-26.5?
-    struct dirent *dir;
-    char txmPath[PATH_MAX];
-    while ((dir = readdir(d)) != NULL) {
-        if(strlen(dir->d_name) == 96) {
-            snprintf(txmPath, sizeof(txmPath), "/private/preboot/%s/usr/standalone/firmware/FUD/Ap,TrustedExecutionMonitor.img4", dir->d_name);
-            break;
-        }
+
+    NSString *machine = hardwareMachineIdentifier();
+    double version = hardwareDeviceVersion(machine);
+    NSLog(@"[JIT] hw.machine=%@ (version %.2f)", machine ?: @"unknown", version);
+
+    if (@available(iOS 27.0, *)) {
+        // iOS 27: every device is TXM except iPad Pro 11"/12.9" (M1),
+        // hardware identifiers iPad8,11 / iPad8,12
+        if (!machine) return YES;
+        return ![machine isEqualToString:@"iPad8,11"] && ![machine isEqualToString:@"iPad8,12"];
     }
-    closedir(d);
-    return access(txmPath, F_OK) == 0;
+    if (@available(iOS 26.0, *)) {
+        // iOS 26.x: TXM = iPhone hardware version >= 14.2 (iPhone 13/A15+)
+        // or iPad hardware version >= 14.5; A12/A13/A14/M1 stay non-TXM
+        if (!machine) return NO;
+        if ([machine hasPrefix:@"iPad"]) {
+            return version >= 14.5;
+        }
+        return version >= 14.2;
+    }
+    return NO;
 }
 // Thin wrapper of DeviceHasJITFlags to respect overriden flag
 __exported BOOL DeviceHasTXM(void) {
@@ -272,6 +296,13 @@ JITFlags DeviceGetJITFlags(BOOL refresh) {
 }
 BOOL DeviceHasJITFlags(JITFlags flags) {
     return (DeviceGetJITFlags(NO) & flags) == flags;
+}
+
+BOOL DeviceNeedsDebugJITMapping(void) {
+    // This is a capability decision, not a TXM firmware-detection decision.
+    // MirrorMappedCodeCache now means that the Universal JIT script has been
+    // installed and HotSpot may request its RX mapping from the debugger.
+    return DeviceHasJITFlags(JIT_FLAG_IS_IOS_26 | JIT_FLAG_FORCE_MIRRORED);
 }
 
 BOOL JIT26IsLikelyDebuggerKeepAttached(void) {

@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.6)
-project(AngelAuraAmethyst)
+project(Witch)
 
 configure_file(${CMAKE_CURRENT_LIST_DIR}/config.h.in ${CMAKE_CURRENT_LIST_DIR}/config.h)
 
@@ -34,6 +34,7 @@ include_directories(
   "../UI/App"
   "../UI/Managers"
   "../UI/Screens/MainMenu"
+  "../UI/Screens/CrashLog"
   "../UI/Screens/Game"
   "../UI/Screens/Mod"
   "../UI/Screens/Modpack"
@@ -184,7 +185,7 @@ target_link_libraries(audio_capture
 # keyboard) lives in its OWN dylib so the launcher can System.load() it
 # without registering the main executable with the launcher classloader.
 # The game's Knot classloader must be the one that System.load()s
-# AngelAuraAmethyst (via LWJGL's Library.<clinit>) so the game-side JNI
+# Witch (via LWJGL's Library.<clinit>) so the game-side JNI
 # stubs (top.fifthlight.touchcontroller...) resolve; loading the executable
 # from the launcher first makes Knot's second System.load() fail with
 # "already loaded in another classloader" and the game then crashes with
@@ -225,10 +226,11 @@ set_target_properties(TouchControllerGameBridge PROPERTIES
   INSTALL_NAME_DIR "@rpath"
 )
 
-# Angel Aura Amethyst
-add_executable(AngelAuraAmethyst
+# Witch
+add_executable(Witch
   dyld_bypass_validation.m
   dyld_patch_platform.m
+  jit_vm_remap_hook.m
   main.m
   main_hook.m
   JavaLauncher.m
@@ -293,7 +295,9 @@ add_executable(AngelAuraAmethyst
   SurfaceViewController+ExternalDisplay.m
   SurfaceViewController+LogView.m
   SurfaceViewController+Navigation.m
+  SurfaceViewController+Widget.m
   TrackedTextField.m
+  system_monitor.m
 egl_bridge.m
     ZinkConfig.m
     input_bridge_v3.m
@@ -330,6 +334,8 @@ egl_bridge.m
    ../UI/Managers/DownloadManager.m
    ../UI/Managers/CursorManager.m
    ../UI/Screens/MainMenu/MainMenuViewController.m
+   ../UI/Screens/CrashLog/CrashLogAnalyzer.m
+   ../UI/Screens/CrashLog/CrashScreenViewController.m
    ../UI/Screens/Game/GameListViewController.m
    ../UI/Screens/Mod/ModListViewController.m
    ../UI/Screens/Mod/ModDetailViewController.m
@@ -340,6 +346,7 @@ egl_bridge.m
    ../UI/Screens/Shader/ShaderListViewController.m
    ../UI/Screens/Server/ServerListViewController.m
    ../UI/Screens/Settings/SettingsViewController.m
+   ../UI/Screens/Settings/CreditsService.m
    ../UI/Screens/Settings/CursorManageViewController.m
    ../UI/Screens/Settings/CursorHitboxEditorViewController.m
    ../UI/Screens/Account/AccountViewController.m
@@ -352,10 +359,10 @@ egl_bridge.m
 )
 
 if("${CMAKE_HOST_SYSTEM_NAME}" MATCHES "Linux|^GNU$|Android")
-target_sources(AngelAuraAmethyst PUBLIC non_darwin_utils.m)
+target_sources(Witch PUBLIC non_darwin_utils.m)
 endif()
 
-target_link_libraries(AngelAuraAmethyst
+target_link_libraries(Witch
   PUBLIC AFNetworking
   TouchControllerBridge
   lzma
@@ -382,7 +389,7 @@ target_link_libraries(AngelAuraAmethyst
   "-framework WebKit"
   "-weak_framework SafariServices"
 )
-set_target_properties(AngelAuraAmethyst PROPERTIES
+set_target_properties(Witch PROPERTIES
   MACOSX_BUNDLE TRUE
   MACOSX_FRAMEWORK_IDENTIFIER org.cmake.ExecutableTarget
   MACOSX_BUNDLE_INFO_PLIST "${CMAKE_CURRENT_LIST_DIR}/Info.plist")

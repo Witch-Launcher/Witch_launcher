@@ -2,11 +2,13 @@
 
 ## 🇬🇧 English
 
+- Fixed Distant Horizons crashing the game at startup (NoClassDefFoundError: org.lwjgl.system.Pointer$Default on 1.20/1.20.1 Fabric). Root cause: patched GLFW's static `SharedLibrary` field was created during `GLFW.<clinit>`, which runs inside `MemoryUtil.<clinit>` → `Library.<clinit>` → `System.load` before `MemoryUtil.UNSAFE` is assigned — `Pointer$Default` got permanently poisoned and any later LWJGL use (e.g. DH's TinyFileDialogs message box) crashed with "UNSAFE is null". The library handle is now created lazily on first use, keeping `GLFW.<clinit>` pure Java.
 - Reviewed and fixed the Super resolution not working.
 - Fixed Distant Horizons crashing on iOS 26 (A12+ devices): the mod's zstd-jni native library is now pre-extracted from the DH jar and ad-hoc signed with a bundled ldid, so it loads from `java.library.path` instead of failing with "code signature invalid".
 
 ## 🇻🇳 Tiếng Việt
 
+- Sửa Distant Horizons crash ngay khi khởi động game (NoClassDefFoundError: org.lwjgl.system.Pointer$Default trên Fabric 1.20/1.20.1). Nguyên nhân: thư viện `SharedLibrary` tĩnh trong GLFW (patched) được tạo trong lúc `GLFW.<clinit>` chạy bên trong `MemoryUtil.<clinit>` → `Library.<clinit>` → `System.load`, trước khi `MemoryUtil.UNSAFE` được gán — class `Pointer$Default` bị "đầu độc" vĩnh viễn và mọi truy cập LWJGL sau đó (vd: hộp thoại TinyFileDialogs của DH) crash với lỗi "UNSAFE is null". Giờ handle thư viện được tạo delay khi dùng lần đầu, giữ cho `GLFW.<clinit>` hoàn toàn pure Java.
 - Xem và sửa mod Super resolution không hoạt động.
 - Sửa Distant Horizons crash trên iOS 26 (máy A12+): thư viện zstd-jni của mod giờ được lấy sẵn từ jar DH và ký ad-hoc bằng ldid đi kèm trong app, load từ `java.library.path` thay vì báo lỗi "code signature invalid".
 
@@ -30,7 +32,8 @@
 # AngelAuraAmethyst iOS — 1.1.3
 
 ```Cảm ơn L4d đã hỗ trợ mình trong việc sửa chữa vấn đề trên iOS 27(But not working :< I'm Sorry)```
-```Thanks for Development247```
+```Thanks for Development247, Han```
+
 ## 🇬🇧 English
 
 - Fixed the Distant Horizons mod not working on iOS 26.
@@ -75,6 +78,20 @@
 
 ---
 
+# AngelAuraAmethyst iOS — 1.1.3-beta.10
+
+```Cảm ơn L4d đã hỗ trợ mình trong việc sửa chữa vấn đề trên iOS 27(But not working :< I'm Sorry)```
+
+## 🇬🇧 English
+
+- 
+
+## 🇻🇳 Tiếng Việt
+
+- 
+
+---
+
 # AngelAuraAmethyst iOS — 1.1.3-beta.9
 
 ```Cảm ơn L4d đã hỗ trợ mình trong việc sửa chữa vấn đề trên iOS 27(But not working :< I'm Sorry)```
@@ -84,12 +101,14 @@
 - Fixed the Distant Horizons mod not working on iOS 26.
 - Fixed the crash issue when reaching 1000MB RAM on all devices.
 - Reviewed and fixed the Touch Controller not working.
+- iOS 26.6/27 JIT: TXM detection rewritten to match StikDebug 3.1.6+ exactly — A13/A14/M1 devices (e.g. iPhone 12) now use the correct non-TXM path on iOS 26, and on iOS 27 every device except the M1 iPad Pro (iPad8,11/iPad8,12) is treated as TXM so the Universal JIT script is actually served. Use StikDebug 3.1.6 or newer (3.1.9 recommended). New hidden preference `debug.force_txm` to override detection.
 
 ## 🇻🇳 Tiếng Việt
 
 - Sửa lỗi Distant Horizons mod không hoạt động trên iOS 26.
 - Sửa lỗi crash khi đạt 1000MB RAM trên mọi thiết bị.
 - Xem và sửa mod Touch Controller không hoạt động.
+- Sửa JIT trên iOS 26.6/27: viết lại cách nhận diện TXM cho khớp hoàn toàn với StikDebug 3.1.6+ — máy A13/A14/M1 (vd iPhone 12) giờ dùng đúng đường non-TXM trên iOS 26, còn trên iOS 27 mọi thiết bị trừ iPad Pro M1 (iPad8,11/iPad8,12) được xem là TXM để debugger thực sự phục vụ script Universal JIT. Hãy dùng StikDebug 3.1.6 trở lên (khuyến nghị 3.1.9). Thêm pref ẩn `debug.force_txm` để ép nhận diện TXM.
 
 ---
 

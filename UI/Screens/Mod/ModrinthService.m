@@ -50,7 +50,7 @@ static NSString *const kModrinthBaseURL = @"https://api.modrinth.com/v2";
     NSMutableURLRequest *request = [NSMutableURLRequest requestWithURL:components.URL];
     request.HTTPMethod = @"GET";
     [request setValue:@"application/json" forHTTPHeaderField:@"Content-Type"];
-    [request setValue:@"Amethyst/1.0" forHTTPHeaderField:@"User-Agent"];
+    [request setValue:@"Witch/1.0" forHTTPHeaderField:@"User-Agent"];
 
     [[NSURLSession.sharedSession dataTaskWithRequest:request completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
         if (error) {
@@ -92,7 +92,7 @@ static NSString *const kModrinthBaseURL = @"https://api.modrinth.com/v2";
     NSString *urlStr = [NSString stringWithFormat:@"%@/project/%@/version", kModrinthBaseURL, projectId];
     NSMutableURLRequest *request = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:urlStr]];
     [request setValue:@"application/json" forHTTPHeaderField:@"Content-Type"];
-    [request setValue:@"Amethyst/1.0" forHTTPHeaderField:@"User-Agent"];
+    [request setValue:@"Witch/1.0" forHTTPHeaderField:@"User-Agent"];
 
     [[NSURLSession.sharedSession dataTaskWithRequest:request completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
         if (error) {
@@ -134,7 +134,7 @@ static NSString *const kModrinthBaseURL = @"https://api.modrinth.com/v2";
     NSString *urlStr = [NSString stringWithFormat:@"%@/project/%@", kModrinthBaseURL, projectId];
     NSMutableURLRequest *request = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:urlStr]];
     [request setValue:@"application/json" forHTTPHeaderField:@"Content-Type"];
-    [request setValue:@"Amethyst/1.0" forHTTPHeaderField:@"User-Agent"];
+    [request setValue:@"Witch/1.0" forHTTPHeaderField:@"User-Agent"];
 
     [[NSURLSession.sharedSession dataTaskWithRequest:request completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
         if (error) {

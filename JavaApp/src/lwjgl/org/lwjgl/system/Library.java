@@ -60,7 +60,7 @@ public final class Library {
         // with UnsatisfiedLinkError before liblwjgl.dylib ever gets loaded.
         loadSystem("org.lwjgl", JNI_LIBRARY_NAME);
         try {
-            // AngelAuraAmethyst (this app's binary) exposes JNI_OnLoad which must run
+            // Witch (this app's binary) exposes JNI_OnLoad which must run
             // so runtimeJavaVMPtr gets set; otherwise JNI_LWJGL_changeRenderer (called
             // from pojavInitOpenGL) SIGSEGVs dereferencing a NULL JavaVM*.
             // NOTE: the TouchController game-side dylib
@@ -71,7 +71,7 @@ public final class Library {
             // TransportPatcher injects the load into the mod's Transport.<clinit>
             // instead, so it runs in Knot.
             if (Platform.get() == Platform.MACOSX) {
-                System.load(System.getenv("BUNDLE_PATH") + "/AngelAuraAmethyst");
+                System.load(System.getenv("BUNDLE_PATH") + "/Witch");
             } else if (Platform.get() == Platform.LINUX) {
                 System.loadLibrary("pojavexec");
             }

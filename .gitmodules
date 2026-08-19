@@ -1,2 +1,3 @@
-
-
+[submodule "amethyst-prebuilt-libraries/renderers/ANGLE/angle"]
+	path = amethyst-prebuilt-libraries/renderers/ANGLE/angle
+	url = https://github.com/Ynnyny/angle.git

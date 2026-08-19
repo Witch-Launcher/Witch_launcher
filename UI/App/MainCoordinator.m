@@ -164,7 +164,8 @@
 - (void)showSettings {
     SettingsViewController *vc = [[SettingsViewController alloc] init];
     vc.coordinator = self;
-    [self.rootVC presentContentAsSheet:vc];
+    UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:vc];
+    [self.rootVC presentContentAsSheet:nav];
 }
 
 - (void)showFileManager {
@@ -221,9 +222,16 @@
 }
 
 - (void)removeVersion:(NSString *)versionName {
-    NSString *path = [VersionDirectoryManager.shared versionPathForVersion:versionName];
-    [[NSFileManager defaultManager] removeItemAtPath:path error:nil];
-    [self.rootVC.rightPanelVC refreshVersions];
+    UIAlertController *alert = [UIAlertController alertControllerWithTitle:[NSString stringWithFormat:@"Delete %@?", versionName]
+                                                                   message:@"This will permanently delete this profile and version. This action cannot be undone."
+                                                            preferredStyle:UIAlertControllerStyleAlert];
+    [alert addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
+    [alert addAction:[UIAlertAction actionWithTitle:@"Delete" style:UIAlertActionStyleDestructive handler:^(UIAlertAction *action) {
+        NSString *path = [VersionDirectoryManager.shared versionPathForVersion:versionName];
+        [[NSFileManager defaultManager] removeItemAtPath:path error:nil];
+        [self.rootVC.rightPanelVC refreshVersions];
+    }]];
+    [self.rootVC presentViewController:alert animated:YES completion:nil];
 }
 
 - (void)selectVersion:(NSString *)versionName {

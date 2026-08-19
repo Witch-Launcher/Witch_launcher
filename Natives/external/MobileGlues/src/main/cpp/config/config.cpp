@@ -1,8 +1,15 @@
+// MobileGlues - config/config.cpp
+// Copyright (c) 2025-2026 MobileGL-Dev
+// Licensed under the GNU Lesser General Public License v2.1:
+//   https://www.gnu.org/licenses/old-licenses/lgpl-2.1.txt
+// SPDX-License-Identifier: LGPL-2.1-only
+// End of Source File Header
 #include "config.h"
 
 #include "../gl/log.h"
 #include "../gl/mg.h"
 #include "cJSON.h"
+#include "stats.h"
 #include <cerrno>
 #include <stdio.h>
 #include <stdlib.h>
@@ -14,12 +21,13 @@
 
 char* DEFAULT_MG_DIRECTORY_PATH = "/sdcard/MG";
 
-char* mg_directory_path;
-char* config_file_path;
-char* log_file_path;
-char* glsl_cache_file_path;
+bool is_custom_mg_dir = false;
+char* mg_directory_path = nullptr;
+char* config_file_path = nullptr;
+char* log_file_path = nullptr;
+char* glsl_cache_file_path = nullptr;
 
-static cJSON* config_json = NULL;
+static cJSON* config_json = nullptr;
 
 int initialized = 0;
 
@@ -31,11 +39,15 @@ char* concatenate(char* str1, char* str2) {
 }
 
 int check_path() {
-    char* var = getenv("MG_DIR_PATH");
-    mg_directory_path = var ? var : DEFAULT_MG_DIRECTORY_PATH;
+    if (!mg_directory_path) {
+        char* var = getenv("MG_DIR_PATH");
+        is_custom_mg_dir = var ? true : false;
+        mg_directory_path = var ? strdup(var) : DEFAULT_MG_DIRECTORY_PATH;
+    }
     config_file_path = concatenate(mg_directory_path, "/config.json");
     log_file_path = concatenate(mg_directory_path, "/latest.log");
     glsl_cache_file_path = concatenate(mg_directory_path, "/glsl_cache.tmp");
+    stats_file_path = concatenate(mg_directory_path, "/stats.json");
 
     if (mkdir(mg_directory_path, 0755) != 0 && errno != EEXIST) {
         LOG_E("Error creating MG directory.\n")

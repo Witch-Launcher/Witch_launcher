@@ -8,9 +8,38 @@
 "game.menu.log_output" = "Nhật ký ra ";
 "game.menu.custom_controls" = "Tùy chỉnh điều khiển";
 
+"In-Game Widget" = "Tiện ích trong game";
+"preference.title.widget_menu" = "Menu tiện ích";
+"preference.title.widget_show_fps" = "Hiển thị FPS";
+"preference.title.widget_show_cpu" = "Hiển thị CPU";
+"preference.title.widget_show_gpu" = "Hiển thị GPU";
+"preference.title.widget_cpu_style" = "Hiển thị CPU/GPU";
+"preference.title.widget_cpu_style.bars" = "Sơ đồ";
+"preference.title.widget_cpu_style.percent" = "Phần trăm";
+"preference.title.widget_cpu_style.ring" = "Đường tròn";
+"preference.title.widget_ram_style" = "Hiển thị RAM";
+"preference.title.widget_ram_style.none" = "Tắt";
+"preference.title.widget_size" = "Kích thước Widget";
+"preference.title.widget_show_temp" = "Hiển thị nhiệt độ";
+"preference.title.widget_temp_unit" = "Đơn vị nhiệt độ";
+"preference.title.widget_temp_unit.c" = "Độ C (°C)";
+"preference.title.widget_temp_unit.f" = "Độ F (°F)";
+"preference.title.widget_show_batt" = "Hiển thị pin";
+"preference.title.widget_bg_opacity" = "Độ đậm nền Widget";
+
 "game.note.airplay" = "Minecraft đang được hiển thị trên màn hình AirPlay";
 
 "game.title.exit_code" = "Trò chơi thoát với mã %d";
+
+"crash.screen.title" = "Game crash";
+"crash.screen.code" = "Mã lỗi: %d";
+"crash.screen.close" = "Đóng";
+"crash.screen.share" = "Chia sẻ log";
+"crash.screen.toggle_full" = "Xem toàn bộ log";
+"crash.screen.toggle_excerpt" = "Xem đoạn trích";
+"crash.screen.category.mod" = "Thiếu hoặc xung đột mod";
+"crash.screen.category.error" = "Lỗi game";
+"crash.screen.category.raw" = "Lỗi không xác định";
 
 // The play button
 "Play" = "Chơi";
@@ -319,3 +348,9 @@
 "controller_configurator.mouse.title.mouse_middle" = "Chuột giữa";
 "controller_configurator.mouse.title.mouse_scroll_up" = "Lăn lên";
 "controller_configurator.mouse.title.mouse_scroll_down" = "Lăn xuống";
+"credits.title" = "Ghi công";
+"credits.author" = "Tác giả";
+"credits.author_placeholder" = "Tên của bạn";
+"credits.open_license" = "Mở giấy phép";
+"credits.open_project" = "Mở dự án";
+"credits.unavailable" = "Không tải được credits. Kiểm tra kết nối internet của bạn.";

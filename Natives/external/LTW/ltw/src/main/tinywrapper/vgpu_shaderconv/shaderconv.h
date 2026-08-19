@@ -8,6 +8,7 @@
 #define UNTITLED_SHADERCONV_H
 
 char * ConvertShaderVgpu(char* source, int is_vertex, int second_pass);
+char * ConvertShaderBufferTextures(const char * source);
 
 char * GLSLHeader(char* source);
 char * RemoveConstInsideBlocks(char* source, int * sourceLength);

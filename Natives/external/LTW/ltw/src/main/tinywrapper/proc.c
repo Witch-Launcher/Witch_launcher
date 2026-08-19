@@ -6,6 +6,7 @@
 #include <EGL/egl.h>
 #include <GLES3/gl31.h>
 #include <dlfcn.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include "proc.h"
@@ -19,12 +20,12 @@ INTERNAL eglMustCastToProperFunctionPointerType (*host_eglGetProcAddress)(const 
 INTERNAL es3_functions_t es3_functions;
 
 static void error_sysegl() {
-    fprintf(stderr, "LTWInit: Failed to load system EGL: %s", dlerror());
+    fprintf(stderr, "LTWInit: Failed to load system EGL: %s\n", dlerror());
     abort();
 }
 
 static void error_init(const char* functionName) {
-    fprintf(stderr, "LTWInit: Failed to load function \"%s\"", functionName);
+    fprintf(stderr, "LTWInit: Failed to load function \"%s\"\n", functionName);
     abort();
 }
 
@@ -37,7 +38,7 @@ static void init_es3_proc() {
 #undef GLESFUNC
 }
 
-__attribute__((constructor, used, visibility("default"))) void proc_init(){
+__attribute__((constructor, used)) void proc_init(){
     const char* systemEglPath = "@rpath/libtinygl4angle.dylib";
     const char* eglPath = getenv("LIBGL_EGL") != NULL ? getenv("LIBGL_EGL") : systemEglPath;
     int flags = RTLD_LAZY | RTLD_LOCAL;
@@ -73,7 +74,7 @@ __attribute__((used, visibility("default"))) eglMustCastToProperFunctionPointerT
     if(strncmp(procname, "gl", 2) != 0) goto fallback;
 #define GLESOVERRIDE(name)                                        \
     if(!strcmp(procname, #name)) {                                \
-        fprintf(stderr, "LTW: Overridden %s\n", #name);                        \
+        printf("LTW: Overridden %s\n", #name);                        \
         return (eglMustCastToProperFunctionPointerType) name;     \
     }
 #include "es3_overrides.h"

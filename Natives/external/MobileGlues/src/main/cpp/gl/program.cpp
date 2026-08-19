@@ -1,6 +1,9 @@
-//
-// Created by hanji on 2025/2/3.
-//
+// MobileGlues - gl/program.cpp
+// Copyright (c) 2025-2026 MobileGL-Dev
+// Licensed under the GNU Lesser General Public License v2.1:
+//   https://www.gnu.org/licenses/old-licenses/lgpl-2.1.txt
+// SPDX-License-Identifier: LGPL-2.1-only
+// End of Source File Header
 
 #include <regex.h>
 #include "GL/glext.h"
@@ -12,16 +15,12 @@
 #include <cstring>
 #include <iostream>
 #include "../config/settings.h"
-#include <ankerl/unordered_dense.h>
 #include "drawing.h"
 
 #define DEBUG 0
 
 extern UnorderedMap<GLuint, bool> shader_map_is_sampler_buffer_emulated;
 UnorderedMap<GLuint, bool> program_map_is_sampler_buffer_emulated;
-
-extern UnorderedMap<GLuint, bool> shader_map_is_atomic_counter_emulated;
-UnorderedMap<GLuint, bool> program_map_is_atomic_counter_emulated;
 
 enum class ShouldGenerateFSState : int {
     Never = 0,
@@ -31,8 +30,8 @@ enum class ShouldGenerateFSState : int {
 
 UnorderedMap<GLuint, ShouldGenerateFSState> program_map_should_generate_fs;
 
-char* updateLayoutLocation(const char* esslSource, GLuint color, const char* name) {
-    std::string shaderCode(esslSource);
+std::string updateLayoutLocation(const std::string& esslSource, GLuint color, const char* name) {
+    const std::string& shaderCode = esslSource;
 
     std::string pattern = std::string(R"((layout\s*$[^)]*location\s*=\s*\d+[^)]*$\s*)?)") +
                           R"(out\s+((?:highp|mediump|lowp|\w+\s+)*\w+)\s+)" + name + R"(\s*;)";
@@ -42,9 +41,7 @@ char* updateLayoutLocation(const char* esslSource, GLuint color, const char* nam
     std::regex reg(pattern);
     std::string modifiedCode = std::regex_replace(shaderCode, reg, replacement);
 
-    char* result = new char[modifiedCode.size() + 1];
-    strcpy(result, modifiedCode.c_str());
-    return result;
+    return modifiedCode;
 }
 
 void glBindFragDataLocation(GLuint program, GLuint color, const GLchar* name) {
@@ -71,29 +68,12 @@ void glBindFragDataLocation(GLuint program, GLuint color, const GLchar* name) {
         }
     }
 
-    char* origin_glsl = nullptr;
-    if (shaderInfo.frag_data_changed) {
-        size_t glslLen = strlen(shaderInfo.frag_data_changed_converted) + 1;
-        origin_glsl = (char*)malloc(glslLen);
-        if (origin_glsl == nullptr) {
-            LOG_E("Memory reallocation failed for frag_data_changed_converted\n")
-            return;
-        }
-        strcpy(origin_glsl, shaderInfo.frag_data_changed_converted);
-    } else {
-        size_t glslLen = shaderInfo.converted.length() + 1;
-        origin_glsl = (char*)malloc(glslLen);
-        if (origin_glsl == nullptr) {
-            LOG_E("Memory reallocation failed for converted\n")
-            return;
-        }
-        strcpy(origin_glsl, shaderInfo.converted.c_str());
-    }
+    // Copied before the call, not aliased into it: the result is assigned back
+    // over the same member that supplies the input.
+    const std::string origin_glsl =
+        shaderInfo.frag_data_changed ? shaderInfo.frag_data_changed_converted : shaderInfo.converted;
 
-    char* result_glsl = updateLayoutLocation(origin_glsl, color, name);
-    free(origin_glsl);
-
-    shaderInfo.frag_data_changed_converted = result_glsl;
+    shaderInfo.frag_data_changed_converted = updateLayoutLocation(origin_glsl, color, name);
     shaderInfo.frag_data_changed = 1;
 }
 
@@ -115,14 +95,14 @@ void GenerateDefaultFSSource() {
     }
 }
 
-
 static UnorderedMap<unsigned, GLuint> DefaultFSMap; // essl version <-> shader id
 void glLinkProgram(GLuint program) {
     LOG()
 
     LOG_D("glLinkProgram(%d)", program)
     if (!shaderInfo.converted.empty() && shaderInfo.frag_data_changed) {
-        GLES.glShaderSource(shaderInfo.id, 1, (const GLchar* const*)&shaderInfo.frag_data_changed_converted, nullptr);
+        const GLchar* patched = shaderInfo.frag_data_changed_converted.c_str();
+        GLES.glShaderSource(shaderInfo.id, 1, &patched, nullptr);
         GLES.glCompileShader(shaderInfo.id);
         GLint status = 0;
         GLES.glGetShaderiv(shaderInfo.id, GL_COMPILE_STATUS, &status);
@@ -137,13 +117,13 @@ void glLinkProgram(GLuint program) {
     }
     shaderInfo.id = 0;
     shaderInfo.converted = "";
-    shaderInfo.frag_data_changed_converted = nullptr;
+    shaderInfo.frag_data_changed_converted.clear();
     shaderInfo.frag_data_changed = 0;
 
     // Generate defaut fragment shader if needed
     if (program_map_should_generate_fs[program] == ShouldGenerateFSState::Maybe) {
         GenerateDefaultFSSource();
-        GLuint &default_fs = DefaultFSMap[CurrentDefaultFSSourceVersion];
+        GLuint& default_fs = DefaultFSMap[CurrentDefaultFSSourceVersion];
         if (!default_fs) {
             default_fs = GLES.glCreateShader(GL_FRAGMENT_SHADER);
             const char* src = DefaultFSSource.c_str();
@@ -205,10 +185,6 @@ void glAttachShader(GLuint program, GLuint shader) {
     LOG_D("glAttachShader(%u, %u)", program, shader)
     if (hardware->emulate_texture_buffer && shader_map_is_sampler_buffer_emulated[shader])
         program_map_is_sampler_buffer_emulated[program] = true;
-    if (shader_map_is_atomic_counter_emulated[shader]) {
-        program_map_is_atomic_counter_emulated[program] = true;
-        LOG_D("Shader %d is atomic counter emulated, setting program %d to atomic counter emulated", shader, program)
-    }
 
     GLint type = 0;
     GLES.glGetShaderiv(shader, GL_SHADER_TYPE, &type);
@@ -238,9 +214,51 @@ GLuint glCreateProgram() {
             g_samplerCacheForSamplerBuffer.erase(program);
         }
     }
-    program_map_is_atomic_counter_emulated[program] = false;
     program_map_should_generate_fs[program] = ShouldGenerateFSState::Unknown;
 
     CHECK_GL_ERROR
     return program;
+}
+
+// GL 3.1's name-only half of the active-uniform query, on top of the ES call that
+// already returns the same string.
+//
+// It was a stub -- a no-op that wrote neither the name nor the length and, being a
+// stub rather than an error, left glGetError clean. Callers got whatever was
+// already in the buffer they passed.
+//
+// That is not a cosmetic gap. The standard way to build a name -> location map is
+// to walk the active uniforms by index and ask for each name, and a caller doing
+// that ended up with a map keyed on garbage: every later lookup missed, so the
+// uniforms never got set and kept whatever the driver had zero-initialised them
+// to. NeoForge's early loading window does exactly this, and a screenSize of
+// (0, 0) turned its every vertex into a division by zero -- gl_Position came out
+// non-finite, every primitive was discarded, and the window rendered black with
+// nothing anywhere reporting a problem.
+void glGetActiveUniformName(GLuint program, GLuint uniformIndex, GLsizei bufSize, GLsizei* length,
+                            GLchar* uniformName) {
+    LOG()
+    LOG_D("glGetActiveUniformName(program: %u, index: %u, bufSize: %d)", program, uniformIndex, bufSize)
+
+    if (length) *length = 0;
+    if (bufSize <= 0 || uniformName == nullptr) {
+        // Nothing to write. Still forwarded when bufSize is negative so the driver
+        // raises the GL_INVALID_VALUE the caller is owed.
+        if (bufSize < 0) GLES.glGetActiveUniform(program, uniformIndex, bufSize, nullptr, nullptr, nullptr, nullptr);
+        CHECK_GL_ERROR
+        return;
+    }
+
+    // Same buffer contract in both calls: at most bufSize-1 characters plus the
+    // terminator, and a length that excludes it. The size and type this also
+    // returns are what glGetActiveUniformsiv is for; they are discarded here.
+    GLint size = 0;
+    GLenum type = 0;
+    GLsizei written = 0;
+    uniformName[0] = '\0';
+    GLES.glGetActiveUniform(program, uniformIndex, bufSize, &written, &size, &type, uniformName);
+    if (length) *length = written;
+
+    LOG_D("  -> \"%s\"", uniformName)
+    CHECK_GL_ERROR
 }

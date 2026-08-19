@@ -41,8 +41,25 @@ AliasDecl(glBindFragDataLocation, EXT)
 AliasDecl(glBindFragDataLocationIndexed, EXT)
 
 // Hidden functions
-AliasDeclPriv(DrawBuffer)
-AliasDeclPriv(PolygonMode)
+// ANGLE dropped its GL_-prefixed desktop exports (GL_DrawBuffer, GL_PolygonMode),
+// so these cannot be branch aliases anymore. Provide local forwarding instead.
+
+void glDrawBuffer(GLenum buf) {
+    static void (*glDrawBuffersFn)(GLenum count, const GLenum *bufs) = NULL;
+    if (!glDrawBuffersFn) {
+        glDrawBuffersFn = dlsym(RTLD_NEXT, "glDrawBuffers");
+    }
+    if (glDrawBuffersFn) {
+        GLenum bufs[1] = { buf == GL_NONE ? GL_NONE : GL_BACK };
+        glDrawBuffersFn(1, bufs);
+    }
+}
+
+void glPolygonMode(GLenum face, GLenum mode) {
+    // GLES has no polygon mode; ANGLE's GL_ exports are gone. Ignore.
+    (void)face;
+    (void)mode;
+}
 
 int proxy_width, proxy_height, proxy_intformat, maxTextureSize;
 

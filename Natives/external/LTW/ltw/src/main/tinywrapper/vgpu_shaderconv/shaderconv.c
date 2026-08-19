@@ -1727,3 +1727,252 @@ int GetShaderVersion(const char * source) {
     free(versionString);
     return 100;
 }
+
+/**
+ * Convert texture-buffer samplers into plain 2D samplers so the shader can
+ * compile on OpenGL ES 3.0, which has no GL_EXT_texture_buffer:
+ *   isamplerBuffer/usamplerBuffer/samplerBuffer become isampler2D/usampler2D/sampler2D
+ *   texelFetch(S, i)              become texelFetch(S, ivec2(i, 0), 0)
+ * and any "#extension ...texture_buffer..." directive is dropped.
+ * @param source The shader as a null-terminated string
+ * @return A new allocated string, or NULL on failure (caller frees the input)
+ */
+static int isIdentifierChar(char c) {
+    return (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '_';
+}
+
+static int isWsChar(char c) {
+    return c == ' ' || c == '\t' || c == '\r' || c == '\n';
+}
+
+static const char* findSubstring(const char* haystack, size_t hayLen, const char* needle) {
+    size_t needleLen = strlen(needle);
+    if(needleLen > hayLen) return NULL;
+    for(size_t i = 0; i + needleLen <= hayLen; i++) {
+        if(memcmp(haystack + i, needle, needleLen) == 0) return haystack + i;
+    }
+    return NULL;
+}
+
+/* Returns non-zero when the token at @pos lies inside a precision statement
+ * ("precision" as the first word of the line) */
+static int isPrecisionStatementLine(const char* source, size_t srcLen, size_t pos) {
+    size_t lineStart = pos;
+    while(lineStart > 0 && source[lineStart - 1] != '\n') lineStart--;
+    size_t p = lineStart;
+    while(p < srcLen && isWsChar(source[p])) p++;
+    if(srcLen - p < 9 || memcmp(source + p, "precision", 9) != 0) return 0;
+    if(p + 9 < srcLen && isIdentifierChar(source[p + 9])) return 0;
+    return 1;
+}
+
+char * ConvertShaderBufferTextures(const char * source) {
+    if(source == NULL) return NULL;
+
+    size_t srcLen = strlen(source);
+    size_t cap = srcLen + 4096;
+    char* out = malloc(cap);
+    if(out == NULL) return NULL;
+    size_t outLen = 0;
+
+    typedef struct BufferSampler {
+        char type; /* 'i' for int, 'u' for uint, 'f' for float */
+        char name[512];
+    } BufferSampler;
+    BufferSampler* samplers = NULL;
+    int samplerCount = 0, samplerCap = 0;
+
+    static const struct {
+        const char* token;
+        size_t tokenLen;
+        char type;
+    } samplerTokens[] = {
+        {"isamplerBuffer", 14, 'i'},
+        {"usamplerBuffer", 14, 'u'},
+        {"samplerBuffer", 13, 'f'},
+    };
+    static const char* bannedTokens[] = {
+        "imageBuffer", "iimageBuffer", "uimageBuffer",
+    };
+
+    /* Pass 1: strip buffer-texture extension lines, rewrite sampler types */
+    size_t i = 0;
+    while(i < srcLen) {
+        if(srcLen - i >= 10 && memcmp(source + i, "#extension", 10) == 0) {
+            size_t lineEnd = i;
+            while(lineEnd < srcLen && source[lineEnd] != '\n') lineEnd++;
+            if(findSubstring(source + i, lineEnd - i, "texture_buffer") != NULL) {
+                i = lineEnd;
+                if(i < srcLen) i++; /* skip the newline too */
+                continue;
+            }
+            while(i < lineEnd) out[outLen++] = source[i++];
+            if(i < srcLen) out[outLen++] = source[i++];
+            continue;
+        }
+        int matched = 0;
+        for(size_t b = 0; b < sizeof(bannedTokens)/sizeof(bannedTokens[0]); b++) {
+            size_t btokLen = strlen(bannedTokens[b]);
+            if(srcLen - i < btokLen || memcmp(source + i, bannedTokens[b], btokLen) != 0) continue;
+            if(i > 0 && isIdentifierChar(source[i - 1])) continue;
+            if(i + btokLen < srcLen && isIdentifierChar(source[i + btokLen])) continue;
+            /* Reserved words in GLSL ES 3.00 (precision statements only), drop the line */
+            size_t lineStart = i;
+            while(lineStart > 0 && source[lineStart - 1] != '\n') lineStart--;
+            outLen -= (i - lineStart); /* undo the already-copied line prefix */
+            size_t lineEnd = lineStart;
+            while(lineEnd < srcLen && source[lineEnd] != '\n') lineEnd++;
+            i = lineEnd;
+            if(i < srcLen) i++; /* skip the newline too */
+            matched = 1;
+            break;
+        }
+        if(matched) continue;
+        for(size_t s = 0; s < sizeof(samplerTokens)/sizeof(samplerTokens[0]); s++) {
+            size_t tokLen = samplerTokens[s].tokenLen;
+            if(srcLen - i < tokLen || memcmp(source + i, samplerTokens[s].token, tokLen) != 0) continue;
+            if(i > 0 && isIdentifierChar(source[i - 1])) continue;
+            if(i + tokLen < srcLen && isIdentifierChar(source[i + tokLen])) continue;
+            if(isPrecisionStatementLine(source, srcLen, i)) {
+                /* a "precision" declaration for a buffer sampler type is
+                 * meaningless once the type is rewritten: drop the line */
+                size_t lineStart = i;
+                while(lineStart > 0 && source[lineStart - 1] != '\n') lineStart--;
+                outLen -= (i - lineStart); /* undo the already-copied line prefix */
+                size_t lineEnd = lineStart;
+                while(lineEnd < srcLen && source[lineEnd] != '\n') lineEnd++;
+                i = lineEnd;
+                if(i < srcLen) i++; /* skip the newline too */
+                matched = 1;
+                break;
+            }
+            /* record the sampler variable name that follows the type token */
+            size_t n = i + tokLen;
+            while(n < srcLen && (source[n] == ' ' || source[n] == '\t' || source[n] == '\r' || source[n] == '\n')) n++;
+            if(n < srcLen && isIdentifierChar(source[n])) {
+                size_t nameStart = n;
+                while(n < srcLen && isIdentifierChar(source[n])) n++;
+                size_t nameLen = n - nameStart;
+                if(samplerCount == samplerCap) {
+                    samplerCap = samplerCap == 0 ? 4 : samplerCap * 2;
+                    BufferSampler* grown = realloc(samplers, sizeof(BufferSampler) * samplerCap);
+                    if(grown == NULL) { free(samplers); free(out); return NULL; }
+                    samplers = grown;
+                }
+                samplers[samplerCount].type = samplerTokens[s].type;
+                if(nameLen >= sizeof(samplers[samplerCount].name)) nameLen = sizeof(samplers[samplerCount].name) - 1;
+                memcpy(samplers[samplerCount].name, source + nameStart, nameLen);
+                samplers[samplerCount].name[nameLen] = 0;
+                samplerCount++;
+            }
+            const char* replacement = samplerTokens[s].type == 'i' ? "isampler2D" : samplerTokens[s].type == 'u' ? "usampler2D" : "sampler2D";
+            size_t replLen = strlen(replacement);
+            if(outLen + replLen + 64 > cap) {
+                cap = outLen + replLen + 4096;
+                char* grown = realloc(out, cap);
+                if(!grown) { free(samplers); free(out); return NULL; }
+                out = grown;
+            }
+            memcpy(out + outLen, replacement, replLen);
+            outLen += replLen;
+            i += tokLen;
+            matched = 1;
+            break;
+        }
+        if(matched) continue;
+        out[outLen++] = source[i++];
+    }
+
+    /* Pass 2: rewrite texelFetch(NAME, ...) for recorded buffer samplers */
+    i = 0;
+    while(i + 10 <= outLen) {
+        if(memcmp(out + i, "texelFetch", 10) != 0) { i++; continue; }
+        if(i > 0 && isIdentifierChar(out[i - 1])) { i++; continue; }
+        size_t paren = i + 10;
+        while(paren < outLen && isWsChar(out[paren])) paren++;
+        if(paren >= outLen || out[paren] != '(') { i++; continue; }
+        size_t nameStart = paren + 1;
+        size_t nameEnd = nameStart;
+        while(nameEnd < outLen && isWsChar(out[nameEnd])) nameEnd++;
+        size_t identStart = nameEnd;
+        while(nameEnd < outLen && isIdentifierChar(out[nameEnd])) nameEnd++;
+        if(nameEnd == identStart) { i++; continue; }
+
+        char sampleType = 0;
+        for(int s = 0; s < samplerCount; s++) {
+            size_t slen = strlen(samplers[s].name);
+            if(nameEnd - identStart == slen && memcmp(out + identStart, samplers[s].name, slen) == 0) {
+                sampleType = samplers[s].type;
+                break;
+            }
+        }
+        if(sampleType == 0) { i++; continue; } /* not a buffer sampler, leave it alone */
+
+        /* balanced scan: find arg separator(s) and the call's closing paren */
+        size_t scan = nameEnd;
+        int depth = 0;
+        int firstComma = -1, secondComma = -1;
+        size_t callEnd = 0;
+        int closed = 0;
+        while(scan < outLen) {
+            char c = out[scan];
+            if(c == '(') depth++;
+            else if(c == ')') {
+                if(depth == 0) { callEnd = scan; closed = 1; break; }
+                depth--;
+            } else if(c == ',' && depth == 0) {
+                if(firstComma < 0) firstComma = (int)scan;
+                else if(secondComma < 0) secondComma = (int)scan;
+            }
+            scan++;
+        }
+        if(!closed) { i++; continue; }
+
+        size_t argStart = firstComma >= 0 ? (size_t)firstComma + 1 : nameEnd;
+        while(argStart < callEnd && isWsChar(out[argStart])) argStart++;
+        size_t argEnd = secondComma >= 0 ? (size_t)secondComma : callEnd;
+        while(argEnd > argStart && isWsChar(out[argEnd - 1])) argEnd--;
+
+        const char* vecCtor = sampleType == 'f' ? "vec2" : "ivec2";
+        size_t nameSparse = nameEnd - nameStart;
+        size_t before = i; /* start of the "texelFetch" keyword, kept in the output */
+        size_t arg1Len = argEnd - argStart;
+        size_t restLen = secondComma >= 0 ? callEnd - (size_t)secondComma : 0;
+        size_t afterLen = outLen - callEnd - 1;
+        size_t builtMax = 11 + nameSparse + 8 + arg1Len + 6 + (restLen ? 1 + restLen : 0) + 2;
+        size_t newLen = before + builtMax + afterLen;
+        char* newOut = malloc(newLen + 1);
+        char* builtBuf = malloc(builtMax + 1);
+        if(newOut == NULL || builtBuf == NULL) { free(builtBuf); free(samplers); free(out); return NULL; }
+        size_t r = 0;
+        memcpy(builtBuf + r, "texelFetch(", 11); r += 11;
+        memcpy(builtBuf + r, out + nameStart, nameSparse); r += nameSparse;
+        builtBuf[r++] = ',';
+        builtBuf[r++] = ' ';
+        size_t vecCtorLen = strlen(vecCtor);
+        memcpy(builtBuf + r, vecCtor, vecCtorLen); r += vecCtorLen;
+        builtBuf[r++] = '(';
+        memcpy(builtBuf + r, out + argStart, arg1Len); r += arg1Len;
+        memcpy(builtBuf + r, ", 0)", 4); r += 4;
+        if(restLen) {
+            builtBuf[r++] = ' ';
+            memcpy(builtBuf + r, out + (size_t)secondComma, restLen); r += restLen;
+        } else {
+            memcpy(builtBuf + r, ", 0", 3); r += 3; /* ES 3.00 texelFetch requires the lod argument */
+        }
+        builtBuf[r++] = ')';
+        newLen = before + r + afterLen;
+        memcpy(newOut, out, before);
+        memcpy(newOut + before, builtBuf, r);
+        memcpy(newOut + before + r, out + callEnd + 1, afterLen);
+        free(builtBuf);
+        free(out);
+        out = newOut;
+        outLen = newLen;
+        i = before + r; /* resume searching after the rewritten call */
+    }
+
+    out[outLen] = 0;
+    free(samplers);
+    return out;
+}

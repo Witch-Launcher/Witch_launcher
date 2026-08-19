@@ -385,6 +385,7 @@ set(LTW_CORE_SRC
   ${LTW_DIR}/stubs.c
   ${LTW_DIR}/multidraw.c
   ${LTW_DIR}/vertexattrib.c
+  ${LTW_DIR}/texture_buffer.c
   ${LTW_DIR}/swizzle.c
   ${LTW_DIR}/license_notice.c
   ${LTW_DIR}/env.c

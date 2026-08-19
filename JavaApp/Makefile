@@ -1,6 +1,17 @@
 # Prerequisite variables
 SOURCEDIR := src
 OUTPUTDIR := build
+# javac/mktemp defaults to /var/folders on the system volume; on a nearly-full
+# boot drive that fails with "No space left on device". Keep staging on the
+# project volume instead (see root Makefile java -j2 note).
+# NOTE: JDK 8 on macOS ignores the TMPDIR env var for its own java.io.tmpdir,
+# so -J-Djava.io.tmpdir must be passed explicitly, otherwise the javac JVM's
+# own temp files (native library extraction etc.) still land on the boot
+# volume and fail with "could not create parent directories" when it is full.
+JAVAC_TMPDIR := $(abspath $(OUTPUTDIR)/.javac-tmp)
+export TMPDIR := $(JAVAC_TMPDIR)
+
+$(shell mkdir -p $(JAVAC_TMPDIR))
 
 SOURCES := $(shell find $(SOURCEDIR) -type f -name '*.java')
 CLASSES := $(SOURCES:$(SOURCEDIR)/%.java=$(OUTPUTDIR)/%.class)
@@ -10,7 +21,7 @@ TARGETS := $(TARGETS:$(SOURCEDIR)/%=$(OUTPUTDIR)/%.jar)
 TARGETS += $(OUTPUTDIR)/lwjgl-3.3.3.jar $(OUTPUTDIR)/lwjgl-3.3.6.jar $(OUTPUTDIR)/lwjgl-3.4.1.jar $(OUTPUTDIR)/cacio-init-agent.jar
 
 # Add all jars to classpath and allow compiling with private API
-JCFLAGS := -cp "$(subst $() $(),:,$(wildcard $(SOURCEDIR)/*/):$(wildcard libs/*/*.jar))" -XDignore.symbol.file
+JCFLAGS := -J-Djava.io.tmpdir=$(JAVAC_TMPDIR) -cp "$(subst $() $(),:,$(wildcard $(SOURCEDIR)/*/):$(wildcard libs/*/*.jar))" -XDignore.symbol.file
 
 all: $(TARGETS)
 	
@@ -26,13 +37,22 @@ check_empty_classes:
 
 # Rules for building java class
 $(CLASSES): $(OUTPUTDIR)/%.class: $(SOURCEDIR)/%.java
-	@set -e
-	$(eval TARGET=$(word 2, $(subst /, ,$@)))
-	@mkdir -p $(OUTPUTDIR)/classes
-	@mkdir -p $(dir $@)
-	@echo "Compiling $<"
-	@$(BOOTJDK)/javac $(JCFLAGS) -d $(OUTPUTDIR)/classes $<
-	@find "$(OUTPUTDIR)/classes/$(dir $(subst $(OUTPUTDIR)/$(TARGET)/,,$@))" -maxdepth 1 -name "$(notdir $(basename $@))*" -exec cp {} "$(dir $@)" \;
+	@set -e; \
+	src="$<"; \
+	out="$(dir $@)"; \
+	base="$$(basename "$$src" .java)"; \
+	echo "Compiling $$src"; \
+	mkdir -p "$$out"; \
+	find "$$out" -maxdepth 1 -name "$$base*.class" -delete; \
+	staging="$$(mktemp -d)"; \
+	trap 'rm -rf "$$staging"' EXIT; \
+	"$(BOOTJDK)/javac" $(JCFLAGS) -d "$$staging" "$$src"; \
+	count=$$(find "$$staging" -name "$$base*.class" | wc -l | tr -d ' '); \
+	if [ "$$count" -eq 0 ]; then \
+		echo "Error: javac produced no class files for $$src"; \
+		exit 1; \
+	fi; \
+	find "$$staging" -name "$$base*.class" -exec cp {} "$$out" \;
 
 $(OUTPUTDIR)/launcher.jar: $(CLASSES)
 	@set -e

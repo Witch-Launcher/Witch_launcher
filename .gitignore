@@ -4,7 +4,7 @@
 /JavaApp/.gradle
 /JavaApp/build
 /JavaApp/local_out
-/Natives/AngelAuraAmethyst
+/Natives/Witch
 /Natives/build
 .DS_Store
 xcshareddata/
@@ -16,6 +16,7 @@ entitlements.codesign.xml
 /Compare
 /.rule/
 /sample/
+/.vscode/
 
 # Build artifacts (users can build themselves)
 /amethyst-prebuilt-libraries/build/

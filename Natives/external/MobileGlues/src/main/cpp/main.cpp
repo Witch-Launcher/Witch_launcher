@@ -1,8 +1,12 @@
-//
-// Created by Swung 0x48 on 2024/10/7.
-//
+// MobileGlues - main.cpp
+// Copyright (c) 2025-2026 MobileGL-Dev
+// Licensed under the GNU Lesser General Public License v2.1:
+//   https://www.gnu.org/licenses/old-licenses/lgpl-2.1.txt
+// SPDX-License-Identifier: LGPL-2.1-only
+// End of Source File Header
 
 #include "config/settings.h"
+#include "config/stats.h"
 #include "egl/egl.h"
 #include "egl/loader.h"
 #include "gl/envvars.h"
@@ -20,11 +24,14 @@
 #ifndef __APPLE__
 __attribute__((used))
 #endif
-const char *license = "GNU LGPL-2.1 License";
+const char* license = "GNU LGPL-2.1 License";
 
 void init_config() {
-    if (check_path())
-        config_refresh();
+    if (!check_path()) return;
+    config_refresh();
+    // One dlopen of this library is one launch. Counting it here, before any
+    // rendering work, means a game that crashes on the first frame still counts.
+    bump_launch_count();
 }
 
 void show_license() {

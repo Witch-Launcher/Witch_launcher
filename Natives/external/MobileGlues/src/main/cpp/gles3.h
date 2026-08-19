@@ -8,8 +8,7 @@
 #include <GLES3/gl32.h>
 #include "gl/gl.h"
 
-struct es3_functions_t
-{
+struct es3_functions_t {
     PFNGLACTIVETEXTUREPROC glActiveTexture;
     PFNGLATTACHSHADERPROC glAttachShader;
     PFNGLBINDATTRIBLOCATIONPROC glBindAttribLocation;
@@ -373,4 +372,4 @@ struct es3_functions_t
     PFNGLBUFFERSTORAGEEXTERNALEXTPROC glBufferStorage;
 };
 
-#endif //FOLD_CRAFT_LAUNCHER_GLES3_H
+#endif // FOLD_CRAFT_LAUNCHER_GLES3_H

@@ -98,8 +98,8 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v5
         with:
-          name: org.angelauramc.amethyst-ios-trollstore
-          path: artifacts/org.angelauramc.amethyst-*-ios-trollstore.tipa
+          name: Witch-ios-trollstore
+          path: artifacts/Witch-*-ios-trollstore.tipa
           retention-days: 30
           if-no-files-found: warn
           compression-level: 0
@@ -108,8 +108,8 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v5
         with:
-          name: org.angelauramc.amethyst-ios-trollstore-slimmed
-          path: artifacts/org.angelauramc.amethyst.slimmed-*-ios-trollstore.tipa
+          name: Witch-ios-trollstore-slimmed
+          path: artifacts/Witch-slimmed-*-ios-trollstore.tipa
           retention-days: 30
           if-no-files-found: warn
           compression-level: 0
@@ -118,8 +118,8 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v5
         with:
-          name: org.angelauramc.amethyst-ios
-          path: artifacts/org.angelauramc.amethyst-*-ios.ipa
+          name: Witch-ios
+          path: artifacts/Witch-*-ios.ipa
           retention-days: 30
           if-no-files-found: warn
           compression-level: 0
@@ -128,18 +128,18 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v5
         with:
-          name: org.angelauramc.amethyst-ios-slimmed
-          path: artifacts/org.angelauramc.amethyst.slimmed-*-ios.ipa
+          name: Witch-ios-slimmed
+          path: artifacts/Witch-slimmed-*-ios.ipa
           retention-days: 30
           if-no-files-found: warn
           compression-level: 0
 
-      - name: Upload AngelAuraAmethyst.dSYM
+      - name: Upload Witch.dSYM
         if: always()
         uses: actions/upload-artifact@v5
         with:
-          name: AngelAuraAmethyst.dSYM
-          path: artifacts/AngelAuraAmethyst.dSYM
+          name: Witch.dSYM
+          path: artifacts/Witch.dSYM
           retention-days: 14
           if-no-files-found: warn
           compression-level: 0

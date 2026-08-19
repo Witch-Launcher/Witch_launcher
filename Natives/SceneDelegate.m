@@ -3,6 +3,7 @@
 #import "utils.h"
 #import "LauncherPreferences.h"
 #import "debug/DebugServer.h"
+#import "touchcontroller_jni_bridge.h"
 
 extern UIWindow *mainWindow;
 
@@ -47,6 +48,11 @@ extern UIWindow *mainWindow;
 - (void)sceneDidBecomeActive:(UIScene *)scene {
     // Called when the scene has moved from an inactive state to an active state.
     // Use this method to restart any tasks that were paused (or not yet started) when the scene was inactive.
+    // Every previous touch sequence is dead at this point (iOS cancels touches
+    // when the app leaves the active state). Force-release any TouchController
+    // pointer that a stalls-dropped touchesEnded may have left held in the mod,
+    // so input never stays "stuck" after returning to the game.
+    touchcontroller_onTouchCancel();
 }
 
 

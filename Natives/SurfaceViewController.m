@@ -109,10 +109,7 @@ static GameSurfaceView* pojavWindow;
 }
 
 - (UIInterfaceOrientationMask)supportedInterfaceOrientations {
-    if (getPrefBool(@"general.lock_landscape")) {
-        return UIInterfaceOrientationMaskLandscape;
-    }
-    return [super supportedInterfaceOrientations];
+    return amethyst_orientation_mask();
 }
 - (void)viewDidLoad
 {
@@ -321,6 +318,7 @@ static GameSurfaceView* pojavWindow;
     [self updatePreferenceChanges];
     [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(updateSavedResolution) name:@"ResolutionDidChangeNotification" object:nil];
     [self loadCustomControls];
+    [self performSelector:@selector(setupCategory_Widget)];
 
     if (UIApplication.sharedApplication.connectedScenes.count > 1 &&
       getPrefBool(@"video.fullscreen_airplay")) {
@@ -333,6 +331,11 @@ static GameSurfaceView* pojavWindow;
 - (void)viewDidAppear:(BOOL)animated {
     [super viewDidAppear:animated];
     [self setNeedsUpdateOfPrefersPointerLocked];
+}
+
+- (void)viewWillDisappear:(BOOL)animated {
+    [super viewWillDisappear:animated];
+    [self performSelector:@selector(widgetStopTimer)];
 }
 
 - (void)updateAudioSettings {
@@ -648,6 +651,9 @@ static GameSurfaceView* pojavWindow;
         self.ctrlView.frame = getSafeArea(self.view.frame);
         [self.ctrlView.subviews makeObjectsPerformSelector:@selector(update)];
 
+        // Reposition in-game widget (keeps user's relative position)
+        [self performSelector:@selector(widgetRepositionFromDefaults)];
+
         // Update game resolution
         [self updateSavedResolution];
         [GyroInput updateOrientation];
@@ -727,6 +733,16 @@ static GameSurfaceView* pojavWindow;
 
     // TouchController integration
     if (event == ACTION_DOWN) {
+        // UIKit can drop the matching touchesEnded during a frame stall, which
+        // would leave this touch's pointer held down in the mod forever. The
+        // system may also reuse the same UITouch object for a later sequence,
+        // so before assigning a fresh index, release any leftover pointer that
+        // is still mapped to this exact key. onTouchUp is a no-op if the mod
+        // already released it, so this is always safe.
+        NSNumber* existingTouchIndex = [touchControllerIndexMap objectForKey:touchEvent];
+        if (existingTouchIndex != nil) {
+            touchcontroller_onTouchUp([existingTouchIndex intValue]);
+        }
         int index = touchcontroller_onTouchDown(normX, normY);
         if (index >= 0) {
             [touchControllerIndexMap setObject:@(index) forKey:touchEvent];

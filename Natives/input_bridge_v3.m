@@ -146,6 +146,18 @@ void CTCDesktopPeer_openGlobal(JNIEnv *env, jclass clazz, jstring path) {
 void hackFix18LWJGL(void *addr) {
     addr = (void *)((uintptr_t)addr & ~PAGE_MASK);
     if(DeviceHasJITFlags(JIT_FLAG_FORCE_MIRRORED)) return;
+    // This hack exists for one page inside liblwjgl.dylib whose PROT_EXEC
+    // got lost on iOS 18 (COW text -> r--). GLFW callbacks, however, are
+    // libffi closure trampolines (vm_allocate/vm_remap'd, not file-backed):
+    // running the MAP_FIXED remap below on those replaces the page with a
+    // plain anonymous RW mapping whose max-prot has no execute, and the
+    // final mprotect(RX) fails -> the trampoline page stays non-executable
+    // and the game SIGBUSes on the first event poll (NeoForge early display
+    // window crash). Restrict the hack to liblwjgl.dylib pages only.
+    Dl_info info;
+    if (dladdr(addr, &info) == 0 || info.dli_fname == NULL) return;
+    NSString *dylibPath = [NSString stringWithUTF8String:info.dli_fname];
+    if (![dylibPath hasSuffix:@"liblwjgl.dylib"]) return;
     if(!mprotect(addr, PAGE_SIZE, PROT_READ | PROT_EXEC)) return;
     // FIXME: For some reason the one page in liblwjgl.dylib is mapped as r-x/rwx (COW), and recent builds on iOS 18 switches it to r--/rw- causing codesign failure. Here we hack it to map anon page to get r-x back
     char tempPage[PAGE_SIZE];
@@ -156,7 +168,9 @@ void hackFix18LWJGL(void *addr) {
         return;
     }
     memcpy(addr, tempPage, PAGE_SIZE);
-    mprotect(addr, PAGE_SIZE, PROT_READ | PROT_EXEC);
+    if (mprotect(addr, PAGE_SIZE, PROT_READ | PROT_EXEC) != 0) {
+        NSLog(@"hackFix18LWJGL: mprotect(RX) restore failed: %s", strerror(errno));
+    }
 }
 
 void registerOpenHandler(JNIEnv *env) {
@@ -608,16 +622,33 @@ static BOOL aasdl_available(void) {
  * liblwjgl.dylib already loaded in another classloader". Set the flag
  * directly on the native SDL3 instead, so whichever classloader the game
  * uses finds it already set. */
-void aasdl_setMainReady(void) {
+void aasdl_setMainReady(NSString *nativesDir) {
     static BOOL done;
     if (done) return;
     done = YES;
-    NSString *sdlDir = [[NSBundle.mainBundle.bundlePath stringByAppendingPathComponent:@"libs"] stringByAppendingPathComponent:@"lwjgl41_natives"];
-    NSString *sdlPath = [sdlDir stringByAppendingPathComponent:@"libSDL3.dylib"];
-    if (![NSFileManager.defaultManager fileExistsAtPath:sdlPath]) {
-        NSLog(@"[SDLInject] libSDL3.dylib not found, skipping SDL_SetMainReady");
+    /* nativesDir should be the bare dir name (e.g. "lwjgl41_natives") matching
+     * org.lwjgl.librarypath: dlopen'ing a *different* copy registers a second
+     * SDL instance under its own install name, and SDL_SetMainReady on one
+     * instance is invisible to the other. Fall back to the other dirs in case
+     * the version resolution disagrees with the installed bundle layout. */
+    NSArray<NSString *> *candidates = @[ @"lwjgl41_natives", @"lwjgl36_natives", @"lwjgl33_natives" ];
+    if (nativesDir.length > 0 && [candidates indexOfObject:nativesDir] == NSNotFound) {
+        candidates = [candidates arrayByAddingObject:nativesDir];
+    }
+    NSString *sdlPath = nil;
+    for (NSString *candidate in candidates) {
+        NSString *sdlDir = [[NSBundle.mainBundle.bundlePath stringByAppendingPathComponent:@"libs"] stringByAppendingPathComponent:candidate];
+        NSString *probe = [sdlDir stringByAppendingPathComponent:@"libSDL3.dylib"];
+        if ([NSFileManager.defaultManager fileExistsAtPath:probe]) {
+            sdlPath = probe;
+            break;
+        }
+    }
+    if (!sdlPath) {
+        NSLog(@"[SDLInject] libSDL3.dylib not found in any natives dir, skipping SDL_SetMainReady");
         return;
     }
+    NSLog(@"[SDLInject] using libSDL3.dylib from %@", sdlPath.stringByDeletingLastPathComponent);
     void *handle = dlopen(sdlPath.UTF8String, RTLD_LAZY | RTLD_GLOBAL);
     if (!handle) {
         NSLog(@"[SDLInject] dlopen libSDL3.dylib failed: %s", dlerror());

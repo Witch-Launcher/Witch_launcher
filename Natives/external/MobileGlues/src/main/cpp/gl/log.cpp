@@ -1,6 +1,9 @@
-//
-// Created by BZLZHH on 2025/1/26.
-//
+// MobileGlues - gl/log.cpp
+// Copyright (c) 2025-2026 MobileGL-Dev
+// Licensed under the GNU Lesser General Public License v2.1:
+//   https://www.gnu.org/licenses/old-licenses/lgpl-2.1.txt
+// SPDX-License-Identifier: LGPL-2.1-only
+// End of Source File Header
 
 #include "log.h"
 #include <unistd.h>
@@ -10,20 +13,21 @@
 
 #ifndef __ANDROID__
 // Define a stub for __android_log_print if not on Android
-int __android_log_print(int prio, const char *tag,  const char *fmt, ...) {
+int __android_log_print(int prio, const char* tag, const char* fmt, ...) {
     return 0; // Do nothing
 }
 #endif
 
-#define CASE(e) \
-    case e: return #e;
+#define CASE(e)                                                                                                        \
+    case e:                                                                                                            \
+        return #e;
 
 const char* glEnumToString(GLenum e) {
     static char str[128];
     switch (e) {
-/* Boolean values */
+        /* Boolean values */
 
-/* Data types */
+        /* Data types */
         CASE(GL_BYTE)
         CASE(GL_UNSIGNED_BYTE)
         CASE(GL_SHORT)
@@ -48,7 +52,7 @@ const char* glEnumToString(GLenum e) {
         CASE(GL_UNSIGNED_INT_8_8_8_8_REV)
         CASE(GL_UNSIGNED_INT_10_10_10_2)
 
-/* Primitives */
+        /* Primitives */
         CASE(GL_LINE_LOOP)
         CASE(GL_LINE_STRIP)
         CASE(GL_TRIANGLES)
@@ -58,7 +62,7 @@ const char* glEnumToString(GLenum e) {
         CASE(GL_QUAD_STRIP)
         CASE(GL_POLYGON)
 
-/* Vertex Arrays */
+        /* Vertex Arrays */
         CASE(GL_VERTEX_ARRAY)
         CASE(GL_NORMAL_ARRAY)
         CASE(GL_COLOR_ARRAY)
@@ -100,19 +104,19 @@ const char* glEnumToString(GLenum e) {
         CASE(GL_T2F_C4F_N3F_V3F)
         CASE(GL_T4F_C4F_N3F_V4F)
 
-/* Matrix Mode */
+        /* Matrix Mode */
         CASE(GL_MATRIX_MODE)
         CASE(GL_MODELVIEW)
         CASE(GL_PROJECTION)
         CASE(GL_TEXTURE)
 
-/* Points */
+        /* Points */
         CASE(GL_POINT_SMOOTH)
         CASE(GL_POINT_SIZE)
         CASE(GL_POINT_SIZE_GRANULARITY)
         CASE(GL_POINT_SIZE_RANGE)
 
-/* Lines */
+        /* Lines */
         CASE(GL_LINE_SMOOTH)
         CASE(GL_LINE_STIPPLE)
         CASE(GL_LINE_STIPPLE_PATTERN)
@@ -121,7 +125,7 @@ const char* glEnumToString(GLenum e) {
         CASE(GL_LINE_WIDTH_GRANULARITY)
         CASE(GL_LINE_WIDTH_RANGE)
 
-/* Polygons */
+        /* Polygons */
         CASE(GL_POINT)
         CASE(GL_LINE)
         CASE(GL_FILL)
@@ -142,14 +146,14 @@ const char* glEnumToString(GLenum e) {
         CASE(GL_POLYGON_OFFSET_LINE)
         CASE(GL_POLYGON_OFFSET_FILL)
 
-/* Display Lists */
+        /* Display Lists */
         CASE(GL_COMPILE)
         CASE(GL_COMPILE_AND_EXECUTE)
         CASE(GL_LIST_BASE)
         CASE(GL_LIST_INDEX)
         CASE(GL_LIST_MODE)
 
-/* Depth buffer */
+        /* Depth buffer */
         CASE(GL_NEVER)
         CASE(GL_LESS)
         CASE(GL_EQUAL)
@@ -166,7 +170,7 @@ const char* glEnumToString(GLenum e) {
         CASE(GL_DEPTH_WRITEMASK)
         CASE(GL_DEPTH_COMPONENT)
 
-/* Lighting */
+        /* Lighting */
         CASE(GL_LIGHTING)
         CASE(GL_LIGHT0)
         CASE(GL_LIGHT1)
@@ -202,7 +206,7 @@ const char* glEnumToString(GLenum e) {
         CASE(GL_COLOR_MATERIAL_PARAMETER)
         CASE(GL_NORMALIZE)
 
-/* User clipping planes */
+        /* User clipping planes */
         CASE(GL_CLIP_PLANE0)
         CASE(GL_CLIP_PLANE1)
         CASE(GL_CLIP_PLANE2)
@@ -210,7 +214,7 @@ const char* glEnumToString(GLenum e) {
         CASE(GL_CLIP_PLANE4)
         CASE(GL_CLIP_PLANE5)
 
-/* Accumulation buffer */
+        /* Accumulation buffer */
         CASE(GL_ACCUM_RED_BITS)
         CASE(GL_ACCUM_GREEN_BITS)
         CASE(GL_ACCUM_BLUE_BITS)
@@ -222,12 +226,12 @@ const char* glEnumToString(GLenum e) {
         CASE(GL_MULT)
         CASE(GL_RETURN)
 
-/* Alpha testing */
+        /* Alpha testing */
         CASE(GL_ALPHA_TEST)
         CASE(GL_ALPHA_TEST_REF)
         CASE(GL_ALPHA_TEST_FUNC)
 
-/* Blending */
+        /* Blending */
         CASE(GL_BLEND)
         CASE(GL_BLEND_SRC)
         CASE(GL_BLEND_DST)
@@ -243,12 +247,12 @@ const char* glEnumToString(GLenum e) {
         CASE(GL_ONE_MINUS_DST_COLOR)
         CASE(GL_SRC_ALPHA_SATURATE)
 
-/* Render Mode */
+        /* Render Mode */
         CASE(GL_FEEDBACK)
         CASE(GL_RENDER)
         CASE(GL_SELECT)
 
-/* Feedback */
+        /* Feedback */
         CASE(GL_2D)
         CASE(GL_3D)
         CASE(GL_3D_COLOR)
@@ -266,11 +270,11 @@ const char* glEnumToString(GLenum e) {
         CASE(GL_FEEDBACK_BUFFER_SIZE)
         CASE(GL_FEEDBACK_BUFFER_TYPE)
 
-/* Selection */
+        /* Selection */
         CASE(GL_SELECTION_BUFFER_POINTER)
         CASE(GL_SELECTION_BUFFER_SIZE)
 
-/* Fog */
+        /* Fog */
         CASE(GL_FOG)
         CASE(GL_FOG_MODE)
         CASE(GL_FOG_DENSITY)
@@ -282,7 +286,7 @@ const char* glEnumToString(GLenum e) {
         CASE(GL_EXP)
         CASE(GL_EXP2)
 
-/* Logic Ops */
+        /* Logic Ops */
         CASE(GL_INDEX_LOGIC_OP)
         CASE(GL_COLOR_LOGIC_OP)
         CASE(GL_LOGIC_OP_MODE)
@@ -303,7 +307,7 @@ const char* glEnumToString(GLenum e) {
         CASE(GL_OR_REVERSE)
         CASE(GL_OR_INVERTED)
 
-/* Stencil */
+        /* Stencil */
         CASE(GL_STENCIL_BITS)
         CASE(GL_STENCIL_TEST)
         CASE(GL_STENCIL_CLEAR_VALUE)
@@ -320,7 +324,7 @@ const char* glEnumToString(GLenum e) {
         CASE(GL_INCR)
         CASE(GL_DECR)
 
-/* Buffers, Pixel Drawing/Reading */
+        /* Buffers, Pixel Drawing/Reading */
         CASE(GL_LEFT)
         CASE(GL_RIGHT)
         CASE(GL_FRONT_LEFT)
@@ -357,7 +361,7 @@ const char* glEnumToString(GLenum e) {
         CASE(GL_RGB)
         CASE(GL_RGBA)
 
-/* Implementation limits */
+        /* Implementation limits */
         CASE(GL_MAX_LIST_NESTING)
         CASE(GL_MAX_EVAL_ORDER)
         CASE(GL_MAX_LIGHTS)
@@ -372,7 +376,7 @@ const char* glEnumToString(GLenum e) {
         CASE(GL_MAX_VIEWPORT_DIMS)
         CASE(GL_MAX_CLIENT_ATTRIB_STACK_DEPTH)
 
-/* Gets */
+        /* Gets */
         CASE(GL_ATTRIB_STACK_DEPTH)
         CASE(GL_CLIENT_ATTRIB_STACK_DEPTH)
         CASE(GL_COLOR_CLEAR_VALUE)
@@ -401,7 +405,7 @@ const char* glEnumToString(GLenum e) {
         CASE(GL_TEXTURE_STACK_DEPTH)
         CASE(GL_VIEWPORT)
 
-/* Evaluators */
+        /* Evaluators */
         CASE(GL_AUTO_NORMAL)
         CASE(GL_MAP1_COLOR_4)
         CASE(GL_MAP1_INDEX)
@@ -429,7 +433,7 @@ const char* glEnumToString(GLenum e) {
         CASE(GL_ORDER)
         CASE(GL_DOMAIN)
 
-/* Hints */
+        /* Hints */
         CASE(GL_PERSPECTIVE_CORRECTION_HINT)
         CASE(GL_POINT_SMOOTH_HINT)
         CASE(GL_LINE_SMOOTH_HINT)
@@ -439,11 +443,11 @@ const char* glEnumToString(GLenum e) {
         CASE(GL_FASTEST)
         CASE(GL_NICEST)
 
-/* Scissor box */
+        /* Scissor box */
         CASE(GL_SCISSOR_BOX)
         CASE(GL_SCISSOR_TEST)
 
-/* Pixel Mode / Transfer */
+        /* Pixel Mode / Transfer */
         CASE(GL_MAP_COLOR)
         CASE(GL_MAP_STENCIL)
         CASE(GL_INDEX_SHIFT)
@@ -493,7 +497,7 @@ const char* glEnumToString(GLenum e) {
         CASE(GL_ZOOM_X)
         CASE(GL_ZOOM_Y)
 
-/* Texture mapping */
+        /* Texture mapping */
         CASE(GL_TEXTURE_ENV)
         CASE(GL_TEXTURE_ENV_MODE)
         CASE(GL_TEXTURE_1D)
@@ -538,13 +542,13 @@ const char* glEnumToString(GLenum e) {
         CASE(GL_R)
         CASE(GL_Q)
 
-/* Utility */
+        /* Utility */
         CASE(GL_VENDOR)
         CASE(GL_RENDERER)
         CASE(GL_VERSION)
         CASE(GL_EXTENSIONS)
 
-/* Errors */
+        /* Errors */
         CASE(GL_INVALID_ENUM)
         CASE(GL_INVALID_VALUE)
         CASE(GL_INVALID_OPERATION)
@@ -552,8 +556,7 @@ const char* glEnumToString(GLenum e) {
         CASE(GL_STACK_UNDERFLOW)
         CASE(GL_OUT_OF_MEMORY)
 
-
-/* OpenGL 1.1 */
+        /* OpenGL 1.1 */
         CASE(GL_PROXY_TEXTURE_1D)
         CASE(GL_PROXY_TEXTURE_2D)
         CASE(GL_TEXTURE_PRIORITY)
@@ -630,14 +633,14 @@ const char* glEnumToString(GLenum e) {
         CASE(GL_SECONDARY_COLOR_ARRAY_BUFFER_BINDING)
         CASE(GL_FOG_COORDINATE_ARRAY_BUFFER_BINDING)
         CASE(GL_WEIGHT_ARRAY_BUFFER_BINDING)
-//        CASE(GL_MAP_READ_BIT)
-//        CASE(GL_MAP_WRITE_BIT)
+        //        CASE(GL_MAP_READ_BIT)
+        //        CASE(GL_MAP_WRITE_BIT)
         CASE(GL_BUFFER_ACCESS_FLAGS)
         CASE(GL_BUFFER_MAP_LENGTH)
         CASE(GL_BUFFER_MAP_OFFSET)
-//        CASE(GL_READ_ONLY)
-//        CASE(GL_WRITE_ONLY)
-//        CASE(GL_READ_WRITE)
+        //        CASE(GL_READ_ONLY)
+        //        CASE(GL_WRITE_ONLY)
+        //        CASE(GL_READ_WRITE)
         CASE(GL_PIXEL_PACK_BUFFER)
         CASE(GL_PIXEL_UNPACK_BUFFER)
         CASE(GL_PIXEL_UNPACK_BUFFER_BINDING)
@@ -648,20 +651,20 @@ const char* glEnumToString(GLenum e) {
         CASE(GL_COPY_READ_BUFFER)
         CASE(GL_COPY_WRITE_BUFFER)
 
-//        CASE(GL_READ_BUFFER)
-//        CASE(GL_UNPACK_ROW_LENGTH)
-//        CASE(GL_UNPACK_SKIP_ROWS)
-//        CASE(GL_UNPACK_SKIP_PIXELS)
-//        CASE(GL_PACK_ROW_LENGTH)
-//        CASE(GL_PACK_SKIP_ROWS)
-//        CASE(GL_PACK_SKIP_PIXELS)
-//        CASE(GL_COLOR)
-//        CASE(GL_DEPTH)
-//        CASE(GL_STENCIL)
-//        CASE(GL_RED)
-//        CASE(GL_RGB8)
-//        CASE(GL_RGBA8)
-//        CASE(GL_RGB10_A2)
+        //        CASE(GL_READ_BUFFER)
+        //        CASE(GL_UNPACK_ROW_LENGTH)
+        //        CASE(GL_UNPACK_SKIP_ROWS)
+        //        CASE(GL_UNPACK_SKIP_PIXELS)
+        //        CASE(GL_PACK_ROW_LENGTH)
+        //        CASE(GL_PACK_SKIP_ROWS)
+        //        CASE(GL_PACK_SKIP_PIXELS)
+        //        CASE(GL_COLOR)
+        //        CASE(GL_DEPTH)
+        //        CASE(GL_STENCIL)
+        //        CASE(GL_RED)
+        //        CASE(GL_RGB8)
+        //        CASE(GL_RGBA8)
+        //        CASE(GL_RGB10_A2)
         CASE(GL_TEXTURE_BINDING_3D)
         CASE(GL_UNPACK_SKIP_IMAGES)
         CASE(GL_UNPACK_IMAGE_HEIGHT)
@@ -681,17 +684,17 @@ const char* glEnumToString(GLenum e) {
         CASE(GL_MAX_TEXTURE_LOD_BIAS)
         CASE(GL_TEXTURE_COMPARE_MODE)
         CASE(GL_TEXTURE_COMPARE_FUNC)
-//        CASE(GL_CURRENT_QUERY)
-//        CASE(GL_QUERY_RESULT)
-//        CASE(GL_QUERY_RESULT_AVAILABLE)
-//        CASE(GL_BUFFER_MAPPED)
-//        CASE(GL_BUFFER_MAP_POINTER)
-//        CASE(GL_STREAM_READ)
-//        CASE(GL_STREAM_COPY)
-//        CASE(GL_STATIC_READ)
-//        CASE(GL_STATIC_COPY)
-//        CASE(GL_DYNAMIC_READ)
-//        CASE(GL_DYNAMIC_COPY)
+        //        CASE(GL_CURRENT_QUERY)
+        //        CASE(GL_QUERY_RESULT)
+        //        CASE(GL_QUERY_RESULT_AVAILABLE)
+        //        CASE(GL_BUFFER_MAPPED)
+        //        CASE(GL_BUFFER_MAP_POINTER)
+        //        CASE(GL_STREAM_READ)
+        //        CASE(GL_STREAM_COPY)
+        //        CASE(GL_STATIC_READ)
+        //        CASE(GL_STATIC_COPY)
+        //        CASE(GL_DYNAMIC_READ)
+        //        CASE(GL_DYNAMIC_COPY)
         CASE(GL_MAX_DRAW_BUFFERS)
         CASE(GL_DRAW_BUFFER0)
         CASE(GL_DRAW_BUFFER1)
@@ -714,10 +717,10 @@ const char* glEnumToString(GLenum e) {
         CASE(GL_SAMPLER_3D)
         CASE(GL_SAMPLER_2D_SHADOW)
         CASE(GL_FRAGMENT_SHADER_DERIVATIVE_HINT)
-//        CASE(GL_PIXEL_PACK_BUFFER)
-//        CASE(GL_PIXEL_UNPACK_BUFFER)
-//        CASE(GL_PIXEL_PACK_BUFFER_BINDING)
-//        CASE(GL_PIXEL_UNPACK_BUFFER_BINDING)
+        //        CASE(GL_PIXEL_PACK_BUFFER)
+        //        CASE(GL_PIXEL_UNPACK_BUFFER)
+        //        CASE(GL_PIXEL_PACK_BUFFER_BINDING)
+        //        CASE(GL_PIXEL_UNPACK_BUFFER_BINDING)
         CASE(GL_FLOAT_MAT2x3)
         CASE(GL_FLOAT_MAT2x4)
         CASE(GL_FLOAT_MAT3x2)
@@ -789,9 +792,9 @@ const char* glEnumToString(GLenum e) {
         CASE(GL_UNSIGNED_INT_SAMPLER_3D)
         CASE(GL_UNSIGNED_INT_SAMPLER_CUBE)
         CASE(GL_UNSIGNED_INT_SAMPLER_2D_ARRAY)
-//        CASE(GL_BUFFER_ACCESS_FLAGS)
-//        CASE(GL_BUFFER_MAP_LENGTH)
-//        CASE(GL_BUFFER_MAP_OFFSET)
+        //        CASE(GL_BUFFER_ACCESS_FLAGS)
+        //        CASE(GL_BUFFER_MAP_LENGTH)
+        //        CASE(GL_BUFFER_MAP_OFFSET)
         CASE(GL_DEPTH_COMPONENT32F)
         CASE(GL_DEPTH32F_STENCIL8)
         CASE(GL_FLOAT_32_UNSIGNED_INT_24_8_REV)
@@ -851,10 +854,10 @@ const char* glEnumToString(GLenum e) {
         CASE(GL_FRAMEBUFFER_INCOMPLETE_MULTISAMPLE)
         CASE(GL_MAX_SAMPLES)
         CASE(GL_HALF_FLOAT)
-//        CASE(GL_MAP_READ_BIT)
-//        CASE(GL_MAP_WRITE_BIT)
-//        CASE(GL_MAP_INVALIDATE_RANGE_BIT)
-//        CASE(GL_MAP_INVALIDATE_BUFFER_BIT)
+        //        CASE(GL_MAP_READ_BIT)
+        //        CASE(GL_MAP_WRITE_BIT)
+        //        CASE(GL_MAP_INVALIDATE_RANGE_BIT)
+        //        CASE(GL_MAP_INVALIDATE_BUFFER_BIT)
         CASE(GL_MAP_FLUSH_EXPLICIT_BIT)
         CASE(GL_MAP_UNSYNCHRONIZED_BIT)
         CASE(GL_RG)
@@ -884,10 +887,10 @@ const char* glEnumToString(GLenum e) {
         CASE(GL_RGBA8_SNORM)
         CASE(GL_SIGNED_NORMALIZED)
         CASE(GL_PRIMITIVE_RESTART_FIXED_INDEX)
-//        CASE(GL_COPY_READ_BUFFER)
-//        CASE(GL_COPY_WRITE_BUFFER)
-//        CASE(GL_COPY_READ_BUFFER_BINDING)
-//        CASE(GL_COPY_WRITE_BUFFER_BINDING)
+        //        CASE(GL_COPY_READ_BUFFER)
+        //        CASE(GL_COPY_WRITE_BUFFER)
+        //        CASE(GL_COPY_READ_BUFFER_BINDING)
+        //        CASE(GL_COPY_WRITE_BUFFER_BINDING)
         CASE(GL_UNIFORM_BUFFER)
         CASE(GL_UNIFORM_BUFFER_BINDING)
         CASE(GL_UNIFORM_BUFFER_START)
@@ -933,8 +936,8 @@ const char* glEnumToString(GLenum e) {
         CASE(GL_TIMEOUT_EXPIRED)
         CASE(GL_CONDITION_SATISFIED)
         CASE(GL_WAIT_FAILED)
-//        CASE(GL_SYNC_FLUSH_COMMANDS_BIT)
-//        CASE(GL_TIMEOUT_IGNORED)
+        //        CASE(GL_SYNC_FLUSH_COMMANDS_BIT)
+        //        CASE(GL_TIMEOUT_IGNORED)
         CASE(GL_VERTEX_ATTRIB_ARRAY_DIVISOR)
         CASE(GL_ANY_SAMPLES_PASSED)
         CASE(GL_ANY_SAMPLES_PASSED_CONSERVATIVE)
@@ -944,8 +947,8 @@ const char* glEnumToString(GLenum e) {
         CASE(GL_TEXTURE_SWIZZLE_G)
         CASE(GL_TEXTURE_SWIZZLE_B)
         CASE(GL_TEXTURE_SWIZZLE_A)
-//        CASE(GL_GREEN)
-//        CASE(GL_BLUE)
+        //        CASE(GL_GREEN)
+        //        CASE(GL_BLUE)
         CASE(GL_INT_2_10_10_10_REV)
         CASE(GL_TRANSFORM_FEEDBACK)
         CASE(GL_TRANSFORM_FEEDBACK_PAUSED)
@@ -980,9 +983,9 @@ const char* glEnumToString(GLenum e) {
         CASE(GL_BGR_INTEGER)
         CASE(GL_BGRA_INTEGER)
 
-/*
- * OpenGL 1.3
- */
+        /*
+         * OpenGL 1.3
+         */
 
         /* multitexture */
         CASE(GL_TEXTURE0)
@@ -1020,7 +1023,7 @@ const char* glEnumToString(GLenum e) {
         CASE(GL_ACTIVE_TEXTURE)
         CASE(GL_CLIENT_ACTIVE_TEXTURE)
         CASE(GL_MAX_TEXTURE_UNITS)
-/* texture_cube_map */
+        /* texture_cube_map */
         CASE(GL_NORMAL_MAP)
         CASE(GL_REFLECTION_MAP)
         CASE(GL_TEXTURE_CUBE_MAP)
@@ -1033,7 +1036,7 @@ const char* glEnumToString(GLenum e) {
         CASE(GL_TEXTURE_CUBE_MAP_NEGATIVE_Z)
         CASE(GL_PROXY_TEXTURE_CUBE_MAP)
         CASE(GL_MAX_CUBE_MAP_TEXTURE_SIZE)
-/* texture_compression */
+        /* texture_compression */
         CASE(GL_COMPRESSED_ALPHA)
         CASE(GL_COMPRESSED_LUMINANCE)
         CASE(GL_COMPRESSED_LUMINANCE_ALPHA)
@@ -1045,7 +1048,7 @@ const char* glEnumToString(GLenum e) {
         CASE(GL_TEXTURE_COMPRESSED)
         CASE(GL_NUM_COMPRESSED_TEXTURE_FORMATS)
         CASE(GL_COMPRESSED_TEXTURE_FORMATS)
-/* multisample */
+        /* multisample */
         CASE(GL_MULTISAMPLE)
         CASE(GL_SAMPLE_ALPHA_TO_COVERAGE)
         CASE(GL_SAMPLE_ALPHA_TO_ONE)
@@ -1055,12 +1058,12 @@ const char* glEnumToString(GLenum e) {
         CASE(GL_SAMPLE_COVERAGE_VALUE)
         CASE(GL_SAMPLE_COVERAGE_INVERT)
         CASE(GL_MULTISAMPLE_BIT)
-/* transpose_matrix */
+        /* transpose_matrix */
         CASE(GL_TRANSPOSE_MODELVIEW_MATRIX)
         CASE(GL_TRANSPOSE_PROJECTION_MATRIX)
         CASE(GL_TRANSPOSE_TEXTURE_MATRIX)
         CASE(GL_TRANSPOSE_COLOR_MATRIX)
-/* texture_env_combine */
+        /* texture_env_combine */
         CASE(GL_COMBINE)
         CASE(GL_COMBINE_RGB)
         CASE(GL_COMBINE_ALPHA)
@@ -1083,29 +1086,30 @@ const char* glEnumToString(GLenum e) {
         CASE(GL_CONSTANT)
         CASE(GL_PRIMARY_COLOR)
         CASE(GL_PREVIOUS)
-/* texture_env_dot3 */
+        /* texture_env_dot3 */
         CASE(GL_DOT3_RGB)
         CASE(GL_DOT3_RGBA)
-/* texture_border_clamp */
+        /* texture_border_clamp */
         CASE(GL_CLAMP_TO_BORDER)
-/*
- * Miscellaneous
- */
-        default:
-            sprintf(str, "0x%x", e);
-            return str;
+        /*
+         * Miscellaneous
+         */
+    default:
+        sprintf(str, "0x%x", e);
+        return str;
     }
 }
 
 #if LOG_CALLED_FUNCS
 
 #include "../config/config.h"
+#include <ska/flat_hash_map.hpp>
 
 void log_unique_function(const char* func_name) {
     if (!func_name || strlen(func_name) < 2 || strncmp(func_name, "gl", 2) != 0) {
         return;
     }
-    static std::unordered_set<std::string> logged_functions;
+    static ska::flat_hash_set<std::string> logged_functions;
     static std::mutex log_mutex;
     std::string func_str(func_name);
 

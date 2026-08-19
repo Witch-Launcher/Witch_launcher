@@ -150,7 +150,7 @@
     if ([iconURL isKindOfClass:[NSString class]] && iconURL.length > 0) {
         __weak typeof(self) weakSelf = self;
         NSMutableURLRequest *request = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:iconURL]];
-        [request setValue:@"Amethyst/1.0" forHTTPHeaderField:@"User-Agent"];
+        [request setValue:@"Witch/1.0" forHTTPHeaderField:@"User-Agent"];
         [_projectIcon setImageWithURLRequest:request
                            placeholderImage:placeholder
                                     success:^(NSURLRequest *request, NSHTTPURLResponse *response, UIImage *image) {

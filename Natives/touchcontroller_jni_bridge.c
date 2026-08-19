@@ -89,8 +89,12 @@ static void enqueue_move_view(float deltaPitch, float deltaYaw) {
 
 // Drain marker table: per-pointer game read position recorded when its
 // AddPointerMessage was enqueued (see the pending-remove logic below).
-#define TC_MARKER_MASK 1023
-static size_t g_down_markers[1024];
+// Pointer indices grow monotonically and never reset, so the table must be
+// large enough that a wrap-around collision (which would delay a Remove until
+// the hard deadline and can get the Remove dropped when it lands in the same
+// drain batch as its Add) is effectively impossible within a session.
+#define TC_MARKER_MASK 4095
+static size_t g_down_markers[4096];
 
 // Called from SurfaceViewController.m when a touch begins (ACTION_DOWN)
 // Returns pointer index assigned to this touch, or -1 on failure

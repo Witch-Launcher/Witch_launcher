@@ -21,6 +21,40 @@ CGPoint lastVirtualMousePoint;
 
 @property(nonatomic) UIView* rootView;
 
+// In-game widget (SurfaceViewController+Widget.m)
+@property(nonatomic) UIView *widgetView;
+@property(nonatomic) UILabel *widgetFpsLabel;
+@property(nonatomic) UILabel *widgetRamLabel;
+@property(nonatomic) UILabel *widgetTempLabel;
+@property(nonatomic) UILabel *widgetBattLabel;
+@property(nonatomic) UIView *widgetBarView;
+@property(nonatomic) UIView *widgetBarSegLauncher;
+@property(nonatomic) UIView *widgetBarSegDevice;
+@property(nonatomic) UILabel *widgetBarSegLauncherLabel;
+@property(nonatomic) UILabel *widgetBarSegDeviceLabel;
+@property(nonatomic) UILabel *widgetBarSegFreeLabel;
+@property(nonatomic) UILabel *widgetCpuPercentLabel;
+@property(nonatomic) UILabel *widgetGpuPercentLabel;
+@property(nonatomic) UILabel *widgetCpuNameLabel;
+@property(nonatomic) UIView *widgetCpuBar;
+@property(nonatomic) UILabel *widgetCpuBarLabel;
+@property(nonatomic) UILabel *widgetGpuNameLabel;
+@property(nonatomic) UIView *widgetGpuBar;
+@property(nonatomic) UILabel *widgetGpuBarLabel;
+@property(nonatomic) UIView *widgetCpuRing;
+@property(nonatomic) UILabel *widgetCpuRingLabel;
+@property(nonatomic) UILabel *widgetCpuRingPercentLabel;
+@property(nonatomic) UIView *widgetGpuRing;
+@property(nonatomic) UILabel *widgetGpuRingLabel;
+@property(nonatomic) UILabel *widgetGpuRingPercentLabel;
+@property(nonatomic) UIView *widgetPanelView;
+@property(nonatomic) UIView *widgetPanelBackdrop;
+@property(nonatomic) UIImageView *widgetEmptyIcon;
+@property(nonatomic) BOOL savedEdgeGestureEnabled;
+
+// Navigation swipe strip
+@property(nonatomic) UIView *menuSwipeView;
+
 - (instancetype)initWithMetadata:(NSDictionary *)metadata;
 - (instancetype)initWithJarPath:(NSString *)jarPath;
 - (instancetype)initWithJarPath:(NSString *)jarPath args:(NSArray<NSString *> *)args minJavaVersion:(int)minJavaVersion;
@@ -55,6 +89,8 @@ CGPoint lastVirtualMousePoint;
 
 - (void)actionOpenNavigationMenu;
 - (void)didSelectMenuItem:(int)item;
+- (void)animateMenuScale:(CGFloat)scale duration:(CGFloat)duration;
 - (void)viewWillTransitionToSize_Navigation:(CGRect)frame;
+- (void)setEdgeSwipeUIHidden:(BOOL)hidden;
 
 @end

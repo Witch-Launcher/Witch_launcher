@@ -54,6 +54,12 @@ else
     vtool -show "$JVM" || true
 fi
 
+echo "[jre25] patching libjvm mirror prepare breakpoint..."
+python3 "$(cd "$(dirname "$0")" && pwd)/patch_libjvm_mirror_brk.py" "$JVM"
+
+echo "[jre25] patching libjvm JIT allocation breakpoint..."
+python3 "$(cd "$(dirname "$0")" && pwd)/patch_libjvm_jit_alloc.py" "$JVM"
+
 rm -rf "$WORK_DIR"
 echo "[jre25] done. Final size:"
 du -sh "$DEST_DIR"
