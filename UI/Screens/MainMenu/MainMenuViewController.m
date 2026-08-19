@@ -2,12 +2,15 @@
 #import "ThemeManager.h"
 #import "MarkdownRenderer.h"
 #import "CreditsService.h"
+#import "LauncherPreferences.h"
+#import "config.h"
 
 static NSString *const NewsURLString = @"https://raw.githubusercontent.com/Ynnyny/Angel-Aura-Amethyst-iOS/refs/heads/main/news.md";
 static const NSTimeInterval NewsRefreshInterval = 300.0; // 5 minutes
 
 @interface MainMenuViewController () <WKNavigationDelegate>
 @property (nonatomic) WKWebView *webView;
+@property (nonatomic) UIImageView *logoImageView;
 @property (nonatomic) UILabel *titleLabel;
 @property (nonatomic) UILabel *versionLabel;
 @property (nonatomic) UIActivityIndicatorView *loadingIndicator;
@@ -22,6 +25,7 @@ static const NSTimeInterval NewsRefreshInterval = 300.0; // 5 minutes
     [self setup];
     [CreditsService.shared refreshIfNeeded];
     [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(updateColors) name:ThemeDidChangeNotification object:nil];
+    [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(logoDidChange) name:@"LauncherLogoDidChangeNotification" object:nil];
     [self updateColors];
     [self loadNews];
     [self startNewsRefreshTimer];
@@ -30,6 +34,7 @@ static const NSTimeInterval NewsRefreshInterval = 300.0; // 5 minutes
 - (void)viewWillAppear:(BOOL)animated {
     [super viewWillAppear:animated];
     [self loadNews];
+    _logoImageView.image = [UIImage imageNamed:[self logoImageName]];
 }
 
 - (void)dealloc {
@@ -47,6 +52,13 @@ static const NSTimeInterval NewsRefreshInterval = 300.0; // 5 minutes
 }
 
 - (void)setup {
+    _logoImageView = [[UIImageView alloc] initWithImage:[UIImage imageNamed:[self logoImageName]]];
+    _logoImageView.translatesAutoresizingMaskIntoConstraints = NO;
+    _logoImageView.contentMode = UIViewContentModeScaleAspectFit;
+    _logoImageView.layer.cornerRadius = 10;
+    _logoImageView.layer.masksToBounds = YES;
+    [self.view addSubview:_logoImageView];
+
     _titleLabel = [[UILabel alloc] init];
     _titleLabel.translatesAutoresizingMaskIntoConstraints = NO;
     _titleLabel.font = [UIFont systemFontOfSize:24 weight:UIFontWeightBold];
@@ -77,8 +89,14 @@ static const NSTimeInterval NewsRefreshInterval = 300.0; // 5 minutes
     [self.view addSubview:_loadingIndicator];
 
     [NSLayoutConstraint activateConstraints:@[
-        [_titleLabel.topAnchor constraintEqualToAnchor:self.view.topAnchor constant:16],
-        [_titleLabel.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor constant:20],
+        [_logoImageView.topAnchor constraintEqualToAnchor:self.view.topAnchor constant:16],
+        [_logoImageView.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor constant:20],
+        [_logoImageView.widthAnchor constraintEqualToConstant:44],
+        [_logoImageView.heightAnchor constraintEqualToConstant:44],
+
+        [_titleLabel.topAnchor constraintEqualToAnchor:_logoImageView.topAnchor],
+        [_titleLabel.leadingAnchor constraintEqualToAnchor:_logoImageView.trailingAnchor constant:12],
+        [_titleLabel.trailingAnchor constraintLessThanOrEqualToAnchor:self.view.trailingAnchor constant:-20],
 
         [_versionLabel.topAnchor constraintEqualToAnchor:_titleLabel.bottomAnchor constant:2],
         [_versionLabel.leadingAnchor constraintEqualToAnchor:_titleLabel.leadingAnchor constant:1],
@@ -193,11 +211,34 @@ static const NSTimeInterval NewsRefreshInterval = 300.0; // 5 minutes
     return [NSString stringWithFormat:@"#%02X%02X%02X", (int)(r * 255), (int)(g * 255), (int)(b * 255)];
 }
 
+// The menu logo follows the launcher.theme logo setting (launcher.logo_style):
+// "purple" uses the purple pair, "blue" the official blue pair, "dev" the
+// development logo. Until the user picks one, the build type decides the
+// default: release builds use purple, development builds use the dev logo.
+- (NSString *)logoImageName {
+    NSString *style = getPrefObject(@"launcher.logo_style");
+    if (style == nil) {
+        style = CONFIG_RELEASE ? @"purple" : @"dev";
+    }
+    if ([style isEqualToString:@"dev"]) {
+        return @"logo-dev";
+    }
+    if ([style isEqualToString:@"blue"]) {
+        return ThemeManager.shared.isDarkMode ? @"logo-main-dark" : @"logo-main-light";
+    }
+    return ThemeManager.shared.isDarkMode ? @"logo-dark" : @"logo-light";
+}
+
+- (void)logoDidChange {
+    _logoImageView.image = [UIImage imageNamed:[self logoImageName]];
+}
+
 - (void)updateColors {
     ThemeManager *theme = ThemeManager.shared;
     self.view.backgroundColor = theme.contentBackgroundColor;
     _titleLabel.textColor = theme.primaryTextColor;
     _versionLabel.textColor = theme.secondaryTextColor;
+    _logoImageView.image = [UIImage imageNamed:[self logoImageName]];
     _webView.scrollView.indicatorStyle = theme.isDarkMode ? UIScrollViewIndicatorStyleWhite : UIScrollViewIndicatorStyleBlack;
     [self renderNews];
 }

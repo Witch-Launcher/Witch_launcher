@@ -110,7 +110,8 @@
     if (global) {
         // Preferences that cannot be isolated
         NSDictionary *general = @{
-            @"game_directory": @"default"
+            @"game_directory": @"default",
+            @"orientation_lock": @"off"
         };
         [defaults[@"general"] addEntriesFromDictionary:general];
         defaults[@"debug"] = @{
@@ -125,6 +126,13 @@
             @"debug_server_port": @(9090),
             @"debug_server_token": @"",
             @"debug_server_localhost_only": @NO
+        }.mutableCopy;
+        defaults[@"launcher"] = @{
+            @"theme": @"System",
+            @"logo_style": (CONFIG_RELEASE ? @"purple" : @"dev")
+        }.mutableCopy;
+        defaults[@"curseforge"] = @{
+            @"api_key": @""
         }.mutableCopy;
         defaults[@"warnings"] = @{
             @"local_warn": @YES

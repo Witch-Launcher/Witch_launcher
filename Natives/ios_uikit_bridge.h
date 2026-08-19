@@ -9,6 +9,7 @@ UIViewController* tmpRootVC;
 
 void showDialog(NSString* title, NSString* message);
 UIInterfaceOrientationMask amethyst_orientation_mask(void);
+void applyLauncherAppIcon(void);
 jstring UIKit_accessClipboard(JNIEnv* env, jint action, jstring copySrc);
 void UIKit_launchMinecraftSurfaceVC(UIWindow *window, NSDictionary *metadata);
 void UIKit_launchJarFile(UIWindow *window, NSString *jarPath);

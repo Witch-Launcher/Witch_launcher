@@ -109,6 +109,8 @@ POJAV_JRE8_DIR        ?= $(SOURCEDIR)/depends/java-8-openjdk
 POJAV_JRE17_DIR       ?= $(SOURCEDIR)/depends/java-17-openjdk
 POJAV_JRE21_DIR       ?= $(SOURCEDIR)/depends/java-21-openjdk
 POJAV_JRE25_DIR       ?= $(SOURCEDIR)/depends/java-25-openjdk
+# App icon set to use: AppIcon-Light (official) or AppIcon-Development (dev builds)
+APP_ICON              ?= AppIcon-Light
 
 # Function to use later for checking dependencies
 METHOD_DEPCHECK   = $(shell $(1) >/dev/null 2>&1 && echo 1)
@@ -363,20 +365,47 @@ $(SOURCEDIR)/Natives/external/MobileGlues/src/main/cpp/
 	cp $(WORKINGDIR)/mobileglues/libspirv-cross*.dylib $(WORKINGDIR)/ 2>/dev/null || true
 	echo '[Witch v$(VERSION)] dep_mg - end'
 
-assets:
+assets: logos
 	echo '[Witch v$(VERSION)] assets - start'
-	if [ -d /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneOS.platform ]; then \
+	@XCODE_DEV=$(shell xcode-select -p 2>/dev/null); \
+	if [ -n "$$XCODE_DEV" ] && [ -d "$$XCODE_DEV/Platforms/iPhoneOS.platform" ]; then \
 		mkdir -p $(WORKINGDIR)/Witch.app/Base.lproj; \
-		xcrun actool $(SOURCEDIR)/Natives/Assets.xcassets \
+		"$$XCODE_DEV/usr/bin/actool" $(SOURCEDIR)/Natives/Assets.xcassets \
 			--compile $(SOURCEDIR)/Natives/resources \
 			--platform iphoneos \
 			--minimum-deployment-target 14.0 \
-			--app-icon AppIcon-Light \
+			--target-device iphone --target-device ipad \
 			--output-partial-info-plist /dev/null || true; \
 	else \
 		echo 'Skipping actool - not available'; \
 	fi
 	echo '[Witch v$(VERSION)] assets - end'
+
+# Generate the legacy CFBundleIconFiles PNGs (AppIcon-Light60x60@2x.png,
+# AppIcon-Light76x76@2x~ipad.png, ...) from the master logos in Natives/logo/.
+# APP_ICON=AppIcon-Development is set for development builds (GitHub
+# development workflow); it substitutes the dev logo in place of the official
+# blue one so non-release builds carry the dev branding.
+logos:
+	echo '[Witch v$(VERSION)] logos - start'
+	@if [ '$(APP_ICON)' = 'AppIcon-Development' ]; then \
+		PRIMARY="$(SOURCEDIR)/Natives/logo/logo-dev.png"; \
+	else \
+		PRIMARY="$(SOURCEDIR)/Natives/logo/logo-main-light.png"; \
+	fi; \
+	DARK="$(SOURCEDIR)/Natives/logo/logo-main-dark.png"; \
+	DEV="$(SOURCEDIR)/Natives/logo/logo-dev.png"; \
+	sips -z 120 120 "$$PRIMARY" --out $(SOURCEDIR)/Natives/resources/AppIcon-Light60x60@2x.png >/dev/null; \
+	sips -z 152 152 "$$PRIMARY" --out $(SOURCEDIR)/Natives/resources/AppIcon-Light76x76@2x~ipad.png >/dev/null; \
+	sips -z 120 120 "$$DARK" --out $(SOURCEDIR)/Natives/resources/AppIcon-Dark60x60@2x.png >/dev/null; \
+	sips -z 152 152 "$$DARK" --out $(SOURCEDIR)/Natives/resources/AppIcon-Dark76x76@2x~ipad.png >/dev/null; \
+	sips -z 120 120 "$$DEV" --out $(SOURCEDIR)/Natives/resources/AppIcon-Development60x60@2x.png >/dev/null; \
+	sips -z 152 152 "$$DEV" --out $(SOURCEDIR)/Natives/resources/AppIcon-Development76x76@2x~ipad.png >/dev/null; \
+	PURPLE="$(SOURCEDIR)/Natives/logo/logo-purple-light.png"; \
+	sips -z 120 120 "$$PURPLE" --out $(SOURCEDIR)/Natives/resources/AppIcon-Purple60x60@2x.png >/dev/null; \
+	sips -z 152 152 "$$PURPLE" --out $(SOURCEDIR)/Natives/resources/AppIcon-Purple76x76@2x~ipad.png >/dev/null; \
+	echo "[Witch v$(VERSION)] logos - done (primary=$$PRIMARY)"
+	echo '[Witch v$(VERSION)] logos - end'
 
 lwgjl:
 	echo '[Witch v$(VERSION)] lwgjl - start'
@@ -407,6 +436,7 @@ lwgjl:
 
 payload: native dep_mg lwgjl java jre assets
 	echo '[Witch v$(VERSION)] payload - start'
+	rm -f $(WORKINGDIR)/Witch.app/*.png
 	$(call METHOD_DIRCHECK,$(WORKINGDIR)/Witch.app/libs)
 	$(call METHOD_DIRCHECK,$(WORKINGDIR)/Witch.app/libs_caciocavallo)
 	$(call METHOD_DIRCHECK,$(WORKINGDIR)/Witch.app/libs_caciocavallo17)

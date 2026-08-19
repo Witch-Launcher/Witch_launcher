@@ -83,7 +83,7 @@ jobs:
           export CFLAGS="-Wno-error=implicit-function-declaration $CFLAGS"
           export CXXFLAGS="-Wno-error=implicit-function-declaration $CXXFLAGS"
 
-          SIGN_FLAGS="CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="
+          SIGN_FLAGS="CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY= APP_ICON=AppIcon-Development"
 
           # WARNING MITIGATION: Filter runtime stderr streams to suppress repetitive upstream vtool signature warnings
           gmake -j$(sysctl -n hw.ncpu) dsym package PLATFORM=2 $SIGN_FLAGS 2> >(grep -v "vtool warning: code signature will be invalid" >&2)

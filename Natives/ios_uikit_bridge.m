@@ -183,6 +183,24 @@ UIInterfaceOrientationMask amethyst_orientation_mask(void) {
     return UIInterfaceOrientationMaskAllButUpsideDown;
 }
 
+// Switch the home-screen app icon. "blue" reverts to the build's primary icon
+// (AppIcon-Light); "purple"/"dev" use their alternate icon sets. Not supported
+// on every sideload setup, so failures are only logged.
+void applyLauncherAppIcon(void) {
+    NSString *style = getPrefObject(@"launcher.logo_style");
+    NSString *iconName = nil; // nil = primary AppIcon-Light
+    if ([style isEqualToString:@"purple"]) {
+        iconName = @"AppIcon-Purple";
+    } else if ([style isEqualToString:@"dev"]) {
+        iconName = @"AppIcon-Development";
+    }
+    [UIApplication.sharedApplication setAlternateIconName:iconName completionHandler:^(NSError *error) {
+        if (error) {
+            NSLog(@"[AppIcon] setAlternateIconName(%@) failed: %@", iconName ?: @"primary", error.localizedDescription);
+        }
+    }];
+}
+
 void UIKit_returnToSplitView() {
     dispatch_async(dispatch_get_main_queue(), ^{
         UIWindow *window = UIWindow.mainWindow;
