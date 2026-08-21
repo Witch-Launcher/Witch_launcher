@@ -1,3 +1,9 @@
 [submodule "amethyst-prebuilt-libraries/renderers/ANGLE/angle"]
 	path = amethyst-prebuilt-libraries/renderers/ANGLE/angle
 	url = https://github.com/Ynnyny/angle.git
+[submodule "Natives/external/NG-GL4ES/3rdparty/glslang"]
+	path = Natives/external/NG-GL4ES/3rdparty/glslang
+	url = https://github.com/KhronosGroup/glslang.git
+[submodule "Natives/external/NG-GL4ES/3rdparty/SPIRV-Cross"]
+	path = Natives/external/NG-GL4ES/3rdparty/SPIRV-Cross
+	url = https://github.com/KhronosGroup/SPIRV-Cross.git
