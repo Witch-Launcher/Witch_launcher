@@ -4,6 +4,12 @@
 <dict>
 	<key>ALTDeviceID</key>
 	<string></string>
+	<!-- iOS 26+ continued-processing requests use this wildcard to request a
+	     short GPU workload when an active Vulkan game is backgrounded. -->
+	<key>BGTaskSchedulerPermittedIdentifiers</key>
+	<array>
+		<string>com.witch.zad626.minecraft.gpu.*</string>
+	</array>
 	<key>CADisableMinimumFrameDurationOnPhone</key>
 	<true/>
 	<key>CFBundleDevelopmentRegion</key>

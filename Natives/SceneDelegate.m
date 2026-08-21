@@ -4,6 +4,8 @@
 #import "LauncherPreferences.h"
 #import "debug/DebugServer.h"
 #import "touchcontroller_jni_bridge.h"
+#import "SurfaceViewController.h"
+#import <BackgroundTasks/BackgroundTasks.h>
 
 extern UIWindow *mainWindow;
 
@@ -12,6 +14,43 @@ extern UIWindow *mainWindow;
 @end
 
 @implementation SceneDelegate
+
+// iOS 26 introduced BGContinuedProcessingTaskRequestResourcesGPU.  Without
+// its entitlement, MoltenVK loses its Metal device as soon as an active game
+// is put in the background (kIOGPUCommandBufferCallbackErrorBackgroundExecutionNotPermitted).
+// The request is deliberately best-effort: ordinary App Store/sideload
+// profiles cannot grant this restricted entitlement, but foreground gameplay
+// must continue to work normally when it is unavailable.
+static NSString *const kMinecraftGPUBackgroundTaskPrefix = @"com.witch.zad626.minecraft.gpu.";
+
+- (void)requestVulkanBackgroundGPUAllowanceIfNeeded {
+    if (@available(iOS 26.0, *)) {
+        if (!SurfaceViewController.isRunning) return;
+        if (!getEntitlementValue(@"com.apple.developer.background-tasks.continued-processing.gpu")) {
+            NSLog(@"[VulkanBackground] GPU continued-processing entitlement unavailable; iOS will revoke Vulkan after the app backgrounds");
+            return;
+        }
+        if (!(BGTaskScheduler.supportedResources & BGContinuedProcessingTaskRequestResourcesGPU)) {
+            NSLog(@"[VulkanBackground] This device does not support background GPU continued processing");
+            return;
+        }
+
+        NSString *identifier = [kMinecraftGPUBackgroundTaskPrefix stringByAppendingString:NSUUID.UUID.UUIDString];
+        BGContinuedProcessingTaskRequest *request =
+            [[BGContinuedProcessingTaskRequest alloc] initWithIdentifier:identifier
+                                                                     title:@"Minecraft is running"
+                                                                  subtitle:@"Keeping Vulkan rendering available"];
+        request.strategy = BGContinuedProcessingTaskRequestSubmissionStrategyFail;
+        request.requiredResources = BGContinuedProcessingTaskRequestResourcesGPU;
+
+        NSError *error = nil;
+        if ([[BGTaskScheduler sharedScheduler] submitTaskRequest:request error:&error]) {
+            NSLog(@"[VulkanBackground] Submitted GPU continued-processing request %@", identifier);
+        } else {
+            NSLog(@"[VulkanBackground] GPU continued-processing request rejected: %@", error.localizedDescription ?: @"unknown error");
+        }
+    }
+}
 
 
 - (void)scene:(UIScene *)scene willConnectToSession:(UISceneSession *)session options:(UISceneConnectionOptions *)connectionOptions {
@@ -59,6 +98,11 @@ extern UIWindow *mainWindow;
 - (void)sceneWillResignActive:(UIScene *)scene {
     // Called when the scene will move from an active state to an inactive state.
     // This may occur due to temporary interruptions (ex. an incoming phone call).
+    // Submit while the scene is still foreground-associated. Waiting for
+    // sceneDidEnterBackground is too late on iOS 27: MoltenVK has already
+    // received VK_ERROR_DEVICE_LOST by then.
+    [self requestVulkanBackgroundGPUAllowanceIfNeeded];
+    CallbackBridge_pauseGameIfNeed();
 }
 
 

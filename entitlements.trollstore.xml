@@ -10,6 +10,9 @@
     <true/>
     <key>com.apple.developer.kernel.increased-memory-limit</key>
     <true/>
+    <!-- Required by BGContinuedProcessingTaskRequestResourcesGPU on iOS 26+. -->
+    <key>com.apple.developer.background-tasks.continued-processing.gpu</key>
+    <true/>
 
     <!-- Allow loading ad-hoc-signed dylibs extracted at runtime (Distant
          Horizons extracts libzstd-jni_dh-*.dylib into tmp and dlopens it) -->

@@ -135,6 +135,7 @@ void init_logDeviceAndVer(char *argument) {
     NSLog(@"[Pre-init] Entitlements availability:");
     printEntitlementAvailability(@"com.apple.developer.kernel.extended-virtual-addressing");
     printEntitlementAvailability(@"com.apple.developer.kernel.increased-memory-limit");
+    printEntitlementAvailability(@"com.apple.developer.background-tasks.continued-processing.gpu");
     printEntitlementAvailability(@"com.apple.private.security.no-sandbox");
     //printEntitlementAvailability(@"dynamic-codesigning");
 }

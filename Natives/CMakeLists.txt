@@ -371,6 +371,7 @@ target_link_libraries(Witch
   "-framework AltKit"
   "-framework AuthenticationServices"
   "-framework AVFoundation"
+  "-framework BackgroundTasks"
   "-framework CAltKit"
   "-framework CoreFoundation"
   "-framework CoreGraphics"

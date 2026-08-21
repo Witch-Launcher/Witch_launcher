@@ -17,6 +17,7 @@ entitlements.codesign.xml
 /.rule/
 /sample/
 /.vscode/
+/log/
 
 # Build artifacts (users can build themselves)
 /amethyst-prebuilt-libraries/build/
