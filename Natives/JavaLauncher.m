@@ -627,6 +627,17 @@ int launchJVMWithArgs(NSString *username, id launchTarget, int width, int height
     // LWJGL checks this property before java.library.path, so Fabric-launched
     // games (e.g. Sodium) can find liblwjgl.dylib and friends.
     margv[++margc] = [NSString stringWithFormat:@"-Dorg.lwjgl.librarypath=%@", [javaLibraryPath componentsSeparatedByString:@":"].firstObject].UTF8String;
+
+    // VulkanMod ships the macOS-arm64 Shaderc binary in its own jar. On an
+    // iPhone 8 Plus (A11) that binary executes ARMv8.4 RCpc-immo instructions
+    // (for example LDAPURSB) and dies with SIGILL while
+    // shaderc_compiler_initialize() runs. Force LWJGL to use the matching
+    // iOS Shaderc binary from the selected LWJGL natives directory instead
+    // of extracting the mod's host-native copy. This is an LWJGL launcher
+    // property; it leaves the VulkanMod jar intact.
+    NSString *shadercPath = [[javaLibraryPath componentsSeparatedByString:@":"].firstObject
+        stringByAppendingPathComponent:@"libshaderc.dylib"];
+    margv[++margc] = [NSString stringWithFormat:@"-Dorg.lwjgl.shaderc.libname=%@", shadercPath].UTF8String;
     
     margv[++margc] = [NSString stringWithFormat:@"-Duser.dir=%@", gameDir].UTF8String;
     margv[++margc] = [NSString stringWithFormat:@"-Duser.home=%s", getenv("POJAV_HOME")].UTF8String;

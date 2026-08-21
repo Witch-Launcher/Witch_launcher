@@ -462,7 +462,9 @@ lwgjl:
 	echo "Copying 3.3.6 JARs to libs/lwjgl36..."; \
 	find "$$LWJGL36_DIR/bin/RELEASE" -name '*.jar' ! -name '*-natives-*' ! -name '*-sources.jar' -exec cp {} "$(SOURCEDIR)/JavaApp/libs/lwjgl36/" \; ; \
 	LWJGL41_DIR="$(SOURCEDIR)/lwgjl/lwjgl3-wip-rebase_3.4.1"; \
-	if [ ! -f "$$LWJGL41_DIR/bin/out/liblwjgl.dylib" ]; then \
+	: "LWJGL 3.4.1 Shaderc needs shaderc_compile_options_set_max_id_bound"; \
+	if [ ! -f "$$LWJGL41_DIR/bin/out/liblwjgl.dylib" ] || \
+	   ! nm -gU "$$LWJGL41_DIR/bin/out/libshaderc.dylib" 2>/dev/null | grep -q '_shaderc_compile_options_set_max_id_bound$$'; then \
 		echo "Building LWGJL 3.4.1..."; \
 		cd "$$LWJGL41_DIR" && export JAVA_HOME="$(JAVA_HOME)" && cd libffi && find build_iphoneos-arm64 -name Makefile -exec touch {} + && touch build_iphoneos-arm64/config.status && make -C build_iphoneos-arm64 && cd .. && mkdir -p bin/libs/native/macos/arm64/org/lwjgl bin/libs/native/macos/x64/org/lwjgl && cp libffi/build_iphoneos-arm64/.libs/libffi.a bin/libs/native/macos/arm64/org/lwjgl/libffi.a && cp bin/libs/native/macos/arm64/org/lwjgl/libffi.a bin/libs/native/macos/x64/org/lwjgl/libffi.a 2>/dev/null && ant -Dplatform.macos=true -Dbinding.assimp=false -Dbinding.bgfx=false -Dbinding.cuda=false -Dbinding.egl=false -Dbinding.fmod=false -Dbinding.harfbuzz=false -Dbinding.hwloc=false -Dbinding.jawt=false -Dbinding.jemalloc=false -Dbinding.ktx=false -Dbinding.libdivide=false -Dbinding.llvm=false -Dbinding.lmdb=false -Dbinding.lz4=false -Dbinding.meow=false -Dbinding.meshoptimizer=false -Dbinding.nfd=false -Dbinding.nuklear=false -Dbinding.odbc=false -Dbinding.opengles=false -Dbinding.opencl=false -Dbinding.openvr=false -Dbinding.openxr=false -Dbinding.opus=false -Dbinding.par=false -Dbinding.remotery=false -Dbinding.renderdoc=false -Dbinding.rpmalloc=false -Dbinding.vulkan=true -Dbinding.vma=true -Dbinding.spvc=true -Dbinding.shaderc=true -Dbinding.sse=false -Dbinding.spng=false -Dbinding.tinyexr=false -Dbinding.tinyfd=true -Dbinding.tootle=false -Dbinding.xxhash=false -Dbinding.yoga=false -Dbinding.zstd=false -Dbinding.sdl=false -Dbuild.type=release/3.4.1 -Djavadoc.skip=true -Dnashorn.args="--no-deprecation-warning" compile-templates compile compile-native release && mkdir -p bin/out && find bin/libs/native/macos/arm64/org/lwjgl -name '*.dylib' -exec cp {} bin/out/ \; || exit 1; \
 	fi; \
@@ -489,6 +491,17 @@ payload: native dep_mg lwgjl java jre assets
 	cp $(SOURCEDIR)/lwgjl/lwjgl3-wip-rebase_3.3.3/bin/out/*.dylib $(WORKINGDIR)/Witch.app/libs/lwjgl33_natives/ || exit 1
 	cp $(SOURCEDIR)/lwgjl/lwjgl3-wip-rebase_3.3.6/bin/out/*.dylib $(WORKINGDIR)/Witch.app/libs/lwjgl36_natives/ || exit 1
 	cp $(SOURCEDIR)/lwgjl/lwjgl3-wip-rebase_3.4.1/bin/out/*.dylib $(WORKINGDIR)/Witch.app/libs/lwjgl41_natives/ || exit 1
+	@nm -gU $(WORKINGDIR)/Witch.app/libs/lwjgl41_natives/libshaderc.dylib | \
+		grep -q '_shaderc_compile_options_set_max_id_bound$$' || \
+		{ echo 'ERROR: LWJGL 3.4.1 Shaderc is too old for VulkanMod'; exit 1; }
+	# Keep the legacy iOS Shaderc binary for LWJGL 3.3.x. VulkanMod 0.6.8 uses
+	# LWJGL 3.4.1 and requires shaderc_compile_options_set_max_id_bound, which
+	# this legacy binary does not export. The 3.4.1 directory therefore retains
+	# the matching Shaderc produced by the local LWJGL build above.
+	cp $(SOURCEDIR)/Natives/resources/Frameworks/libshaderc.dylib \
+	   $(WORKINGDIR)/Witch.app/libs/lwjgl33_natives/libshaderc.dylib || exit 1
+	cp $(SOURCEDIR)/Natives/resources/Frameworks/libshaderc.dylib \
+	   $(WORKINGDIR)/Witch.app/libs/lwjgl36_natives/libshaderc.dylib || exit 1
 	# LWJGL's libopenal.dylib links ApplicationServices.framework (macOS-only).
 	# Replace with iOS-compatible openal-soft build so LWJGL finds it at the
 	# expected path but loads a dylib that works on iOS.
