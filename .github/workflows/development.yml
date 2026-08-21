@@ -12,7 +12,7 @@ jobs:
   build:
     name: Development build
     runs-on: macos-14
-    timeout-minutes: 20
+    timeout-minutes: 360
     steps:
       - name: Checkout repository
         uses: actions/checkout@v5
@@ -30,6 +30,28 @@ jobs:
           distribution: 'zulu'
           java-version: '8'
 
+      # boot JDKs for the from-source JRE builds (same-major as the target)
+      - name: Setup boot JDK 17 (Zulu)
+        uses: actions/setup-java@v5
+        id: setup-java17
+        with:
+          distribution: 'zulu'
+          java-version: '17'
+
+      - name: Setup boot JDK 21 (Zulu)
+        uses: actions/setup-java@v5
+        id: setup-java21
+        with:
+          distribution: 'zulu'
+          java-version: '21'
+
+      - name: Setup boot JDK 25 (Zulu)
+        uses: actions/setup-java@v5
+        id: setup-java25
+        with:
+          distribution: 'zulu'
+          java-version: '25'
+
       # initialize essential building and packaging utilities via homebrew infrastructure
       - name: Install brew dependencies
         env:
@@ -37,7 +59,7 @@ jobs:
         run: |
           brew untap aws/tap 2>/dev/null || true
           brew update
-          brew install make wget ldid
+          brew install make wget ldid autoconf pkg-config
           sudo mkdir -p /usr/local/bin
           # map the gmake binary symlink seamlessly across the target build runner paths
           sudo ln -sf /opt/homebrew/bin/gmake /usr/local/bin/gmake
@@ -47,7 +69,7 @@ jobs:
         uses: actions/cache@v5
         with:
           path: depends/
-          key: amethyst-jres-v1
+          key: amethyst-jres-v2
 
       # resolve and inject core environmental paths and flags directly into the global execution scope
       - name: Resolve env (paths, SDK)
@@ -63,6 +85,22 @@ jobs:
           wget --version | head -1
           xcrun --sdk iphoneos --show-sdk-version
           echo "SDKPATH=$SDKPATH"
+
+      # Build the four iOS JREs from source (skipped when restored from cache:
+      # build.sh/make short-circuit on depends/java-<ver>-openjdk/release).
+      # Signal-legacy: vtool signature warnings are filtered like the main step.
+      - name: Build iOS JREs from source
+        if: steps.cache-jres.outputs.cache-hit != 'true'
+        shell: bash
+        run: |
+          export PATH=/opt/homebrew/bin:$PATH
+          export RUNNER=0
+          export JRE_BUILD_MODE=build
+          export JRE_BOOT_8="${{ steps.setup-java.outputs.path }}"
+          export JRE_BOOT_17="${{ steps.setup-java17.outputs.path }}"
+          export JRE_BOOT_21="${{ steps.setup-java21.outputs.path }}"
+          export JRE_BOOT_25="${{ steps.setup-java25.outputs.path }}"
+          gmake jre 2> >(grep -v "vtool warning: code signature will be invalid" >&2)
 
       # Trigger gmake compilation pipelines with inline stderr filtering and execute post-build binary optimization
       - name: Build sideload IPA & TrollStore tIPA

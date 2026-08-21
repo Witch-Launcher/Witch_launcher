@@ -1,0 +1,4 @@
+#!/bin/bash
+# iOS arm64 clang++ wrapper used as the OpenJDK toolchain.
+# $thecxx / $thesysroot are exported by setdevkitpath.sh.
+exec $thecxx -arch arm64 -isysroot $thesysroot -miphoneos-version-min=14.0 "$@"

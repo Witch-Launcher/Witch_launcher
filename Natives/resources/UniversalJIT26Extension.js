@@ -26,6 +26,13 @@ legacyCommands[0x6a] = function(brkResponse) {
         log(`Mirror prepare brk 0x6a: missing rx/rw (x1=${x1}, x2=${parseRegNum(brkResponse, 0x02)})`);
         return;
     }
+    // Mirror superpage lives in a fixed 4 GB band (0x700000000-0x800000000).
+    // Reject out-of-band pairs: a register-layout shift between JDK builds
+    // would otherwise prepare_memory_region() on random addresses.
+    if (rx < 0x700000000n || rx >= 0x800000000n || rw <= rx || rw > 0x800000000n) {
+        log(`Mirror prepare brk 0x6a: out-of-band rx=0x${rx.toString(16)} rw=0x${rw.toString(16)}, skipping (layout drift?)`);
+        return;
+    }
     if (!size || size < 16n * 1024n * 1024n) {
         if (rw > rx) {
             size = rw - rx;

@@ -11,6 +11,9 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
+#include <sys/sysctl.h>
+#include <sys/proc.h>
+#include <signal.h>
 #include <unistd.h>
 
 #include "utils.h"
@@ -28,6 +31,18 @@ static NSString *dhNativeLibPath = nil;
 
 // Forward declaration for DH fix
 static void checkAndAddDhNativeLibPath(NSString *versionId);
+static BOOL instanceHasTouchControllerMod(NSString *gameDir);
+
+// JVM-startup watchdog (defined after launchJVMWithArgs). Surfaces a crash
+// screen if the JVM stalls with no output and no rendering for 120s.
+static void startJVMStartupWatchdog(BOOL jit26Active, uint64_t launchMs);
+static uint64_t jitNowMs(void);
+// Defined in egl_bridge.m — returns total swap/frame count (advanced by the
+// game's CAMetalLayer once a window starts rendering).
+extern uint64_t pojavSwapCount(void);
+
+// Defined in main.m — monotonic ms of the last stdout/stderr flush.
+uint64_t pojavLastLogWriteMs(void);
 
 // Defined in input_bridge_v3.m — sets SDL3's SDL_MainIsReady flag. Called
 // before JLI_Launch so SDL-based games (26.x / RenderPearl) can SDL_Init.
@@ -269,6 +284,29 @@ void init_loadCustomJvmFlags(int* argc, const char** argv) {
     }
 }
 
+// Diagnostics: whether a debugger (StikDebug) is currently attached via
+// ptrace. Sandboxed apps may get EPERM from sysctl — log it either way.
+static BOOL processIsDebugged(void) {
+    struct kinfo_proc info = {0};
+    size_t size = sizeof(info);
+    int mib[4] = {CTL_KERN, KERN_PROC, KERN_PROC_PID, getpid()};
+    if (sysctl(mib, 4, &info, &size, NULL, 0) != 0) {
+        NSLog(@"[JavaLauncher] sysctl KERN_PROC_PID failed: %s", strerror(errno));
+        return NO;
+    }
+    return (info.kp_proc.p_flag & P_TRACED) != 0;
+}
+
+// The JIT26 / mirror brk stubs (#0xf00d, #0x6a) are serviced by StikDebug's
+// exception server. When nothing services them the kernel raises SIGTRAP and
+// the default action kills the app (crash straight back to the home screen).
+// During the handshake window we catch SIGTRAP instead: the stub resumes with
+// stale registers and the probe below fails with a diagnostic dialog telling
+// the user exactly what to fix (enable JIT / assign the script).
+static void onUnservicedBrk(int sig) {
+    (void)sig;
+}
+
 static BOOL JIT26ProbeLooksValid(void *result) {
     if (!result || result == MAP_FAILED) {
         return NO;
@@ -314,15 +352,37 @@ int launchJVMWithArgs(NSString *username, id launchTarget, int width, int height
     DeviceGetJITFlags(YES);
     BOOL requiresDebugJITMapping = DeviceNeedsDebugJITMapping();
     BOOL jit26AlwaysAttached = getPrefBool(@"debug.debug_always_attached_jit");
-    NSLog(@"[JavaLauncher] JIT flags 0x%X -> requiresDebugJITMapping=%d", (unsigned)DeviceGetJITFlags(NO), requiresDebugJITMapping);
-    if (requiresDebugJITMapping) {
+    // Patched Java 21/25 runtimes always route code-cache allocation through
+    // brk #0xf00d / brk #0x6a on iOS 26.6+/27 — even on TXM devices where RX
+    // mappings work directly (see patch_libjvm_jit_alloc.py /
+    // patch_libjvm_mirror_brk.py). The launcher must therefore run the full
+    // JIT26 handshake (script upload + probe + exception ports) on every
+    // iOS 26+ device, regardless of the TXM classification. Skipping it on
+    // "blanket TXM" iOS 27 devices (iPhone 12/13 & co.) leaves the JVM's
+    // first breakpoint unserviced: the JVM thread hangs inside JLI_Launch
+    // before any Java output — the all-black, frozen-log screen.
+    BOOL jit26Handshake = DeviceHasJITFlags(JIT_FLAG_IS_IOS_26);
+    NSLog(@"[JavaLauncher] JIT flags 0x%X -> requiresDebugJITMapping=%d jit26Handshake=%d",
+        (unsigned)DeviceGetJITFlags(NO), requiresDebugJITMapping, jit26Handshake);
+    if (jit26Handshake) {
         // Keep StikDebug attached through probe, JVM init, and mirror prepare.
+        // Catch unserviced handshake brks (SIGTRAP) so the app shows an error
+        // dialog instead of dying to the home screen.
+        BOOL traced = processIsDebugged();
+        NSLog(@"[JavaLauncher] JIT26 handshake begin (debugger attached: %d)", traced);
+        struct sigaction jitTrapSa = {0};
+        struct sigaction oldTrapSa;
+        jitTrapSa.sa_handler = onUnservicedBrk;
+        sigemptyset(&jitTrapSa.sa_mask);
+        jitTrapSa.sa_flags = 0;
+        sigaction(SIGTRAP, &jitTrapSa, &oldTrapSa);
         JIT26SetDetachAfterFirstBr(NO);
         JIT26SendJITScript([NSString stringWithContentsOfFile:[NSBundle.mainBundle pathForResource:@"UniversalJIT26Extension" ofType:@"js"]]);
         // Use the same brk #0xf00d path as patched libjvm (not legacy brk #0x69).
         void *probeMapping = JIT26PrepareRegion(NULL, getpagesize());
         NSLog(@"[JavaLauncher] JIT26 probe returned %p", probeMapping);
         if (!JIT26ProbeLooksValid(probeMapping)) {
+            sigaction(SIGTRAP, &oldTrapSa, NULL);
             NSString *inBundleScriptPath = [NSBundle.mainBundle pathForResource:@"UniversalJIT26" ofType:@"js"];
             NSString *documentsScriptPath = [NSString stringWithFormat:@"%s/UniversalJIT26.js", getenv("POJAV_HOME")];
             if (inBundleScriptPath) {
@@ -345,13 +405,17 @@ int launchJVMWithArgs(NSString *username, id launchTarget, int width, int height
             }
             showDialog(localize(@"Error", nil),
                 [NSString stringWithFormat:
-                    @"StikDebug probe failed (got %p). Your assigned script may be outdated, or StikDebug is below 3.1.6. "
-                     @"UniversalJIT26.js was refreshed in Witch Documents — re-assign it in StikDebug (long-press → Assign Script), "
-                     @"re-enable JIT, then launch again.",
+                    @"StikDebug probe failed (got %p). JIT is not servicing Witch's breakpoints. "
+                     @"Make sure the JIT toggle for Witch in StikDebug is ON, close and reopen Witch after "
+                     @"enabling it, and that the assigned script is \"Universal JIT 26\". "
+                     @"UniversalJIT26.js was refreshed in Witch Documents — re-assign it in StikDebug "
+                     @"(long-press → Assign Script), re-enable JIT, then launch again.",
                     probeMapping]);
             [PLLogOutputView handleExitCode:1];
             return 1;
         }
+        // Debugger is servicing us — restore default SIGTRAP behavior for the JVM run.
+        sigaction(SIGTRAP, &oldTrapSa, NULL);
         JIT26SetDetachAfterFirstBr(!jit26AlwaysAttached);
         init_jit_vm_remap_hook();
         // make sure we don't get stuck in EXC_BAD_ACCESS
@@ -404,9 +468,16 @@ int launchJVMWithArgs(NSString *username, id launchTarget, int width, int height
     // BEFORE the JVM starts: the JVM snapshots the environment at boot and
     // later setenv() calls are invisible to System.getenv(). The value is
     // not a real socket path (the transport is an in-process ring buffer),
-    // so any non-empty value works; harmless when no mod is installed.
-    setenv("TOUCH_CONTROLLER_PROXY_SOCKET", "inproc:touchcontroller", 1);
-    NSLog(@"[JavaLauncher] TOUCH_CONTROLLER_PROXY_SOCKET set before JVM launch");
+    // so any non-empty value works. Only set it when the instance actually
+    // ships the mod (mirrors Tools.hasModLibrary); otherwise leave it unset.
+    NSString *tcGameDir = [NSString stringWithFormat:@"%s/instances/%@/%@",
+        getenv("POJAV_HOME"), getPrefObject(@"general.game_directory"),
+        [PLProfiles resolveKeyForCurrentProfile:@"gameDir"]]
+        .stringByStandardizingPath;
+    if (instanceHasTouchControllerMod(tcGameDir)) {
+        setenv("TOUCH_CONTROLLER_PROXY_SOCKET", "inproc:touchcontroller", 1);
+        NSLog(@"[JavaLauncher] TouchController mod detected: TOUCH_CONTROLLER_PROXY_SOCKET set");
+    }
 
     // Apply Zink-specific environment variables if Zink renderer is selected
     if ([renderer hasPrefix:@"libOSMesa"]) {
@@ -440,7 +511,13 @@ int launchJVMWithArgs(NSString *username, id launchTarget, int width, int height
         return 1;
     }
 
-    BOOL needsMirrorJITPrepare = requiresDebugJITMapping && RuntimeSupportsDebugJITMapping(javaHome);
+    // Patched runtimes use mirror_w/x on every iOS 26.6+/27 device, TXM or
+    // not (the JVM's code-cache path goes through brk #0xf00d/0x6a regardless
+    // of the device's direct-RX capability). needsMirrorJITPrepare therefore
+    // only requires iOS 26+ plus a mirror-capable runtime — not
+    // requiresDebugJITMapping, which wrongly excluded "blanket TXM" iOS 27
+    // devices (iPhone 12/13 & co.) and hung them inside JLI_Launch.
+    BOOL needsMirrorJITPrepare = jit26Handshake && RuntimeSupportsDebugJITMapping(javaHome);
     if (needsMirrorJITPrepare) {
         // Java 21/25 patched runtimes use mirror_w/x on every iOS 26.6+/27 device.
         // StikDebug must stay attached through vm_remap and follow-up prepare calls.
@@ -689,7 +766,11 @@ int launchJVMWithArgs(NSString *username, id launchTarget, int width, int height
         showDialog(localize(@"Error", nil), @(error));
         return 1;
     }
-    if (requiresDebugJITMapping) {
+    if (needsMirrorJITPrepare) {
+        // Preload libjvm and rebind the vm_remap/vm_protect hooks BEFORE the
+        // JVM boots so the JIT26 mirror prepare covers every RX request the
+        // patched runtime makes — required on iOS 26.6+/27 for TXM devices
+        // too (the runtime always uses mirror_w there).
         NSString *libjvmPath = [NSString stringWithFormat:@"%@/lib/server/libjvm.dylib", javaHome];
         if (![fm fileExistsAtPath:libjvmPath]) {
             UIKit_returnToSplitView();
@@ -858,6 +939,13 @@ int launchJVMWithArgs(NSString *username, id launchTarget, int width, int height
     // Free split VC
     tmpRootVC = nil;
 
+    // Watch the JVM startup: if it produces no output and never starts
+    // rendering within 120s, surface a crash screen instead of leaving the
+    // user staring at a frozen black screen. This catches the iOS 26.6+/27
+    // hang where the patched JVM's first brk #0xf00d goes unserviced and the
+    // JVM thread stalls inside JLI_Launch before any Java output.
+    startJVMStartupWatchdog(jit26Handshake, jitNowMs());
+
     return pJLI_Launch(++margc, margv,
                    0, NULL, // sizeof(const_jargs) / sizeof(char *), const_jargs,
                    0, NULL, // sizeof(const_appclasspath) / sizeof(char *), const_appclasspath,
@@ -868,6 +956,66 @@ int launchJVMWithArgs(NSString *username, id launchTarget, int width, int height
                    "java", "openjdk",
                    /* (const_jargs != NULL) ? JNI_TRUE : */ JNI_FALSE,
                    JNI_TRUE, JNI_FALSE, JNI_TRUE);
+}
+
+// ==================== JVM Startup Watchdog ====================
+static uint64_t jitNowMs(void) {
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC_RAW, &ts);
+    return (uint64_t)ts.tv_sec * 1000 + (uint64_t)(ts.tv_nsec / 1000000);
+}
+
+// After JLI_Launch begins, a healthy JVM either prints output (any Java /
+// launcher line), starts rendering (CAMetalLayer frame count advances), or
+// exits. If none of those happened within the timeout the JVM is wedged —
+// typical for the iOS 26.6+/27 patched-runtime brk hang — so surface the
+// crash screen with a hint instead of an endless black screen.
+static void startJVMStartupWatchdog(BOOL jit26Active, uint64_t launchMs) {
+    if (!jit26Active) return; // Pre-iOS 26 classic path never hangs this way.
+    dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
+        uint64_t lastFrame = pojavSwapCount();
+        for (int i = 0; i < 60; i++) { // 2s * 60 = 120s
+            usleep(2 * 1000 * 1000);
+            // Anything newer than launch = the JVM made progress.
+            if (pojavLastLogWriteMs() > launchMs) return;
+            // Frames advancing = game window is live and rendering.
+            if (pojavSwapCount() != lastFrame) return;
+        }
+        NSLog(@"[JavaLauncher] WATCHDOG: JVM produced no output and no frames "
+              @"for 120s after launch — showing crash screen (possible JIT26 brk hang)");
+        dispatch_async(dispatch_get_main_queue(), ^{
+            [PLLogOutputView handleExitCode:1];
+        });
+    });
+}
+
+// ==================== TouchController Mod Detection ====================
+// Mirrors Tools.hasModLibrary (Java): true if the instance ships the mod via
+// a jar in mods/ (Fabric/Quilt style) or via Forge-style libraries. Used to
+// gate TOUCH_CONTROLLER_PROXY_SOCKET before the JVM snapshots the
+// environment (System.getenv() in Java cannot see post-boot setenv()).
+static BOOL instanceHasTouchControllerMod(NSString *gameDir) {
+    NSFileManager *fileManager = [NSFileManager defaultManager];
+    NSArray<NSString *> *modDirs = @[
+        [gameDir stringByAppendingPathComponent:@"mods"],
+        [gameDir stringByAppendingPathComponent:@".minecraft/mods"]
+    ];
+    for (NSString *dirPath in modDirs) {
+        NSArray<NSString *> *entries = [fileManager contentsOfDirectoryAtPath:dirPath error:nil];
+        for (NSString *entry in entries) {
+            if ([entry rangeOfString:@"touchcontroller" options:NSCaseInsensitiveSearch].location != NSNotFound) {
+                return YES;
+            }
+        }
+    }
+    NSString *librariesDir = [NSString stringWithFormat:@"%s/libraries", getenv("POJAV_HOME")];
+    NSArray<NSString *> *libPaths = [fileManager subpathsOfDirectoryAtPath:librariesDir error:nil];
+    for (NSString *relPath in libPaths) {
+        if ([relPath rangeOfString:@"touchcontroller" options:NSCaseInsensitiveSearch].location != NSNotFound) {
+            return YES;
+        }
+    }
+    return NO;
 }
 
 // ==================== Distant Horizons Native Library Fix ====================

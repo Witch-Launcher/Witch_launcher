@@ -123,6 +123,19 @@ void glGetIntegerv(GLenum pname, GLint* params) {
         (*params) = g_current_ctx ? g_current_ctx->context_flags : 0;
         break;
     }
+    case GL_UNIFORM_BUFFER_OFFSET_ALIGNMENT: {
+        // Minecraft 1.21.6+ divides by this value at renderer init
+        // (DynamicUniformStorage/GlDevice). The ES backend reports 0 for this
+        // desktop query on some devices (e.g. iPhone 6s / A9 through ANGLE),
+        // which crashes the game with ArithmeticException (/ by zero). Promise a
+        // valid power-of-two alignment (16 is Apple's Metal/GLES3 minimum) when
+        // the backend has no answer.
+        GLint es_params = 0;
+        GLES.glGetIntegerv(pname, &es_params);
+        (*params) = es_params > 0 ? es_params : 16;
+        LOG_D("  -> %d", *params)
+        break;
+    }
     case GL_ARRAY_BUFFER_BINDING:
     case GL_ATOMIC_COUNTER_BUFFER_BINDING:
     case GL_COPY_READ_BUFFER_BINDING:

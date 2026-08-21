@@ -130,6 +130,8 @@ jobs:
         run: |
           export PATH=/opt/procursus/bin:/opt/homebrew/bin:$PATH
           export RUNNER=1
+          # release artifacts are fetched as prebuilt JRE archives above; never rebuild from source here
+          export JRE_BUILD_MODE=download
           if [ "${{ matrix.platform_name }}" == "ios" ]; then
             # Build ipa and tipa for iOS
             gmake -j$(sysctl -n hw.ncpu) dsym package PLATFORM=${{ matrix.platform }}

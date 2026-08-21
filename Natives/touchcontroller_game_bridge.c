@@ -18,9 +18,9 @@
 
 #include "touchcontroller_launcher.h"
 
-// Diagnostic logging: writes to process stderr, which the launcher captures
-// into the JVM log file (latestlog.txt) alongside Java output.
-#define TCG_LOG(...) fprintf(stderr, "[TCG] " __VA_ARGS__)
+// Diagnostic logging (disabled): used to write to process stderr, which the
+// launcher captures into the JVM log file alongside Java output.
+#define TCG_LOG(...) do {} while (0)
 
 #define GAME_MAX_MESSAGE_SIZE 255
 
@@ -103,26 +103,11 @@ Java_top_fifthlight_touchcontroller_common_platform_ios_Transport_receive__3BI(J
     jbyte* data = (*env)->GetByteArrayElements(env, buffer, NULL);
     if (data == NULL) return -1;
 
-    // One-shot + sparse polling markers: the mod calls receive() every
-    // render frame; log the first poll and every 1000th so we can confirm
-    // the mod is actually polling the shared queue.
-    static int pollCount = 0;
-    int poll = ++pollCount;
-    if (poll == 1 || poll % 1000 == 0) {
-        TCG_LOG("game poll #%d (buffer size=%d)\n", poll, (int)arrayLen);
-    }
-
     int result = touchcontroller_ios_receive(data, (size_t)arrayLen);
     if (result < 0) {
         (*env)->ReleaseByteArrayElements(env, buffer, data, 0);
         game_throw_exception(env, "Queue not initialized");
         return 0;
-    }
-    if (result > 0) {
-        int type = (result >= 4)
-            ? ((data[0] & 0xFF) << 24) | ((data[1] & 0xFF) << 16) | ((data[2] & 0xFF) << 8) | (data[3] & 0xFF)
-            : -1;
-        TCG_LOG("game receive n=%d type=%d\n", result, type);
     }
     (*env)->ReleaseByteArrayElements(env, buffer, data, 0);
     return result;
@@ -142,12 +127,7 @@ Java_top_fifthlight_touchcontroller_common_platform_ios_Transport_send__3BII(JNI
     jbyte* data = (*env)->GetByteArrayElements(env, buffer, NULL);
     if (data == NULL) return;
 
-    int result = touchcontroller_ios_send(data + off, len);
-    if (result == 0 && len >= 4) {
-        int type = ((data[off] & 0xFF) << 24) | ((data[off + 1] & 0xFF) << 16)
-            | ((data[off + 2] & 0xFF) << 8) | (data[off + 3] & 0xFF);
-        TCG_LOG("game send n=%d type=%d\n", len, type);
-    }
+int result = touchcontroller_ios_send(data + off, len);
     (*env)->ReleaseByteArrayElements(env, buffer, data, JNI_ABORT);
     if (result != 0) {
         game_throw_exception(env, "Queue not initialized");

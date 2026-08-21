@@ -20,6 +20,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include <dirent.h>
+#include <time.h>
+#include <stdatomic.h>
 #include "utils.h"
 #include "codesign.h"
 
@@ -29,6 +31,15 @@
 int ptrace(int, pid_t, caddr_t, int);
 #define fm NSFileManager.defaultManager
 extern char** environ;
+
+// Monotonic timestamp (ms) of the last stdout/stderr line flushed to the log
+// pipe. The JVM-startup watchdog (JavaLauncher.m) uses it to distinguish a
+// jvm that is making progress from one stuck inside JLI_Launch with no output
+// (the iOS 26.6+/27 black-screen hang).
+static atomic_uint_fast64_t g_lastLogWriteMs = 0;
+uint64_t pojavLastLogWriteMs(void) {
+    return atomic_load_explicit(&g_lastLogWriteMs, memory_order_relaxed);
+}
 
 void printEntitlementAvailability(NSString *key) {
     NSLog(@"* %@: %@", key, getEntitlementValue(key) ? @"YES" : @"NO");
@@ -184,6 +195,11 @@ void init_redirectStdio() {
             }
             [file writeData:[NSData dataWithBytes:buf length:rsize]];
             [file synchronizeFile];
+            struct timespec ts;
+            clock_gettime(CLOCK_MONOTONIC_RAW, &ts);
+            atomic_store_explicit(&g_lastLogWriteMs,
+                (uint64_t)ts.tv_sec * 1000 + (uint64_t)(ts.tv_nsec / 1000000),
+                memory_order_relaxed);
         }
         [file closeFile];
     });

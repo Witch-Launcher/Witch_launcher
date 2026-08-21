@@ -354,3 +354,8 @@
 "credits.open_license" = "Mở giấy phép";
 "credits.open_project" = "Mở dự án";
 "credits.unavailable" = "Không tải được credits. Kiểm tra kết nối internet của bạn.";
+"account.no_account" = "Chưa có tài khoản";
+"launcher.checking" = "Đang kiểm tra...";
+"launcher.download" = "Đang tải xuống...";
+"preference.title.gamepad_sensitivity" = "Độ nhạy tay cầm";
+"preference.title.lwjgl_version" = "Phiên bản LWJGL";

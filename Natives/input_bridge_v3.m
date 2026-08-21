@@ -15,6 +15,7 @@
 #include <assert.h>
 #include <dlfcn.h>
 #include <libgen.h>
+#include <mach/mach.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <stdatomic.h>
@@ -303,9 +304,70 @@ ADD_CALLBACK_WWIN(WindowSize)
 
 #undef ADD_CALLBACK_WWIN
 
+// LWJGL GLFW callbacks are libffi/JNA closure trampolines living in anonymous
+// exec regions. On iOS 18 those regions are vm_allocate'd with a max-prot that
+// has no execute and the mprotect(RX) that should add execute silently fails
+// (see hackFix18LWJGL), so the trampoline page stays non-executable and calling
+// it SIGBUSes with BUS_ADRALN. Before invoking a closure, probe the vmmap
+// protection of its page and, when it is not executable, repair it by raising
+// max protection to include execute (vm_protect set_maximum=TRUE, allowed under
+// a debugger/jailbroken kernel). Only if the repair fails do we skip the call;
+// the pure-JNI internalWindowSizeChanged path still delivers the window size.
+static bool closure_is_executable(void *func) {
+    if (func == NULL) return false;
+    mach_vm_address_t addr = (mach_vm_address_t)func;
+    mach_vm_size_t size = 0;
+    vm_region_basic_info_data_64_t info;
+    mach_msg_type_number_t infoCount = VM_REGION_BASIC_INFO_COUNT_64;
+    mach_port_t objectName = MACH_PORT_NULL;
+    kern_return_t kr = mach_vm_region(mach_task_self(), &addr, &size,
+        VM_REGION_BASIC_INFO_64, (vm_region_info_t)&info, &infoCount, &objectName);
+    if (kr != KERN_SUCCESS) return true; // unknown -> allow (default behavior)
+    if (info.protection & VM_PROT_EXECUTE) return true;
+
+    mach_vm_address_t page = (mach_vm_address_t)func & ~(mach_vm_address_t)(PAGE_SIZE - 1);
+    kr = vm_protect(mach_task_self(), page, PAGE_SIZE, TRUE, VM_PROT_READ | VM_PROT_EXECUTE);
+    if (kr == KERN_SUCCESS) {
+        kr = vm_protect(mach_task_self(), page, PAGE_SIZE, FALSE, VM_PROT_READ | VM_PROT_EXECUTE);
+        if (kr == KERN_SUCCESS) {
+            NSLog(@"[input_bridge] repaired non-exec closure page %p (was prot=0x%x)", func, info.protection);
+            return true;
+        }
+    }
+    NSLog(@"[input_bridge] cannot repair non-exec closure page %p (prot=0x%x kr=0x%x)", func, info.protection, kr);
+    return false;
+}
+
+#define GUARDED_INVOKE(NAME, WRAP_ARGS, CALL_ARGS) \
+static void safeInvoke##NAME WRAP_ARGS { \
+    if (!GLFW_invoke_##NAME) return; \
+    if (!closure_is_executable((void *)GLFW_invoke_##NAME)) { \
+        static BOOL logged##NAME = NO; \
+        if (!logged##NAME) { \
+            logged##NAME = YES; \
+            NSLog(@"[input_bridge] skip non-exec closure " #NAME " (%p)", GLFW_invoke_##NAME); \
+        } \
+        return; \
+    } \
+    GLFW_invoke_##NAME CALL_ARGS; \
+}
+
+GUARDED_INVOKE(Char, (void *window, unsigned int codepoint), (window, codepoint))
+GUARDED_INVOKE(CharMods, (void *window, unsigned int codepoint, int mods), (window, codepoint, mods))
+GUARDED_INVOKE(CursorEnter, (void *window, int entered), (window, entered))
+GUARDED_INVOKE(CursorPos, (void *window, double x, double y), (window, x, y))
+GUARDED_INVOKE(FramebufferSize, (void *window, int w, int h), (window, w, h))
+GUARDED_INVOKE(Key, (void *window, int key, int scancode, int action, int mods), (window, key, scancode, action, mods))
+GUARDED_INVOKE(MouseButton, (void *window, int button, int action, int mods), (window, button, action, mods))
+GUARDED_INVOKE(Scroll, (void *window, double xoff, double yoff), (window, xoff, yoff))
+GUARDED_INVOKE(WindowPos, (void *window, int x, int y), (window, x, y))
+GUARDED_INVOKE(WindowSize, (void *window, int w, int h), (window, w, h))
+
+#undef GUARDED_INVOKE
+
 void handleFramebufferSizeJava(void* window, int w, int h) {
-    if(GLFW_invoke_CursorEnter)GLFW_invoke_CursorEnter(window, 1);
-    if(GLFW_invoke_WindowPos)GLFW_invoke_WindowPos(window, 0, 0);
+    safeInvokeCursorEnter(window, 1);
+    safeInvokeWindowPos(window, 0, 0);
     if (vmGlfwClass != NULL && method_internalWindowSizeChanged != NULL) {
         (*runtimeJNIEnvPtr)->CallStaticVoidMethod(runtimeJNIEnvPtr, vmGlfwClass, method_internalWindowSizeChanged, (long)window, w, h);
     }
@@ -326,37 +388,37 @@ void pojavPumpEvents(void* window) {
         cLastX = cursorX;
         cLastY = cursorY;
         if (isUseStackQueueCall)
-            GLFW_invoke_CursorPos(window, cursorX, cursorY);
+            safeInvokeCursorPos(window, cursorX, cursorY);
     }
     for(size_t i = 0; i < counter; i++) {
         GLFWInputEvent event = events[i];
         switch(event.type) {
             case EVENT_TYPE_CHAR:
-                if(GLFW_invoke_Char) GLFW_invoke_Char(window, event.i1);
+                safeInvokeChar(window, event.i1);
                 break;
             case EVENT_TYPE_CHAR_MODS:
                 if(GLFW_invoke_CharMods) {
-                    GLFW_invoke_CharMods(window, event.i1, event.i2);
+                    safeInvokeCharMods(window, event.i1, event.i2);
                 } else if (GLFW_invoke_Char) {
-                    GLFW_invoke_Char(window, event.i1);
+                    safeInvokeChar(window, event.i1);
                 }
                 break;
             case EVENT_TYPE_KEY:
-                if(GLFW_invoke_Key) GLFW_invoke_Key(window, event.i1, event.i2, event.i3, event.i4);
+                safeInvokeKey(window, event.i1, event.i2, event.i3, event.i4);
                 break;
             case EVENT_TYPE_MOUSE_BUTTON:
-                if(GLFW_invoke_MouseButton) GLFW_invoke_MouseButton(window, event.i1, event.i2, event.i3);
+                safeInvokeMouseButton(window, event.i1, event.i2, event.i3);
                 break;
             case EVENT_TYPE_SCROLL:
-                if(GLFW_invoke_Scroll) GLFW_invoke_Scroll(window, event.f1, event.f2);
+                safeInvokeScroll(window, event.f1, event.f2);
                 break;
             case EVENT_TYPE_FRAMEBUFFER_SIZE:
                 handleFramebufferSizeJava(window, event.i1, event.i2);
-                if(GLFW_invoke_FramebufferSize) GLFW_invoke_FramebufferSize(window, event.i1, event.i2);
+                safeInvokeFramebufferSize(window, event.i1, event.i2);
                 break;
             case EVENT_TYPE_WINDOW_SIZE:
                 handleFramebufferSizeJava(window, event.i1, event.i2);
-                if(GLFW_invoke_WindowSize) GLFW_invoke_WindowSize(window, event.i1, event.i2);
+                safeInvokeWindowSize(window, event.i1, event.i2);
                 break;
         }
     }
@@ -483,10 +545,10 @@ void CallbackBridge_nativeSetInputReady(BOOL inputReady) {
     if (inputReady) {
         if (GLFW_invoke_FramebufferSize) {
             hackFix18LWJGL(GLFW_invoke_FramebufferSize);
-            GLFW_invoke_FramebufferSize((void*) showingWindow, windowWidth, windowHeight);
+            safeInvokeFramebufferSize((void*) showingWindow, windowWidth, windowHeight);
         }
         if (GLFW_invoke_WindowSize) {
-            GLFW_invoke_WindowSize((void*) showingWindow, windowWidth, windowHeight);
+            safeInvokeWindowSize((void*) showingWindow, windowWidth, windowHeight);
         }
     }
 }
@@ -951,7 +1013,7 @@ BOOL CallbackBridge_nativeSendChar(jchar codepoint /* jint codepoint */) {
         if (isUseStackQueueCall) {
             sendData(EVENT_TYPE_CHAR, codepoint, 0, 0, 0);
         } else {
-            GLFW_invoke_Char((void*) showingWindow, (unsigned int) codepoint);
+            safeInvokeChar((void*) showingWindow, (unsigned int) codepoint);
             // return lwjgl2_triggerCharEvent(codepoint);
         }
         return YES;
@@ -968,9 +1030,9 @@ BOOL CallbackBridge_nativeSendCharMods(jchar codepoint, int mods) {
             sendData(EVENT_TYPE_CHAR_MODS, (unsigned int) codepoint, mods, 0, 0);
         } else {
             if (GLFW_invoke_CharMods) {
-                GLFW_invoke_CharMods((void*) showingWindow, codepoint, mods);
+                safeInvokeCharMods((void*) showingWindow, codepoint, mods);
             } else {
-                GLFW_invoke_Char((void*) showingWindow, (unsigned int) codepoint);
+                safeInvokeChar((void*) showingWindow, (unsigned int) codepoint);
             }
         }
         return YES;
@@ -983,7 +1045,7 @@ BOOL CallbackBridge_nativeSendCharMods(jchar codepoint, int mods) {
 /*
 JNIEXPORT void JNICALL Java_org_lwjgl_glfw_CallbackBridge_nativeSendCursorEnter(JNIEnv* env, jclass clazz, jint entered) {
     if (GLFW_invoke_CursorEnter && isInputReady) {
-        GLFW_invoke_CursorEnter(showingWindow, entered);
+        safeInvokeCursorEnter(showingWindow, entered);
     }
 }
 */
@@ -1017,7 +1079,7 @@ void CallbackBridge_nativeSendCursorPos(char event, CGFloat x, CGFloat y) {
 
     if (GLFW_invoke_CursorPos) {
         if (isInputReady && !isUseStackQueueCall) {
-            GLFW_invoke_CursorPos((void*) showingWindow, (double) cursorX, (double) cursorY);
+            safeInvokeCursorPos((void*) showingWindow, (double) cursorX, (double) cursorY);
         }
     } else if (aasdl_available()) {
         float mx, my;
@@ -1095,7 +1157,7 @@ void CallbackBridge_nativeSendKey(int key, int scancode, int action, int mods) {
             if (isUseStackQueueCall) {
                 sendData(EVENT_TYPE_KEY, key, scancode, action, mods);
             } else {
-                GLFW_invoke_Key((void*) showingWindow, key, scancode, action, mods);
+                safeInvokeKey((void*) showingWindow, key, scancode, action, mods);
             }
         }
 
@@ -1128,7 +1190,7 @@ void CallbackBridge_nativeSendMouseButton(int button, int action, int mods) {
                 if (isUseStackQueueCall) {
                     sendData(EVENT_TYPE_MOUSE_BUTTON, button, action, mods, 0);
                 } else {
-                    GLFW_invoke_MouseButton((void*) showingWindow, button, action, mods);
+                    safeInvokeMouseButton((void*) showingWindow, button, action, mods);
                 }
             }
         }
@@ -1171,14 +1233,14 @@ void CallbackBridge_nativeSendScreenSize(int width, int height) {
             if (isUseStackQueueCall) {
                 sendData(EVENT_TYPE_FRAMEBUFFER_SIZE, width, height, 0, 0);
             } else {
-                GLFW_invoke_FramebufferSize((void*) showingWindow, width, height);
+                safeInvokeFramebufferSize((void*) showingWindow, width, height);
             }
         }
         if (GLFW_invoke_WindowSize) {
             if (isUseStackQueueCall) {
                 sendData(EVENT_TYPE_WINDOW_SIZE, width, height, 0, 0);
             } else {
-                GLFW_invoke_WindowSize((void*) showingWindow, width, height);
+                safeInvokeWindowSize((void*) showingWindow, width, height);
             }
         }
     }
@@ -1191,7 +1253,7 @@ void CallbackBridge_nativeSendScroll(CGFloat xoffset, CGFloat yoffset) {
         if (isUseStackQueueCall) {
             sendDataFloat(EVENT_TYPE_SCROLL, xoffset, yoffset, 0, 0);
         } else {
-            GLFW_invoke_Scroll((void*) showingWindow, (double) xoffset, (double) yoffset);
+            safeInvokeScroll((void*) showingWindow, (double) xoffset, (double) yoffset);
         }
     } else if (aasdl_available()) {
         aasdl_pushMouseWheel((float) xoffset, (float) yoffset);

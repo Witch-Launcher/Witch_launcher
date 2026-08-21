@@ -477,3 +477,8 @@
 "credits.open_license" = "Open License";
 "credits.open_project" = "Open Project";
 "credits.unavailable" = "Credits could not be loaded. Check your internet connection.";
+"account.no_account" = "No account";
+"launcher.checking" = "Checking...";
+"launcher.download" = "Downloading...";
+"preference.title.gamepad_sensitivity" = "Gamepad Sensitivity";
+"preference.title.lwjgl_version" = "LWJGL Version";

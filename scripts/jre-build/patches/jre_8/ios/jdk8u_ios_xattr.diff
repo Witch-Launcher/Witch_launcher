@@ -1,0 +1,12 @@
+diff --git a/make/common/MakeBase.gmk b/make/common/MakeBase.gmk
+index f31da150..710db352 100644
+--- a/make/common/MakeBase.gmk
++++ b/make/common/MakeBase.gmk
+@@ -375,7 +375,6 @@ else ifeq ($(OPENJDK_TARGET_OS),macosx)
+   define install-file
+ 	$(MKDIR) -p $(@D)
+ 	$(CP) -fRP '$<' '$@'
+-	if [ -n "`$(XATTR) -l '$@'`" ]; then $(XATTR) -c '$@'; fi
+   endef
+ else
+   define install-file

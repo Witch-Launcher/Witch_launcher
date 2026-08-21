@@ -346,7 +346,6 @@ public class PojavLauncher {
         // with UnsatisfiedLinkError on the first GLFW native call.
         try {
             System.load(System.getenv("BUNDLE_PATH") + "/Frameworks/libTouchControllerBridge.dylib");
-            System.out.println("[TouchController] loaded libTouchControllerBridge.dylib");
         } catch (Throwable t) {
             System.err.println("[TouchController] TouchControllerBridge load failed: " + t);
         }
@@ -356,14 +355,13 @@ public class PojavLauncher {
         // Only spin it up when the game actually ships the touchcontroller
         // mod; otherwise the socket/daemon sits idle and can cause issues.
         boolean hasTouchControllerMod = Tools.hasModLibrary(Tools.getVersionInfo(args[1]), "touchcontroller");
-        System.out.println("[TouchController] touchcontroller mod present: " + hasTouchControllerMod);
         try {
             if (hasTouchControllerMod) {
                 TouchControllerManager.getInstance().initialize(
                     Integer.parseInt(size[0]), Integer.parseInt(size[1]));
             }
         } catch (Throwable t) {
-            System.err.println("[TouchController] initialize failed (optional): " + t);
+            // Optional; TouchController is unavailable in this game instance.
         }
         MCOptionUtils.load();
         MCOptionUtils.set("fullscreen", "false");

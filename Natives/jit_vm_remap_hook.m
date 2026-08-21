@@ -371,9 +371,30 @@ static kern_return_t hooked_vm_protect(
               (void *)(uintptr_t)address, (void *)(uintptr_t)rx, size / (1024 * 1024));
         prepareMirrorPair(rx, address, size);
     } else if (result == KERN_SUCCESS && looksLikeJITExecProtect(address, size, new_protection)) {
-        NSLog(@"[JIT26] vm_protect RX prepare: addr=%p size=%zu KB",
-              (void *)(uintptr_t)address, size / 1024);
-        JIT26PrepareRegion((void *)(uintptr_t)address, size);
+        // Mirror prepare is idempotent per region. The prewarm (or an earlier
+        // vm_remap/vm_protect) already prepared the whole superpage window, so
+        // skip the debugger round-trip whenever this RX request is covered —
+        // JVM init on iOS 26.6+/27 otherwise fires one brk per code blob
+        // transition, which stutters startup and can hang on a slow debugger
+        // link. sys_icache_invalidate stays local and is always safe.
+        BOOL covered = g_lastPreparedRx != 0
+            && address >= g_lastPreparedRx
+            && address + size <= g_lastPreparedRx + g_lastPreparedSize;
+        static BOOL skipLoggedOnce;
+        if (covered) {
+            if (!skipLoggedOnce) {
+                skipLoggedOnce = YES;
+                NSLog(@"[JIT26] vm_protect RX already prepared (addr=%p size=%zu KB), skipping debugger round-trip",
+                      (void *)(uintptr_t)address, size / 1024);
+            }
+        } else {
+            skipLoggedOnce = NO;
+            NSLog(@"[JIT26] vm_protect RX prepare: addr=%p size=%zu KB",
+                  (void *)(uintptr_t)address, size / 1024);
+            JIT26PrepareRegion((void *)(uintptr_t)address, size);
+            g_lastPreparedRx = address;
+            g_lastPreparedSize = size;
+        }
         sys_icache_invalidate((void *)(uintptr_t)address, size);
     }
     return result;

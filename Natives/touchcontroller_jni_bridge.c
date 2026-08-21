@@ -26,9 +26,9 @@
 #include "touchcontroller_jni_bridge.h"
 #include "touchcontroller_launcher.h"
 
-// Diagnostic logging: writes to process stderr, which the launcher captures
-// into the JVM log file (latestlog.txt) alongside Java output.
-#define TCL_LOG(...) fprintf(stderr, "[TCL] " __VA_ARGS__)
+// Diagnostic logging (disabled): used to write to process stderr, which the
+// launcher captures into the JVM log file alongside Java output.
+#define TCL_LOG(...) do {} while (0)
 
 // No-op stubs kept for compatibility with callers (JavaLauncher JNI init,
 // launcher transport). All touch handling is classloader-free C code now.

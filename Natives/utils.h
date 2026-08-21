@@ -120,6 +120,9 @@ void _CGDataProviderReleaseBytePointerCallback(void *info,const void *pointer);
 
 jboolean attachThread(bool isAndroid, JNIEnv** secondJNIEnvPtr);
 
+// Last stdout/stderr-flush timestamp (monotonic ms). Defined in main.m.
+uint64_t pojavLastLogWriteMs(void);
+
 void sendData(short type, int i1, int i2, short i3, short i4);
 void sendDataFloat(short type, float i1, float i2, short i3, short i4);
 

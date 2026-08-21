@@ -16,7 +16,7 @@ void* SecTaskCreateFromSelf(CFAllocatorRef allocator);
 
 BOOL getEntitlementValue(NSString *key) {
     void *secTask = SecTaskCreateFromSelf(NULL);
-    CFTypeRef value = SecTaskCopyValueForEntitlement(SecTaskCreateFromSelf(NULL), key, nil);
+    CFTypeRef value = SecTaskCopyValueForEntitlement(secTask, key, nil);
     CFRelease(secTask);
     if (value == nil) {
         return NO;
@@ -203,7 +203,7 @@ BOOL DeviceCanCreateRXMap(void) {
         return NO;
     }
     *map = 0xFFFFFFFF;
-    int ret = mprotect(map, getpagesize(), PROT_READ | PROT_EXEC) | mprotect(map, getpagesize(), PROT_READ | PROT_EXEC);
+    int ret = mprotect(map, getpagesize(), PROT_READ | PROT_EXEC);
     munmap(map, getpagesize());
     return ret == 0;
 }
@@ -245,8 +245,9 @@ BOOL DeviceHasTXMReal(void) {
     if (@available(iOS 27.0, *)) {
         // iOS 27: every device is TXM except iPad Pro 11"/12.9" (M1),
         // hardware identifiers iPad8,11 / iPad8,12
-        if (!machine) return YES;
-        return ![machine isEqualToString:@"iPad8,11"] && ![machine isEqualToString:@"iPad8,12"];
+        BOOL txm = (!machine || (![machine isEqualToString:@"iPad8,11"] && ![machine isEqualToString:@"iPad8,12"]));
+        NSLog(@"[JIT] iOS 27 blanket TXM rule: %@", txm ? @"TXM" : @"non-TXM (iPad8,11/8,12)");
+        return txm;
     }
     if (@available(iOS 26.0, *)) {
         // iOS 26.x: TXM = iPhone hardware version >= 14.2 (iPhone 13/A15+)

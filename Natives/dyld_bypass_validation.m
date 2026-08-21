@@ -30,6 +30,10 @@ bool (*redirectFunction)(char *name, void *patchAddr, void *target) = NULL;
 extern void* __mmap(void *addr, size_t len, int prot, int flags, int fd, off_t offset);
 extern int __fcntl(int fildes, int cmd, void* param);
 
+// Defined below; called by redirectFunctionDirect when the kernel refuses to
+// flip dyld's own __TEXT pages to RX on iOS 26+.
+bool redirectFunctionMirrored(char *name, void *patchAddr, void *target);
+
 // Since we're patching libsystem_kernel, we must avoid calling to its functions
 static void builtin_memcpy(char *target, char *source, size_t size) {
     for (int i = 0; i < size; i++) {
@@ -61,6 +65,14 @@ bool redirectFunctionDirect(char *name, void *patchAddr, void *target) {
     if (kret != KERN_SUCCESS) {
         NSDebugLog(@"[DyldLVBypass] vm_protect(RX) fails at line %d", __LINE__);
         builtin_vm_protect(mach_task_self(), (vm_address_t)patchAddr, sizeof(patch), false, PROT_READ);
+        // On iOS 26+/27 the kernel refuses to flip dyld's own __TEXT pages to
+        // RX even for TXM/CS_DEBUGGED processes. Fall back to the mirrored
+        // (vm_remap) strategy instead of leaving the hook uninstalled — an
+        // uninstalled dyld bypass silently breaks loading of unsigned dylibs.
+        if (DeviceHasJITFlags(JIT_FLAG_IS_IOS_26)) {
+            NSDebugLog(@"[DyldLVBypass] retrying with redirectFunctionMirrored (TXM/iOS 26+ direct RX refused)");
+            return redirectFunctionMirrored(name, patchAddr, target);
+        }
         return FALSE;
     }
     
@@ -177,6 +189,11 @@ void* hooked_mmap(void *addr, size_t len, int prot, int flags, int fd, off_t off
         return MAP_FAILED;
     }
     
+    char mmapPath[4096] = {0};
+    if (fd >= 0 && (prot & PROT_EXEC) && fcntl(fd, F_GETPATH, mmapPath) == 0) {
+        NSLog(@"[DyldLVBypass] exec map %s (addr=%p len=%zu prot=0x%x flags=0x%x offset=%lld)", mmapPath, addr, len, prot, flags, (long long)offset);
+    }
+    
     void *map = __mmap(addr, len, prot, flags, fd, offset);
     // Anonymous or non-exec mappings don't need the exec permission check
     if (fd == -1 || (prot & PROT_EXEC) == 0) {
@@ -188,7 +205,7 @@ void* hooked_mmap(void *addr, size_t len, int prot, int flags, int fd, off_t off
         map = MAP_FAILED;
     }
     if (map == MAP_FAILED) {
-        //printf("[DyldLVBypass] mmap(prot=%d, flags=%d, fd=%d)\n", prot, flags, fd);
+        NSLog(@"[DyldLVBypass] mmap exec failed for %s, using fallback (addr=%p len=%zu prot=0x%x flags=0x%x)", mmapPath, addr, len, prot, flags);
         map = __mmap(addr, len, prot, flags | MAP_PRIVATE | MAP_ANON, 0, 0);
         if (DeviceHasJITFlags(JIT_FLAG_FORCE_MIRRORED | JIT_FLAG_HAS_TXM)) {
             JIT26PrepareRegion(map, len);

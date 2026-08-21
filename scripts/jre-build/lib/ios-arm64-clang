@@ -1,0 +1,6 @@
+#!/bin/bash
+# iOS arm64 clang wrapper used as the OpenJDK toolchain.
+# $thecc / $thesysroot are exported by setdevkitpath.sh.
+# Minimum iOS deployment target: 14.0 (must match the launcher's
+# deployment target and the mirror/JIT runtime requirements).
+exec $thecc -arch arm64 -isysroot $thesysroot -miphoneos-version-min=14.0 "$@"

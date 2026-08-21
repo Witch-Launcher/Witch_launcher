@@ -207,11 +207,6 @@ Java_net_kdt_pojavlaunch_touchcontroller_IosSocketTransport_nativeSend(JNIEnv* e
     jbyte* data = (*env)->GetByteArrayElements(env, buffer, NULL);
     if (data == NULL) return;
     enqueue_message(queue->launcher_to_game, &queue->launcher_to_game_mutex, data + offset, length);
-    if (length >= 4) {
-        int type = ((data[offset] & 0xFF) << 24) | ((data[offset + 1] & 0xFF) << 16)
-            | ((data[offset + 2] & 0xFF) << 8) | (data[offset + 3] & 0xFF);
-        fprintf(stderr, "[TCL] launcher send n=%d type=%d\n", (int)length, type);
-    }
     (*env)->ReleaseByteArrayElements(env, buffer, data, JNI_ABORT);
 }
 

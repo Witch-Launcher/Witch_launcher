@@ -26,6 +26,12 @@ SLIMMED ?= 0
 # Check if slimmed should be built, and additionally skip normal build
 SLIMMED_ONLY ?= 0
 
+# How JREs are obtained: build = compile OpenJDK from source (default),
+# download = fetch the prebuilt iOS packages from angelauramc.dev.
+# `make jre-download` forces download mode for that invocation.
+JRE_BUILD_MODE ?= build
+JRE_VERSIONS   ?= 8 17 21 25
+
 # If not in a GitHub repository, default to these
 # so that compiling doesn't fail
 ifeq (,$(BRANCH))
@@ -157,18 +163,6 @@ METHOD_PACKAGE = \
 	if [ '$(SLIMMED)' = '1' ] || [ '$(SLIMMED_ONLY)' = '1' ]; then \
 		rm -f $(OUTPUTDIR)/Witch-slimmed-$(VERSION)-$(PLATFORM_NAME)$$IPA_SUFFIX; \
 		zip --symlinks -r $(OUTPUTDIR)/Witch-slimmed-$(VERSION)-$(PLATFORM_NAME)$$IPA_SUFFIX Payload --exclude='Payload/Witch.app/java_runtimes/*'; \
-	fi
-
-# Function to download and unpack Java runtimes.
-METHOD_JAVA_UNPACK = \
-	cd $(SOURCEDIR)/depends; \
-	if [ ! -f "java-$(1)-openjdk/release" ] && [ ! -f "$(ls jre$(1)-*.tar.xz)" ]; then \
-		if [ "$(RUNNER)" != "1" ]; then \
-			wget '$(2)' -q --show-progress; \
-			unzip jre*-ios-aarch64.zip && rm jre*-ios-aarch64.zip; \
-		fi; \
-		mkdir -p java-$(1)-openjdk; \
-		tar xvf jre$(1)-*.tar.xz -C java-$(1)-openjdk; \
 	fi
 
 # Function to codesign binaries.
@@ -311,12 +305,39 @@ java: lwgjl
 jre: native
 	echo '[Witch v$(VERSION)] jre - start'
 	mkdir -p $(SOURCEDIR)/depends
+	@if [ '$(JRE_BUILD_MODE)' = 'download' ]; then \
+		echo '[Witch] JRE_BUILD_MODE=download: fetching prebuilt packages'; \
+		rm -f $(SOURCEDIR)/depends/jre*.tar.xz; \
+	else \
+		echo '[Witch] JRE_BUILD_MODE=build: building from source'; \
+		for ver in $(JRE_VERSIONS); do \
+			if [ ! -f "$(SOURCEDIR)/depends/java-$${ver}-openjdk/release" ]; then \
+				bash $(SOURCEDIR)/scripts/jre-build/build.sh $$ver || exit 1; \
+			else \
+				echo "[Witch] java-$${ver}-openjdk already present, skipping build"; \
+			fi; \
+		done; \
+	fi
 	cd $(SOURCEDIR)/depends; \
-	$(call METHOD_JAVA_UNPACK,8,'https://assets.angelauramc.dev/openjdk/ios-arm64/jre8-ios-aarch64.zip'); \
-	$(call METHOD_JAVA_UNPACK,17,'https://assets.angelauramc.dev/openjdk/ios-arm64/jre17-ios-aarch64.zip'); \
-	$(call METHOD_JAVA_UNPACK,21,'https://assets.angelauramc.dev/openjdk/ios-arm64/jre21-ios-aarch64.zip'); \
-	$(call METHOD_JAVA_UNPACK,25,'https://assets.angelauramc.dev/openjdk/ios-arm64/jre25-ios-aarch64.zip'); \
-	if [ -f "$(ls jre*.tar.xz)" ]; then rm $(SOURCEDIR)/depends/jre*.tar.xz; fi; \
+	unpack_jre() { \
+		ver="$$1"; url="$$2"; \
+		if [ -f "java-$${ver}-openjdk/release" ]; then echo "[Witch] java-$${ver}-openjdk already unpacked, skip"; return 0; fi; \
+		if ls jre$${ver}-*.tar.xz >/dev/null 2>&1; then \
+			echo "[Witch] extracting jre$${ver}-*.tar.xz"; \
+			mkdir -p "java-$${ver}-openjdk"; tar xf jre$${ver}-*.tar.xz -C "java-$${ver}-openjdk"; return 0; \
+		fi; \
+		if ! ls jre$${ver}-*.zip jre$${ver}-ios-aarch64.zip >/dev/null 2>&1; then \
+			echo "[Witch] downloading jre$${ver} ..."; \
+			wget -q --show-progress "$$url"; \
+		fi; \
+		unzip jre$${ver}-ios-aarch64.zip && rm jre$${ver}-ios-aarch64.zip; \
+		mkdir -p "java-$${ver}-openjdk"; \
+		tar xf jre$${ver}-*.tar.xz -C "java-$${ver}-openjdk"; \
+	}; \
+	for ver in $(JRE_VERSIONS); do \
+		unpack_jre "$$ver" "https://assets.angelauramc.dev/openjdk/ios-arm64/jre$${ver}-ios-aarch64.zip"; \
+	done; \
+	if ls jre*.tar.xz >/dev/null 2>&1; then rm -f jre*.tar.xz; fi; \
 	rm -rf $(SOURCEDIR)/depends/java-{8,17,21,25}-openjdk/{ASSEMBLY_EXCEPTION,bin,include,jre,legal,LICENSE,man,THIRD_PARTY_README,lib/{ct.sym,jspawnhelper,libjsig.dylib,src.zip,tools.jar}}; \
 	rm -f $(SOURCEDIR)/depends/java-{8,17,21,25}-openjdk/.amethyst-mirror-mapping; \
 	printf 'witch-mirror-mapping-v1\n' > $(SOURCEDIR)/depends/java-17-openjdk/.witch-mirror-mapping; \
@@ -328,11 +349,12 @@ jre: native
 			python3 $(SOURCEDIR)/scripts/patch_libjvm_mirror_brk.py "$$jvm"; \
 			python3 $(SOURCEDIR)/scripts/patch_libjvm_jit_alloc.py "$$jvm"; \
 			if ! otool -l "$$jvm" >/dev/null 2>&1; then \
-				echo "[jre] ERROR: libjvm.dylib for Java $$ver failed Mach-O validation (corrupt download?)"; \
+				echo "[jre] ERROR: libjvm.dylib for Java $$ver failed Mach-O validation (corrupt build/download?)"; \
 				exit 1; \
 			fi; \
 		fi; \
 	done; \
+	$(MAKE) -C $(SOURCEDIR) verify-jres || { echo "[jre] ERROR: JRE verification failed" >&2; exit 1; }; \
 	$(call METHOD_DIRCHECK,$(OUTPUTDIR)/java_runtimes); \
 	cp -R $(POJAV_JRE8_DIR) $(OUTPUTDIR)/java_runtimes; \
 	cp -R $(POJAV_JRE17_DIR) $(OUTPUTDIR)/java_runtimes; \
@@ -343,6 +365,20 @@ jre: native
 	cp $(WORKINGDIR)/libawt_xawt.dylib $(OUTPUTDIR)/java_runtimes/java-21-openjdk/lib
 	cp $(WORKINGDIR)/libawt_xawt.dylib $(OUTPUTDIR)/java_runtimes/java-25-openjdk/lib
 	echo '[Witch v$(VERSION)] jre - end'
+
+# Force the download based flow for this invocation.
+jre-download:
+	$(MAKE) jre JRE_BUILD_MODE=download
+
+# Validate every bundled runtime before it is copied into the app.
+verify-jres:
+	echo '[Witch v$(VERSION)] verify-jres - start'
+	for ver in $(JRE_VERSIONS); do \
+		if [ -d "$(SOURCEDIR)/depends/java-$${ver}-openjdk" ]; then \
+			bash $(SOURCEDIR)/scripts/jre-build/verify_jre.sh $$ver || exit 1; \
+		fi; \
+	done
+	echo '[Witch v$(VERSION)] verify-jres - end'
 
  dep_mg:
 	echo '[Witch v$(VERSION)] dep_mg - start'
