@@ -188,7 +188,8 @@ build_version() {
   if [[ "$ver" == "8" ]]; then
     extra=( --with-toolchain-type=clang SDKNAME=iphoneos
             --with-freetype-include="$FREETYPE_DIR/include/freetype2"
-            --with-freetype-lib="$FREETYPE_DIR/lib" )
+            --with-freetype-lib="$FREETYPE_DIR/lib"
+            --with-cups-include="$CUPS_DIR" )
   else
     extra=( --with-toolchain-type=clang
             --with-sysroot="$thesysroot"
