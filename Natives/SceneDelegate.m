@@ -23,6 +23,10 @@ extern UIWindow *mainWindow;
 // must continue to work normally when it is unavailable.
 static NSString *const kMinecraftGPUBackgroundTaskPrefix = @"com.witch.zad626.minecraft.gpu.";
 
+// Compiled only against the iOS 26 SDK and newer: BGContinuedProcessingTask
+// types do not exist in older SDK headers. The @available check inside still
+// guards execution at runtime.
+#if __IPHONE_OS_VERSION_MAX_ALLOWED >= 260000
 - (void)requestVulkanBackgroundGPUAllowanceIfNeeded {
     if (@available(iOS 26.0, *)) {
         if (!SurfaceViewController.isRunning) return;
@@ -51,6 +55,7 @@ static NSString *const kMinecraftGPUBackgroundTaskPrefix = @"com.witch.zad626.mi
         }
     }
 }
+#endif
 
 
 - (void)scene:(UIScene *)scene willConnectToSession:(UISceneSession *)session options:(UISceneConnectionOptions *)connectionOptions {
@@ -107,7 +112,9 @@ static NSString *const kMinecraftGPUBackgroundTaskPrefix = @"com.witch.zad626.mi
     // command buffer that iOS rejects with VK_ERROR_DEVICE_LOST.
     CallbackBridge_nativeSetWindowFocused(NO, YES);
     CallbackBridge_pauseGameIfNeed();
+#if __IPHONE_OS_VERSION_MAX_ALLOWED >= 260000
     [self requestVulkanBackgroundGPUAllowanceIfNeeded];
+#endif
 }
 
 

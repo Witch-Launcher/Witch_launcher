@@ -41,7 +41,20 @@ jobs:
           exit 1
 
       - name: Set up Xcode Version
-        run: sudo xcode-select -s /Applications/Xcode_15.4.app
+        run: |
+          ls -d /Applications/Xcode*.app || true
+          # Prefer the newest installed Xcode (iOS 26 SDK is required for the
+          # BGContinuedProcessingTask APIs in SceneDelegate.m); fall back to
+          # 15.4 when nothing newer is present.
+          LATEST_XCODE=$(ls -d /Applications/Xcode*.app 2>/dev/null | sort -V | tail -1)
+          if [ -n "$LATEST_XCODE" ]; then
+            echo "Selected $LATEST_XCODE"
+            sudo xcode-select -s "$LATEST_XCODE"
+          else
+            sudo xcode-select -s /Applications/Xcode_15.4.app
+          fi
+          xcodebuild -version
+          xcrun --sdk iphoneos --show-sdk-version
 
       # provision the stable zulu jdk 8 runtime environment as structured in the upstream core
       - name: Setup JDK 8 (Zulu)
