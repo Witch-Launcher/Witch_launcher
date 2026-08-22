@@ -37,13 +37,23 @@ jobs:
       - name: Checkout repository submodules
         shell: bash
         run: |
+          set -o pipefail
+          # Same rationale as development.yml: skip the flaky ANGLE tree.
+          SUBMODULES="Natives/external/NG-GL4ES/3rdparty/SPIRV-Cross Natives/external/NG-GL4ES/3rdparty/glslang"
           for i in 1 2 3 4 5 6; do
             echo "::group::Submodule update attempt $i/6"
-            if git -c protocol.version=2 submodule update --init --force --depth=1 --recursive; then
+            if git -c protocol.version=2 submodule sync -- $SUBMODULES && \
+               git -c protocol.version=2 submodule update --init --force --depth=1 $SUBMODULES; then
               echo "::endgroup::"
               exit 0
             fi
             echo "::endgroup::"
+            for p in $SUBMODULES; do
+              if [ -e "$p/.git" ] && ! git -C "$p" rev-parse --verify -q HEAD >/dev/null 2>&1; then
+                rm -rf "$p"
+                echo "Removed poisoned clone: $p"
+              fi
+            done
             echo "Attempt $i failed; retrying in 15s..."
             sleep 15
           done
