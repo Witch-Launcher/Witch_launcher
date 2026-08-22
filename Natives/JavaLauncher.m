@@ -377,7 +377,10 @@ int launchJVMWithArgs(NSString *username, id launchTarget, int width, int height
         jitTrapSa.sa_flags = 0;
         sigaction(SIGTRAP, &jitTrapSa, &oldTrapSa);
         JIT26SetDetachAfterFirstBr(NO);
-        JIT26SendJITScript([NSString stringWithContentsOfFile:[NSBundle.mainBundle pathForResource:@"UniversalJIT26Extension" ofType:@"js"]]);
+        // The first brk must be the base-script probe.  StikDebug attaches and
+        // starts the assigned Universal JIT script while servicing that brk;
+        // sending our extension first can leave an unattached debugger waiting
+        // forever on command 2 (the black screen seen before "probe returned").
         // Use the same brk #0xf00d path as patched libjvm (not legacy brk #0x69).
         void *probeMapping = JIT26PrepareRegion(NULL, getpagesize());
         NSLog(@"[JavaLauncher] JIT26 probe returned %p", probeMapping);
@@ -413,6 +416,15 @@ int launchJVMWithArgs(NSString *username, id launchTarget, int width, int height
                     probeMapping]);
             [PLLogOutputView handleExitCode:1];
             return 1;
+        }
+        // The probe has now attached the assigned base script, so command 2
+        // reliably loads our 0x69/0x6a mirror-handler overrides.
+        NSString *extensionScript = [NSString stringWithContentsOfFile:
+            [NSBundle.mainBundle pathForResource:@"UniversalJIT26Extension" ofType:@"js"]];
+        if (extensionScript.length > 0) {
+            JIT26SendJITScript(extensionScript);
+        } else {
+            NSLog(@"[JavaLauncher] UniversalJIT26Extension.js is missing; using assigned base JIT script only");
         }
         // Debugger is servicing us — restore default SIGTRAP behavior for the JVM run.
         sigaction(SIGTRAP, &oldTrapSa, NULL);

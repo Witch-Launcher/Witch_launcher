@@ -6,7 +6,6 @@ typedef NS_ENUM(NSUInteger, SidebarTab) {
     SidebarTabModpack,
     SidebarTabShader,
     SidebarTabResourcePack,
-    SidebarTabServer,
     SidebarTabMap
 };
 

@@ -30,6 +30,8 @@ typedef void GLFW_invoke_FramebufferSize_func(void* window, int width, int heigh
 typedef void GLFW_invoke_Key_func(void* window, int key, int scancode, int action, int mods);
 typedef void GLFW_invoke_MouseButton_func(void* window, int button, int action, int mods);
 typedef void GLFW_invoke_Scroll_func(void* window, double xoffset, double yoffset);
+typedef void GLFW_invoke_WindowFocus_func(void* window, int focused);
+typedef void GLFW_invoke_WindowIconify_func(void* window, int iconified);
 typedef void GLFW_invoke_WindowPos_func(void* window, int x, int y);
 typedef void GLFW_invoke_WindowSize_func(void* window, int width, int height);
 
@@ -69,6 +71,8 @@ jmethodID method_SystemClipboardDataReceived;
     ADD_CALLBACK_WWIN(Key);
     ADD_CALLBACK_WWIN(MouseButton);
     ADD_CALLBACK_WWIN(Scroll);
+    ADD_CALLBACK_WWIN(WindowFocus);
+    ADD_CALLBACK_WWIN(WindowIconify);
     ADD_CALLBACK_WWIN(WindowPos);
     ADD_CALLBACK_WWIN(WindowSize);
 

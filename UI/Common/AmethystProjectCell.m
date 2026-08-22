@@ -10,6 +10,8 @@
         self.selectionStyle = UITableViewCellSelectionStyleNone;
         self.backgroundColor = ThemeManager.shared.cardBackgroundColor;
         self.layer.cornerRadius = 8;
+        self.layer.borderWidth = 1;
+        self.layer.borderColor = [ThemeManager.shared.accentColor colorWithAlphaComponent:0.45].CGColor;
         self.clipsToBounds = YES;
 
         _projectIcon = [[UIImageView alloc] init];
@@ -57,6 +59,7 @@
 
 - (void)updateTheme {
     self.backgroundColor = ThemeManager.shared.cardBackgroundColor;
+    self.layer.borderColor = [ThemeManager.shared.accentColor colorWithAlphaComponent:0.45].CGColor;
     _titleLabel.textColor = ThemeManager.shared.primaryTextColor;
     _subtitleLabel.textColor = ThemeManager.shared.secondaryTextColor;
     _projectIcon.tintColor = ThemeManager.shared.secondaryTextColor;

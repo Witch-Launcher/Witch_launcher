@@ -37,6 +37,13 @@ jobs:
       - name: Checkout repository submodules
         run: git submodule update --init --recursive
 
+      - name: Setup JDK 8 (Zulu)
+        uses: actions/setup-java@v5
+        id: setup-java8
+        with:
+          distribution: 'zulu'
+          java-version: '8'
+
       - name: Get gl4es latest commit hash
         id: gl4es-sha
         run: echo "::set-output name=sha::$(echo $(git ls-remote https://github.com/PojavLauncherTeam/gl4es-114-extra refs/heads/master | grep -io '^\S*'))"
@@ -127,6 +134,8 @@ jobs:
       - name: Build for ${{ matrix.platform_name }}
         env:
           password: ${{ secrets.ELLIE_MINI_SECRET }}
+          JAVA_HOME: ${{ steps.setup-java8.outputs.path }}
+          BOOTJDK: ${{ steps.setup-java8.outputs.path }}/bin
         run: |
           export PATH=/opt/procursus/bin:/opt/homebrew/bin:$PATH
           export RUNNER=1

@@ -92,7 +92,6 @@
         @{@"icon": @"shippingbox", @"title": @"Modpack"},
         @{@"icon": @"paintpalette", @"title": @"Shader"},
         @{@"icon": @"paintbrush.fill", @"title": @"Resource Pack"},
-        @{@"icon": @"server.rack", @"title": @"Server"},
         @{@"icon": @"map", @"title": @"Maps"},
     ];
 

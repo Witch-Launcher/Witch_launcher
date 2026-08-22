@@ -1,6 +1,14 @@
 # Prerequisite variables
 SOURCEDIR := src
 OUTPUTDIR := build
+# JavaApp can be built directly as well as via the repository Makefile.  Do
+# not assume its caller supplied BOOTJDK: that made the empty value expand to
+# `/javac` in both local builds and CI.  Prefer an explicit BOOTJDK, then the
+# active JAVA_HOME, then macOS's registered JDK 8, and finally javac on PATH.
+BOOTJDK ?= $(shell if [ -n "$$JAVA_HOME" ] && [ -x "$$JAVA_HOME/bin/javac" ]; then printf '%s/bin' "$$JAVA_HOME"; elif [ -x /usr/libexec/java_home ]; then /usr/libexec/java_home -v 1.8 2>/dev/null | awk '{print $$0 "/bin"}'; else which javac 2>/dev/null | xargs dirname; fi)
+ifeq (,$(shell test -x "$(BOOTJDK)/javac" && test -x "$(BOOTJDK)/jar" && echo ok))
+$(error JDK 8 was not found. Set BOOTJDK=/path/to/jdk8/bin (or JAVA_HOME=/path/to/jdk8))
+endif
 # javac/mktemp defaults to /var/folders on the system volume; on a nearly-full
 # boot drive that fails with "No space left on device". Keep staging on the
 # project volume instead (see root Makefile java -j2 note).

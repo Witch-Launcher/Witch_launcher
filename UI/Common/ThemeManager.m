@@ -6,6 +6,7 @@ NSString * const ThemeDidChangeNotification = @"ThemeDidChangeNotification";
 @interface ThemeManager ()
 @property (nonatomic) UITraitCollection *currentTraitCollection;
 @property (nonatomic) NSMutableDictionary *colorOverrides;
+@property (nonatomic) NSUInteger backgroundBlurGeneration;
 @end
 
 @implementation ThemeManager
@@ -27,7 +28,11 @@ NSString * const ThemeDidChangeNotification = @"ThemeDidChangeNotification";
         _backgroundBlurIntensity = 0;
         _uiOpacity = 1.0;
         [[NSUserDefaults standardUserDefaults] registerDefaults:@{
-            @"amethyst_ui_opacity": @1.0
+            @"amethyst_ui_opacity": @1.0,
+            @"amethyst_ui_border_enabled": @YES,
+            @"amethyst_ui_border_width": @1.0,
+            @"amethyst_ui_border_radius": @10.0,
+            @"amethyst_settings_blur": @55
         }];
         [self loadSavedPreferences];
     }
@@ -43,13 +48,16 @@ NSString * const ThemeDidChangeNotification = @"ThemeDidChangeNotification";
 
     NSArray *colorKeys = @[@"amethyst_accent_color", @"amethyst_bg_color", @"amethyst_card_bg_color",
                            @"amethyst_sidebar_bg_color", @"amethyst_topbar_bg_color", @"amethyst_rightpanel_bg_color",
-                           @"amethyst_text_color", @"amethyst_secondary_text_color"];
+                           @"amethyst_text_color", @"amethyst_secondary_text_color", @"amethyst_ui_border_color"];
     for (NSString *key in colorKeys) {
         [self loadModeColorsForKey:key legacyHex:[defaults stringForKey:key]];
     }
 
     _backgroundBlurIntensity = [defaults floatForKey:@"amethyst_bg_blur"];
     _uiOpacity = [defaults floatForKey:@"amethyst_ui_opacity"];
+    _uiBorderEnabled = [defaults boolForKey:@"amethyst_ui_border_enabled"];
+    _uiBorderWidth = [defaults floatForKey:@"amethyst_ui_border_width"];
+    _uiBorderCornerRadius = [defaults floatForKey:@"amethyst_ui_border_radius"];
 
     NSString *imgPath = [defaults stringForKey:@"amethyst_bg_image"];
     if (imgPath) {
@@ -137,6 +145,28 @@ NSString * const ThemeDidChangeNotification = @"ThemeDidChangeNotification";
     [self broadcastThemeChange];
 }
 
+- (void)setUiBorderEnabled:(BOOL)uiBorderEnabled {
+    _uiBorderEnabled = uiBorderEnabled;
+    [[NSUserDefaults standardUserDefaults] setBool:uiBorderEnabled forKey:@"amethyst_ui_border_enabled"];
+    [self broadcastThemeChange];
+}
+
+- (UIColor *)uiBorderColor {
+    return [self colorOverrideForKey:@"amethyst_ui_border_color"] ?: [self.accentColor colorWithAlphaComponent:0.72];
+}
+
+- (void)setUiBorderWidth:(CGFloat)uiBorderWidth {
+    _uiBorderWidth = MAX(0.5, MIN(uiBorderWidth, 4.0));
+    [[NSUserDefaults standardUserDefaults] setFloat:_uiBorderWidth forKey:@"amethyst_ui_border_width"];
+    [self broadcastThemeChange];
+}
+
+- (void)setUiBorderCornerRadius:(CGFloat)uiBorderCornerRadius {
+    _uiBorderCornerRadius = MAX(0, MIN(uiBorderCornerRadius, 28.0));
+    [[NSUserDefaults standardUserDefaults] setFloat:_uiBorderCornerRadius forKey:@"amethyst_ui_border_radius"];
+    [self broadcastThemeChange];
+}
+
 - (void)setUiOpacity:(CGFloat)uiOpacity {
     _uiOpacity = uiOpacity;
     [[NSUserDefaults standardUserDefaults] setFloat:uiOpacity forKey:@"amethyst_ui_opacity"];
@@ -162,20 +192,34 @@ NSString * const ThemeDidChangeNotification = @"ThemeDidChangeNotification";
         _blurredBackgroundImage = nil;
         return;
     }
+    NSUInteger generation = ++_backgroundBlurGeneration;
+    CGFloat radius = _backgroundBlurIntensity;
     dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
         CIImage *inputImage = [CIImage imageWithCGImage:cgImage];
-        CIFilter *filter = [CIFilter filterWithName:@"CIGaussianBlur"];
-        [filter setValue:inputImage forKey:kCIInputImageKey];
-        [filter setValue:@(self->_backgroundBlurIntensity) forKey:kCIInputRadiusKey];
+        CGRect extent = inputImage.extent;
 
+        // Clamp the edge pixels outward before blurring: CIGaussianBlur
+        // samples outside the image as transparent black, which produced a
+        // dark border around the blurred background. Clamping extends the
+        // outermost pixels so the blur fades into real content instead.
+        CIFilter *clampFilter = [CIFilter filterWithName:@"CIAffineClamp"];
+        [clampFilter setValue:inputImage forKey:kCIInputImageKey];
+        [clampFilter setValue:[NSValue valueWithCGAffineTransform:CGAffineTransformIdentity] forKey:@"inputTransform"];
+
+        CIFilter *filter = [CIFilter filterWithName:@"CIGaussianBlur"];
+        [filter setValue:clampFilter.outputImage forKey:kCIInputImageKey];
+        [filter setValue:@(radius) forKey:kCIInputRadiusKey];
+
+        // Crop back to the original extent so the (larger) blurred output
+        // matches the source image dimensions exactly.
         CIContext *context = [CIContext contextWithOptions:nil];
-        CIImage *outputImage = [filter outputImage];
-        CGImageRef cgImage = [context createCGImage:outputImage fromRect:[inputImage extent]];
-        UIImage *blurred = [UIImage imageWithCGImage:cgImage];
-        CGImageRelease(cgImage);
+        CGImageRef cgImage = [context createCGImage:filter.outputImage fromRect:extent];
+        UIImage *blurred = cgImage ? [UIImage imageWithCGImage:cgImage] : nil;
+        if (cgImage) CGImageRelease(cgImage);
 
         dispatch_async(dispatch_get_main_queue(), ^{
-            self->_blurredBackgroundImage = blurred;
+            if (generation != self->_backgroundBlurGeneration) return;
+            self->_blurredBackgroundImage = blurred ?: self->_backgroundImage;
             [self broadcastThemeChange];
         });
     });
@@ -331,6 +375,20 @@ NSString * const ThemeDidChangeNotification = @"ThemeDidChangeNotification";
     [[NSNotificationCenter defaultCenter] postNotificationName:ThemeDidChangeNotification object:nil];
 }
 
+- (BOOL)shouldApplyBorderToView:(UIView *)view {
+    return NO;
+}
+
+- (BOOL)shouldSkipCornerRadiusForView:(UIView *)view {
+    return YES;
+}
+
+- (void)applyBorderStyleToViewTree:(UIView *)view {
+}
+
+- (void)applyBorderStyleToAllWindows {
+}
+
 - (void)resetAppearance {
     [_colorOverrides removeAllObjects];
 
@@ -347,6 +405,7 @@ NSString * const ThemeDidChangeNotification = @"ThemeDidChangeNotification";
     [defaults removeObjectForKey:@"amethyst_bg_video"];
     [defaults removeObjectForKey:@"amethyst_bg_blur"];
     [defaults removeObjectForKey:@"amethyst_ui_opacity"];
+    [defaults removeObjectForKey:@"amethyst_settings_blur"];
 
     _backgroundImage = nil;
     _blurredBackgroundImage = nil;

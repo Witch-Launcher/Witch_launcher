@@ -75,6 +75,11 @@ jobs:
       - name: Resolve env (paths, SDK)
         run: |
           echo "SDKPATH=$(xcrun --sdk iphoneos --show-sdk-path)" >> $GITHUB_ENV
+          # setup-java's location is not guaranteed to be registered with
+          # /usr/libexec/java_home on macOS runners. Persist it for every
+          # Make invocation, including the earlier JRE-build step.
+          echo "JAVA_HOME=${{ steps.setup-java.outputs.path }}" >> $GITHUB_ENV
+          echo "BOOTJDK=${{ steps.setup-java.outputs.path }}/bin" >> $GITHUB_ENV
           echo "RUNNER=0" >> $GITHUB_ENV
 
       - name: Verify tools
@@ -106,8 +111,6 @@ jobs:
       - name: Build sideload IPA & TrollStore tIPA
         shell: bash
         run: |
-          echo '#import <mach/mach.h>' | cat - Natives/JavaLauncher.m > temp && mv temp Natives/JavaLauncher.m
-
           JDK_BASE_PATH="${{ steps.setup-java.outputs.path }}"
           export PATH="$JDK_BASE_PATH/bin:/opt/homebrew/bin:$PATH"
           export JAVA_HOME="$JDK_BASE_PATH"

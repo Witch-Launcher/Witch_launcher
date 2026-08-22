@@ -299,6 +299,8 @@ ADD_CALLBACK_WWIN(FramebufferSize)
 ADD_CALLBACK_WWIN(Key)
 ADD_CALLBACK_WWIN(MouseButton)
 ADD_CALLBACK_WWIN(Scroll)
+ADD_CALLBACK_WWIN(WindowFocus)
+ADD_CALLBACK_WWIN(WindowIconify)
 ADD_CALLBACK_WWIN(WindowPos)
 ADD_CALLBACK_WWIN(WindowSize)
 
@@ -360,6 +362,8 @@ GUARDED_INVOKE(FramebufferSize, (void *window, int w, int h), (window, w, h))
 GUARDED_INVOKE(Key, (void *window, int key, int scancode, int action, int mods), (window, key, scancode, action, mods))
 GUARDED_INVOKE(MouseButton, (void *window, int button, int action, int mods), (window, button, action, mods))
 GUARDED_INVOKE(Scroll, (void *window, double xoff, double yoff), (window, xoff, yoff))
+GUARDED_INVOKE(WindowFocus, (void *window, int focused), (window, focused))
+GUARDED_INVOKE(WindowIconify, (void *window, int iconified), (window, iconified))
 GUARDED_INVOKE(WindowPos, (void *window, int x, int y), (window, x, y))
 GUARDED_INVOKE(WindowSize, (void *window, int w, int h), (window, w, h))
 
@@ -1269,4 +1273,15 @@ void CallbackBridge_pauseGameIfNeed() {
         CallbackBridge_nativeSendKey(GLFW_KEY_ESCAPE, 0, 1, 0);
         CallbackBridge_nativeSendKey(GLFW_KEY_ESCAPE, 0, 0, 0);
     }
+}
+
+// UIKit scene state is not automatically propagated to the stub GLFW window.
+// On iOS 26/27, keep Minecraft from submitting GPU work while the scene is
+// backgrounded by marking its GLFW window unfocused and iconified.
+void CallbackBridge_nativeSetWindowFocused(BOOL focused, BOOL iconified) {
+    if (!isInputReady || showingWindow == 0) return;
+    void *window = (void *)showingWindow;
+    safeInvokeWindowFocus(window, focused ? 1 : 0);
+    safeInvokeWindowIconify(window, iconified ? 1 : 0);
+    NSLog(@"[SceneLifecycle] GLFW window focused=%d iconified=%d", focused, iconified);
 }

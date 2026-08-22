@@ -91,6 +91,7 @@ static NSString *const kMinecraftGPUBackgroundTaskPrefix = @"com.witch.zad626.mi
     // when the app leaves the active state). Force-release any TouchController
     // pointer that a stalls-dropped touchesEnded may have left held in the mod,
     // so input never stays "stuck" after returning to the game.
+    CallbackBridge_nativeSetWindowFocused(YES, NO);
     touchcontroller_onTouchCancel();
 }
 
@@ -101,8 +102,12 @@ static NSString *const kMinecraftGPUBackgroundTaskPrefix = @"com.witch.zad626.mi
     // Submit while the scene is still foreground-associated. Waiting for
     // sceneDidEnterBackground is too late on iOS 27: MoltenVK has already
     // received VK_ERROR_DEVICE_LOST by then.
-    [self requestVulkanBackgroundGPUAllowanceIfNeeded];
+    // Notify GLFW synchronously before UIKit withdraws foreground GPU access.
+    // Minecraft then stops rendering instead of letting MoltenVK submit a
+    // command buffer that iOS rejects with VK_ERROR_DEVICE_LOST.
+    CallbackBridge_nativeSetWindowFocused(NO, YES);
     CallbackBridge_pauseGameIfNeed();
+    [self requestVulkanBackgroundGPUAllowanceIfNeeded];
 }
 
 
@@ -116,6 +121,7 @@ static NSString *const kMinecraftGPUBackgroundTaskPrefix = @"com.witch.zad626.mi
     // Called as the scene transitions from the foreground to the background.
     // Use this method to save data, release shared resources, and store enough scene-specific state information
     // to restore the scene back to its current state.
+    CallbackBridge_nativeSetWindowFocused(NO, YES);
     CallbackBridge_pauseGameIfNeed();
 }
 

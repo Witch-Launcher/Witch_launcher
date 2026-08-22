@@ -9,7 +9,6 @@
 #import "ModListViewController.h"
 #import "ModpackListViewController.h"
 #import "ShaderListViewController.h"
-#import "ServerListViewController.h"
 #import "SettingsViewController.h"
 #import "AccountViewController.h"
 #import "DownloadHubViewController.h"
@@ -49,7 +48,6 @@
 @property (nonatomic) ModListViewController *modListVC;
 @property (nonatomic) ShaderListViewController *shaderListVC;
 @property (nonatomic) ModpackListViewController *modpackListVC;
-@property (nonatomic) ServerListViewController *serverListVC;
 @property (nonatomic) ResourcePackListViewController *resourcePackListVC;
 @property (nonatomic) MapListViewController *mapListVC;
 @end
@@ -123,13 +121,6 @@
                     _shaderListVC.coordinator = self;
                 }
                 vc = _shaderListVC;
-                break;
-            case SidebarTabServer:
-                if (!_serverListVC) {
-                    _serverListVC = [[ServerListViewController alloc] init];
-                    _serverListVC.coordinator = self;
-                }
-                vc = _serverListVC;
                 break;
             case SidebarTabResourcePack:
                 if (!_resourcePackListVC) {

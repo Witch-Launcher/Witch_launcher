@@ -30,6 +30,10 @@ extern NSString * const ThemeDidChangeNotification;
 @property (nonatomic, readonly) UIColor *contentBackgroundColor;
 @property (nonatomic) CGFloat backgroundBlurIntensity;
 @property (nonatomic) CGFloat uiOpacity;
+@property (nonatomic) BOOL uiBorderEnabled;
+@property (nonatomic, readonly) UIColor *uiBorderColor;
+@property (nonatomic) CGFloat uiBorderWidth;
+@property (nonatomic) CGFloat uiBorderCornerRadius;
 
 - (void)applyAccentColor:(UIColor *)color;
 - (void)applyAccentColor:(UIColor *)color darkMode:(BOOL)dark;
@@ -42,6 +46,7 @@ extern NSString * const ThemeDidChangeNotification;
 - (void)resetAppearance;
 - (void)broadcastThemeChange;
 - (void)updateBackgroundBlur;
+- (void)applyBorderStyleToAllWindows;
 - (BOOL)isDarkMode;
 
 @end

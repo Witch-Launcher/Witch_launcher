@@ -64,6 +64,8 @@
         self.selectionStyle = UITableViewCellSelectionStyleNone;
         self.backgroundColor = ThemeManager.shared.cardBackgroundColor;
         self.layer.cornerRadius = 8;
+        self.layer.borderWidth = 1;
+        self.layer.borderColor = [ThemeManager.shared.accentColor colorWithAlphaComponent:0.45].CGColor;
         self.clipsToBounds = YES;
 
         _projectIcon = [[UIImageView alloc] init];
@@ -178,6 +180,7 @@
 
 - (void)updateTheme {
     self.backgroundColor = ThemeManager.shared.cardBackgroundColor;
+    self.layer.borderColor = [ThemeManager.shared.accentColor colorWithAlphaComponent:0.45].CGColor;
     _titleLabel.textColor = ThemeManager.shared.primaryTextColor;
     _downloadsLabel.textColor = ThemeManager.shared.accentColor;
     _descLabel.textColor = ThemeManager.shared.secondaryTextColor;
@@ -396,6 +399,7 @@
 @property (nonatomic) UIButton *downloadBtn;
 @property (nonatomic) UIButton *installBtn;
 @property (nonatomic) UISegmentedControl *sourceControl;
+@property (nonatomic) NSLayoutConstraint *sourceControlWidthConstraint;
 @property (nonatomic) NSDictionary *selectedMod;
 @property (nonatomic) NSInteger currentRequestId;
 
@@ -489,40 +493,17 @@
     _errorLabel.hidden = YES;
     [self.view addSubview:_errorLabel];
 
-    UIView *sidePanel = [[UIView alloc] init];
-    sidePanel.translatesAutoresizingMaskIntoConstraints = NO;
-    sidePanel.backgroundColor = [UIColor clearColor];
-    [self.view addSubview:sidePanel];
-
     _sourceControl = [[UISegmentedControl alloc] initWithItems:@[@"Modrinth", @"CurseForge"]];
     _sourceControl.translatesAutoresizingMaskIntoConstraints = NO;
     _sourceControl.selectedSegmentIndex = 0;
     _sourceControl.selectedSegmentTintColor = ThemeManager.shared.accentColor;
-    [_sourceControl setTitleTextAttributes:@{NSForegroundColorAttributeName: UIColor.whiteColor} forState:UIControlStateSelected];
+    _sourceControl.accessibilityLabel = @"Mod source: Modrinth or CurseForge";
+    _sourceControl.layer.cornerRadius = 8;
+    _sourceControl.clipsToBounds = YES;
+    [_sourceControl setTitleTextAttributes:@{NSForegroundColorAttributeName: ThemeManager.shared.primaryTextColor, NSFontAttributeName: [UIFont systemFontOfSize:11 weight:UIFontWeightMedium]} forState:UIControlStateNormal];
+    [_sourceControl setTitleTextAttributes:@{NSForegroundColorAttributeName: UIColor.whiteColor, NSFontAttributeName: [UIFont systemFontOfSize:11 weight:UIFontWeightSemibold]} forState:UIControlStateSelected];
     [_sourceControl addTarget:self action:@selector(sourceChanged) forControlEvents:UIControlEventValueChanged];
-    [sidePanel addSubview:_sourceControl];
-
-    _downloadBtn = [UIButton buttonWithType:UIButtonTypeSystem];
-    _downloadBtn.translatesAutoresizingMaskIntoConstraints = NO;
-    [_downloadBtn setTitle:@"Download" forState:UIControlStateNormal];
-    [_downloadBtn setTitleColor:UIColor.whiteColor forState:UIControlStateNormal];
-    _downloadBtn.backgroundColor = ThemeManager.shared.accentColor;
-    _downloadBtn.layer.cornerRadius = 8;
-    _downloadBtn.titleLabel.font = [UIFont systemFontOfSize:14 weight:UIFontWeightSemibold];
-    [_downloadBtn addTarget:self action:@selector(downloadCurrentMod) forControlEvents:UIControlEventTouchUpInside];
-    _downloadBtn.hidden = YES;
-    [sidePanel addSubview:_downloadBtn];
-
-    _installBtn = [UIButton buttonWithType:UIButtonTypeSystem];
-    _installBtn.translatesAutoresizingMaskIntoConstraints = NO;
-    [_installBtn setTitle:@"Install" forState:UIControlStateNormal];
-    [_installBtn setTitleColor:UIColor.whiteColor forState:UIControlStateNormal];
-    _installBtn.backgroundColor = ThemeManager.shared.successColor;
-    _installBtn.layer.cornerRadius = 8;
-    _installBtn.titleLabel.font = [UIFont systemFontOfSize:14 weight:UIFontWeightSemibold];
-    [_installBtn addTarget:self action:@selector(installCurrentMod) forControlEvents:UIControlEventTouchUpInside];
-    _installBtn.hidden = YES;
-    [sidePanel addSubview:_installBtn];
+    [self.view addSubview:_sourceControl];
 
     _tableView = [[UITableView alloc] init];
     _tableView.translatesAutoresizingMaskIntoConstraints = NO;
@@ -538,11 +519,13 @@
 
     [_tableView registerClass:[ModCell class] forCellReuseIdentifier:@"ModCell"];
 
-    CGFloat sideWidth = 130;
+    BOOL hasCurseForgeAPI = [getPrefObject(@"curseforge.api_key") isKindOfClass:NSString.class] && [getPrefObject(@"curseforge.api_key") length] > 0;
+    _sourceControl.hidden = !hasCurseForgeAPI;
+    _sourceControlWidthConstraint = [_sourceControl.widthAnchor constraintEqualToConstant:hasCurseForgeAPI ? 160 : 0];
     [NSLayoutConstraint activateConstraints:@[
         [_searchBar.topAnchor constraintEqualToAnchor:self.view.topAnchor constant:8],
         [_searchBar.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor constant:12],
-        [_searchBar.trailingAnchor constraintEqualToAnchor:sidePanel.leadingAnchor constant:-8],
+        [_searchBar.trailingAnchor constraintEqualToAnchor:_sourceControl.leadingAnchor constant:(hasCurseForgeAPI ? -8 : -12)],
 
         [_spinner.centerXAnchor constraintEqualToAnchor:self.view.centerXAnchor],
         [_spinner.centerYAnchor constraintEqualToAnchor:self.view.centerYAnchor],
@@ -557,41 +540,17 @@
         [_errorLabel.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor constant:40],
         [_errorLabel.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor constant:-40],
 
-        [sidePanel.topAnchor constraintEqualToAnchor:self.view.topAnchor],
-        [sidePanel.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor],
-        [sidePanel.widthAnchor constraintEqualToConstant:sideWidth],
-        [sidePanel.bottomAnchor constraintEqualToAnchor:self.view.bottomAnchor],
-
-        [_sourceControl.topAnchor constraintEqualToAnchor:sidePanel.topAnchor constant:16],
-        [_sourceControl.leadingAnchor constraintEqualToAnchor:sidePanel.leadingAnchor constant:6],
-        [_sourceControl.trailingAnchor constraintEqualToAnchor:sidePanel.trailingAnchor constant:-6],
-
-        [_downloadBtn.topAnchor constraintEqualToAnchor:_sourceControl.bottomAnchor constant:20],
-        [_downloadBtn.leadingAnchor constraintEqualToAnchor:sidePanel.leadingAnchor constant:6],
-        [_downloadBtn.trailingAnchor constraintEqualToAnchor:sidePanel.trailingAnchor constant:-6],
-        [_downloadBtn.heightAnchor constraintEqualToConstant:36],
-
-        [_installBtn.topAnchor constraintEqualToAnchor:_downloadBtn.bottomAnchor constant:8],
-        [_installBtn.leadingAnchor constraintEqualToAnchor:sidePanel.leadingAnchor constant:6],
-        [_installBtn.trailingAnchor constraintEqualToAnchor:sidePanel.trailingAnchor constant:-6],
-        [_installBtn.heightAnchor constraintEqualToConstant:36],
+        [_sourceControl.centerYAnchor constraintEqualToAnchor:_searchBar.centerYAnchor],
+        [_sourceControl.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor constant:-12],
+        _sourceControlWidthConstraint,
+        [_sourceControl.heightAnchor constraintEqualToConstant:32],
 
         [_tableView.topAnchor constraintEqualToAnchor:_searchBar.bottomAnchor constant:4],
         [_tableView.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor],
-        [_tableView.trailingAnchor constraintEqualToAnchor:sidePanel.leadingAnchor],
+        [_tableView.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor],
         [_tableView.bottomAnchor constraintEqualToAnchor:self.view.bottomAnchor],
     ]];
 
-    UIView *separator = [[UIView alloc] init];
-    separator.translatesAutoresizingMaskIntoConstraints = NO;
-    separator.backgroundColor = ThemeManager.shared.separatorColor;
-    [self.view addSubview:separator];
-    [NSLayoutConstraint activateConstraints:@[
-        [separator.topAnchor constraintEqualToAnchor:self.view.topAnchor],
-        [separator.bottomAnchor constraintEqualToAnchor:self.view.bottomAnchor],
-        [separator.trailingAnchor constraintEqualToAnchor:sidePanel.leadingAnchor],
-        [separator.widthAnchor constraintEqualToConstant:1],
-    ]];
 }
 
 - (void)updateColors {
@@ -604,6 +563,8 @@
     _emptyLabel.textColor = theme.secondaryTextColor;
     _errorLabel.textColor = theme.errorColor;
     _sourceControl.selectedSegmentTintColor = theme.accentColor;
+    [_sourceControl setTitleTextAttributes:@{NSForegroundColorAttributeName: theme.primaryTextColor, NSFontAttributeName: [UIFont systemFontOfSize:11 weight:UIFontWeightMedium]} forState:UIControlStateNormal];
+    [_sourceControl setTitleTextAttributes:@{NSForegroundColorAttributeName: UIColor.whiteColor, NSFontAttributeName: [UIFont systemFontOfSize:11 weight:UIFontWeightSemibold]} forState:UIControlStateSelected];
 }
 
 - (NSString *)selectedVersion {

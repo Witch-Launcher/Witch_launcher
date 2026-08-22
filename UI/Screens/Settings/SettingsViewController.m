@@ -21,6 +21,10 @@
 @property (nonatomic) NSInteger currentPage;
 @property (nonatomic) BOOL skipOffsetSync;
 @property (nonatomic, copy) void (^pendingColorPickCallback)(UIColor *);
+@property (nonatomic) UIImageView *backdropImageView;
+@property (nonatomic) UIImage *settingsSnapshot;
+@property (nonatomic) NSUInteger backdropBlurGeneration;
+@property (nonatomic) dispatch_queue_t backdropQueue;
 @end
 
 @implementation SettingsViewController
@@ -174,6 +178,7 @@
             @{@"type": @"image", @"label": localize(@"Background", nil)},
             @{@"type": @"slider", @"label": localize(@"UI Opacity", nil), @"key": @"amethyst_ui_opacity", @"min": @0, @"max": @100, @"suffix": @"%"},
             @{@"type": @"slider", @"label": localize(@"Background Blur", nil), @"key": @"amethyst_bg_blur", @"min": @0, @"max": @20, @"suffix": @""},
+            @{@"type": @"slider", @"label": @"Settings Background Blur", @"key": @"amethyst_settings_blur", @"min": @0, @"max": @100, @"suffix": @"%"},
             @{@"type": @"export", @"label": localize(@"Export Appearance Theme", nil)},
             @{@"type": @"import", @"label": localize(@"Import Appearance Theme", nil)},
             @{@"type": @"color", @"label": localize(@"Reset Appearance", nil), @"key": @"amethyst_reset_appearance"},
@@ -260,6 +265,7 @@
 
     [self setupTabBar];
     [self setupPages];
+    [self setupBackgroundBlur];
 
     _tabWidthConstraint = [_tabBarScroll.widthAnchor constraintEqualToConstant:132];
     [NSLayoutConstraint activateConstraints:@[
@@ -368,11 +374,102 @@
     [self dismissViewControllerAnimated:YES completion:nil];
 }
 
+- (void)viewWillAppear:(BOOL)animated {
+    [super viewWillAppear:animated];
+    if (!_settingsSnapshot) [self captureBackdropSnapshot];
+    [self applySettingsBlur];
+}
+
+- (void)setupBackgroundBlur {
+    _backdropImageView = [[UIImageView alloc] init];
+    _backdropImageView.translatesAutoresizingMaskIntoConstraints = NO;
+    _backdropImageView.contentMode = UIViewContentModeScaleAspectFill;
+    _backdropImageView.clipsToBounds = YES;
+    _backdropImageView.backgroundColor = ThemeManager.shared.contentBackgroundColor;
+    _backdropQueue = dispatch_queue_create("amethyst.settings.backdrop.blur", DISPATCH_QUEUE_SERIAL);
+    [self.view insertSubview:_backdropImageView atIndex:0];
+    [NSLayoutConstraint activateConstraints:@[
+        [_backdropImageView.topAnchor constraintEqualToAnchor:self.view.topAnchor],
+        [_backdropImageView.bottomAnchor constraintEqualToAnchor:self.view.bottomAnchor],
+        [_backdropImageView.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor],
+        [_backdropImageView.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor],
+    ]];
+}
+
+// Freeze whatever the app behind the sheet is showing (works for custom
+// images, playing videos, anything) so it can be gaussian-blurred as the
+// Settings backdrop.
+- (void)captureBackdropSnapshot {
+    UIView *target = self.presentingViewController.view;
+    if (!target || target.bounds.size.width <= 0 || target.bounds.size.height <= 0) {
+        target = self.view.window.rootViewController.view;
+    }
+    if (!target || target.bounds.size.width <= 0 || target.bounds.size.height <= 0) return;
+
+    UIGraphicsImageRendererFormat *fmt = [[UIGraphicsImageRendererFormat alloc] init];
+    fmt.scale = 1.0; // blur hides fine detail; keep memory/CPU low
+    fmt.opaque = YES;
+    UIGraphicsImageRenderer *renderer = [[UIGraphicsImageRenderer alloc] initWithBounds:target.bounds format:fmt];
+    UIImage *snap = [renderer imageWithActions:^(UIGraphicsImageRendererContext *ctx) {
+        BOOL ok = [target drawViewHierarchyInRect:target.bounds afterScreenUpdates:NO];
+        if (!ok) {
+            // Fallback: layer render
+            [target.layer renderInContext:ctx.CGContext];
+        }
+    }];
+    if (snap) _settingsSnapshot = snap;
+}
+
+// Slider value is stored as 0-100 (%). It maps linearly onto a 0-25pt
+// CIGaussianBlur radius applied to the captured backdrop. Edges are clamped
+// before blurring (same trick as ThemeManager) so no dark border appears.
+- (void)applySettingsBlur {
+    if (!_backdropImageView) return;
+    float v = MAX(0.0f, MIN([[NSUserDefaults standardUserDefaults] floatForKey:@"amethyst_settings_blur"], 100.0f));
+    CGFloat radius = v / 100.0 * 25.0;
+
+    if (!_settingsSnapshot) return;
+    if (radius <= 0.01) {
+        ++_backdropBlurGeneration;
+        _backdropImageView.image = _settingsSnapshot;
+        return;
+    }
+
+    NSUInteger gen = ++_backdropBlurGeneration;
+    UIImage *snapshot = _settingsSnapshot;
+    CGImageRef cg = snapshot.CGImage;
+    if (!cg) return;
+    CGRect extent = CGRectMake(0, 0, CGImageGetWidth(cg), CGImageGetHeight(cg));
+    dispatch_queue_t queue = _backdropQueue;
+
+    dispatch_async(queue, ^{
+        CIImage *input = [CIImage imageWithCGImage:cg];
+        CIFilter *clampFilter = [CIFilter filterWithName:@"CIAffineClamp"];
+        [clampFilter setValue:input forKey:kCIInputImageKey];
+        [clampFilter setValue:[NSValue valueWithCGAffineTransform:CGAffineTransformIdentity] forKey:@"inputTransform"];
+
+        CIFilter *blur = [CIFilter filterWithName:@"CIGaussianBlur"];
+        [blur setValue:clampFilter.outputImage forKey:kCIInputImageKey];
+        [blur setValue:@(radius) forKey:kCIInputRadiusKey];
+
+        CIContext *ctx = [CIContext contextWithOptions:nil];
+        CGImageRef outRef = [ctx createCGImage:blur.outputImage fromRect:extent];
+        UIImage *result = outRef ? [UIImage imageWithCGImage:outRef] : nil;
+        if (outRef) CGImageRelease(outRef);
+
+        dispatch_async(dispatch_get_main_queue(), ^{
+            if (gen != self->_backdropBlurGeneration) return;
+            self->_backdropImageView.image = result ?: snapshot;
+        });
+    });
+}
+
 - (void)updateColors {
     ThemeManager *theme = ThemeManager.shared;
     self.view.backgroundColor = theme.contentBackgroundColor;
+    _backdropImageView.backgroundColor = theme.contentBackgroundColor;
     for (UITableView *tv in _pageTables) {
-        tv.backgroundColor = theme.contentBackgroundColor;
+        tv.backgroundColor = [UIColor clearColor];
     }
     for (UIButton *btn in _tabButtons) {
         [self updateTabStyle:btn];
@@ -702,6 +799,8 @@
             val = ThemeManager.shared.backgroundBlurIntensity;
         } else if ([item[@"key"] isEqualToString:@"amethyst_ui_opacity"]) {
             val = ThemeManager.shared.uiOpacity * 100.0;
+        } else if ([item[@"key"] isEqualToString:@"amethyst_settings_blur"]) {
+            val = [[NSUserDefaults standardUserDefaults] floatForKey:@"amethyst_settings_blur"];
         } else {
             val = getPrefFloat(item[@"key"]);
             if ([item[@"key"] isEqualToString:@"java.allocated_memory"] && val < [item[@"min"] floatValue]) {
@@ -710,7 +809,7 @@
                 setPrefFloat(@"java.allocated_memory", val);
             }
         }
-        if (val == 0 && ![item[@"key"] isEqualToString:@"amethyst_bg_blur"] && ![item[@"key"] isEqualToString:@"amethyst_ui_opacity"] && ![item[@"key"] isEqualToString:@"general.widget_bg_opacity"] && !disabled) val = [item[@"min"] floatValue] + ([item[@"max"] floatValue] - [item[@"min"] floatValue]) / 2;
+        if (val == 0 && ![item[@"key"] isEqualToString:@"amethyst_bg_blur"] && ![item[@"key"] isEqualToString:@"amethyst_ui_opacity"] && ![item[@"key"] isEqualToString:@"amethyst_settings_blur"] && ![item[@"key"] isEqualToString:@"general.widget_bg_opacity"] && !disabled) val = [item[@"min"] floatValue] + ([item[@"max"] floatValue] - [item[@"min"] floatValue]) / 2;
         sl.minimumValue = [item[@"min"] floatValue];
         sl.maximumValue = [item[@"max"] floatValue];
         sl.value = val;
@@ -879,6 +978,9 @@
         ThemeManager.shared.backgroundBlurIntensity = val;
     } else if ([item[@"key"] isEqualToString:@"amethyst_ui_opacity"]) {
         ThemeManager.shared.uiOpacity = val / 100.0;
+    } else if ([item[@"key"] isEqualToString:@"amethyst_settings_blur"]) {
+        [[NSUserDefaults standardUserDefaults] setFloat:val forKey:@"amethyst_settings_blur"];
+        [self applySettingsBlur];
     } else {
         setPrefFloat(item[@"key"], val);
         if ([item[@"key"] isEqualToString:@"video.resolution"]) {

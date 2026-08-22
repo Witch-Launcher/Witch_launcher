@@ -571,6 +571,8 @@ public class GLFW
     private static native long nglfwSetKeyCallback(long window, long ptr);
     private static native long nglfwSetMouseButtonCallback(long window, long ptr);
     private static native long nglfwSetScrollCallback(long window, long ptr);
+    private static native long nglfwSetWindowFocusCallback(long window, long ptr);
+    private static native long nglfwSetWindowIconifyCallback(long window, long ptr);
     private static native long nglfwSetWindowSizeCallback(long window, long ptr);
     // private static native void nglfwSetInputReady();
     private static native void nglfwSetShowingWindow(long window);
@@ -763,14 +765,14 @@ public class GLFW
     public static GLFWWindowFocusCallback glfwSetWindowFocusCallback(@NativeType("GLFWwindow *") long window, @Nullable @NativeType("GLFWwindowfocusfun") GLFWWindowFocusCallbackI cbfun) {
         GLFWWindowFocusCallback lastCallback = mGLFWWindowFocusCallback;
         if (cbfun == null) mGLFWWindowFocusCallback = null;
-        else mGLFWWindowFocusCallback = GLFWWindowFocusCallback.create(cbfun);
+        else mGLFWWindowFocusCallback = GLFWWindowFocusCallback.createSafe(nglfwSetWindowFocusCallback(window, memAddressSafe(cbfun)));
         return lastCallback;
     }
 
     public static GLFWWindowIconifyCallback glfwSetWindowIconifyCallback(@NativeType("GLFWwindow *") long window, @Nullable @NativeType("GLFWwindowiconifyfun") GLFWWindowIconifyCallbackI cbfun) {
         GLFWWindowIconifyCallback lastCallback = mGLFWWindowIconifyCallback;
         if (cbfun == null) mGLFWWindowIconifyCallback = null;
-        else mGLFWWindowIconifyCallback = GLFWWindowIconifyCallback.create(cbfun);
+        else mGLFWWindowIconifyCallback = GLFWWindowIconifyCallback.createSafe(nglfwSetWindowIconifyCallback(window, memAddressSafe(cbfun)));
 
         return lastCallback;
     }

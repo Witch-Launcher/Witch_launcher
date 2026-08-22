@@ -89,7 +89,6 @@
     UIColor *green = [UIColor colorWithRed:0.20 green:0.84 blue:0.29 alpha:1];
     UIColor *orange = [UIColor colorWithRed:1.00 green:0.62 blue:0.04 alpha:1];
     UIColor *blue = [UIColor colorWithRed:0.39 green:0.82 blue:1.00 alpha:1];
-    UIColor *pink = [UIColor colorWithRed:0.75 green:0.35 blue:0.95 alpha:1];
     UIColor *teal = [UIColor colorWithRed:0.35 green:0.78 blue:0.70 alpha:1];
     UIColor *red = [UIColor colorWithRed:0.90 green:0.30 blue:0.30 alpha:1];
 
@@ -99,7 +98,6 @@
         @{@"icon": @"square.stack.3d.up", @"title": @"Modpack", @"desc": @"Curated mod collections", @"color": orange, @"id": @"modpack"},
         @{@"icon": @"paintpalette", @"title": @"Shader", @"desc": @"Iris & Optifine packs", @"color": blue, @"id": @"shader"},
         @{@"icon": @"paintbrush.fill", @"title": @"Resource Pack", @"desc": @"Textures & visual overhauls", @"color": red, @"id": @"resourcepack"},
-        @{@"icon": @"globe", @"title": @"Server", @"desc": @"Manage multiplayer servers", @"color": pink, @"id": @"server"},
         @{@"icon": @"map", @"title": @"Maps", @"desc": @"Worlds & adventure maps", @"color": teal, @"id": @"map"},
     ];
 
@@ -183,10 +181,6 @@
     } else if ([card.categoryId isEqualToString:@"resourcepack"]) {
         ResourcePackListViewController *vc = [[ResourcePackListViewController alloc] init];
         [self.navigationController pushViewController:vc animated:YES];
-    } else if ([card.categoryId isEqualToString:@"server"]) {
-        [self dismissViewControllerAnimated:YES completion:^{
-            [self.coordinator switchToTab:SidebarTabServer];
-        }];
     }
 }
 
