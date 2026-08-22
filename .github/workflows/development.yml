@@ -17,7 +17,28 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v5
         with:
-          submodules: recursive
+          submodules: false
+
+      # googlesource.com intermittently returns HTTP 502 / truncated
+      # responses while resolving pinned commits during shallow submodule
+      # fetches (fails on a random submodule each run). Retry until every
+      # submodule is checked out; already-updated ones are skipped fast.
+      - name: Checkout submodules (with retries)
+        shell: bash
+        run: |
+          set -o pipefail
+          for i in 1 2 3 4 5 6; do
+            echo "::group::Submodule update attempt $i/6"
+            if git -c protocol.version=2 submodule sync --recursive && \
+               git -c protocol.version=2 submodule update --init --force --depth=1 --recursive; then
+              echo "::endgroup::"
+              exit 0
+            fi
+            echo "::endgroup::"
+            echo "Attempt $i failed; retrying in 15s..."
+            sleep 15
+          done
+          exit 1
 
       - name: Set up Xcode Version
         run: sudo xcode-select -s /Applications/Xcode_15.4.app

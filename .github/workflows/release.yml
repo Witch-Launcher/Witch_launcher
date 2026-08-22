@@ -35,7 +35,19 @@ jobs:
         uses: actions/checkout@main
 
       - name: Checkout repository submodules
-        run: git submodule update --init --recursive
+        shell: bash
+        run: |
+          for i in 1 2 3 4 5 6; do
+            echo "::group::Submodule update attempt $i/6"
+            if git -c protocol.version=2 submodule update --init --force --depth=1 --recursive; then
+              echo "::endgroup::"
+              exit 0
+            fi
+            echo "::endgroup::"
+            echo "Attempt $i failed; retrying in 15s..."
+            sleep 15
+          done
+          exit 1
 
       - name: Setup JDK 8 (Zulu)
         uses: actions/setup-java@v5
