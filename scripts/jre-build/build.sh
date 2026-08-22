@@ -173,14 +173,17 @@ build_version() {
     --with-extra-cxxflags="$CFLAGS"
     --with-extra-ldflags="-arch arm64"
     --disable-precompiled-headers
-    --disable-warnings-as-errors
     --enable-option-checking=fatal
-    --enable-headless-only=yes
     --with-jvm-variants="$JVM_VARIANTS"
     --with-native-debug-symbols=external
     --with-debug-level="$JDK_DEBUG_LEVEL"
     --x-includes="$BUILD_DIR/lib/ios-missing-include"
   )
+  # JDK 9+ configure-only flags; Corretto/OpenJDK 8 rejects them outright.
+  if [[ "$ver" != "8" ]]; then
+    common+=( --disable-warnings-as-errors
+              --enable-headless-only=yes )
+  fi
   local extra=()
   if [[ "$ver" == "8" ]]; then
     extra=( --with-toolchain-type=clang SDKNAME=iphoneos
