@@ -155,6 +155,13 @@
 "login.msa.progress.acquireMCToken" = "(4/5) Acquiring the Minecraft token";
 "login.msa.progress.checkMCProfile" = "(5/5) Checking the Minecraft profile";
 
+"login.ely.progress.authenticate" = "Authenticating with Ely.by";
+"login.ely.progress.oauthExchange" = "Exchanging Ely.by authorization code";
+"login.ely.progress.userInfo" = "Fetching Ely.by account info";
+"login.ely.progress.validate" = "Validating Ely.by session";
+"login.ely.progress.refresh" = "Refreshing Ely.by session";
+"login.ely.error.relogin" = "The stored session has expired and cannot be refreshed. Please log in again.";
+
 "News" = "News";
 "Profiles" = "Profiles";
 "Settings" = "Settings";

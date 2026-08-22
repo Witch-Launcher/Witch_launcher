@@ -139,6 +139,7 @@
         }.mutableCopy;
         // TODO: isolate this or add account picker into profile editor(?)
         defaults[@"internal"][@"selected_account"] = @"";
+        defaults[@"internal"][@"ely_client_token"] = @"";
     }
 
     return defaults;

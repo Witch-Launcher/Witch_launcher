@@ -240,6 +240,7 @@ add_executable(Witch
   authenticator/BaseAuthenticator.m
   authenticator/LocalAuthenticator.m
   authenticator/MicrosoftAuthenticator.m
+  authenticator/ElyAuthenticator.m
 
   ctxbridges/gl_bridge.m
   ctxbridges/osm_bridge.m
@@ -316,6 +317,7 @@ egl_bridge.m
    ../UI/Common/MMMarkdown/MMScanner.m
    ../UI/Common/MMMarkdown/MMSpanParser.m
    ../UI/Common/HapticManager.m
+   ../UI/Common/ElySkinHead.m
    ../UI/Common/CustomButton.m
    ../UI/Common/CustomSlider.m
    ../UI/Common/BlurContainerView.m

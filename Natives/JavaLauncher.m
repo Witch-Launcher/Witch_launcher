@@ -26,6 +26,7 @@
 #import "PLProfiles.h"
 #import "VersionDirectoryManager.h"
 #import "TouchControllerManager.h"
+#import "authenticator/BaseAuthenticator.h"
 
 static NSString *dhNativeLibPath = nil;
 
@@ -714,6 +715,9 @@ int launchJVMWithArgs(NSString *username, id launchTarget, int width, int height
     margv[++margc] = [NSString stringWithFormat:@"-javaagent:%@/patchjna_agent.jar=", librariesPath].UTF8String;
     if(getPrefBool(@"general.cosmetica")) {
         margv[++margc] = [NSString stringWithFormat:@"-javaagent:%@/arc_dns_injector.jar=23.95.137.176", librariesPath].UTF8String;
+    }
+    if ([BaseAuthenticator.current.authData[@"accountType"] isEqualToString:@"elyby"]) {
+        margv[++margc] = [NSString stringWithFormat:@"-javaagent:%@/authlib-injector.jar=ely.by", librariesPath].UTF8String;
     }
 
     // Workaround random stack guard allocation crashes

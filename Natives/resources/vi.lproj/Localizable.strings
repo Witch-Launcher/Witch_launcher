@@ -141,6 +141,13 @@
 "login.msa.progress.acquireMCToken" = "(4/5) Đang nhận Khoá Minecraft";
 "login.msa.progress.checkMCProfile" = "(5/5) Kiểm tra hồ sơ Minecraft";
 
+"login.ely.progress.authenticate" = "Đang xác thực với Ely.by";
+"login.ely.progress.oauthExchange" = "Đang đổi mã ủy quyền Ely.by";
+"login.ely.progress.userInfo" = "Đang tải thông tin tài khoản Ely.by";
+"login.ely.progress.validate" = "Đang kiểm tra phiên Ely.by";
+"login.ely.progress.refresh" = "Đang làm mới phiên Ely.by";
+"login.ely.error.relogin" = "Phiên đăng nhập đã hết hạn và không thể làm mới. Vui lòng đăng nhập lại.";
+
 "News" = "Tin tức";
 "Settings" = "Thiết lập";
 

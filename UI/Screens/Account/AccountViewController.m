@@ -9,9 +9,13 @@
 #import "DownloadProgressOverlay.h"
 #import <WebKit/WebKit.h>
 #import "UIImageView+AFNetworking.h"
+#import "AFNetworking.h"
+#import "ElySkinHead.h"
 
 @interface AccountViewController () <UIImagePickerControllerDelegate, UINavigationControllerDelegate>
 @property (nonatomic) NSDictionary *editingAccount;
+@property (nonatomic) NSString *pendingSkinVariant;
+@property (nonatomic) BOOL skinManagerWebViewActive;
 @end
 
 @interface MicrosoftAuthenticator (Keychain)
@@ -109,10 +113,14 @@
 
 - (void)configureWithAccount:(NSDictionary *)account isSelected:(BOOL)isSelected {
     _nameLabel.text = account[@"username"] ?: @"Unknown";
+    BOOL isEly = [account[@"accountType"] isEqualToString:@"elyby"];
     BOOL isPremium = [account[@"xboxGamertag"] length] > 0;
     BOOL isDemo = isPremium && [account[@"profileId"] isEqualToString:@"00000000-0000-0000-0000-000000000000"];
 
-    if (isDemo) {
+    if (isEly) {
+        _typeLabel.text = @"Ely.by";
+        _typeLabel.backgroundColor = [UIColor colorWithRed:0.55 green:0.35 blue:0.86 alpha:1];
+    } else if (isDemo) {
         _typeLabel.text = @"Demo";
         _typeLabel.backgroundColor = [UIColor colorWithRed:0.95 green:0.60 blue:0.20 alpha:1];
     } else if (isPremium) {
@@ -123,22 +131,35 @@
         _typeLabel.backgroundColor = ThemeManager.shared.secondaryTextColor;
     }
 
-    _editBtn.hidden = !isPremium || isDemo;
+    _editBtn.hidden = !((isPremium && !isDemo) || isEly);
 
     UIImage *placeholder = [UIImage systemImageNamed:isDemo ? @"exclamationmark.triangle.fill" : (isPremium ? @"person.fill.checkmark" : @"person.circle.fill")];
     _avatarView.image = placeholder;
     _avatarView.tintColor = ThemeManager.shared.secondaryTextColor;
 
     NSString *profileId = account[@"profileId"];
-    if (isPremium && profileId.length > 0 && !isDemo) {
+    if (isEly && [account[@"username"] length] > 0) {
+        NSString *username = account[@"username"];
+        UIImage *cached = [ElySkinHead cachedHeadForUsername:username size:40];
+        if (cached) {
+            _avatarView.image = cached;
+            _avatarView.tintColor = [UIColor clearColor];
+        }
+        __weak typeof(self) weakSelf = self;
+        [ElySkinHead headForUsername:username size:40 completion:^(UIImage *head) {
+            if (!head) return;
+            weakSelf.avatarView.image = head;
+            weakSelf.avatarView.tintColor = [UIColor clearColor];
+        }];
+    } else if (!isEly && isPremium && profileId.length > 0 && !isDemo) {
         NSString *skinURL = [NSString stringWithFormat:@"https://mc-heads.net/head/%@/40", profileId];
         __weak typeof(self) weakSelf = self;
         [_avatarView setImageWithURLRequest:[NSURLRequest requestWithURL:[NSURL URLWithString:skinURL]]
-                          placeholderImage:placeholder
-                                   success:^(NSURLRequest *request, NSHTTPURLResponse *response, UIImage *image) {
-                                       weakSelf.avatarView.image = image;
-                                       weakSelf.avatarView.tintColor = [UIColor clearColor];
-                                   } failure:nil];
+                           placeholderImage:placeholder
+                                    success:^(NSURLRequest *request, NSHTTPURLResponse *response, UIImage *image) {
+                                        weakSelf.avatarView.image = image;
+                                        weakSelf.avatarView.tintColor = [UIColor clearColor];
+                                     } failure:nil];
     }
 
     if (isSelected) {
@@ -168,11 +189,20 @@
 @property (nonatomic) NSMutableArray *accountsArray;
 @property (nonatomic) UISegmentedControl *addTypeControl;
 @property (nonatomic) UITextField *usernameField;
+@property (nonatomic) UITextField *passwordField;
 @property (nonatomic) UIButton *addActionBtn;
+@property (nonatomic) UIButton *oauthLinkBtn;
 @property (nonatomic) UIView *addFormView;
+@property (nonatomic) NSLayoutConstraint *passwordTopConstraint;
+@property (nonatomic) NSLayoutConstraint *passwordHeightConstraint;
+@property (nonatomic) NSLayoutConstraint *oauthTopConstraint;
+@property (nonatomic) NSLayoutConstraint *oauthHeightConstraint;
 @property (nonatomic) NSLayoutConstraint *formBottomConstraint;
 @property (nonatomic) WKWebView *loginWebView;
+@property (nonatomic) BOOL elyOAuthFlowActive;
 @end
+
+extern NSString *ELY_OAUTH_REDIRECT_URI;
 
 @implementation AccountViewController
 
@@ -227,7 +257,7 @@
     addTitle.textColor = ThemeManager.shared.primaryTextColor;
     [_addFormView addSubview:addTitle];
 
-    _addTypeControl = [[UISegmentedControl alloc] initWithItems:@[@"Premium (Microsoft)", @"Local (Offline)"]];
+    _addTypeControl = [[UISegmentedControl alloc] initWithItems:@[@"Premium (Microsoft)", @"Local (Offline)", @"Ely.by"]];
     _addTypeControl.translatesAutoresizingMaskIntoConstraints = NO;
     _addTypeControl.selectedSegmentIndex = 1;
     [_addTypeControl addTarget:self action:@selector(addTypeChanged) forControlEvents:UIControlEventValueChanged];
@@ -251,6 +281,18 @@
 
     [_addFormView addSubview:_usernameField];
 
+    _passwordField = [[UITextField alloc] init];
+    _passwordField.translatesAutoresizingMaskIntoConstraints = NO;
+    _passwordField.placeholder = @"Password";
+    _passwordField.borderStyle = UITextBorderStyleRoundedRect;
+    _passwordField.font = [UIFont systemFontOfSize:14];
+    _passwordField.hidden = YES;
+    _passwordField.secureTextEntry = YES;
+    _passwordField.returnKeyType = UIReturnKeyDone;
+    _passwordField.inputAccessoryView = kbToolbar;
+    [_passwordField addTarget:self action:@selector(dismissKeyboard) forControlEvents:UIControlEventEditingDidEndOnExit];
+    [_addFormView addSubview:_passwordField];
+
     _addActionBtn = [UIButton buttonWithType:UIButtonTypeSystem];
     _addActionBtn.translatesAutoresizingMaskIntoConstraints = NO;
     [_addActionBtn setTitle:@"Login with Microsoft  →" forState:UIControlStateNormal];
@@ -261,6 +303,15 @@
     [_addActionBtn addTarget:self action:@selector(addAccountTapped) forControlEvents:UIControlEventTouchUpInside];
     _addActionBtn.hidden = YES;
     [_addFormView addSubview:_addActionBtn];
+
+    _oauthLinkBtn = [UIButton buttonWithType:UIButtonTypeSystem];
+    _oauthLinkBtn.translatesAutoresizingMaskIntoConstraints = NO;
+    [_oauthLinkBtn setTitle:@"Sign in with Browser (OAuth2)" forState:UIControlStateNormal];
+    _oauthLinkBtn.titleLabel.font = [UIFont systemFontOfSize:12];
+    [_oauthLinkBtn setTitleColor:ThemeManager.shared.accentColor forState:UIControlStateNormal];
+    [_oauthLinkBtn addTarget:self action:@selector(addElyOAuthTapped) forControlEvents:UIControlEventTouchUpInside];
+    _oauthLinkBtn.hidden = YES;
+    [_addFormView addSubview:_oauthLinkBtn];
 
     [NSLayoutConstraint activateConstraints:@[
         [titleLabel.topAnchor constraintEqualToAnchor:self.view.topAnchor constant:16],
@@ -288,23 +339,50 @@
         [_usernameField.trailingAnchor constraintEqualToAnchor:_addFormView.trailingAnchor constant:-12],
         [_usernameField.heightAnchor constraintEqualToConstant:36],
 
-        [_addActionBtn.topAnchor constraintEqualToAnchor:_usernameField.bottomAnchor constant:10],
+        self.passwordTopConstraint = [_passwordField.topAnchor constraintEqualToAnchor:_usernameField.bottomAnchor constant:0],
+        [_passwordField.leadingAnchor constraintEqualToAnchor:_addFormView.leadingAnchor constant:12],
+        [_passwordField.trailingAnchor constraintEqualToAnchor:_addFormView.trailingAnchor constant:-12],
+        self.passwordHeightConstraint = [_passwordField.heightAnchor constraintEqualToConstant:0],
+
+        [_addActionBtn.topAnchor constraintEqualToAnchor:_passwordField.bottomAnchor constant:10],
         [_addActionBtn.leadingAnchor constraintEqualToAnchor:_addFormView.leadingAnchor constant:12],
         [_addActionBtn.trailingAnchor constraintEqualToAnchor:_addFormView.trailingAnchor constant:-12],
         [_addActionBtn.heightAnchor constraintEqualToConstant:40],
-        [_addActionBtn.bottomAnchor constraintEqualToAnchor:_addFormView.bottomAnchor constant:-12],
+
+        self.oauthTopConstraint = [_oauthLinkBtn.topAnchor constraintEqualToAnchor:_addActionBtn.bottomAnchor constant:0],
+        [_oauthLinkBtn.centerXAnchor constraintEqualToAnchor:_addFormView.centerXAnchor],
+        self.oauthHeightConstraint = [_oauthLinkBtn.heightAnchor constraintEqualToConstant:0],
+        [_oauthLinkBtn.bottomAnchor constraintEqualToAnchor:_addFormView.bottomAnchor constant:-10],
     ]];
 
     [self addTypeChanged];
 }
 
 - (void)addTypeChanged {
-    BOOL isLocal = _addTypeControl.selectedSegmentIndex == 1;
-    _usernameField.hidden = !isLocal;
+    NSInteger selected = _addTypeControl.selectedSegmentIndex;
+    BOOL isLocal = selected == 1;
+    BOOL isEly = selected == 2;
+
+    _usernameField.hidden = !(isLocal || isEly);
+    _usernameField.placeholder = isEly ? @"Ely.by email or username" : @"Username";
+    if (isLocal && _usernameField.text.length == 0) _usernameField.text = @"Player";
+    if (!isLocal && [_usernameField.text isEqualToString:@"Player"]) _usernameField.text = @"";
+    if (!isLocal && !isEly) _passwordField.text = @"";
+
+    _passwordField.hidden = !isEly;
+    self.passwordTopConstraint.constant = isEly ? 10 : 0;
+    self.passwordHeightConstraint.constant = isEly ? 36 : 0;
+
+    _oauthLinkBtn.hidden = !isEly;
+    self.oauthTopConstraint.constant = isEly ? 6 : 0;
+    self.oauthHeightConstraint.constant = isEly ? 30 : 0;
+
     _addActionBtn.hidden = NO;
     if (isLocal) {
         [_addActionBtn setTitle:@"Add Local Account" forState:UIControlStateNormal];
         _usernameField.placeholder = @"Username";
+    } else if (isEly) {
+        [_addActionBtn setTitle:@"Login with Ely.by  →" forState:UIControlStateNormal];
     } else {
         [_addActionBtn setTitle:@"Login with Microsoft  →" forState:UIControlStateNormal];
     }
@@ -380,8 +458,12 @@
 }
 
 - (void)addMicrosoftAccount {
+    self.elyOAuthFlowActive = NO;
     NSString *authURL = @"https://login.live.com/oauth20_authorize.srf?client_id=00000000402b5328&response_type=code&redirect_uri=https://login.live.com/oauth20_desktop.srf&scope=service::user.auth.xboxlive.com::MBI_SSL";
+    [self presentLoginWebViewWithURL:[NSURL URLWithString:authURL] title:@"Microsoft Login"];
+}
 
+- (void)presentLoginWebViewWithURL:(NSURL *)url title:(NSString *)title {
     UIView *webContainer = [[UIView alloc] initWithFrame:self.view.bounds];
     webContainer.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
     webContainer.backgroundColor = UIColor.whiteColor;
@@ -399,7 +481,7 @@
 
     UILabel *titleLabel = [[UILabel alloc] initWithFrame:CGRectMake(0, 0, topBar.bounds.size.width, 44)];
     titleLabel.autoresizingMask = UIViewAutoresizingFlexibleWidth;
-    titleLabel.text = @"Microsoft Login";
+    titleLabel.text = title;
     titleLabel.textAlignment = NSTextAlignmentCenter;
     titleLabel.font = [UIFont systemFontOfSize:15 weight:UIFontWeightSemibold];
     [topBar addSubview:titleLabel];
@@ -412,34 +494,56 @@
 
     [self.view addSubview:webContainer];
 
-    [webView loadRequest:[NSURLRequest requestWithURL:[NSURL URLWithString:authURL]]];
+    [webView loadRequest:[NSURLRequest requestWithURL:url]];
 }
 
 - (void)dismissWebView {
     [self.loginWebView.superview removeFromSuperview];
     self.loginWebView = nil;
+    if (self.skinManagerWebViewActive) {
+        self.skinManagerWebViewActive = NO;
+        NSString *name = _editingAccount[@"username"];
+        if (name.length > 0) {
+            [ElySkinHead clearCacheForUsername:name];
+        }
+        [[NSNotificationCenter defaultCenter] postNotificationName:@"AccountDidChangeNotification" object:nil];
+    }
 }
 
 - (void)webView:(WKWebView *)webView decidePolicyForNavigationAction:(WKNavigationAction *)navigationAction decisionHandler:(void (^)(WKNavigationActionPolicy))decisionHandler {
     NSURL *url = navigationAction.request.URL;
     NSString *urlStr = url.absoluteString;
-    if ([urlStr hasPrefix:@"https://login.live.com/oauth20_desktop.srf"]) {
+
+    NSString *redirectPrefix = self.elyOAuthFlowActive ? ELY_OAUTH_REDIRECT_URI : @"https://login.live.com/oauth20_desktop.srf";
+    if ([urlStr hasPrefix:redirectPrefix]) {
         [self dismissWebView];
-        NSString *query = url.query;
-        if (query) {
-            NSString *authCode = nil;
-            NSString *errorDesc = nil;
-            for (NSString *pair in [query componentsSeparatedByString:@"&"]) {
-                NSArray *kv = [pair componentsSeparatedByString:@"="];
-                if (kv.count != 2) continue;
-                if ([kv[0] isEqualToString:@"code"]) {
-                    authCode = [kv[1] stringByRemovingPercentEncoding];
-                } else if ([kv[0] isEqualToString:@"error"]) {
-                    errorDesc = [kv[1] stringByRemovingPercentEncoding];
-                }
+        NSMutableDictionary *params = [NSMutableDictionary dictionary];
+        for (NSString *pair in [url.query componentsSeparatedByString:@"&"]) {
+            NSArray *kv = [pair componentsSeparatedByString:@"="];
+            if (kv.count != 2) continue;
+            params[kv[0]] = [kv[1] stringByRemovingPercentEncoding];
+        }
+
+        if (self.elyOAuthFlowActive) {
+            self.elyOAuthFlowActive = NO;
+            if (params[@"code"]) {
+                ElyAuthenticator *auth = [[ElyAuthenticator alloc] initWithOAuthCode:params[@"code"]];
+                [auth loginWithCallback:^(id status, BOOL success) {
+                    dispatch_async(dispatch_get_main_queue(), ^{
+                        if (!success) {
+                            NSString *errMsg = [status isKindOfClass:NSError.class] ? [(NSError *)status localizedDescription] : ([status isKindOfClass:NSString.class] ? status : @"Login failed");
+                            showDialog(localize(@"Error", nil), errMsg);
+                            return;
+                        }
+                        [self selectAndSaveAccount:auth];
+                        showDialog(@"Success", [NSString stringWithFormat:@"Logged in as %@", auth.authData[@"username"] ?: @"Unknown"]);
+                    });
+                }];
+            } else if (params[@"error_description"] || params[@"error"]) {
+                showDialog(localize(@"Error", nil), params[@"error_description"] ?: params[@"error"]);
             }
-            if (authCode) {
-                MicrosoftAuthenticator *auth = [[MicrosoftAuthenticator alloc] initWithInput:authCode];
+        } else if (params[@"code"]) {
+                MicrosoftAuthenticator *auth = [[MicrosoftAuthenticator alloc] initWithInput:params[@"code"]];
                 [auth loginWithCallback:^(id status, BOOL success) {
                     dispatch_async(dispatch_get_main_queue(), ^{
                         if (!success) {
@@ -456,9 +560,8 @@
                         }
                     });
                 }];
-            } else if (errorDesc) {
-                showDialog(localize(@"Error", nil), errorDesc);
-            }
+        } else if (params[@"error"]) {
+            showDialog(localize(@"Error", nil), params[@"error"]);
         }
         decisionHandler(WKNavigationActionPolicyCancel);
         return;
@@ -483,9 +586,71 @@
 - (void)addAccountTapped {
     if (_addTypeControl.selectedSegmentIndex == 0) {
         [self addMicrosoftAccount];
+    } else if (_addTypeControl.selectedSegmentIndex == 2) {
+        [self addElyByAccount];
     } else {
         [self addLocalAccount];
     }
+}
+
+#pragma mark - Ely.by Login
+
+- (void)addElyByAccount {
+    NSString *login = _usernameField.text;
+    NSString *password = _passwordField.text;
+    if (login.length == 0 || password.length == 0) {
+        showDialog(localize(@"Error", nil), @"Please enter your Ely.by email/username and password.");
+        return;
+    }
+    [self elyLoginWithLogin:login password:password totp:nil];
+}
+
+- (void)elyLoginWithLogin:(NSString *)login password:(NSString *)password totp:(NSString *)totp {
+    ElyAuthenticator *auth = [[ElyAuthenticator alloc] initWithCredentials:login password:password totp:totp];
+    [auth loginWithCallback:^(id status, BOOL success) {
+        dispatch_async(dispatch_get_main_queue(), ^{
+            if ([status isKindOfClass:NSString.class] && [status isEqualToString:@"TOTP_REQUIRED"]) {
+                [self promptElyTOTPWithLogin:login password:password];
+                return;
+            }
+            if (!success) {
+                NSString *errMsg = [status isKindOfClass:NSError.class] ? [(NSError *)status localizedDescription] : ([status isKindOfClass:NSString.class] ? status : @"Login failed");
+                showDialog(localize(@"Error", nil), errMsg);
+                return;
+            }
+            if (status == nil || [status isEqualToString:@"Done"]) {
+                [self selectAndSaveAccount:auth];
+                showDialog(@"Success", [NSString stringWithFormat:@"Logged in as %@", auth.authData[@"username"] ?: @"Unknown"]);
+            }
+        });
+    }];
+}
+
+- (void)promptElyTOTPWithLogin:(NSString *)login password:(NSString *)password {
+    UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Two-Factor Authentication"
+                                                                   message:@"Your account is protected with two factor auth. Enter the 6-digit code from your authenticator app."
+                                                            preferredStyle:UIAlertControllerStyleAlert];
+    [alert addTextFieldWithConfigurationHandler:^(UITextField *textField) {
+        textField.placeholder = @"123456";
+        textField.keyboardType = UIKeyboardTypeNumberPad;
+    }];
+    [alert addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
+    [alert addAction:[UIAlertAction actionWithTitle:@"Verify" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
+        NSString *code = [alert.textFields.firstObject.text stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceCharacterSet];
+        [self elyLoginWithLogin:login password:password totp:code];
+    }]];
+    [self presentViewController:alert animated:YES completion:nil];
+}
+
+- (void)addElyOAuthTapped {
+    NSURL *url = [ElyAuthenticator oauthAuthorizeURL];
+    if (!url) {
+        showDialog(@"OAuth2 Not Configured",
+            @"Register an application at https://account.ely.by/dev/applications/new (type: Website), then fill in ELY_OAUTH_CLIENT_ID, ELY_OAUTH_CLIENT_SECRET and ELY_OAUTH_REDIRECT_URI in Natives/authenticator/ElyAuthenticator.m.");
+        return;
+    }
+    self.elyOAuthFlowActive = YES;
+    [self presentLoginWebViewWithURL:url title:@"Ely.by Login"];
 }
 
 - (void)deleteAccountAtIndex:(NSInteger)index {
@@ -505,13 +670,22 @@
         [MicrosoftAuthenticator clearTokenDataOfProfile:xuid];
     }
 
+    if ([account[@"accountType"] isEqualToString:@"elyby"]) {
+        [ElyAuthenticator invalidateAccessToken:account[@"accessToken"] clientToken:account[@"clientToken"]];
+        NSString *elyProfileId = account[@"profileId"];
+        if (elyProfileId.length > 0) {
+            [ElyAuthenticator clearTokenDataOfProfile:elyProfileId];
+        }
+    }
+
     [self loadAccounts];
     [[NSNotificationCenter defaultCenter] postNotificationName:@"AccountDidChangeNotification" object:nil];
 }
 
 - (void)editAccount:(NSDictionary *)account {
     BOOL isPremium = [account[@"xboxGamertag"] length] > 0;
-    if (!isPremium) return;
+    BOOL isEly = [account[@"accountType"] isEqualToString:@"elyby"];
+    if (!isPremium && !isEly) return;
     _editingAccount = account;
 
     UIViewController *editVC = [[UIViewController alloc] init];
@@ -543,7 +717,27 @@
     [scroll addSubview:headView];
 
     NSString *profileId = account[@"profileId"];
-    if (profileId.length > 0 && ![profileId isEqualToString:@"00000000-0000-0000-0000-000000000000"]) {
+    if (isEly && [account[@"username"] length] > 0) {
+        NSString *skinURL = [NSString stringWithFormat:@"https://skinsystem.ely.by/skins/%@.png", account[@"username"]];
+        NSString *username = account[@"username"];
+        __weak UIImageView *weakPreview = skinPreview;
+        __weak UIImageView *weakHead = headView;
+        UIImage *cachedHead = [ElySkinHead cachedHeadForUsername:username size:80];
+        if (cachedHead) {
+            headView.image = cachedHead;
+            headView.tintColor = [UIColor clearColor];
+        }
+        [skinPreview setImageWithURLRequest:[NSURLRequest requestWithURL:[NSURL URLWithString:skinURL]]
+                           placeholderImage:[UIImage systemImageNamed:@"person.circle.fill"]
+                                    success:^(NSURLRequest *request, NSHTTPURLResponse *response, UIImage *image) {
+                                        weakPreview.image = image;
+                                    } failure:nil];
+        [ElySkinHead headForUsername:username size:80 completion:^(UIImage *head) {
+            if (!head) return;
+            weakHead.image = head;
+            weakHead.tintColor = [UIColor clearColor];
+        }];
+    } else if (profileId.length > 0 && ![profileId isEqualToString:@"00000000-0000-0000-0000-000000000000"]) {
         NSString *skinURL = [NSString stringWithFormat:@"https://mc-heads.net/body/%@/200", profileId];
         [skinPreview setImageWithURL:[NSURL URLWithString:skinURL]];
         NSString *headURL = [NSString stringWithFormat:@"https://mc-heads.net/avatar/%@/80", profileId];
@@ -582,6 +776,9 @@
     changeSkinBtn.layer.cornerRadius = 8;
     changeSkinBtn.titleLabel.font = [UIFont systemFontOfSize:14 weight:UIFontWeightMedium];
     [changeSkinBtn addTarget:self action:@selector(changeSkinTapped:) forControlEvents:UIControlEventTouchUpInside];
+    if (isEly) {
+        [changeSkinBtn setTitle:@"Manage Skin on ely.by  ↗" forState:UIControlStateNormal];
+    }
     [scroll addSubview:changeSkinBtn];
 
     UIButton *changeCapeBtn = [UIButton buttonWithType:UIButtonTypeSystem];
@@ -592,6 +789,9 @@
     changeCapeBtn.layer.cornerRadius = 8;
     changeCapeBtn.titleLabel.font = [UIFont systemFontOfSize:14 weight:UIFontWeightMedium];
     [changeCapeBtn addTarget:self action:@selector(changeCapeTapped:) forControlEvents:UIControlEventTouchUpInside];
+    if (isEly) {
+        [changeCapeBtn setTitle:@"About Capes" forState:UIControlStateNormal];
+    }
     [scroll addSubview:changeCapeBtn];
 
     [NSLayoutConstraint activateConstraints:@[
@@ -743,12 +943,141 @@
 
 #pragma mark - Change Skin / Cape
 
+- (void)ensureFreshMSToken:(void (^)(NSString *accessToken))completion {
+    NSString *username = _editingAccount[@"username"];
+    NSString *xuid = _editingAccount[@"xuid"];
+    if (username.length == 0 || xuid.length == 0) {
+        completion(nil);
+        return;
+    }
+
+    NSString *selectedName = getPrefObject(@"internal.selected_account");
+    MicrosoftAuthenticator *auth = (MicrosoftAuthenticator *)[BaseAuthenticator loadSavedName:username];
+    if (![auth isKindOfClass:MicrosoftAuthenticator.class]) {
+        completion(nil);
+        return;
+    }
+
+    [auth refreshTokenWithCallback:^(id status, BOOL success) {
+        if (status != nil) return;
+        dispatch_async(dispatch_get_main_queue(), ^{
+            if (![selectedName isEqualToString:username] && selectedName.length > 0) {
+                [BaseAuthenticator loadSavedName:selectedName];
+            }
+            NSDictionary *tokenData = [MicrosoftAuthenticator tokenDataOfProfile:xuid];
+            completion(tokenData[@"accessToken"]);
+        });
+    }];
+}
+
 - (void)changeSkinTapped:(UIButton *)sender {
-    [self presentImagePickerForCape:NO];
+    BOOL isEly = [_editingAccount[@"accountType"] isEqualToString:@"elyby"];
+    if (isEly) {
+        self.skinManagerWebViewActive = YES;
+        self.elyOAuthFlowActive = NO;
+        [self presentLoginWebViewWithURL:[NSURL URLWithString:@"https://account.ely.by/"] title:@"ely.by Skin Manager"];
+        return;
+    }
+
+    UIAlertController *variantAlert = [UIAlertController alertControllerWithTitle:@"Skin Model"
+                                                                          message:@"Choose the model of your skin"
+                                                                   preferredStyle:UIAlertControllerStyleActionSheet];
+    [variantAlert addAction:[UIAlertAction actionWithTitle:@"Classic (Steve, 4px arms)" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
+        self.pendingSkinVariant = @"classic";
+        [self presentImagePickerForCape:NO];
+    }]];
+    [variantAlert addAction:[UIAlertAction actionWithTitle:@"Slim (Alex, 3px arms)" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
+        self.pendingSkinVariant = @"slim";
+        [self presentImagePickerForCape:NO];
+    }]];
+    [variantAlert addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
+    variantAlert.popoverPresentationController.sourceView = sender;
+    variantAlert.popoverPresentationController.sourceRect = sender.bounds;
+    [self presentViewController:variantAlert animated:YES completion:nil];
 }
 
 - (void)changeCapeTapped:(UIButton *)sender {
-    showDialog(@"Not Available", @"Cape upload is not currently supported through the Minecraft API.");
+    BOOL isEly = [_editingAccount[@"accountType"] isEqualToString:@"elyby"];
+    if (isEly) {
+        showDialog(@"Capes",
+            @"Ely.by manages capes centrally: players cannot equip, upload or change capes themselves. Capes are granted automatically by the Ely.by system (events, donations and so on) and will show up on your character automatically.");
+        return;
+    }
+
+    DownloadProgressOverlay *overlay = [DownloadProgressOverlay showInView:self.view title:@"Loading Capes"];
+    [self ensureFreshMSToken:^(NSString *accessToken) {
+        if (accessToken.length == 0) {
+            [overlay dismiss];
+            showDialog(@"Error", @"Failed to retrieve access token. Please re-login.");
+            return;
+        }
+
+        NSDictionary *headers = @{
+            @"Authorization": [NSString stringWithFormat:@"Bearer %@", accessToken]
+        };
+        AFHTTPSessionManager *manager = AFHTTPSessionManager.manager;
+        [manager GET:@"https://api.minecraftservices.com/minecraft/profile" parameters:nil headers:headers progress:nil success:^(NSURLSessionDataTask *task, NSDictionary *response) {
+            dispatch_async(dispatch_get_main_queue(), ^{
+                [overlay dismiss];
+                [self presentCapePickerWithProfile:response accessToken:accessToken sourceView:sender];
+            });
+        } failure:^(NSURLSessionDataTask *task, NSError *error) {
+            dispatch_async(dispatch_get_main_queue(), ^{
+                [overlay dismiss];
+                showDialog(@"Error", error.localizedDescription ?: @"Failed to fetch profile.");
+            });
+        }];
+    }];
+}
+
+- (void)presentCapePickerWithProfile:(NSDictionary *)profile accessToken:(NSString *)accessToken sourceView:(UIButton *)sourceView {
+    NSArray *capes = profile[@"capes"] ?: @[];
+    if (capes.count == 0) {
+        showDialog(@"No Capes", @"This account does not own any capes. Capes can only be equipped if they were obtained through official Minecraft events or the Marketplace.");
+        return;
+    }
+
+    UIAlertController *sheet = [UIAlertController alertControllerWithTitle:@"Change Cape"
+                                                                   message:@"Select a cape to equip. Tapping the active cape unequips it."
+                                                            preferredStyle:UIAlertControllerStyleActionSheet];
+    for (NSDictionary *cape in capes) {
+        NSString *capeId = cape[@"id"];
+        BOOL isActive = [cape[@"state"] isEqualToString:@"ACTIVE"];
+        NSString *title = cape[@"alias"] ?: capeId;
+        if (isActive) title = [title stringByAppendingString:@"  ✓"];
+        [sheet addAction:[UIAlertAction actionWithTitle:title style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
+            [self equipCapeWithId:capeId isActive:isActive accessToken:accessToken];
+        }]];
+    }
+    [sheet addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
+    sheet.popoverPresentationController.sourceView = sourceView;
+    sheet.popoverPresentationController.sourceRect = sourceView.bounds;
+    [self presentViewController:sheet animated:YES completion:nil];
+}
+
+- (void)equipCapeWithId:(NSString *)capeId isActive:(BOOL)isActive accessToken:(NSString *)accessToken {
+    NSMutableURLRequest *request = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:[NSString stringWithFormat:@"https://api.minecraftservices.com/minecraft/profile/capes/%@", capeId]]];
+    request.HTTPMethod = @"PUT";
+    request.HTTPBody = [@"" dataUsingEncoding:NSUTF8StringEncoding];
+    [request setValue:[NSString stringWithFormat:@"Bearer %@", accessToken] forHTTPHeaderField:@"Authorization"];
+
+    DownloadProgressOverlay *overlay = [DownloadProgressOverlay showInView:self.view title:@"Changing Cape"];
+    NSURLSessionDataTask *task = [NSURLSession.sharedSession dataTaskWithRequest:request completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
+        dispatch_async(dispatch_get_main_queue(), ^{
+            NSHTTPURLResponse *httpResp = (NSHTTPURLResponse *)response;
+            if (!error && httpResp.statusCode == 200) {
+                [overlay finishWithMessage:isActive ? @"Cape removed!" : @"Cape equipped!"];
+                dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 1.2 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+                    [overlay dismiss];
+                });
+            } else {
+                [overlay dismiss];
+                NSString *errMsg = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding] ?: (error.localizedDescription ?: @"Unknown error");
+                showDialog(@"Cape Change Failed", [NSString stringWithFormat:@"HTTP %ld: %@", (long)httpResp.statusCode, errMsg]);
+            }
+        });
+    }];
+    [task resume];
 }
 
 - (void)presentImagePickerForCape:(BOOL)forCape {
@@ -765,6 +1094,13 @@
     UIImage *image = info[UIImagePickerControllerOriginalImage];
     if (!image) return;
 
+    CGFloat width = image.size.width;
+    CGFloat height = image.size.height;
+    if (!((width == 64 && height == 64) || (width == 64 && height == 32))) {
+        showDialog(@"Invalid Skin", @"The skin must be a standard 64x64 (modern) or 64x32 (legacy) PNG file.");
+        return;
+    }
+
     NSString *uuid = _editingAccount[@"profileId"];
     NSString *xuid = _editingAccount[@"xuid"];
     if (!uuid || !xuid) {
@@ -772,13 +1108,8 @@
         return;
     }
     NSString *plainUUID = [[uuid componentsSeparatedByString:@"-"] componentsJoinedByString:@""];
-
-    NSDictionary *tokenData = [MicrosoftAuthenticator tokenDataOfProfile:xuid];
-    NSString *accessToken = tokenData[@"accessToken"];
-    if (!accessToken) {
-        showDialog(@"Error", @"Failed to retrieve access token. Please re-login.");
-        return;
-    }
+    NSString *variant = self.pendingSkinVariant ?: @"classic";
+    self.pendingSkinVariant = nil;
 
     NSData *imageData = UIImagePNGRepresentation(image);
     if (!imageData) {
@@ -787,49 +1118,64 @@
     }
 
     DownloadProgressOverlay *overlay = [DownloadProgressOverlay showInView:self.view title:@"Uploading Skin"];
-    [overlay updateProgress:0 message:@"Uploading..."];
+    [overlay updateProgress:0 message:@"Refreshing session..."];
 
-    NSMutableURLRequest *request = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:@"https://api.minecraftservices.com/minecraft/profile/skins"]];
-    request.HTTPMethod = @"POST";
-    [request setValue:[NSString stringWithFormat:@"Bearer %@", accessToken] forHTTPHeaderField:@"Authorization"];
+    __weak typeof(self) weakSelf = self;
+    NSString *capturedVariant = variant;
+    [self ensureFreshMSToken:^(NSString *accessToken) {
+        if (accessToken.length == 0) {
+            [overlay dismiss];
+            showDialog(@"Error", @"Failed to retrieve access token. Please re-login and try again.");
+            return;
+        }
 
-    NSString *boundary = [NSString stringWithFormat:@"Boundary-%@", [[NSUUID UUID] UUIDString]];
-    [request setValue:[NSString stringWithFormat:@"multipart/form-data; boundary=%@", boundary] forHTTPHeaderField:@"Content-Type"];
+        NSMutableURLRequest *request = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:@"https://api.minecraftservices.com/minecraft/profile/skins"]];
+        request.HTTPMethod = @"POST";
+        [request setValue:[NSString stringWithFormat:@"Bearer %@", accessToken] forHTTPHeaderField:@"Authorization"];
 
-    NSMutableData *body = [NSMutableData data];
-    [body appendData:[[NSString stringWithFormat:@"--%@\r\n", boundary] dataUsingEncoding:NSUTF8StringEncoding]];
-    [body appendData:[@"Content-Disposition: form-data; name=\"variant\"\r\n\r\n" dataUsingEncoding:NSUTF8StringEncoding]];
-    [body appendData:[@"CLASSIC\r\n" dataUsingEncoding:NSUTF8StringEncoding]];
+        NSString *boundary = [NSString stringWithFormat:@"Boundary-%@", [[NSUUID UUID] UUIDString]];
+        [request setValue:[NSString stringWithFormat:@"multipart/form-data; boundary=%@", boundary] forHTTPHeaderField:@"Content-Type"];
 
-    [body appendData:[[NSString stringWithFormat:@"--%@\r\n", boundary] dataUsingEncoding:NSUTF8StringEncoding]];
-    [body appendData:[[NSString stringWithFormat:@"Content-Disposition: form-data; name=\"file\"; filename=\"skin.png\"\r\n"] dataUsingEncoding:NSUTF8StringEncoding]];
-    [body appendData:[@"Content-Type: image/png\r\n\r\n" dataUsingEncoding:NSUTF8StringEncoding]];
-    [body appendData:imageData];
-    [body appendData:[[NSString stringWithFormat:@"\r\n--%@--\r\n", boundary] dataUsingEncoding:NSUTF8StringEncoding]];
+        NSMutableData *body = [NSMutableData data];
+        [body appendData:[[NSString stringWithFormat:@"--%@\r\n", boundary] dataUsingEncoding:NSUTF8StringEncoding]];
+        [body appendData:[@"Content-Disposition: form-data; name=\"variant\"\r\n\r\n" dataUsingEncoding:NSUTF8StringEncoding]];
+        [body appendData:[[NSString stringWithFormat:@"%@\r\n", capturedVariant] dataUsingEncoding:NSUTF8StringEncoding]];
 
-    request.HTTPBody = body;
+        [body appendData:[[NSString stringWithFormat:@"--%@\r\n", boundary] dataUsingEncoding:NSUTF8StringEncoding]];
+        [body appendData:[[NSString stringWithFormat:@"Content-Disposition: form-data; name=\"file\"; filename=\"skin.png\"\r\n"] dataUsingEncoding:NSUTF8StringEncoding]];
+        [body appendData:[@"Content-Type: image/png\r\n\r\n" dataUsingEncoding:NSUTF8StringEncoding]];
+        [body appendData:imageData];
+        [body appendData:[[NSString stringWithFormat:@"\r\n--%@--\r\n", boundary] dataUsingEncoding:NSUTF8StringEncoding]];
 
-    [[NSURLSession.sharedSession dataTaskWithRequest:request completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
-        dispatch_async(dispatch_get_main_queue(), ^{
-            if (error) {
-                [overlay dismiss];
-                showDialog(@"Upload Failed", error.localizedDescription);
-                return;
-            }
-            NSHTTPURLResponse *httpResp = (NSHTTPURLResponse *)response;
-            if (httpResp.statusCode == 200 || httpResp.statusCode == 204) {
-                [overlay finishWithMessage:@"Skin updated!"];
-                dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 1.5 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+        request.HTTPBody = body;
+        [overlay updateProgress:0.5 message:@"Uploading..."];
+
+        [[NSURLSession.sharedSession dataTaskWithRequest:request completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
+            dispatch_async(dispatch_get_main_queue(), ^{
+                if (!weakSelf) return;
+                if (error) {
                     [overlay dismiss];
-                    showDialog(@"Success", @"Your skin has been updated. It may take a few minutes to appear in-game.");
-                });
-            } else {
-                [overlay dismiss];
-                NSString *errMsg = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding] ?: @"Unknown error";
-                showDialog(@"Upload Failed", [NSString stringWithFormat:@"HTTP %ld: %@", (long)httpResp.statusCode, errMsg]);
-            }
-        });
-    }] resume];
+                    showDialog(@"Upload Failed", error.localizedDescription);
+                    return;
+                }
+                NSHTTPURLResponse *httpResp = (NSHTTPURLResponse *)response;
+                if (httpResp.statusCode == 200 || httpResp.statusCode == 204) {
+                    [overlay finishWithMessage:@"Skin updated!"];
+                    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 1.5 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+                        [overlay dismiss];
+                        showDialog(@"Success", @"Your skin has been updated. It may take a few minutes to appear in-game.");
+                    });
+                } else {
+                    [overlay dismiss];
+                    NSString *errMsg = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding] ?: @"Unknown error";
+                    if (httpResp.statusCode == 401) {
+                        errMsg = @"Session expired and could not be refreshed. Please re-login.";
+                    }
+                    showDialog(@"Upload Failed", [NSString stringWithFormat:@"HTTP %ld: %@", (long)httpResp.statusCode, errMsg]);
+                }
+            });
+        }] resume];
+    }];
 }
 
 

@@ -30,6 +30,7 @@
 #import "VersionDirectoryManager.h"
 #import "PLProfiles.h"
 #import "MinecraftResourceUtils.h"
+#import "ElySkinHead.h"
 
 @interface MainCoordinator () <UIAlertViewDelegate> {
     CGFloat _lastMsTime;
@@ -82,7 +83,16 @@
     NSString *name = BaseAuthenticator.current.authData[@"username"] ?: nil;
     UIImage *skin = nil;
     NSString *profileId = BaseAuthenticator.current.authData[@"profileId"];
-    if (profileId && [profileId length] > 0 && ![profileId isEqualToString:@"00000000-0000-0000-0000-000000000000"]) {
+    BOOL isEly = [BaseAuthenticator.current.authData[@"accountType"] isEqualToString:@"elyby"];
+    if (isEly && name.length > 0) {
+        __weak typeof(self) weakSelf = self;
+        [ElySkinHead headForUsername:name size:60 completion:^(UIImage *head) {
+            if (!head) return;
+            MainCoordinator *strongSelf = weakSelf;
+            if (!strongSelf) return;
+            [strongSelf.rootVC.rightPanelVC updateAccountWithName:name skin:head];
+        }];
+    } else if (profileId && [profileId length] > 0 && ![profileId isEqualToString:@"00000000-0000-0000-0000-000000000000"]) {
         NSString *skinURL = [NSString stringWithFormat:@"https://mc-heads.net/head/%@/60", profileId];
         NSData *imgData = [NSData dataWithContentsOfURL:[NSURL URLWithString:skinURL]];
         if (imgData) skin = [UIImage imageWithData:imgData];
@@ -278,8 +288,10 @@
         return;
     }
 
-    [self showProgressAlert:localize(@"launcher.checking", nil)];
-    [self downloadAndLaunchVersion:versionStr];
+    [self refreshCurrentAccountIfNeeded:^{
+        [self showProgressAlert:localize(@"launcher.checking", nil)];
+        [self downloadAndLaunchVersion:versionStr];
+    }];
 }
 
 - (void)launchWithServer:(NSDictionary *)server {
@@ -304,6 +316,32 @@
     setPrefObject(@"internal.last_server", server);
 
     [self downloadAndLaunchVersion:versionStr];
+}
+
+- (void)refreshCurrentAccountIfNeeded:(void (^)(void))completion {
+    BaseAuthenticator *auth = BaseAuthenticator.current;
+    if (![auth isKindOfClass:[ElyAuthenticator class]]) {
+        completion();
+        return;
+    }
+
+    DownloadProgressOverlay *overlay = [DownloadProgressOverlay showInView:self.rootVC.view title:@"Ely.by Session"];
+    __weak typeof(self) weakSelf = self;
+    [auth refreshTokenWithCallback:^(id status, BOOL success) {
+        dispatch_async(dispatch_get_main_queue(), ^{
+            if (success && status != nil) {
+                [overlay updateProgress:0.5 message:[status isKindOfClass:NSString.class] ? status : @"Refreshing session..."];
+                return;
+            }
+            [overlay dismiss];
+            if (!success) {
+                NSString *errMsg = [status isKindOfClass:NSError.class] ? [(NSError *)status localizedDescription] : ([status isKindOfClass:NSString.class] ? status : @"Failed to refresh session.");
+                showDialog(localize(@"Error", nil), errMsg);
+                return;
+            }
+            if (weakSelf) completion();
+        });
+    }];
 }
 
 - (void)downloadAndLaunchVersion:(NSString *)versionStr {
