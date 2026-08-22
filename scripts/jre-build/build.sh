@@ -162,6 +162,14 @@ build_version() {
   local CUPS_DIR="$THIRDPARTY/cups-2.2.4"
   ln -sfn "$CUPS_DIR/cups" "$BUILD_DIR/lib/ios-missing-include/cups" || true
 
+  # jdk8u honours user-supplied pkg-config style variables and skips its own
+  # (cross-unfriendly) freetype probing when these are present. Point them at
+  # the vendored static build explicitly.
+  if [[ "$ver" == "8" ]]; then
+    export FREETYPE_CFLAGS="-I$FREETYPE_DIR/include/freetype2 -arch arm64 -isysroot $thesysroot -miphoneos-version-min=14.0"
+    export FREETYPE_LIBS="$FREETYPE_DIR/lib/libfreetype.a -arch arm64 -isysroot $thesysroot"
+  fi
+
   # ---- configure ----
   local CFLAGS="-arch arm64 -DHEADLESS=1 -I$BUILD_DIR/lib/ios-missing-include -Wno-implicit-function-declaration"
   [[ "$ver" == "8" ]] && CFLAGS+=" -Wno-c++11-narrowing -Wno-reserved-user-defined-literal -Wno-shift-negative-value"
