@@ -13,6 +13,7 @@
 #import "UIImageView+AFNetworking.h"
 #import "CurseForgeService.h"
 #import "AFImageDownloader.h"
+#import "AmethystBlurView.h"
 
 @interface ModTagView : UIView
 @property (nonatomic) UILabel *label;
@@ -301,7 +302,9 @@
     [super viewDidLoad];
     self.navigationItem.rightBarButtonItem = [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemCancel target:self action:@selector(cancelTapped)];
     self.view.backgroundColor = ThemeManager.shared.contentBackgroundColor;
-    self.tableView.backgroundColor = ThemeManager.shared.contentBackgroundColor;
+    // Realtime frosted backdrop, same shared intensity as every other panel
+    [AmethystBlurView installInView:self.view];
+    self.tableView.backgroundColor = AmethystBlurView.blurEnabled ? [UIColor clearColor] : ThemeManager.shared.contentBackgroundColor;
 }
 
 - (void)cancelTapped {
