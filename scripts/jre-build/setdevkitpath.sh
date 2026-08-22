@@ -13,15 +13,17 @@ fi
 
 export TARGET_JDK=aarch64
 
-if [[ -z "$JVM_VARIANTS" ]]; then
+# NOTE: this file is sourced from build.sh which runs under `set -u`;
+# every optional environment variable must use the ${VAR:-} expansion.
+if [[ -z "${JVM_VARIANTS:-}" ]]; then
   export JVM_VARIANTS=server
 fi
 
-if [[ -z "$JDK_DEBUG_LEVEL" ]]; then
+if [[ -z "${JDK_DEBUG_LEVEL:-}" ]]; then
   export JDK_DEBUG_LEVEL=release
 fi
 
-if [[ -z "$BUILD_FREETYPE_VERSION" ]]; then
+if [[ -z "${BUILD_FREETYPE_VERSION:-}" ]]; then
   if [[ "$TARGET_VERSION" -eq 8 ]]; then
     export BUILD_FREETYPE_VERSION="2.10.4"
   else
@@ -32,7 +34,7 @@ fi
 # Boot JDK resolution. Same-major boot JDKs reproduce the upstream artifacts
 # (jdk-jdk8u/corretto for 8, temurin/any 17/21/25 for the rest). Override each
 # with JRE_BOOT_8 / JRE_BOOT_17 / JRE_BOOT_21 / JRE_BOOT_25 or set BOOT_JDK.
-if [[ -z "$BOOT_JDK" ]]; then
+if [[ -z "${BOOT_JDK:-}" ]]; then
   case "$TARGET_VERSION" in
     8)  BOOT_JDK=${JRE_BOOT_8:-$(/usr/libexec/java_home -v 1.8 2>/dev/null)} ;;
     17) BOOT_JDK=${JRE_BOOT_17:-$(/usr/libexec/java_home -v 17 2>/dev/null)} ;;
