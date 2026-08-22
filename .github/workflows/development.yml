@@ -133,20 +133,17 @@ jobs:
           xcrun --sdk iphoneos --show-sdk-version
           echo "SDKPATH=$SDKPATH"
 
-      # Build the four iOS JREs from source (skipped when restored from cache:
-      # build.sh/make short-circuit on depends/java-<ver>-openjdk/release).
-      # Signal-legacy: vtool signature warnings are filtered like the main step.
-      - name: Build iOS JREs from source
+      # Fetch the official prebuilt iOS arm64 JREs instead of compiling
+      # OpenJDK from source: far faster and immune to the cross-build
+      # configure flakiness (freetype/cups/flags) seen on CI runners.
+      # Cached after the first successful fetch.
+      - name: Fetch prebuilt iOS JREs
         if: steps.cache-jres.outputs.cache-hit != 'true'
         shell: bash
         run: |
           export PATH=/opt/homebrew/bin:$PATH
           export RUNNER=0
-          export JRE_BUILD_MODE=build
-          export JRE_BOOT_8="${{ steps.setup-java.outputs.path }}"
-          export JRE_BOOT_17="${{ steps.setup-java17.outputs.path }}"
-          export JRE_BOOT_21="${{ steps.setup-java21.outputs.path }}"
-          export JRE_BOOT_25="${{ steps.setup-java25.outputs.path }}"
+          export JRE_BUILD_MODE=download
           gmake jre 2> >(grep -v "vtool warning: code signature will be invalid" >&2)
 
       # Trigger gmake compilation pipelines with inline stderr filtering and execute post-build binary optimization
