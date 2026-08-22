@@ -11,6 +11,7 @@
 #import "UIImageView+AFNetworking.h"
 #import "AFNetworking.h"
 #import "ElySkinHead.h"
+#import "AmethystBlurView.h"
 
 @interface AccountViewController () <UIImagePickerControllerDelegate, UINavigationControllerDelegate>
 @property (nonatomic) NSDictionary *editingAccount;
@@ -214,6 +215,9 @@ extern NSString *ELY_OAUTH_REDIRECT_URI;
     [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(keyboardWillHide:) name:UIKeyboardWillHideNotification object:nil];
     [self updateColors];
     [self loadAccounts];
+    // Realtime frosted backdrop behind the whole panel
+    [AmethystBlurView installInView:self.view];
+
 }
 
 - (void)setup {

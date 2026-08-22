@@ -327,6 +327,7 @@ egl_bridge.m
    ../UI/Common/InstallerProgressViewController.m
     ../UI/Common/AmethystProjectCell.m
     ../UI/Common/UIView+LiquidGlass.m
+    ../UI/Common/AmethystBlurView.m
     ../UI/Root/AmethystRootViewController.m
    ../UI/Root/TopBarView.m
    ../UI/Root/SidebarViewController.m

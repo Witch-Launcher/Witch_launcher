@@ -14,6 +14,7 @@
 #import "PLProfiles.h"
 #import "MrpackInstaller.h"
 #import "utils.h"
+#import "AmethystBlurView.h"
 
 static NSString *readInstallerVersionId(NSString *jarPath) {
     NSError *uzError;
@@ -125,6 +126,9 @@ static NSString *const kVerCell = @"VerCell";
     [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(updateColors) name:ThemeDidChangeNotification object:nil];
     [self updateColors];
     [self loadVersions];
+    // Realtime frosted backdrop behind the whole panel
+    [AmethystBlurView installInView:self.view];
+
 }
 
 - (void)setupViews {

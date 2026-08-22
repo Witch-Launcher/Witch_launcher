@@ -5,6 +5,7 @@
 #import "VersionBrowserViewController.h"
 #import "MapListViewController.h"
 #import "ResourcePackListViewController.h"
+#import "AmethystBlurView.h"
 
 @interface DownloadHubCategoryCard : UIView
 @property (nonatomic) UIImageView *iconView;
@@ -73,6 +74,9 @@
     [self setup];
     [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(updateColors) name:ThemeDidChangeNotification object:nil];
     [self updateColors];
+    // Realtime frosted backdrop behind the whole panel
+    [AmethystBlurView installInView:self.view];
+
 }
 
 - (void)setup {

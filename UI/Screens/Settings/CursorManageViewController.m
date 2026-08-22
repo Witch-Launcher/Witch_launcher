@@ -7,6 +7,7 @@
 #import "LauncherPreferences.h"
 #import <PhotosUI/PhotosUI.h>
 #import <UniformTypeIdentifiers/UniformTypeIdentifiers.h>
+#import "AmethystBlurView.h"
 
 @interface CursorManageViewController () <UITableViewDelegate, UITableViewDataSource, PHPickerViewControllerDelegate, UIDocumentPickerDelegate>
 
@@ -42,6 +43,9 @@
     ]];
 
     [self reloadCursors];
+    // Realtime frosted backdrop behind the whole panel
+    [AmethystBlurView installInView:self.view];
+
 }
 
 - (void)viewWillAppear:(BOOL)animated {

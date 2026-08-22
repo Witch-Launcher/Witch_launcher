@@ -6,6 +6,7 @@
 #import "ios_uikit_bridge.h"
 #import "VersionDirectoryManager.h"
 #import "UnzipKit.h"
+#import "AmethystBlurView.h"
 
 @interface VersionBrowserViewController () <UITableViewDelegate, UITableViewDataSource, UIDocumentPickerDelegate>
 @property (nonatomic) UISegmentedControl *typeFilter;
@@ -39,6 +40,9 @@ static NSArray *kLoaders;
     [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(updateColors) name:ThemeDidChangeNotification object:nil];
     [self updateColors];
     [self fetchVersions];
+    // Realtime frosted backdrop behind the whole panel
+    [AmethystBlurView installInView:self.view];
+
 }
 
 - (void)setup {

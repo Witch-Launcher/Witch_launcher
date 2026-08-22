@@ -6,6 +6,7 @@
 #import "utils.h"
 #import "ios_uikit_bridge.h"
 #import "HapticManager.h"
+#import "AmethystBlurView.h"
 
 @interface ProfileSettingsViewController () <UITableViewDelegate, UITableViewDataSource>
 @property (nonatomic) UITableView *tableView;
@@ -36,6 +37,9 @@
         self.profile[@"name"] = @"New Profile";
     }
     self.pendingVersion = self.profile[@"lastVersionId"];
+    // Realtime frosted backdrop behind the whole panel
+    [AmethystBlurView installInView:self.view];
+
 }
 
 - (void)loadLists {

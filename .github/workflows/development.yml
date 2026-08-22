@@ -3,9 +3,9 @@ name: Development build
 on:
   pull_request:
     types: [opened, reopened]
-    branches: ['Amethyst-iOS-J25Exp', 'main']
+    branches: ['main']
   push:
-    branches: ['Amethyst-iOS-J25Exp', 'main']
+    branches: ['main']
   workflow_dispatch:
 
 jobs:

@@ -3,6 +3,7 @@
 #import "HapticManager.h"
 #import "ios_uikit_bridge.h"
 #import <UniformTypeIdentifiers/UniformTypeIdentifiers.h>
+#import "AmethystBlurView.h"
 
 @interface FileBrowserViewController ()
 @property (nonatomic) UILabel *pathLabel;
@@ -41,6 +42,9 @@
     [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(updateColors) name:ThemeDidChangeNotification object:nil];
     [self updateColors];
     [self loadItems];
+    // Realtime frosted backdrop behind the whole panel
+    [AmethystBlurView installInView:self.view];
+
 }
 
 - (void)setup {
