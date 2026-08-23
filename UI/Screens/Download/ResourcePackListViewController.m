@@ -7,6 +7,7 @@
 #import "DownloadManager.h"
 #import "VersionDirectoryManager.h"
 #import "ios_uikit_bridge.h"
+#import "AmethystBlurView.h"
 
 @interface ResourcePackListViewController () <UITableViewDelegate, UITableViewDataSource, UISearchBarDelegate>
 @property (nonatomic) UISearchBar *searchBar;
@@ -29,6 +30,7 @@
 
 - (void)viewDidLoad {
     [super viewDidLoad];
+    [AmethystBlurView installInView:self.view];
     _pageCache = [NSMutableDictionary dictionary];
     _pageOffsets = [NSMutableArray array];
     _hasMore = YES;
@@ -36,6 +38,7 @@
     _packs = [NSMutableArray array];
     [self setup];
     [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(updateColors) name:ThemeDidChangeNotification object:nil];
+    [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(updateColors) name:AmethystBlurIntensityDidChangeNotification object:nil];
     [self updateColors];
     [self loadPacksWithQuery:@"" offset:0];
 }
@@ -112,7 +115,11 @@
 
 - (void)updateColors {
     ThemeManager *theme = ThemeManager.shared;
-    self.view.backgroundColor = theme.contentBackgroundColor;
+    if ([AmethystBlurView blurEnabled]) {
+        self.view.backgroundColor = [UIColor clearColor];
+    } else {
+        self.view.backgroundColor = theme.contentBackgroundColor;
+    }
     _searchBar.searchTextField.textColor = theme.primaryTextColor;
     _searchBar.tintColor = theme.accentColor;
     _emptyLabel.textColor = theme.secondaryTextColor;

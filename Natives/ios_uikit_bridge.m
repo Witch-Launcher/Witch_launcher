@@ -13,25 +13,19 @@
 #include <objc/runtime.h>
 #include "ios_uikit_bridge.h"
 #include "utils.h"
+#import "BlurredDialog.h"
 
 void internal_showDialog(NSString* title, NSString* message) {
     NSLog(@"[UI] Dialog shown: %@: %@", title, message);
-
-    UIAlertController* alert = [UIAlertController alertControllerWithTitle:title
-        message:message
-        preferredStyle:UIAlertControllerStyleAlert];
-    //text.dataDetectorTypes = UIDataDetectorTypeLink;
-    UIAlertAction* okAction = [UIAlertAction actionWithTitle:localize(@"OK", nil) style:UIAlertActionStyleDefault handler:nil];
-    [alert addAction:okAction];
 
     UIWindow *alertWindow = [[UIWindow alloc] initWithWindowScene:UIWindow.mainWindow.windowScene];
     alertWindow.frame = UIScreen.mainScreen.bounds;
     alertWindow.rootViewController = [UIViewController new];
     alertWindow.windowLevel = 1000;
+    alertWindow.backgroundColor = UIColor.clearColor;
     [alertWindow makeKeyAndVisible];
-    objc_setAssociatedObject(alert, @selector(alertWindow), alertWindow, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-
-    [alertWindow.rootViewController presentViewController:alert animated:YES completion:nil];
+    // Frosted realtime dialog (samples the app behind the window)
+    [BlurredDialog presentInWindow:alertWindow title:title message:message okTitle:localize(@"OK", nil)];
 }
 
 void showDialog(NSString* title, NSString* message) {

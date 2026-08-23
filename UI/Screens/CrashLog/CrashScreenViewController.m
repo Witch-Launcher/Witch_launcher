@@ -45,6 +45,21 @@ static NSString *categoryLocalizedKey(CrashLogCategory category) {
     return self;
 }
 
+- (BOOL)shouldAutorotate {
+    // Locking rotation prevents the freeze that happened when the crash
+    // screen rotated after unlock (the frozen game surface below could not
+    // relayout safely).
+    return NO;
+}
+
+- (UIInterfaceOrientationMask)supportedInterfaceOrientations {
+    return amethyst_orientation_mask();
+}
+
+- (UIInterfaceOrientation)preferredInterfaceOrientationForPresentation {
+    return [UIApplication.sharedApplication.windows.firstObject windowScene].interfaceOrientation;
+}
+
 - (void)viewDidLoad {
     [super viewDidLoad];
     [self setupViews];

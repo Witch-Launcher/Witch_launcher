@@ -4,6 +4,7 @@
 #import "CreditsService.h"
 #import "LauncherPreferences.h"
 #import "config.h"
+#import "AmethystBlurView.h"
 
 static NSString *const NewsURLString = @"https://raw.githubusercontent.com/Ynnyny/Angel-Aura-Amethyst-iOS/refs/heads/main/news.md";
 static const NSTimeInterval NewsRefreshInterval = 300.0; // 5 minutes
@@ -22,6 +23,21 @@ static const NSTimeInterval NewsRefreshInterval = 300.0; // 5 minutes
 
 - (void)viewDidLoad {
     [super viewDidLoad];
+    // Frosted rounded card behind the whole main-menu content
+    UIView *_menuCard = [[UIView alloc] init];
+    _menuCard.translatesAutoresizingMaskIntoConstraints = NO;
+    _menuCard.layer.cornerRadius = 22;
+    _menuCard.layer.borderWidth = 1;
+    _menuCard.layer.borderColor = [ThemeManager.shared.accentColor colorWithAlphaComponent:0.35].CGColor;
+    _menuCard.clipsToBounds = YES;
+    [self.view insertSubview:_menuCard atIndex:0];
+    [AmethystBlurView installInView:_menuCard];
+    [NSLayoutConstraint activateConstraints:@[
+        [_menuCard.topAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.topAnchor constant:8],
+        [_menuCard.bottomAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.bottomAnchor constant:-8],
+        [_menuCard.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor constant:14],
+        [_menuCard.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor constant:-14],
+    ]];
     [self setup];
     [CreditsService.shared refreshIfNeeded];
     [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(updateColors) name:ThemeDidChangeNotification object:nil];

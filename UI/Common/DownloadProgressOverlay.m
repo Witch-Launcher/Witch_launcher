@@ -1,4 +1,6 @@
 #import "DownloadProgressOverlay.h"
+
+#import "AmethystBlurView.h"
 #import "ThemeManager.h"
 
 @interface DownloadProgressOverlay ()
@@ -12,9 +14,18 @@
 @implementation DownloadProgressOverlay
 
 + (instancetype)showInView:(UIView *)view title:(NSString *)title {
+    return [self showBlurredInView:view title:title blurred:NO];
+}
+
+// `blurred` adds a realtime frost behind the card — used by the Launch flow
+// so the game-download progress stays readable over any wallpaper.
++ (instancetype)showBlurredInView:(UIView *)view title:(NSString *)title blurred:(BOOL)blurred {
     DownloadProgressOverlay *overlay = [[self alloc] initWithFrame:view.bounds];
     overlay.titleLabel.text = title;
     overlay.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
+    if (blurred) {
+        [AmethystBlurView installInView:overlay];
+    }
     [view addSubview:overlay];
     overlay.alpha = 0;
     [UIView animateWithDuration:0.25 animations:^{

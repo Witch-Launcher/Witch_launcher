@@ -62,6 +62,9 @@ static NSString *const kMinecraftGPUBackgroundTaskPrefix = @"com.witch.zad626.mi
     UIWindowScene *windowScene = (UIWindowScene *)scene;
     self.window = [[UIWindow alloc] initWithWindowScene:windowScene];
     self.window.frame = windowScene.coordinateSpace.bounds;
+    // Translucent bars/panels sample the view hierarchy; without a backdrop
+    // they would reveal the raw black window underneath ("đen xì").
+    self.window.backgroundColor = UIColor.systemBackgroundColor;
     mainWindow = self.window;
     launchInitialViewController(self.window);
     [self.window makeKeyAndVisible];

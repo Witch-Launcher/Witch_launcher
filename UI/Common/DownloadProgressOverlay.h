@@ -3,6 +3,7 @@
 @interface DownloadProgressOverlay : UIView
 
 + (instancetype)showInView:(UIView *)view title:(NSString *)title;
++ (instancetype)showBlurredInView:(UIView *)view title:(NSString *)title blurred:(BOOL)blurred;
 - (void)updateProgress:(float)progress message:(NSString *)message;
 - (void)updateWithFraction:(float)fraction description:(NSString *)description additionalDescription:(NSString *)additional speed:(NSString *)speed eta:(NSString *)eta;
 - (void)finishWithMessage:(NSString *)message;

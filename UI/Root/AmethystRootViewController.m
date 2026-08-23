@@ -6,7 +6,9 @@
 #import "MainCoordinator.h"
 #import "LauncherPreferences.h"
 #import "ios_uikit_bridge.h"
+#import "AmethystBlurView.h"
 #import <AVFoundation/AVFoundation.h>
+#import <QuartzCore/QuartzCore.h>
 
 @interface AmethystRootViewController () <RightPanelDelegate, TopBarDelegate>
 @property (nonatomic) TopBarView *topBar;
@@ -20,6 +22,7 @@
 @property (nonatomic) AVPlayerLayer *backgroundVideoLayer;
 @property (nonatomic) AVPlayer *backgroundVideoPlayer;
 @property (nonatomic) BOOL didInitialLayout;
+@property (nonatomic) CAShapeLayer *shellBorder;
 @end
 
 @implementation AmethystRootViewController
@@ -28,6 +31,7 @@
     [super viewDidLoad];
     [self setupViews];
     [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(updateColors) name:ThemeDidChangeNotification object:nil];
+    [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(updateColors) name:AmethystBlurIntensityDidChangeNotification object:nil];
     [self updateColors];
 }
 
@@ -35,6 +39,7 @@
     _topBar = [[TopBarView alloc] initWithFrame:CGRectZero];
     _topBar.delegate = self;
     [self.view addSubview:_topBar];
+    [AmethystBlurView installInView:_topBar prefKey:@"amethyst_topbar_blur"];
 
     _backgroundImageView = [[UIImageView alloc] init];
     _backgroundImageView.contentMode = UIViewContentModeScaleAspectFill;
@@ -58,8 +63,10 @@
     [self addChildViewController:_sidebarVC];
     [self.view addSubview:_sidebarVC.view];
     [_sidebarVC didMoveToParentViewController:self];
+    [AmethystBlurView installInView:_sidebarVC.view prefKey:@"amethyst_sidebar_blur"];
 
     _sidebarBorder = [[UIView alloc] init];
+    _sidebarBorder.hidden = YES; // superseded by floating borders
     [self.view addSubview:_sidebarBorder];
 
     _contentContainer = [[UIView alloc] init];
@@ -71,6 +78,18 @@
     [self addChildViewController:_rightPanelVC];
     [self.view addSubview:_rightPanelVC.view];
     [_rightPanelVC didMoveToParentViewController:self];
+    [AmethystBlurView installInView:_rightPanelVC.view prefKey:@"amethyst_rightpanel_blur"];
+
+    // One continuous stroke around the whole shell — no seams at junctions.
+    // CRITICAL: CAShapeLayer defaults to an OPAQUE BLACK fillColor. The
+    // even-odd path below fills the entire ring where the top/left/right
+    // bars live, so without clearing it the border layer paints a solid
+    // black slab over all three bars ("đen xì").
+    _shellBorder = [[CAShapeLayer alloc] init];
+    _shellBorder.fillColor = UIColor.clearColor.CGColor;
+    _shellBorder.fillRule = kCAFillRuleEvenOdd;
+    _shellBorder.lineJoin = kCALineJoinRound;
+    [self.view.layer addSublayer:_shellBorder];
 }
 
 - (void)viewDidLayoutSubviews {
@@ -79,6 +98,11 @@
     CGFloat topBarHeight = 44.0;
     CGFloat sidebarWidth = 48.0;
     CGFloat rightPanelWidth = 180.0;
+    // Seamless frame (option B evolved): the three bars TOUCH each other and
+    // form one continuous shell around the content — rounded only on the
+    // OUTER corners.
+    CGFloat fGap = 5.0;      // screen-edge margin of the shell
+    CGFloat innerGap = 6.0;  // breathing room between shell and content
 
     CGRect bounds = self.view.bounds;
     if (bounds.size.width == 0 || bounds.size.height == 0) return;
@@ -91,33 +115,75 @@
     CGFloat leftInset = isLandscape ? safeArea.left : 0;
     CGFloat rightInset = isLandscape ? safeArea.right : 0;
 
-    CGFloat contentTop = topBarY + topBarHeight;
-    CGFloat contentHeight = bounds.size.height - contentTop - safeArea.bottom;
-    CGFloat contentWidth = bounds.size.width - leftInset - sidebarWidth - 1 - rightPanelWidth - rightInset;
+    CGFloat frameX = leftInset + fGap;
+    CGFloat frameW = bounds.size.width - leftInset - rightInset - fGap * 2;
+    CGFloat contentTop = topBarY + 2 + topBarHeight; // flush under top bar
+    CGFloat contentHeight = bounds.size.height - contentTop - safeArea.bottom - fGap;
 
-    _topBar.frame = CGRectMake(leftInset, topBarY, bounds.size.width - leftInset - rightInset, topBarHeight);
+    _topBar.frame = CGRectMake(frameX, topBarY + 2, frameW, topBarHeight);
+    [self styleFloatingView:_topBar corners:kCALayerMinXMinYCorner | kCALayerMaxXMinYCorner];
 
     _backgroundImageView.frame = bounds;
     _backgroundVideoView.frame = bounds;
     _backgroundVideoLayer.frame = _backgroundVideoView.bounds;
 
-    CGFloat sidebarX = leftInset;
-    _sidebarVC.view.frame = CGRectMake(sidebarX, contentTop, sidebarWidth, contentHeight);
-    _sidebarBorder.frame = CGRectMake(sidebarX + sidebarWidth, contentTop, 1, contentHeight);
+    _sidebarVC.view.frame = CGRectMake(frameX, contentTop, sidebarWidth, contentHeight);
+    // Square top corners: the bar sits flush under the top bar — rounding the
+    // T-junction leaves ugly notches. Only the bottom outer corner is rounded.
+    [self styleFloatingView:_sidebarVC.view corners:kCALayerMinXMaxYCorner];
+    _sidebarBorder.hidden = YES;
 
-    CGFloat rightX = bounds.size.width - rightPanelWidth - rightInset;
-    _rightPanelVC.view.frame = CGRectMake(rightX, contentTop, rightPanelWidth, contentHeight);
+    _rightPanelVC.view.frame = CGRectMake(frameX + frameW - rightPanelWidth, contentTop, rightPanelWidth, contentHeight);
+    [self styleFloatingView:_rightPanelVC.view corners:kCALayerMaxXMaxYCorner];
 
-    _contentContainer.frame = CGRectMake(sidebarX + sidebarWidth + 1, contentTop, contentWidth, contentHeight);
+    _contentContainer.frame = CGRectMake(frameX + sidebarWidth + innerGap,
+                                         contentTop,
+                                         frameW - sidebarWidth - rightPanelWidth - innerGap * 2,
+                                         contentHeight);
 
     if (self.currentContentVC) {
         self.currentContentVC.view.frame = _contentContainer.bounds;
     }
 
+    [self updateShellBorderPath];
+
     if (!self.didInitialLayout) {
         self.didInitialLayout = YES;
         [self.coordinator start];
     }
+}
+
+- (void)updateShellBorderPath {
+    if (!_shellBorder) return;
+    CGFloat w = MAX(0.0f, MIN([[NSUserDefaults standardUserDefaults] floatForKey:@"amethyst_bar_border_width"], 4.0f));
+    _shellBorder.lineWidth = w;
+    _shellBorder.strokeColor = [ThemeManager.shared.accentColor colorWithAlphaComponent:0.45].CGColor;
+    _shellBorder.frame = self.view.bounds;
+
+    CGRect outer = CGRectMake(_topBar.frame.origin.x, _topBar.frame.origin.y,
+                              _topBar.frame.size.width,
+                              CGRectGetMaxY(_rightPanelVC.view.frame) - _topBar.frame.origin.y);
+    UIBezierPath *outerPath = [UIBezierPath bezierPathWithRoundedRect:outer
+                                                   byRoundingCorners:UIRectCornerTopLeft | UIRectCornerTopRight | UIRectCornerBottomRight | UIRectCornerBottomLeft
+                                                         cornerRadii:CGSizeMake(16, 16)];
+    UIBezierPath *innerPath = [UIBezierPath bezierPathWithRoundedRect:_contentContainer.frame
+                                                    byRoundingCorners:UIRectCornerAllCorners
+                                                          cornerRadii:CGSizeMake(12, 12)];
+    UIBezierPath *combined = [UIBezierPath bezierPath];
+    [combined appendPath:outerPath];
+    [combined appendPath:innerPath];
+
+    // CALayer's path setter copies internally; the getter does NOT hand out
+    // ownership, so there is nothing to release here (releasing caused an
+    // over-release crash on first CA commit).
+    _shellBorder.path = combined.CGPath;
+}
+
+- (void)styleFloatingView:(UIView *)v corners:(CACornerMask)corners {
+    v.layer.cornerRadius = 16;
+    v.layer.maskedCorners = corners;
+    // User-adjustable border thickness (Appearance > Bar Border Thickness).
+    v.clipsToBounds = YES;
 }
 
 - (void)viewSafeAreaInsetsDidChange {
@@ -133,6 +199,10 @@
     ThemeManager *theme = ThemeManager.shared;
     self.view.backgroundColor = theme.backgroundColor;
     _sidebarBorder.backgroundColor = theme.separatorColor;
+    [self styleFloatingView:_topBar corners:kCALayerMinXMinYCorner | kCALayerMaxXMinYCorner];
+    [self styleFloatingView:_sidebarVC.view corners:kCALayerMinXMaxYCorner];
+    [self styleFloatingView:_rightPanelVC.view corners:kCALayerMaxXMaxYCorner];
+    [self updateShellBorderPath];
     if (theme.backgroundVideoURL) {
         [self setupBackgroundVideo:theme.backgroundVideoURL];
         _backgroundImageView.hidden = YES;

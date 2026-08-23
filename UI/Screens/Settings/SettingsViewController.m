@@ -177,6 +177,10 @@
             @{@"type": @"slider", @"label": localize(@"UI Opacity", nil), @"key": @"amethyst_ui_opacity", @"min": @0, @"max": @100, @"suffix": @"%"},
             @{@"type": @"slider", @"label": localize(@"Background Blur", nil), @"key": @"amethyst_bg_blur", @"min": @0, @"max": @20, @"suffix": @""},
             @{@"type": @"slider", @"label": @"UI Panels Blur", @"key": @"amethyst_settings_blur", @"min": @0, @"max": @100, @"suffix": @"%"},
+            @{@"type": @"slider", @"label": @"Top Bar Blur", @"key": @"amethyst_topbar_blur", @"min": @0, @"max": @100, @"suffix": @"%"},
+            @{@"type": @"slider", @"label": @"Left Bar Blur", @"key": @"amethyst_sidebar_blur", @"min": @0, @"max": @100, @"suffix": @"%"},
+            @{@"type": @"slider", @"label": @"Right Panel Blur", @"key": @"amethyst_rightpanel_blur", @"min": @0, @"max": @100, @"suffix": @"%"},
+            @{@"type": @"slider", @"label": @"Bar Border Thickness", @"key": @"amethyst_bar_border_width", @"min": @0, @"max": @4, @"suffix": @" pt"},
             @{@"type": @"export", @"label": localize(@"Export Appearance Theme", nil)},
             @{@"type": @"import", @"label": localize(@"Import Appearance Theme", nil)},
             @{@"type": @"color", @"label": localize(@"Reset Appearance", nil), @"key": @"amethyst_reset_appearance"},
@@ -725,8 +729,12 @@
             val = ThemeManager.shared.backgroundBlurIntensity;
         } else if ([item[@"key"] isEqualToString:@"amethyst_ui_opacity"]) {
             val = ThemeManager.shared.uiOpacity * 100.0;
-        } else if ([item[@"key"] isEqualToString:@"amethyst_settings_blur"]) {
-            val = [[NSUserDefaults standardUserDefaults] floatForKey:@"amethyst_settings_blur"];
+        } else if ([item[@"key"] hasPrefix:@"amethyst_"] && [item[@"key"] hasSuffix:@"_blur"]) {
+            // UI panel blur keys live in NSUserDefaults (AmethystBlurView reads
+            // them from there), NOT in the launcher preference plist that
+            // getPrefFloat targets. bg_blur is handled above, so this covers
+            // settings/topbar/sidebar/rightpanel blur.
+            val = [[NSUserDefaults standardUserDefaults] floatForKey:item[@"key"]];
         } else {
             val = getPrefFloat(item[@"key"]);
             if ([item[@"key"] isEqualToString:@"java.allocated_memory"] && val < [item[@"min"] floatValue]) {
@@ -735,7 +743,7 @@
                 setPrefFloat(@"java.allocated_memory", val);
             }
         }
-        if (val == 0 && ![item[@"key"] isEqualToString:@"amethyst_bg_blur"] && ![item[@"key"] isEqualToString:@"amethyst_ui_opacity"] && ![item[@"key"] isEqualToString:@"amethyst_settings_blur"] && ![item[@"key"] isEqualToString:@"general.widget_bg_opacity"] && !disabled) val = [item[@"min"] floatValue] + ([item[@"max"] floatValue] - [item[@"min"] floatValue]) / 2;
+        if (val == 0 && ![item[@"key"] isEqualToString:@"amethyst_bg_blur"] && ![item[@"key"] isEqualToString:@"amethyst_ui_opacity"] && !([item[@"key"] hasPrefix:@"amethyst_"] && [item[@"key"] hasSuffix:@"_blur"]) && ![item[@"key"] isEqualToString:@"general.widget_bg_opacity"] && !disabled) val = [item[@"min"] floatValue] + ([item[@"max"] floatValue] - [item[@"min"] floatValue]) / 2;
         sl.minimumValue = [item[@"min"] floatValue];
         sl.maximumValue = [item[@"max"] floatValue];
         sl.value = val;
@@ -904,8 +912,11 @@
         ThemeManager.shared.backgroundBlurIntensity = val;
     } else if ([item[@"key"] isEqualToString:@"amethyst_ui_opacity"]) {
         ThemeManager.shared.uiOpacity = val / 100.0;
-    } else if ([item[@"key"] isEqualToString:@"amethyst_settings_blur"]) {
-        [[NSUserDefaults standardUserDefaults] setFloat:val forKey:@"amethyst_settings_blur"];
+    } else if ([item[@"key"] hasPrefix:@"amethyst_"] && [item[@"key"] hasSuffix:@"_blur"]) {
+        // Save UI panel blur to NSUserDefaults — the store AmethystBlurView
+        // actually reads. setPrefFloat would write the launcher plist and the
+        // slider would appear dead.
+        [[NSUserDefaults standardUserDefaults] setFloat:val forKey:item[@"key"]];
         [_panelBlur applyCurrentIntensity];
         [self refreshTableBackdrops];
         [[NSNotificationCenter defaultCenter] postNotificationName:AmethystBlurIntensityDidChangeNotification object:nil];
@@ -913,6 +924,12 @@
         setPrefFloat(item[@"key"], val);
         if ([item[@"key"] isEqualToString:@"video.resolution"]) {
             [[NSNotificationCenter defaultCenter] postNotificationName:@"ResolutionDidChangeNotification" object:nil];
+        }
+        // Any *_blur slider drives realtime frosted surfaces; let them refresh.
+        BOOL isBlurSlider = [item[@"key"] hasPrefix:@"amethyst_"] && [item[@"key"] hasSuffix:@"_blur"];
+        BOOL isBorderWidth = [item[@"key"] isEqualToString:@"amethyst_bar_border_width"];
+        if (isBlurSlider || isBorderWidth) {
+            [[NSNotificationCenter defaultCenter] postNotificationName:AmethystBlurIntensityDidChangeNotification object:nil];
         }
     }
     UILabel *valLabel = (UILabel *)[cell.contentView viewWithTag:101];

@@ -2,6 +2,8 @@
 #import "VersionDirectoryManager.h"
 #import "AFNetworking.h"
 
+NSString * const DownloadTasksDidChangeNotification = @"DownloadTasksDidChangeNotification";
+
 @implementation DownloadTask
 @end
 
@@ -27,6 +29,78 @@
     }
     return self;
 }
+
+#pragma mark - Multi-download hub
+
+- (void)notifyChange {
+    [[NSNotificationCenter defaultCenter] postNotificationName:DownloadTasksDidChangeNotification object:nil];
+}
+
+- (NSArray<DownloadTask *> *)activeTasks {
+    return [_activeTasks copy];
+}
+
+- (DownloadTask *)beginTaskWithName:(NSString *)name type:(DownloadType)type {
+    DownloadTask *t = [[DownloadTask alloc] init];
+    t.name = name ?: @"Download";
+    t.type = type;
+    t.progress = 0;
+    dispatch_async(dispatch_get_main_queue(), ^{
+        [self->_activeTasks addObject:t];
+        [self notifyChange];
+    });
+    return t;
+}
+
+- (void)updateProgress:(float)progress forTask:(DownloadTask *)task {
+    if (!task || task.cancelled) return;
+    float clamped = MAX(0.0f, MIN(progress, 1.0f));
+    // Throttle: only notify on meaningful steps to avoid notification storms.
+    static const float kStep = 0.02f;
+    static NSMutableDictionary<NSString *, NSNumber *> *lastSteps = nil;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{ lastSteps = [NSMutableDictionary dictionary]; });
+    NSString *key = NSStringFromClass(task.class);
+    key = [key stringByAppendingFormat:@"/%@", task.name];
+    NSNumber *last = lastSteps[key];
+    if (clamped < 1.0f && last && fabs(clamped - last.floatValue) < kStep) {
+        task.progress = clamped;
+        return;
+    }
+    lastSteps[key] = @(clamped);
+    dispatch_async(dispatch_get_main_queue(), ^{
+        task.progress = clamped;
+        [self notifyChange];
+    });
+}
+
+- (void)completeTask:(DownloadTask *)task error:(NSError *)error {
+    if (!task) return;
+    dispatch_async(dispatch_get_main_queue(), ^{
+        task.isFinished = YES;
+        task.error = error;
+        [self->_activeTasks removeObject:task];
+        [self notifyChange];
+    });
+}
+
+- (void)cancelTask:(DownloadTask *)task {
+    if (!task || task.cancelled) return;
+    task.cancelled = YES;
+    if (task.cancelBlock) task.cancelBlock();
+    dispatch_async(dispatch_get_main_queue(), ^{
+        [self->_activeTasks removeObject:task];
+        [self notifyChange];
+    });
+}
+
+- (void)cancelAllTasks {
+    for (DownloadTask *t in [self.activeTasks copy]) {
+        [self cancelTask:t];
+    }
+}
+
+#pragma mark - Convenience flows
 
 - (void)downloadMod:(NSString *)url name:(NSString *)name version:(NSString *)version completion:(void(^)(BOOL, NSError *))completion {
     NSString *modsDir = [VersionDirectoryManager.shared modsPathForVersion:version];

@@ -2,7 +2,7 @@
 #import "ThemeManager.h"
 #import "HapticManager.h"
 #import "LauncherPreferences.h"
-#import "UIView+LiquidGlass.h"
+#import "AmethystBlurView.h"
 
 @interface SidebarTabItem : UIView
 @property (nonatomic) UIImageView *iconView;
@@ -135,14 +135,17 @@
     self.selectedTab = SidebarTabGame;
 
     [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(updateColors) name:ThemeDidChangeNotification object:nil];
-    [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(updateLiquidGlass) name:@"LiquidGlassDidChangeNotification" object:nil];
-    [self updateColors];
-    [self updateLiquidGlass];
-}
+    [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(updateColors) name:AmethystBlurIntensityDidChangeNotification object:nil];
+        [self updateColors];
+    }
 
 - (void)updateColors {
     ThemeManager *theme = ThemeManager.shared;
-    self.view.backgroundColor = theme.sidebarBackgroundColor;
+    if ([AmethystBlurView blurEnabledForKey:@"amethyst_sidebar_blur"]) {
+        self.view.backgroundColor = [theme.sidebarBackgroundColor colorWithAlphaComponent:0.25 * theme.uiOpacity];
+    } else {
+        self.view.backgroundColor = theme.sidebarBackgroundColor;
+    }
     for (SidebarTabItem *item in self.items) {
         item.iconView.tintColor = item.isSelected ? theme.accentColor : theme.secondaryTextColor;
         item.titleLabel.textColor = item.isSelected ? theme.accentColor : theme.secondaryTextColor;
@@ -189,14 +192,6 @@
             item.alpha = 1.0;
             item.userInteractionEnabled = YES;
         }
-    }
-}
-
-- (void)updateLiquidGlass {
-    if (getPrefBool(@"general.liquid_glass")) {
-        [self.view lg_addGlassEffectWithTint:[UIColor colorWithWhite:1 alpha:0.05] cornerRadius:0];
-    } else {
-        [self.view lg_removeGlassEffect];
     }
 }
 

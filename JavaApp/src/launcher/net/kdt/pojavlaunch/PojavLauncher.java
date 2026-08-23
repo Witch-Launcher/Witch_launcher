@@ -218,6 +218,120 @@ public class PojavLauncher {
         return true;
     }
 
+    // Mega-mods like Essential bundle unrelocated copies of LWJGL / blaze3d
+    // platform classes inside their own jars. Fabric's Knot resolves classes
+    // child-first across every game/mod jar BEFORE delegating to the launcher
+    // classloader, so those REAL classes shadow the launcher's iOS shims
+    // (com.mojang.blaze3d.platform.MacosUtil.IS_MACOS=false and the stubbed
+    // GLFWNativeCocoa). Minecraft's macOS-only window utilities then execute
+    // on iOS and die inside GLFWNativeCocoa$Functions.<clinit>
+    // ("A required function is missing: glfwGetCocoaMonitor") as soon as such
+    // a mod is installed.
+    // Fix: overwrite the affected class files INSIDE every jar under the game
+    // directory with the launcher's own shim bytecode (bundled under
+    // /macosfix/), so no classloading order can pick the real ones anymore.
+    // Same approach as patchInstanceLwjgl(); jars whose entries already match
+    // are skipped, so repeat launches don't rewrite anything.
+    private static void patchMacPlatformShims() {
+        Map<String, byte[]> replacements = new HashMap<>();
+        byte[] macosUtil = readResourceBytes("/macosfix/MacosUtil.class");
+        if (macosUtil == null) {
+            System.out.println("[MacShims] MacosUtil.class resource missing, skipping");
+            return;
+        }
+        replacements.put("com/mojang/blaze3d/platform/MacosUtil.class", macosUtil);
+        byte[] glfwNativeCocoa = readResourceBytes("/macosfix/GLFWNativeCocoa.class");
+        if (glfwNativeCocoa != null) {
+            replacements.put("org/lwjgl/glfw/GLFWNativeCocoa.class", glfwNativeCocoa);
+            byte[] functions = readResourceBytes("/macosfix/GLFWNativeCocoa$Functions.class");
+            if (functions != null) {
+                replacements.put("org/lwjgl/glfw/GLFWNativeCocoa$Functions.class", functions);
+            }
+        }
+        List<File> jars = new ArrayList<>();
+        try {
+            Files.walk(new File(Tools.DIR_GAME_NEW).toPath())
+                .filter(p -> p.toString().endsWith(".jar"))
+                .forEach(p -> jars.add(p.toFile()));
+        } catch (IOException e) {
+            System.err.println("[MacShims] walk failed: " + e);
+            return;
+        }
+        int patched = 0;
+        for (File jar : jars) {
+            try {
+                if (replaceJarEntries(jar, replacements)) patched++;
+            } catch (Exception e) {
+                System.err.println("[MacShims] failed on " + jar + ": " + e);
+            }
+        }
+        System.out.println("[MacShims] patched " + patched + " jar(s) under " + Tools.DIR_GAME_NEW);
+    }
+
+    private static boolean isJarSignatureFile(String name) {
+        String lower = name.toLowerCase(java.util.Locale.ROOT);
+        return lower.startsWith("meta-inf/")
+            && (lower.endsWith(".sf") || lower.endsWith(".rsa") || lower.endsWith(".dsa"));
+    }
+
+    private static boolean replaceJarEntries(File jar, Map<String, byte[]> replacements) throws IOException {
+        // Cheap central-directory check first: only rewrite when a target
+        // entry exists AND differs from its replacement — or when the jar was
+        // rewritten earlier but still carries JAR-signature files: Mojang
+        // signs the client jar, so replacing a class underneath the old
+        // digests makes Knot's JarVerifier reject EVERY read from that jar
+        // ("SecurityException: SHA-384 digest error"). Dropping *.SF/*.RSA/
+        // *.DSA disables verification for the jar (Fabric never verifies).
+        boolean present = false;
+        boolean differs = false;
+        try (ZipFile zip = new ZipFile(jar)) {
+            for (Map.Entry<String, byte[]> entry : replacements.entrySet()) {
+                if (zip.getEntry(entry.getKey()) == null) continue;
+                present = true;
+                if (!Arrays.equals(readJarEntry(jar, entry.getKey()), entry.getValue())) {
+                    differs = true;
+                    break;
+                }
+            }
+            boolean signed = false;
+            if (present && !differs) {
+                java.util.Enumeration<? extends ZipEntry> entries = zip.entries();
+                while (entries.hasMoreElements()) {
+                    if (isJarSignatureFile(entries.nextElement().getName())) {
+                        signed = true;
+                        break;
+                    }
+                }
+            }
+            if (!present || (!differs && !signed)) return false;
+        }
+        File tmp = new File(jar.getParentFile(), jar.getName() + ".macshim.tmp");
+        byte[] buf = new byte[65536];
+        try (ZipInputStream zin = new ZipInputStream(new FileInputStream(jar));
+             ZipOutputStream zout = new ZipOutputStream(new FileOutputStream(tmp))) {
+            ZipEntry in;
+            while ((in = zin.getNextEntry()) != null) {
+                if (isJarSignatureFile(in.getName())) continue;
+                ZipEntry out = new ZipEntry(in.getName());
+                out.setTime(in.getTime());
+                zout.putNextEntry(out);
+                byte[] replacement = replacements.get(in.getName());
+                if (replacement != null) {
+                    zout.write(replacement);
+                } else {
+                    int n;
+                    while ((n = zin.read(buf)) > 0) zout.write(buf, 0, n);
+                }
+                zout.closeEntry();
+            }
+        }
+        if (!tmp.renameTo(jar)) {
+            Files.move(tmp.toPath(), jar.toPath(), StandardCopyOption.REPLACE_EXISTING);
+        }
+        System.out.println("[MacShims] patched " + jar);
+        return true;
+    }
+
     private static byte[] readJarEntry(File jar, String entryName) throws IOException {
         try (ZipFile zip = new ZipFile(jar)) {
             ZipEntry entry = zip.getEntry(entryName);
@@ -419,6 +533,11 @@ public class PojavLauncher {
             patchInstanceLwjgl();
         } catch (Throwable t) {
             System.err.println("[LWJGLFix] patch failed: " + t);
+        }
+        try {
+            patchMacPlatformShims();
+        } catch (Throwable t) {
+            System.err.println("[MacShims] patch failed: " + t);
         }
         try {
             ensureLaunchWrapperLibrary();

@@ -25,4 +25,7 @@
 - (void)setLaunchEnabled:(BOOL)enabled;
 - (void)refreshVersions;
 
+// YES while downloads are running and the launch button acts as Cancel.
+@property (nonatomic, readonly) BOOL launchIsCancel;
+
 @end

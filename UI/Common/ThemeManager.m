@@ -32,7 +32,11 @@ NSString * const ThemeDidChangeNotification = @"ThemeDidChangeNotification";
             @"amethyst_ui_border_enabled": @YES,
             @"amethyst_ui_border_width": @1.0,
             @"amethyst_ui_border_radius": @10.0,
-            @"amethyst_settings_blur": @55
+            @"amethyst_settings_blur": @55,
+            @"amethyst_topbar_blur": @55,
+            @"amethyst_sidebar_blur": @55,
+            @"amethyst_rightpanel_blur": @55,
+            @"amethyst_bar_border_width": @1.0
         }];
         [self loadSavedPreferences];
     }

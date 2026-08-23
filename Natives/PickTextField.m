@@ -20,9 +20,12 @@
         self.view.safeAreaInsets.top,
         MIN(self.view.frame.size.width - self.view.safeAreaInsets.right, self.preferredContentSize.width),
         MIN(self.view.frame.size.height - self.view.safeAreaInsets.bottom, self.preferredContentSize.height));
-    CGRect accessoryFrame = CGRectMake(frame.origin.x, frame.origin.y, frame.size.width, self.textField.inputAccessoryView.frame.size.height);
+    // Park the accessory toolbar OUTSIDE the visible area so it never tints
+    // or covers game content; the keyboard takes the full popover height.
+    CGFloat accH = self.textField.inputAccessoryView.frame.size.height;
+    CGRect accessoryFrame = CGRectMake(frame.origin.x, -accH - 12.0, frame.size.width, accH);
     self.textField.inputAccessoryView.frame = accessoryFrame;
-    self.textField.inputView.frame = CGRectMake(frame.origin.x, CGRectGetMaxY(accessoryFrame), frame.size.width, frame.size.height - CGRectGetMaxY(self.inputAccessoryView.frame));
+    self.textField.inputView.frame = CGRectMake(frame.origin.x, frame.origin.y, frame.size.width, frame.size.height - frame.origin.y);
 }
 
 - (void)viewDidDisappear:(BOOL)animated {

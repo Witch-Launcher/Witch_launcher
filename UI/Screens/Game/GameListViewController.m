@@ -1,5 +1,6 @@
 #import "GameListViewController.h"
 #import "ThemeManager.h"
+#import "AmethystBlurView.h"
 
 @interface GameListViewController () <UITableViewDelegate, UITableViewDataSource>
 @property (nonatomic) UILabel *titleLabel;
@@ -12,7 +13,9 @@
 - (void)viewDidLoad {
     [super viewDidLoad];
     [self setup];
+    [AmethystBlurView installInView:self.view];
     [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(updateColors) name:ThemeDidChangeNotification object:nil];
+    [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(updateColors) name:AmethystBlurIntensityDidChangeNotification object:nil];
     [self updateColors];
 }
 
@@ -51,7 +54,9 @@
 
 - (void)updateColors {
     ThemeManager *theme = ThemeManager.shared;
-    self.view.backgroundColor = theme.contentBackgroundColor;
+    // Clear when frost is on so the tab interior matches the shell exterior;
+    // the realtime blur layer provides the backdrop.
+    self.view.backgroundColor = [AmethystBlurView blurEnabled] ? [UIColor clearColor] : theme.contentBackgroundColor;
     _titleLabel.textColor = theme.primaryTextColor;
 }
 

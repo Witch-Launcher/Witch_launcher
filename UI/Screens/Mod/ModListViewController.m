@@ -7,6 +7,7 @@
 #import "HapticManager.h"
 #import "DownloadProgressOverlay.h"
 #import "DownloadManager.h"
+#import "InstalledModsManager.h"
 #import "VersionDirectoryManager.h"
 #import "LauncherPreferences.h"
 #import "ios_uikit_bridge.h"
@@ -53,6 +54,7 @@
 @property (nonatomic) UIButton *versionBtn;
 @property (nonatomic) UIButton *downloadBtn;
 @property (nonatomic) NSDictionary *modData;
+@property (nonatomic, copy) NSString *installState; // none|installed|update
 @property (nonatomic, copy) void(^onVersionTap)(NSDictionary *mod, UIButton *sender);
 @property (nonatomic, copy) void(^onDownloadTap)(NSDictionary *mod, UIButton *sender);
 - (void)configureWithDict:(NSDictionary *)mod;
@@ -189,7 +191,7 @@
     _versionBtn.backgroundColor = ThemeManager.shared.cardBackgroundColor;
     _versionBtn.layer.borderColor = ThemeManager.shared.separatorColor.CGColor;
     [_versionBtn setTitleColor:ThemeManager.shared.primaryTextColor forState:UIControlStateNormal];
-    _downloadBtn.backgroundColor = ThemeManager.shared.accentColor;
+    [self applyInstallState];
 }
 
 - (void)versionBtnTapped {
@@ -249,6 +251,24 @@
         ModTagView *tag = [[ModTagView alloc] initWithText:[loader capitalizedString] color:color];
         [_tagsStack addArrangedSubview:tag];
     }
+
+    [self applyInstallState];
+}
+
+- (void)applyInstallState {
+    ThemeManager *theme = ThemeManager.shared;
+    if ([_installState isEqualToString:@"installed"]) {
+        [_downloadBtn setTitle:@"Đã cài ✓" forState:UIControlStateNormal];
+        _downloadBtn.backgroundColor = theme.successColor;
+    } else if ([_installState isEqualToString:@"update"]) {
+        [_downloadBtn setTitle:@"↑ Update" forState:UIControlStateNormal];
+        _downloadBtn.backgroundColor = theme.warningColor;
+        [_downloadBtn setTitleColor:[UIColor blackColor] forState:UIControlStateNormal];
+    } else {
+        [_downloadBtn setTitle:@"Download" forState:UIControlStateNormal];
+        _downloadBtn.backgroundColor = theme.accentColor;
+        [_downloadBtn setTitleColor:UIColor.whiteColor forState:UIControlStateNormal];
+    }
 }
 
 - (void)prepareForReuse {
@@ -261,6 +281,7 @@
     _modData = nil;
     _onVersionTap = nil;
     _onDownloadTap = nil;
+    _installState = nil;
     for (UIView *v in _tagsStack.arrangedSubviews) {
         [_tagsStack removeArrangedSubview:v];
         [v removeFromSuperview];
@@ -300,11 +321,16 @@
 
 - (void)viewDidLoad {
     [super viewDidLoad];
+    [AmethystBlurView installInView:self.view];
     self.navigationItem.rightBarButtonItem = [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemCancel target:self action:@selector(cancelTapped)];
     self.view.backgroundColor = ThemeManager.shared.contentBackgroundColor;
-    // Realtime frosted backdrop, same shared intensity as every other panel
-    [AmethystBlurView installInView:self.view];
+    // Realtime frosted backdrop, same shared intensity as every other panel.
+    // Host in the navigation controller's view so the frost covers the whole
+    // sheet (navbar included) and never scrolls away with table content.
+    UIView *blurHost = self.navigationController.view ?: self.view;
+    [AmethystBlurView installInView:blurHost];
     self.tableView.backgroundColor = AmethystBlurView.blurEnabled ? [UIColor clearColor] : ThemeManager.shared.contentBackgroundColor;
+    self.view.backgroundColor = [UIColor clearColor];
 }
 
 - (void)cancelTapped {
@@ -451,9 +477,14 @@
     _lastContentOffsetY = 0;
 
     [self setup];
+    // The other tabs frost their backdrop; Mod was missing this layer and
+    // rendered a flat dark veil instead.
+    [AmethystBlurView installInView:self.view];
     [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(updateColors) name:ThemeDidChangeNotification object:nil];
     [self updateColors];
     [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(versionDidChangeExternal) name:@"VersionDidChangeNotification" object:nil];
+    [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(installedModsDidChange) name:InstalledModsDidChangeNotification object:nil];
+    [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(updateColors) name:AmethystBlurIntensityDidChangeNotification object:nil];
     [self loadModsWithQuery:@"" offset:0];
 }
 
@@ -558,7 +589,14 @@
 
 - (void)updateColors {
     ThemeManager *theme = ThemeManager.shared;
-    self.view.backgroundColor = theme.contentBackgroundColor;
+    if ([AmethystBlurView blurEnabled]) {
+        // Clear — the realtime frost behind provides the backdrop. A dark
+        // translucent fill here would paint a black 25% veil over the content
+        // and make the tab interior darker than its surroundings.
+        self.view.backgroundColor = [UIColor clearColor];
+    } else {
+        self.view.backgroundColor = theme.contentBackgroundColor;
+    }
     if (@available(iOS 13.0, *)) {
         _searchBar.searchTextField.textColor = theme.primaryTextColor;
     }
@@ -821,6 +859,7 @@
 
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {
     ModCell *cell = [tableView dequeueReusableCellWithIdentifier:@"ModCell" forIndexPath:indexPath];
+    cell.installState = [self installStateForMod:_mods[indexPath.row]];
     [cell configureWithDict:_mods[indexPath.row]];
     __weak typeof(self) weakSelf = self;
     cell.onVersionTap = ^(NSDictionary *mod, UIButton *sender) {
@@ -848,14 +887,13 @@
         return;
     }
 
-    DownloadProgressOverlay *overlay = [DownloadProgressOverlay showInView:self.view title:@"Downloading Mod"];
-    [overlay updateProgress:0 message:@"Loading versions..."];
+    DownloadTask *hubTask = [[DownloadManager shared] beginTaskWithName:(_selectedMod[@"title"] ?: @"Mod") type:DownloadTypeMod];
     __weak typeof(self) weakSelf = self;
 
     NSString *projectId = _selectedMod[@"project_id"];
     [ModrinthService.shared loadProjectVersions:projectId completion:^(NSArray<NSDictionary *> *versions, NSError *error) {
         if (error || versions.count == 0) {
-            [overlay dismiss];
+            [[DownloadManager shared] completeTask:hubTask error:error];
             showDialog(@"Error", @"No versions found for this mod.");
             return;
         }
@@ -866,28 +904,18 @@
         NSString *url = best[@"url"];
         NSString *filename = best[@"filename"] ?: @"mod.jar";
 
-        [overlay setCancelBlock:^{
+        [hubTask setCancelBlock:^{
             [weakSelf.currentDownloadTask cancel];
             weakSelf.currentDownloadTask = nil;
         }];
 
         weakSelf.currentDownloadTask = [ModrinthService.shared downloadFile:url name:filename progressBlock:^(float p) {
-            [overlay updateProgress:p message:[NSString stringWithFormat:@"Downloading %@", filename]];
+            [[DownloadManager shared] updateProgress:p forTask:hubTask];
         } completion:^(NSString *path, NSError *dlError) {
             weakSelf.currentDownloadTask = nil;
-            if (path) {
-                [overlay finishWithMessage:@"Downloaded!"];
-                dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 1.5 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
-                    [overlay dismiss];
-                    showDialog(@"Downloaded", [NSString stringWithFormat:@"%@ saved to temp.", filename]);
-                });
-            } else {
-                if ([dlError.domain isEqualToString:NSURLErrorDomain] && dlError.code == NSURLErrorCancelled) {
-                    [overlay dismiss];
-                } else {
-                    [overlay dismiss];
-                    showDialog(@"Download Failed", dlError.localizedDescription ?: @"Unknown error");
-                }
+            [[DownloadManager shared] completeTask:hubTask error:dlError];
+            if (!path && !([dlError.domain isEqualToString:NSURLErrorDomain] && dlError.code == NSURLErrorCancelled)) {
+                showDialog(@"Download Failed", dlError.localizedDescription ?: @"Unknown error");
             }
         }];
     }];
@@ -899,14 +927,13 @@
         return;
     }
 
-    DownloadProgressOverlay *overlay = [DownloadProgressOverlay showInView:self.view title:@"Installing Mod"];
-    [overlay updateProgress:0 message:@"Loading versions..."];
+    DownloadTask *hubTask = [[DownloadManager shared] beginTaskWithName:(_selectedMod[@"title"] ?: @"Mod") type:DownloadTypeMod];
     __weak typeof(self) weakSelf = self;
 
     NSString *projectId = _selectedMod[@"project_id"];
     [ModrinthService.shared loadProjectVersions:projectId completion:^(NSArray<NSDictionary *> *versions, NSError *error) {
         if (error || versions.count == 0) {
-            [overlay dismiss];
+            [[DownloadManager shared] completeTask:hubTask error:error];
             showDialog(@"Error", @"No versions found for this mod.");
             return;
         }
@@ -918,42 +945,36 @@
         NSString *filename = best[@"filename"] ?: @"mod.jar";
         NSString *targetVersion = VersionDirectoryManager.shared.currentVersion ?: [weakSelf selectedVersion];
 
-        [overlay setCancelBlock:^{
+        [hubTask setCancelBlock:^{
             [weakSelf.currentDownloadTask cancel];
             weakSelf.currentDownloadTask = nil;
         }];
 
         weakSelf.currentDownloadTask = [ModrinthService.shared downloadFile:url name:filename progressBlock:^(float p) {
-            [overlay updateProgress:p message:@"Downloading..."];
+            [[DownloadManager shared] updateProgress:p forTask:hubTask];
         } completion:^(NSString *path, NSError *dlError) {
             weakSelf.currentDownloadTask = nil;
-            if (path) {
-                [overlay updateProgress:1.0 message:@"Copying to profile..."];
-                NSString *modsDir = [VersionDirectoryManager.shared modsPathForVersion:targetVersion];
-                NSString *targetPath = [modsDir stringByAppendingPathComponent:filename];
-                if (![targetPath hasSuffix:@".jar"]) targetPath = [targetPath stringByAppendingPathExtension:@"jar"];
-                [[NSFileManager defaultManager] createDirectoryAtPath:modsDir withIntermediateDirectories:YES attributes:nil error:nil];
-                [[NSFileManager defaultManager] removeItemAtPath:targetPath error:nil];
-                NSError *moveError = nil;
-                [[NSFileManager defaultManager] moveItemAtPath:path toPath:targetPath error:&moveError];
-                BOOL success = moveError == nil;
-                if (success) {
-                    [overlay finishWithMessage:@"Installed!"];
-                    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 1.5 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
-                        [overlay dismiss];
-                        showDialog(@"Installed", [NSString stringWithFormat:@"%@ installed.", _selectedMod[@"title"]]);
-                    });
-                } else {
-                    [overlay dismiss];
-                    showDialog(@"Install Failed", moveError.localizedDescription ?: @"Unknown error");
-                }
-            } else {
-                if ([dlError.domain isEqualToString:NSURLErrorDomain] && dlError.code == NSURLErrorCancelled) {
-                    [overlay dismiss];
-                } else {
-                    [overlay dismiss];
+            [[DownloadManager shared] completeTask:hubTask error:dlError];
+            if (!path) {
+                if (!([dlError.domain isEqualToString:NSURLErrorDomain] && dlError.code == NSURLErrorCancelled)) {
                     showDialog(@"Download Failed", dlError.localizedDescription ?: @"Unknown error");
                 }
+                return;
+            }
+            NSString *modsDir = [VersionDirectoryManager.shared modsPathForVersion:targetVersion];
+            NSString *targetPath = [modsDir stringByAppendingPathComponent:filename];
+            if (![targetPath hasSuffix:@".jar"]) targetPath = [targetPath stringByAppendingPathExtension:@"jar"];
+            [[NSFileManager defaultManager] createDirectoryAtPath:modsDir withIntermediateDirectories:YES attributes:nil error:nil];
+            [[NSFileManager defaultManager] removeItemAtPath:targetPath error:nil];
+            NSError *moveError = nil;
+            [[NSFileManager defaultManager] moveItemAtPath:path toPath:targetPath error:&moveError];
+            if (moveError == nil) {
+                [[InstalledModsManager shared] recordProjectId:_selectedMod[@"project_id"]
+                                                          title:_selectedMod[@"title"]
+                                                 versionNumber:best[@"version_number"]
+                                                        filename:targetPath.lastPathComponent];
+            } else {
+                showDialog(@"Install Failed", moveError.localizedDescription ?: @"Unknown error");
             }
         }];
     }];
@@ -977,6 +998,37 @@
 
 - (void)versionDidChangeExternal {
     [self loadModsWithQuery:@"" offset:0];
+}
+
+- (void)installedModsDidChange {
+    dispatch_async(dispatch_get_main_queue(), ^{
+        [_tableView reloadData];
+    });
+}
+
+- (NSDate *)parseISODate:(NSString *)str {
+    if (str.length == 0) return nil;
+    static NSISO8601DateFormatter *fmt = nil;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{ fmt = [[NSISO8601DateFormatter alloc] init]; });
+    return [fmt dateFromString:str];
+}
+
+// none | installed | update — based on per-profile manifest + release date.
+- (NSString *)installStateForMod:(NSDictionary *)mod {
+    NSString *pid = mod[@"project_id"];
+    if (pid.length == 0) return @"none";
+    NSDictionary *info = [[InstalledModsManager shared] infoForProjectId:pid];
+    if (!info) return @"none";
+    NSString *filename = info[@"filename"];
+    if (filename.length == 0) return @"none";
+    NSString *path = [[[InstalledModsManager shared] modsDirForCurrentProfile] stringByAppendingPathComponent:filename];
+    if (![[NSFileManager defaultManager] fileExistsAtPath:path]) return @"none";
+
+    NSDate *remote = [self parseISODate:mod[@"date_modified"]];
+    double installedAt = [info[@"installed_at"] doubleValue];
+    if (remote && installedAt < [remote timeIntervalSince1970]) return @"update";
+    return @"installed";
 }
 
 #pragma mark - Version Selector
@@ -1042,6 +1094,9 @@ static const NSInteger kModActionLoadingTag = 9001;
 
     UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:picker];
     nav.modalPresentationStyle = UIModalPresentationPageSheet;
+    nav.view.backgroundColor = UIColor.clearColor;
+    // Guarantee the slide-up version sheet is frosted (bottom-up panel).
+    [AmethystBlurView installInView:nav.view];
     if (@available(iOS 15.0, *)) {
         UISheetPresentationController *sheet = nav.sheetPresentationController;
         if (sheet) {
@@ -1306,6 +1361,10 @@ static const NSInteger kModActionLoadingTag = 9001;
                         [[NSFileManager defaultManager] createDirectoryAtPath:modsDir withIntermediateDirectories:YES attributes:nil error:nil];
                         [[NSFileManager defaultManager] removeItemAtPath:targetPath error:nil];
                         [[NSFileManager defaultManager] moveItemAtPath:path toPath:targetPath error:nil];
+                        [[InstalledModsManager shared] recordProjectId:depProjectId
+                                                                 title:depTitle
+                                                        versionNumber:bestVer[@"version_number"]
+                                                              filename:targetPath.lastPathComponent];
                     }
                     [weakSelf installDependencies:deps index:index + 1 version:mainVersion completion:completion];
                 }];
@@ -1324,42 +1383,35 @@ static const NSInteger kModActionLoadingTag = 9001;
     }
     
     __weak typeof(self) weakSelf = self;
-    if (!_dependencyOverlay) {
-        _dependencyOverlay = [DownloadProgressOverlay showInView:self.view title:@"Installing Mod"];
-    }
-    [_dependencyOverlay updateProgress:0 message:@"Downloading main mod..."];
-    
+    // Close the dependency-phase overlay; the main download lives in the
+    // top-bar hub from here on.
+    dispatch_async(dispatch_get_main_queue(), ^{
+        [_dependencyOverlay dismiss];
+        _dependencyOverlay = nil;
+    });
+
+    DownloadTask *hubTask = [[DownloadManager shared] beginTaskWithName:(_downloadMod[@"title"] ?: filename) type:DownloadTypeMod];
+    [hubTask setCancelBlock:^{
+        for (NSURLSessionDownloadTask *t in weakSelf.dependencyInstallTasks) [t cancel];
+    }];
+
     NSURLSessionDownloadTask *task = [ModrinthService.shared downloadFile:url name:filename progressBlock:^(float p) {
-        [_dependencyOverlay updateProgress:p message:[NSString stringWithFormat:@"Downloading %@", filename]];
+        [[DownloadManager shared] updateProgress:p forTask:hubTask];
     } completion:^(NSString *path, NSError *dlError) {
-        if (path) {
-            [_dependencyOverlay updateProgress:1.0 message:@"Copying to profile..."];
-            NSString *modsDir = [VersionDirectoryManager.shared modsPathForVersion:mcVersion];
-            NSString *targetPath = [modsDir stringByAppendingPathComponent:filename];
-            if (![targetPath hasSuffix:@".jar"]) targetPath = [targetPath stringByAppendingPathExtension:@"jar"];
-            [[NSFileManager defaultManager] createDirectoryAtPath:modsDir withIntermediateDirectories:YES attributes:nil error:nil];
-            [[NSFileManager defaultManager] removeItemAtPath:targetPath error:nil];
-            NSError *moveError = nil;
-            [[NSFileManager defaultManager] moveItemAtPath:path toPath:targetPath error:&moveError];
-            
-            if (moveError == nil) {
-                [_dependencyOverlay finishWithMessage:@"Installed!"];
-                dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 1.5 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
-                    [_dependencyOverlay dismiss];
-                    showDialog(@"Installed", [NSString stringWithFormat:@"%@ installed to profile.", _downloadMod[@"title"]]);
-                    [weakSelf.tableView reloadData];
-                });
-            } else {
-                [_dependencyOverlay finishWithMessage:@"Install failed"];
-                dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 1.0 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
-                    [_dependencyOverlay dismiss];
-                });
-            }
-        } else {
-            [_dependencyOverlay finishWithMessage:@"Failed"];
-            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 1.0 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
-                [_dependencyOverlay dismiss];
-            });
+        [[DownloadManager shared] completeTask:hubTask error:dlError];
+        if (!path) return;
+        NSString *modsDir = [VersionDirectoryManager.shared modsPathForVersion:mcVersion];
+        NSString *targetPath = [modsDir stringByAppendingPathComponent:filename];
+        if (![targetPath hasSuffix:@".jar"]) targetPath = [targetPath stringByAppendingPathExtension:@"jar"];
+        [[NSFileManager defaultManager] createDirectoryAtPath:modsDir withIntermediateDirectories:YES attributes:nil error:nil];
+        [[NSFileManager defaultManager] removeItemAtPath:targetPath error:nil];
+        NSError *moveError = nil;
+        [[NSFileManager defaultManager] moveItemAtPath:path toPath:targetPath error:&moveError];
+        if (moveError == nil) {
+            [[InstalledModsManager shared] recordProjectId:_downloadMod[@"project_id"]
+                                                     title:_downloadMod[@"title"]
+                                            versionNumber:version[@"version_number"]
+                                                  filename:targetPath.lastPathComponent];
         }
     }];
     [_dependencyInstallTasks addObject:task];

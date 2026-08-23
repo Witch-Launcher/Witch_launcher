@@ -12,10 +12,12 @@ import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Base64;
+import java.util.Enumeration;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.zip.ZipEntry;
+import java.util.zip.ZipException;
 import java.util.zip.ZipFile;
 import java.util.zip.ZipInputStream;
 import java.util.zip.ZipOutputStream;
@@ -129,10 +131,19 @@ public class TransportPatcher {
         boolean changed = false;
         File tmp = new File(jar.getParentFile(), jar.getName() + ".tcloader.tmp");
         byte[] buf = new byte[65536];
-        try (ZipInputStream zin = new ZipInputStream(new FileInputStream(jar));
+        // Read via ZipFile (central directory), NEVER ZipInputStream (local
+        // headers): publisher zips exist whose local headers disagree with the
+        // central directory, and streaming over them yields GARBAGE bytes for
+        // some entries. That silently corrupted every nested jar inside
+        // mod bundles like Essential (its embedded stage2 jar's MD5 changed,
+        // so Essential's loader rejected its own payload and the mod never
+        // appeared). ZipFile resolves entries through the central directory —
+        // the same structure every consumer (unzip, JarFile) trusts.
+        try (ZipFile zin = new ZipFile(jar);
              ZipOutputStream zout = new ZipOutputStream(new FileOutputStream(tmp))) {
-            ZipEntry in;
-            while ((in = zin.getNextEntry()) != null) {
+            Enumeration<? extends ZipEntry> entries = zin.entries();
+            while (entries.hasMoreElements()) {
+                ZipEntry in = entries.nextElement();
                 ZipEntry out = new ZipEntry(in.getName());
                 out.setTime(in.getTime());
                 zout.putNextEntry(out);
@@ -141,17 +152,22 @@ public class TransportPatcher {
                     zout.write(replacement);
                     changed = true;
                 } else if (in.getName().endsWith(".jar")) {
-                    ByteArrayOutputStream nested = new ByteArrayOutputStream();
-                    byte[] nb = new byte[65536];
-                    int n;
-                    while ((n = zin.read(nb)) > 0) nested.write(nb, 0, n);
-                    byte[] nestedBytes = nested.toByteArray();
-                    byte[] newNested = patchNestedJar(nestedBytes, replacements);
-                    zout.write(newNested);
-                    if (!Arrays.equals(nestedBytes, newNested)) changed = true;
+                    byte[] nestedBytes = readAll(zin.getInputStream(in));
+                    // Only re-zip a nested jar when it REALLY contains a
+                    // target entry (checked against its central directory).
+                    // Untouched nested jars are written back unmodified, so
+                    // their contents (and hashes) stay bit-exact.
+                    if (nestedJarContainsAny(nestedBytes, replacements)) {
+                        byte[] newNested = patchNestedJar(nestedBytes, replacements);
+                        if (!Arrays.equals(nestedBytes, newNested)) changed = true;
+                        nestedBytes = newNested;
+                    }
+                    zout.write(nestedBytes);
                 } else {
+                    InputStream inStream = zin.getInputStream(in);
                     int n;
-                    while ((n = zin.read(buf)) > 0) zout.write(buf, 0, n);
+                    while ((n = inStream.read(buf)) > 0) zout.write(buf, 0, n);
+                    inStream.close();
                 }
                 zout.closeEntry();
             }
@@ -168,27 +184,65 @@ public class TransportPatcher {
         return true;
     }
 
-    private static byte[] patchNestedJar(byte[] nestedJar, Map<String, byte[]> replacements) throws IOException {
-        ZipInputStream zin = new ZipInputStream(new ByteArrayInputStream(nestedJar));
-        ByteArrayOutputStream outBytes = new ByteArrayOutputStream();
-        try (ZipOutputStream zout = new ZipOutputStream(outBytes)) {
-            ZipEntry in;
-            byte[] buf = new byte[65536];
-            while ((in = zin.getNextEntry()) != null) {
-                ZipEntry out = new ZipEntry(in.getName());
-                out.setTime(in.getTime());
-                zout.putNextEntry(out);
-                byte[] replacement = replacements.get(in.getName());
-                if (replacement != null) {
-                    zout.write(replacement);
-                } else {
-                    int n;
-                    while ((n = zin.read(buf)) > 0) zout.write(buf, 0, n);
+    private static byte[] readAll(InputStream in) throws IOException {
+        ByteArrayOutputStream out = new ByteArrayOutputStream();
+        byte[] buf = new byte[65536];
+        int n;
+        while ((n = in.read(buf)) > 0) out.write(buf, 0, n);
+        in.close();
+        return out.toByteArray();
+    }
+
+    /** Accurate containment probe: scans the nested jar's central directory. */
+    private static boolean nestedJarContainsAny(byte[] nestedJar, Map<String, byte[]> replacements) throws IOException {
+        File tmp = File.createTempFile("tclscan", ".jar", new File(System.getProperty("java.io.tmpdir")));
+        try {
+            java.nio.file.Files.write(tmp.toPath(), nestedJar);
+            try (ZipFile zip = new ZipFile(tmp)) {
+                for (String name : replacements.keySet()) {
+                    if (zip.getEntry(name) != null) return true;
                 }
-                zout.closeEntry();
+            } catch (ZipException e) {
+                // Not a readable zip (some ".jar"-named resources aren't);
+                // leave such entries untouched rather than failing the jar.
+                return false;
             }
+            return false;
+        } finally {
+            tmp.delete();
         }
-        return outBytes.toByteArray();
+    }
+
+    private static byte[] patchNestedJar(byte[] nestedJar, Map<String, byte[]> replacements) throws IOException {
+        File srcTmp = File.createTempFile("tclsrc", ".jar", new File(System.getProperty("java.io.tmpdir")));
+        try {
+            java.nio.file.Files.write(srcTmp.toPath(), nestedJar);
+            ByteArrayOutputStream outBytes = new ByteArrayOutputStream();
+            try (ZipFile zin = new ZipFile(srcTmp);
+                 ZipOutputStream zout = new ZipOutputStream(outBytes)) {
+                Enumeration<? extends ZipEntry> entries = zin.entries();
+                byte[] buf = new byte[65536];
+                while (entries.hasMoreElements()) {
+                    ZipEntry in = entries.nextElement();
+                    ZipEntry out = new ZipEntry(in.getName());
+                    out.setTime(in.getTime());
+                    zout.putNextEntry(out);
+                    byte[] replacement = replacements.get(in.getName());
+                    if (replacement != null) {
+                        zout.write(replacement);
+                    } else {
+                        InputStream inStream = zin.getInputStream(in);
+                        int n;
+                        while ((n = inStream.read(buf)) > 0) zout.write(buf, 0, n);
+                        inStream.close();
+                    }
+                    zout.closeEntry();
+                }
+            }
+            return outBytes.toByteArray();
+        } finally {
+            srcTmp.delete();
+        }
     }
 
     private static byte[] readJarEntry(File jar, String entryName) throws IOException {

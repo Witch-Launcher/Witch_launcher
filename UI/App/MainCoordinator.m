@@ -22,6 +22,7 @@
 #import "PLProfiles.h"
 #import "MinecraftResourceDownloadTask.h"
 #import "DownloadProgressOverlay.h"
+#import "AmethystBlurView.h"
 #import "authenticator/BaseAuthenticator.h"
 #import "SurfaceViewController.h"
 #import "ios_uikit_bridge.h"
@@ -556,7 +557,7 @@
 #pragma mark - Progress Alert helpers
 
 - (void)showProgressAlert:(NSString *)message {
-    self.progressOverlay = [DownloadProgressOverlay showInView:self.rootVC.view title:@"Launching"];
+    self.progressOverlay = [DownloadProgressOverlay showBlurredInView:self.rootVC.view title:@"Launching" blurred:YES];
     self.progressOverlay.statusLabel.text = message;
     __weak typeof(self) weakSelf = self;
     self.progressOverlay.cancelBlock = ^{

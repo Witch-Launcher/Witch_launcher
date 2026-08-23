@@ -62,12 +62,20 @@ $(CLASSES): $(OUTPUTDIR)/%.class: $(SOURCEDIR)/%.java
 	fi; \
 	find "$$staging" -name "$$base*.class" -exec cp {} "$$out" \;
 
-$(OUTPUTDIR)/launcher.jar: $(CLASSES)
+# Depends on the merged LWJGL jar: the iOS shims it carries (MacosUtil,
+# GLFWNativeCocoa) are also embedded into launcher.jar (/macosfix/) so
+# patchMacPlatformShims() can overwrite mod-bundled REAL copies of those
+# classes inside game-directory jars (Essential et al).
+$(OUTPUTDIR)/launcher.jar: $(CLASSES) $(OUTPUTDIR)/lwjgl-3.4.1.jar
 	@set -e
 	@echo "Creating $@"
 	@cp -r $(SOURCEDIR)/launcher/META-INF $(basename $@)/ 2>/dev/null || true
 	@mkdir -p $(basename $@)/lwjglfix
 	@unzip -o -p libs/lwjgl41/lwjgl.jar org/lwjgl/system/Library.class > $(basename $@)/lwjglfix/Library.class
+	@mkdir -p $(basename $@)/macosfix
+	@unzip -o -p $(OUTPUTDIR)/lwjgl-3.4.1.jar com/mojang/blaze3d/platform/MacosUtil.class > $(basename $@)/macosfix/MacosUtil.class
+	@unzip -o -p $(OUTPUTDIR)/lwjgl-3.4.1.jar org/lwjgl/glfw/GLFWNativeCocoa.class > $(basename $@)/macosfix/GLFWNativeCocoa.class
+	@unzip -o -p $(OUTPUTDIR)/lwjgl-3.4.1.jar 'org/lwjgl/glfw/GLFWNativeCocoa$$Functions.class' > '$(basename $@)/macosfix/GLFWNativeCocoa$$Functions.class'
 	@mkdir -p $(basename $@)/launchwrapper
 	@cp libs/launchwrapper-1.12.jar $(basename $@)/launchwrapper/launchwrapper-1.12.jar
 	@find $(basename $@) -name '*.class' -size 0 | grep -v '\$$' && { echo "Error: found empty class files"; exit 1; } || true

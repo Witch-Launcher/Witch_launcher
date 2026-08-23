@@ -5,9 +5,12 @@
 #import "MinecraftResourceUtils.h"
 #import "PLProfiles.h"
 #import "utils.h"
+#import "AmethystBlurView.h"
+#import "DownloadManager.h"
 #import <objc/runtime.h>
 
 @interface RightPanelViewController ()
+@property (nonatomic) BOOL launchIsCancel;
 @property (nonatomic) UIButton *accountButton;
 @property (nonatomic) UILabel *accountNameLabel;
 @property (nonatomic) UIImageView *skinPreviewView;
@@ -30,8 +33,31 @@
     [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(refreshVersions) name:UIApplicationWillEnterForegroundNotification object:nil];
     [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(versionDidChange:) name:@"VersionDidChangeNotification" object:nil];
     [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(updateColors) name:ThemeDidChangeNotification object:nil];
+    [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(updateColors) name:AmethystBlurIntensityDidChangeNotification object:nil];
+    [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(downloadTasksDidChange) name:DownloadTasksDidChangeNotification object:nil];
     [self updateColors];
+    [self downloadTasksDidChange];
 }
+
+#pragma mark - Launch <-> Cancel morph
+
+- (void)downloadTasksDidChange {
+    BOOL busy = [DownloadManager.shared activeTasks].count > 0;
+    ThemeManager *theme = ThemeManager.shared;
+    if (busy && !_launchIsCancel) {
+        _launchIsCancel = YES;
+        [_launchButton setTitle:@"✕" forState:UIControlStateNormal];
+        _launchButton.backgroundColor = theme.errorColor;
+        _launchButton.accessibilityLabel = @"Cancel downloads";
+    } else if (!busy && _launchIsCancel) {
+        _launchIsCancel = NO;
+        [_launchButton setTitle:@"▶" forState:UIControlStateNormal];
+        _launchButton.backgroundColor = theme.accentColor;
+        _launchButton.accessibilityLabel = nil;
+    }
+}
+
+- (BOOL)launchIsCancel { return _launchIsCancel; }
 
 - (void)setup {
     UIView *contentView = [[UIView alloc] init];
@@ -178,7 +204,11 @@
 
 - (void)updateColors {
     ThemeManager *theme = ThemeManager.shared;
-    self.view.backgroundColor = theme.rightPanelBackgroundColor;
+    if ([AmethystBlurView blurEnabledForKey:@"amethyst_rightpanel_blur"]) {
+        self.view.backgroundColor = [theme.rightPanelBackgroundColor colorWithAlphaComponent:0.25 * theme.uiOpacity];
+    } else {
+        self.view.backgroundColor = theme.rightPanelBackgroundColor;
+    }
     _accountNameLabel.textColor = theme.primaryTextColor;
     _versionsLabel.textColor = theme.secondaryTextColor;
     _addVersionButton.tintColor = theme.accentColor;
@@ -390,6 +420,11 @@
 }
 
 - (void)didTapLaunch {
+    if (_launchIsCancel) {
+        [HapticManager.shared play:HapticTypeHeavy];
+        [DownloadManager.shared cancelAllTasks];
+        return;
+    }
     [HapticManager.shared play:HapticTypeMedium];
     if (self.delegate) [self.delegate rightPanelDidTapLaunch];
 }

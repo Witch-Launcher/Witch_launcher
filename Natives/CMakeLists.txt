@@ -328,6 +328,7 @@ egl_bridge.m
     ../UI/Common/AmethystProjectCell.m
     ../UI/Common/UIView+LiquidGlass.m
     ../UI/Common/AmethystBlurView.m
+   ../UI/Common/BlurredDialog.m
     ../UI/Root/AmethystRootViewController.m
    ../UI/Root/TopBarView.m
    ../UI/Root/SidebarViewController.m
@@ -336,6 +337,7 @@ egl_bridge.m
    ../UI/Managers/VersionDirectoryManager.m
    ../UI/Managers/DownloadManager.m
    ../UI/Managers/CursorManager.m
+   ../UI/Managers/InstalledModsManager.m
    ../UI/Screens/MainMenu/MainMenuViewController.m
    ../UI/Screens/CrashLog/CrashLogAnalyzer.m
    ../UI/Screens/CrashLog/CrashScreenViewController.m

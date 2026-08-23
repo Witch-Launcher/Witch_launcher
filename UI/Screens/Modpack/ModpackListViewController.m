@@ -8,6 +8,7 @@
 #import "DownloadProgressOverlay.h"
 #import "MrpackInstaller.h"
 #import "ios_uikit_bridge.h"
+#import "AmethystBlurView.h"
 
 @interface ModpackListViewController () <UITableViewDelegate, UITableViewDataSource, UISearchBarDelegate, UIDocumentPickerDelegate>
 @property (nonatomic) UILabel *titleLabel;
@@ -32,6 +33,7 @@
 
 - (void)viewDidLoad {
     [super viewDidLoad];
+    [AmethystBlurView installInView:self.view];
     _pageCache = [NSMutableDictionary dictionary];
     _pageOffsets = [NSMutableArray array];
     _hasMore = YES;
@@ -40,6 +42,7 @@
     _pageSize = 50;
     [self setup];
     [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(updateColors) name:ThemeDidChangeNotification object:nil];
+    [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(updateColors) name:AmethystBlurIntensityDidChangeNotification object:nil];
     [self updateColors];
     [self loadModpacksWithQuery:@"" offset:0];
 }
@@ -126,7 +129,11 @@
 
 - (void)updateColors {
     ThemeManager *theme = ThemeManager.shared;
-    self.view.backgroundColor = theme.contentBackgroundColor;
+    if ([AmethystBlurView blurEnabled]) {
+        self.view.backgroundColor = [UIColor clearColor];
+    } else {
+        self.view.backgroundColor = theme.contentBackgroundColor;
+    }
     _titleLabel.textColor = theme.primaryTextColor;
     _importButton.tintColor = theme.accentColor;
     _searchBar.searchTextField.textColor = theme.primaryTextColor;
