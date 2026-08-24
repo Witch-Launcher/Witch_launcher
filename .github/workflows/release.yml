@@ -1,7 +1,13 @@
 name: Release build
 
+permissions:
+  contents: write
+  actions: write
+
 on:
-  workflow_dispatch
+  push:
+    branches: ['main']
+  workflow_dispatch:
 
 jobs:
   build:
@@ -176,20 +182,54 @@ jobs:
           fi
 
       - name: Upload regular ipa
-        uses: actions/upload-artifact@main
+        if: always()
+        uses: actions/upload-artifact@v4
         with:
-          name: net.kdt.pojavlauncher-${{ matrix.platform_name }}.ipa
-          path: artifacts/net.kdt.pojavlauncher-*-${{ matrix.platform_name }}.ipa
+          name: Witch-${{ matrix.platform_name }}-ipa
+          path: artifacts/Witch-*-${{ matrix.platform_name }}.ipa
+          if-no-files-found: ignore
 
       - name: Upload regular tipa
-        uses: actions/upload-artifact@main
+        if: always()
+        uses: actions/upload-artifact@v4
         with:
-          name: net.kdt.pojavlauncher-${{ matrix.platform_name }}.tipa
-          path: artifacts/net.kdt.pojavlauncher-*-${{ matrix.platform_name }}-trollstore.tipa
+          name: Witch-${{ matrix.platform_name }}-tipa
+          path: artifacts/Witch-*-${{ matrix.platform_name }}-trollstore.tipa
+          if-no-files-found: ignore
 
-      - name: Upload PojavLauncher.dSYM
-        uses: actions/upload-artifact@main
+      - name: Upload Witch.dSYM
         if: matrix.platform_name == 'ios'
+        uses: actions/upload-artifact@v4
         with:
-          name: PojavLauncher.dSYM
-          path: artifacts/PojavLauncher.dSYM
+          name: Witch-dSYM
+          path: artifacts/Witch.dSYM
+          if-no-files-found: ignore
+
+  publish:
+    name: Publish Release
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      actions: write
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+
+      - name: Reset rolling release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release delete release --cleanup-tag -y 2>/dev/null || true
+          gh api -X DELETE "repos/$GITHUB_REPOSITORY/git/refs/tags/release" 2>/dev/null || true
+
+      - name: Publish Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: release
+          name: Witch Launcher — Release
+          prerelease: false
+          fail_on_unmatched_files: false
+          files: |
+            **/*.ipa
+            **/*.tipa
