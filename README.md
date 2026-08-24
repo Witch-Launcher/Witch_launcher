@@ -4,10 +4,9 @@
 
 Thanks to vibecodest and [Catsruledogs](https://github.com/catsruledogs/Amethyst-iOS-25.git), T1k-T1k for the source code!
 
-```Thanks to L4d for helping me fix the bug on iOS 27 (but it didn't work :< I'm sorry)```
-
 ## Third party components and their licenses
 - [Witch](https://github.com/Ynnyny/Witch_launcher): [GNU General Public License v3.0](https://github.com/Ynnyny/Witch_launcher/blob/main/LICENSE)
+- [Amethyst-iOS](https://github.com/AngelAuraMC/Amethyst-iOS): [GNU General Public License v3.0](https://github.com/AngelAuraMC/Amethyst-iOS/blob/main/LICENSE)
 - [Catsruledogs](https://github.com/catsruledogs/Amethyst-iOS-25.git): [GNU General Public License v3.0](https://github.com/catsruledogs/Amethyst-iOS-25/blob/main/LICENSE)
 - [Caciocavallo](https://github.com/PojavLauncherTeam/caciocavallo): [GNU GPLv2 License](https://github.com/PojavLauncherTeam/caciocavallo/blob/master/LICENSE).
 - [jsr305](https://code.google.com/p/jsr-305): [3-Clause BSD License](http://opensource.org/licenses/BSD-3-Clause).
