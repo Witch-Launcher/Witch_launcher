@@ -1,11 +1,12 @@
 name: Development build
 
+permissions:
+  contents: write
+  actions: write
+
 on:
-  pull_request:
-    types: [opened, reopened]
-    branches: ['main']
   push:
-    branches: ['main']
+    branches: ['beta']
   workflow_dispatch:
 
 jobs:
@@ -174,42 +175,32 @@ jobs:
         if: always()
         run: ls -la artifacts/ || true
 
-      - name: Upload TrollStore tIPA (full)
+      - name: Organize artifacts (full vs slimmed)
         if: always()
-        uses: actions/upload-artifact@v5
+        shell: bash
+        run: |
+          mkdir -p artifacts/full artifacts/slimmed
+          mv artifacts/Witch-slimmed-*.ipa artifacts/slimmed/ 2>/dev/null || true
+          mv artifacts/Witch-slimmed-*.tipa artifacts/slimmed/ 2>/dev/null || true
+          mv artifacts/Witch-*.ipa artifacts/full/ 2>/dev/null || true
+          mv artifacts/Witch-*.tipa artifacts/full/ 2>/dev/null || true
+
+      - name: Upload full IPA & tIPA
+        if: always()
+        uses: actions/upload-artifact@v4
         with:
-          name: Witch-ios-trollstore
-          path: artifacts/Witch-*-ios-trollstore.tipa
+          name: Witch-full
+          path: artifacts/full/*
           retention-days: 30
           if-no-files-found: warn
           compression-level: 0
 
-      - name: Upload TrollStore tIPA (slimmed)
+      - name: Upload slimmed IPA & tIPA
         if: always()
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v4
         with:
-          name: Witch-ios-trollstore-slimmed
-          path: artifacts/Witch-slimmed-*-ios-trollstore.tipa
-          retention-days: 30
-          if-no-files-found: warn
-          compression-level: 0
-
-      - name: Upload regular IPA (full)
-        if: always()
-        uses: actions/upload-artifact@v5
-        with:
-          name: Witch-ios
-          path: artifacts/Witch-*-ios.ipa
-          retention-days: 30
-          if-no-files-found: warn
-          compression-level: 0
-
-      - name: Upload regular IPA (slimmed)
-        if: always()
-        uses: actions/upload-artifact@v5
-        with:
-          name: Witch-ios-slimmed
-          path: artifacts/Witch-slimmed-*-ios.ipa
+          name: Witch-slimmed
+          path: artifacts/slimmed/*
           retention-days: 30
           if-no-files-found: warn
           compression-level: 0
@@ -227,10 +218,39 @@ jobs:
       # extract local compilation cmake diagnostic records upon unexpected pipeline failure
       - name: Upload build logs on failure
         if: failure()
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v4
         with:
           name: build-logs
           path: |
             Natives/build/CMakeFiles/CMakeOutput.log
             Natives/build/CMakeFiles/CMakeError.log
           if-no-files-found: ignore
+
+  publish:
+    name: Publish Pre-release
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      actions: write
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+
+      - name: Reset rolling pre-release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release delete pre-release --cleanup-tag -y 2>/dev/null || true
+          gh api -X DELETE "repos/$GITHUB_REPOSITORY/git/refs/tags/pre-release" 2>/dev/null || true
+
+      - name: Publish Pre-release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: pre-release
+          name: Witch Launcher — Pre-release
+          prerelease: true
+          fail_on_unmatched_files: false
+          files: |
+            **/*.ipa
+            **/*.tipa
