@@ -45,3 +45,6 @@ entitlements.codesign.xml
 /lwgjl/*/libffi/build*/src/*/.deps/.dirstamp
 *.bak
 /Natives/OSMesaShim/bin/
+
+# Website moved to separate repo (witch-launcher-web)
+/web/
