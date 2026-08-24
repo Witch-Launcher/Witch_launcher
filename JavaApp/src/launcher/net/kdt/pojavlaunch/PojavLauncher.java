@@ -69,9 +69,13 @@ public class PojavLauncher {
         });
 
         try {
-            // Try to initialize Caciocavallo17
+            // Try to initialize Caciocavallo17. CTCPreloadClassLoader's static
+            // init can fail with more than just CNFE (e.g. AWT
+            // IllegalArgumentException when the installer JVM has no usable
+            // screen metrics); any failure there must never kill the launch,
+            // so catch Throwable instead of ClassNotFoundException only.
             Class.forName("com.github.caciocavallosilano.cacio.ctc.CTCPreloadClassLoader");
-        } catch (ClassNotFoundException e) {}
+        } catch (Throwable ignored) {}
 
         String runJar = System.getProperty("pojav.runJar");
         if (runJar != null) {
@@ -88,6 +92,11 @@ public class PojavLauncher {
             String cancelFile = System.getProperty("pojav.cancelFile");
             if (cancelFile != null && !cancelFile.isEmpty()) {
                 final File cancelMarker = new File(cancelFile);
+                // A leftover marker from a previous cancelled/failed install
+                // would make the watcher below halt this JVM immediately,
+                // aborting a fresh install that nobody cancelled. Clear it
+                // before arming the watcher.
+                cancelMarker.delete();
                 Thread cancelWatcher = new Thread(() -> {
                     try {
                         while (!cancelMarker.exists()) {
@@ -154,16 +163,32 @@ public class PojavLauncher {
         }
     }
 
-    // ============ LWJGL Library-order fix ============
-    // The game's LWJGL (Fabric/Knot classloader) fails on JDK 25+ because eager
-    // class init during System.load of the native executable initializes
-    // org.lwjgl.glfw.GLFW before liblwjgl.dylib is registered: GLFWErrorCallbackI
-    // <clinit> -> LibFFI.<clinit> -> FFI_TYPE_DOUBLE() throws UnsatisfiedLinkError
-    // ("Could not initialize class org.lwjgl.glfw.GLFW"). Older builds of the
-    // lwjgl jar call System.load(app binary) BEFORE loadSystem("org.lwjgl").
-    // This patches the instance's lwjgl core jar with the fixed Library.class
-    // (loadSystem first), matching lwjgl41's build.
-    private static void patchInstanceLwjgl() {
+    // ============ Instance patch scoping ============
+    // Jars under versions/<other-id>/ belong to OTHER instances sharing the
+    // same instances root. The vanilla source jar of a different instance
+    // must stay byte-pristine: Forge/NeoForge installers binary-patch exactly
+    // that file and hard-fail on any modification ("Patch expected
+    // com/mojang/blaze3d/platform/MacosUtil.class to have the checksum ..."),
+    // which permanently broke reinstalling until the jar was re-downloaded.
+    // Only jars belonging to the instance being launched — and everything
+    // outside versions/ (shared libraries, mods caches) — are patchable.
+    private static boolean isPatchableGameJar(java.nio.file.Path p, String currentVersionId) {
+        String s = p.toString();
+        if (s.contains("/cache/forge-module-safe/") || s.contains("/cache/lwjgl-module-safe/")) return false;
+        int i = s.indexOf("/versions/");
+        if (i < 0) return true;
+        String rest = s.substring(i + "/versions/".length());
+        int slash = rest.indexOf('/');
+        if (slash < 0) return false;
+        String owner = rest.substring(0, slash);
+        return currentVersionId == null || owner.equals(currentVersionId);
+    }
+
+    // Older builds of the bundled lwjgl jar call System.load(app binary)
+    // BEFORE loadSystem("org.lwjgl"). This patches the instance's lwjgl core
+    // jar with the fixed Library.class (loadSystem first), matching lwjgl41's
+    // build.
+    private static void patchInstanceLwjgl(String currentVersionId) {
         byte[] fixedLibrary = readResourceBytes("/lwjglfix/Library.class");
         if (fixedLibrary == null) {
             System.out.println("[LWJGLFix] fixed Library.class resource missing, skipping");
@@ -173,7 +198,9 @@ public class PojavLauncher {
         File gameDir = new File(Tools.DIR_GAME_NEW);
         List<File> jars = new ArrayList<>();
         try {
-            Files.walk(gameDir.toPath()).filter(p -> p.toString().endsWith(".jar"))
+            Files.walk(gameDir.toPath())
+                .filter(p -> p.toString().endsWith(".jar"))
+                .filter(p -> isPatchableGameJar(p, currentVersionId))
                 .forEach(p -> jars.add(p.toFile()));
         } catch (IOException e) {
             System.err.println("[LWJGLFix] walk failed: " + e);
@@ -232,7 +259,7 @@ public class PojavLauncher {
     // /macosfix/), so no classloading order can pick the real ones anymore.
     // Same approach as patchInstanceLwjgl(); jars whose entries already match
     // are skipped, so repeat launches don't rewrite anything.
-    private static void patchMacPlatformShims() {
+    private static void patchMacPlatformShims(String currentVersionId) {
         Map<String, byte[]> replacements = new HashMap<>();
         byte[] macosUtil = readResourceBytes("/macosfix/MacosUtil.class");
         if (macosUtil == null) {
@@ -252,6 +279,7 @@ public class PojavLauncher {
         try {
             Files.walk(new File(Tools.DIR_GAME_NEW).toPath())
                 .filter(p -> p.toString().endsWith(".jar"))
+                .filter(p -> isPatchableGameJar(p, currentVersionId))
                 .forEach(p -> jars.add(p.toFile()));
         } catch (IOException e) {
             System.err.println("[MacShims] walk failed: " + e);
@@ -530,12 +558,12 @@ public class PojavLauncher {
         }
 
         try {
-            patchInstanceLwjgl();
+            patchInstanceLwjgl(args[1]);
         } catch (Throwable t) {
             System.err.println("[LWJGLFix] patch failed: " + t);
         }
         try {
-            patchMacPlatformShims();
+            patchMacPlatformShims(args[1]);
         } catch (Throwable t) {
             System.err.println("[MacShims] patch failed: " + t);
         }

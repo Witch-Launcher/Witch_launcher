@@ -145,6 +145,8 @@
 		<string>filza</string>
 		<string>santander</string>
 		<string>shareddocuments</string>
+		<string>stikdebug</string>
+		<string>stikjit</string>
 	</array>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>

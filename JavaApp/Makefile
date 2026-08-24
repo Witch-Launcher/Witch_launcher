@@ -29,7 +29,10 @@ TARGETS := $(TARGETS:$(SOURCEDIR)/%=$(OUTPUTDIR)/%.jar)
 TARGETS += $(OUTPUTDIR)/lwjgl-3.3.3.jar $(OUTPUTDIR)/lwjgl-3.3.6.jar $(OUTPUTDIR)/lwjgl-3.4.1.jar $(OUTPUTDIR)/cacio-init-agent.jar
 
 # Add all jars to classpath and allow compiling with private API
-JCFLAGS := -J-Djava.io.tmpdir=$(JAVAC_TMPDIR) -cp "$(subst $() $(),:,$(wildcard $(SOURCEDIR)/*/):$(wildcard libs/*/*.jar))" -XDignore.symbol.file
+# mcstub_sources/ holds compile-only Minecraft API stubs (see
+# net/minecraft/server/packs/resources/IoSupplier.java): javac resolves them
+# for descriptors but their .class files are never packaged.
+JCFLAGS := -J-Djava.io.tmpdir=$(JAVAC_TMPDIR) -cp "$(subst $() $(),:,$(wildcard $(SOURCEDIR)/*/):$(abspath mcstub_sources):$(wildcard libs/*/*.jar))" -XDignore.symbol.file
 
 all: $(TARGETS)
 	
@@ -96,6 +99,7 @@ $(OUTPUTDIR)/lwjgl-3.3.3.jar: $(CLASSES)
 	@cd $(OUTPUTDIR)/lwjgl33_lib && find ../../libs/lwjgl -name 'lwjgl*.jar' ! -name 'lwjgl.jar' -exec $(BOOTJDK)/jar -xf {} \; && rm -rf META-INF
 	@cd $(OUTPUTDIR)/lwjgl33_lib && $(BOOTJDK)/jar -xf "../../libs/lwjgl/lwjgl.jar" && rm -rf META-INF
 	@cp -R $(OUTPUTDIR)/lwjgl/* $(OUTPUTDIR)/lwjgl33_lib/
+	@python3 ../scripts/strip_v69_classes.py $(OUTPUTDIR)/lwjgl33_lib
 	@$(BOOTJDK)/jar -cf $@ -C $(OUTPUTDIR)/lwjgl33_lib .
 
 # Build LWJGL 3.3.6
@@ -107,6 +111,7 @@ $(OUTPUTDIR)/lwjgl-3.3.6.jar: $(CLASSES)
 	@cd $(OUTPUTDIR)/lwjgl36_lib && find ../../libs/lwjgl36 -name 'lwjgl*.jar' ! -name 'lwjgl.jar' -exec $(BOOTJDK)/jar -xf {} \; && rm -rf META-INF
 	@cd $(OUTPUTDIR)/lwjgl36_lib && $(BOOTJDK)/jar -xf "../../libs/lwjgl36/lwjgl.jar" && rm -rf META-INF
 	@cp -R $(OUTPUTDIR)/lwjgl/* $(OUTPUTDIR)/lwjgl36_lib/
+	@python3 ../scripts/strip_v69_classes.py $(OUTPUTDIR)/lwjgl36_lib
 	@$(BOOTJDK)/jar -cf $@ -C $(OUTPUTDIR)/lwjgl36_lib .
 
 $(OUTPUTDIR)/lwjgl-3.4.1.jar: $(CLASSES)
@@ -121,6 +126,7 @@ $(OUTPUTDIR)/lwjgl-3.4.1.jar: $(CLASSES)
 	# org/jspecify from lwjgl-core would split the package with the real
 	# org.jspecify:jspecify jar -> "Split package: org.jspecify". Strip it.
 	@rm -rf $(OUTPUTDIR)/lwjgl41_lib/org/jspecify
+	@python3 ../scripts/strip_v69_classes.py $(OUTPUTDIR)/lwjgl41_lib
 	@$(BOOTJDK)/jar -cf $@ -C $(OUTPUTDIR)/lwjgl41_lib .
 
 # Legacy alias

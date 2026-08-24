@@ -21,6 +21,12 @@ public final class MacosUtil {
     private MacosUtil() {
     }
 
+    // MC 1.20.1 (SRG m_247671_) passes the window icon supplier; older/newer
+    // builds call a no-arg variant. Keep both signatures so every era links.
     public static void disableCloseWindowMenuItem() {
+    }
+
+    public static void disableCloseWindowMenuItem(
+            net.minecraft.server.packs.resources.IoSupplier<?> iconSupplier) {
     }
 }

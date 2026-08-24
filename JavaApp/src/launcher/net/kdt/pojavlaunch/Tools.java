@@ -31,12 +31,15 @@ import java.nio.file.Files;
 import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.jar.JarFile;
 import java.util.zip.ZipEntry;
+import java.util.zip.ZipInputStream;
+import java.util.zip.ZipOutputStream;
 import net.kdt.pojavlaunch.uikit.UIKit;
 import net.kdt.pojavlaunch.utils.JSONUtils;
 import net.kdt.pojavlaunch.value.DependentLibrary;
@@ -139,6 +142,225 @@ public final class Tools {
         }
     }
 
+    // Forge 1.17+ resolves every jar on java.class.path as a JPMS module
+    // (BootstrapLauncher / the newer net.minecraftforge.bootstrap), and its
+    // modlauncher runs each class through a bundled ASM while transforming.
+    // Two classes of bytecode break that layer:
+    //
+    //  1. Our bundled LWJGL jars carry an iOS shim under
+    //     com/mojang/blaze3d/platform (MacosUtil); Minecraft itself ships that
+    //     package too, and JPMS forbids one package living in two modules:
+    //       ResolutionException: Module minecraft contains package ...
+    //  2. Class files with a major version newer than what modlauncher's ASM
+    //      supports crash the transform ("Unsupported class file major
+    //      version 69" with its bundled ASM 9.5, which reads up to Java 23).
+    //
+    // Fix: copy every jar destined for the module path into a writable cache
+    // dir once, dropping com/mojang/** from bundled LWJGL jars and >=Java24
+    // classes from ALL jars, then swap the copies in BEFORE Forge reads them.
+    // module-info.class is ALWAYS kept regardless of its version: it carries
+    // the JPMS module name, and losing it renames the module (gson ->
+    // "com.google.gson" becomes filename-derived "gson"), which defeats
+    // BootstrapLauncher's JarJar dedupe and explodes with duplicate-export
+    // ResolutionExceptions. Cache folders embed the source path hash + length
+    // so app updates invalidate them.
+    // moduleName -> classpath entry that first claimed it during this run.
+    // Mirrors BootstrapLauncher's duplicate-module detection: two jars whose
+    // Automatic-Module-Name collide (e.g. asm-analysis 9.8 left over from an
+    // old install next to our upgraded 9.9.1) abort the whole bootstrap, so
+    // drop later duplicates here instead.
+    private static final Map<String, String> MODULE_NAME_OWNERS = new HashMap<>();
+
+    private static void sanitizeModulePathForForge() {
+        String cp = System.getProperty("java.class.path");
+        if (cp == null || cp.isEmpty()) return;
+        MODULE_NAME_OWNERS.clear();
+        StringBuilder rebuilt = new StringBuilder(cp.length());
+        boolean changed = false;
+        for (String entry : cp.split(":")) {
+            String replacement = sanitizeJarEntry(entry);
+            changed |= replacement != entry;
+            if (replacement == null) continue;
+            if (rebuilt.length() > 0) rebuilt.append(':');
+            rebuilt.append(replacement);
+        }
+        if (changed) {
+            System.setProperty("java.class.path", rebuilt.toString());
+            System.out.println("[ModuleFix] java.class.path now points at module-safe copies");
+        }
+    }
+
+    // Returns a module-safe copy of one classpath jar, the entry itself if it
+    // needs no treatment, or null if the entry duplicates a module another
+    // jar already provides (the caller must drop it from the classpath).
+    private static String sanitizeJarEntry(String entry) {
+        File source = new File(entry);
+        if (!entry.endsWith(".jar") || !source.isFile()
+                || entry.contains("/cache/forge-module-safe/")
+                || entry.contains("/cache/lwjgl-module-safe/")) {
+            return entry;
+        }
+        try {
+            boolean lwjglBundle = entry.endsWith("/lwjgl.jar") && entry.contains("/libs/lwjgl");
+            File destDir = new File(DIR_GAME_NEW + "/cache/forge-module-safe/"
+                + source.getParentFile().getName() + "-"
+                + Integer.toHexString(source.getAbsolutePath().hashCode()) + "-" + source.length());
+            File dest = new File(destDir, source.getName());
+            if (!dest.isFile()) {
+                destDir.mkdirs();
+                String report = copyJarSanitized(source, dest, lwjglBundle);
+                System.out.println("[ModuleFix] wrote module-safe copy: " + dest + report);
+            } else {
+                System.out.println("[ModuleFix] reusing module-safe copy: " + dest);
+            }
+            String moduleName = readModuleName(dest);
+            String previous = MODULE_NAME_OWNERS.putIfAbsent(moduleName, entry);
+            if (previous != null && !previous.equals(entry)) {
+                System.out.println("[ModuleFix] dropped duplicate module '" + moduleName
+                    + "' from " + entry + " (already provided by " + previous + ")");
+                return null;
+            }
+            return dest.getAbsolutePath();
+        } catch (Throwable t) {
+            System.err.println("[ModuleFix] failed to sanitize " + entry + ", keeping original: " + t);
+            return entry;
+        }
+    }
+
+    // Best-effort JPMS module identity of a jar: Automatic-Module-Name from
+    // the manifest when present, otherwise a normalized filename-derived name
+    // with the trailing version stripped ("asm-analysis-9.8" ->
+    // "asm.analysis"). Only used for duplicate detection, so approximation is
+    // fine as long as it is deterministic.
+    private static String readModuleName(File jar) throws IOException {
+        try (JarFile jf = new JarFile(jar)) {
+            java.util.jar.Manifest mf = jf.getManifest();
+            if (mf != null) {
+                String auto = mf.getMainAttributes().getValue("Automatic-Module-Name");
+                if (auto != null && !auto.isEmpty()) return auto;
+            }
+        }
+        String base = jar.getName();
+        base = base.substring(0, base.length() - 4); // .jar
+        java.util.regex.Matcher m = java.util.regex.Pattern
+            .compile("^(.+?)-?[0-9][0-9A-Za-z._-]*$").matcher(base);
+        if (m.matches()) base = m.group(1);
+        return base.replaceAll("[^A-Za-z0-9]", ".");
+    }
+
+    // Copies src to dest, skipping entries per policy:
+    //  - .class files whose major version is Java 24+ (>= 68): modlauncher's
+    //    ASM cannot read them; dropped names are reported so repeat offenders
+    //    can be identified from device logs,
+    //  - everything under com/mojang/** when dropMojang is set (bundled LWJGL
+    //    shim classes; see the MacShims note for why Forge must not see them
+    //    inside the lwjgl module).
+    // module-info.class is never dropped (see the class javadoc).
+    private static String copyJarSanitized(File source, File dest, boolean dropMojang) throws IOException {
+        File tmp = new File(dest.getParentFile(), dest.getName() + ".tmp");
+        byte[] buf = new byte[65536];
+        List<String> dropped = new ArrayList<>();
+        int mojangDropped = 0;
+        try (ZipInputStream zin = new ZipInputStream(new FileInputStream(source));
+             ZipOutputStream zout = new ZipOutputStream(new FileOutputStream(tmp))) {
+            ZipEntry in;
+            while ((in = zin.getNextEntry()) != null) {
+                String name = in.getName();
+                if (dropMojang && name.startsWith("com/mojang/")) {
+                    mojangDropped++;
+                    continue;
+                }
+                if (name.endsWith(".class") && !name.endsWith("module-info.class")) {
+                    byte[] head = new byte[8];
+                    int read = 0;
+                    while (read < head.length) {
+                        int n = zin.read(head, read, head.length - read);
+                        if (n < 0) break;
+                        read += n;
+                    }
+                    int major = read == head.length ? ((head[6] & 0xFF) << 8 | (head[7] & 0xFF)) : 0;
+                    if (major >= 68) {
+                        if (dropped.size() < 5) dropped.add(name);
+                        continue;
+                    }
+                    zout.putNextEntry(new ZipEntry(name));
+                    zout.write(head, 0, read);
+                    int n;
+                    while ((n = zin.read(buf)) > 0) zout.write(buf, 0, n);
+                    zout.closeEntry();
+                    continue;
+                }
+                zout.putNextEntry(new ZipEntry(name));
+                int n;
+                while ((n = zin.read(buf)) > 0) zout.write(buf, 0, n);
+                zout.closeEntry();
+            }
+        }
+        if (!tmp.renameTo(dest)) {
+            Files.move(tmp.toPath(), dest.toPath(), StandardCopyOption.REPLACE_EXISTING);
+        }
+        String report = "";
+        if (!dropped.isEmpty()) {
+            report = " [dropped " + dropped.size() + "+ >=Java24 classes: " + String.join(", ", dropped) + "]";
+        }
+        if (mojangDropped > 0) {
+            report += " [dropped " + mojangDropped + " com/mojang entries]";
+        }
+        return report;
+    }
+
+    // Forge's fmlearlydisplay progress window initializes its GL context on one
+    // thread but paints from a worker thread. On iOS translation layers the
+    // per-thread context never carries over, so every textured draw dies
+    // silently and only the red background quads survive — the user sees a
+    // solid red screen for the whole mod-loading phase (plus
+    // glBindVertexArray(non-gen name) spam under Zink).
+    //
+    // Setting earlyWindowControl=false in FML's config makes
+    // ImmediateWindowHandler pick DummyProvider instead, which hands window
+    // creation off to net.minecraftforge.client.loading.NoVizFallback — i.e. a
+    // plain vanilla GLFW window created by Minecraft itself, exactly the path
+    // that already works on this port (the Mojang logo screen). This is also
+    // the long-standing desktop trick used for OptiFine compatibility.
+    private static void disableForgeEarlyWindow() {
+        try {
+            File configDir = new File(DIR_GAME_PROFILE, "config");
+            configDir.mkdirs();
+            File fmlToml = new File(configDir, "fml.toml"); // FMLPaths.FMLCONFIG
+            List<String> lines = new ArrayList<>();
+            if (fmlToml.isFile()) {
+                lines.addAll(Files.readAllLines(fmlToml.toPath()));
+            }
+            boolean found = false;
+            boolean modified = false;
+            for (int i = 0; i < lines.size(); i++) {
+                String trimmed = lines.get(i).trim();
+                if (trimmed.startsWith("earlyWindowControl") && trimmed.contains("=")) {
+                    found = true;
+                    if (!trimmed.endsWith("false")) {
+                        lines.set(i, "earlyWindowControl = false");
+                        modified = true;
+                    }
+                    break;
+                }
+            }
+            if (!found) {
+                if (!lines.isEmpty()) lines.add("");
+                lines.add("# Disabled by Witch: fmlearlydisplay cannot render on iOS GL translation layers");
+                lines.add("earlyWindowControl = false");
+                modified = true;
+            }
+            if (modified) {
+                Files.write(fmlToml.toPath(), lines);
+                System.out.println("[EarlyWindow] earlyWindowControl=false written to " + fmlToml);
+            } else {
+                System.out.println("[EarlyWindow] earlyWindowControl already disabled in " + fmlToml);
+            }
+        } catch (Throwable t) {
+            System.err.println("[EarlyWindow] failed to write fml.toml, early window stays enabled: " + t);
+        }
+    }
+
     public static void launchMinecraft(MinecraftAccount profile, final JMinecraftVersionList.Version versionInfo) throws Throwable {
         System.out.println("[DEBUG] launchMinecraft: id=" + versionInfo.id + " inheritsFrom=" + versionInfo.inheritsFrom + " assets=" + versionInfo.assets + " mainClass=" + versionInfo.mainClass);
         injectVoxyMemoryStorageConfig();
@@ -152,11 +374,41 @@ public final class Tools {
         if (mainClass != null && (mainClass.contains("fabric") || mainClass.contains("quilt"))) {
             neutralizeFabricLwjgl(versionInfo);
         }
+        // Forge/NeoForge only: see the javadoc of sanitizeModulePathForForge.
+        // The new Forge bootstrap (net.minecraftforge.bootstrap.ForgeBootstrap,
+        // MC 1.20.4+ / 26.x) and NeoForge's own entrypoint (net.neoforged.*)
+        // both contain the substring "forge", so match those too — they
+        // replaced BootstrapLauncher and need the same treatment.
+        boolean forgeTarget = "cpw.mods.bootstraplauncher.BootstrapLauncher".equals(mainClass)
+            || (mainClass != null && mainClass.contains("forge"));
+        if (forgeTarget) {
+            sanitizeModulePathForForge();
+            disableForgeEarlyWindow();
+        }
         String[] launchArgs = getMinecraftArgs(profile, versionInfo);
         System.out.println("[DEBUG] Minecraft Args: " + Arrays.toString(launchArgs));
 
         final String launchClassPath = generateLaunchClassPath(versionInfo);
         System.out.println("[DEBUG] Launch classpath: " + launchClassPath);
+
+        // The instance libraries are appended to java.class.path by
+        // PojavClassLoader.addURL below, and Forge resolves that property as
+        // its module path — so the game jars need the same module-safe
+        // treatment as the app's own libs (see sanitizeModulePathForForge).
+        final String effectiveLaunchClassPath;
+        if (forgeTarget) {
+            StringBuilder sanitized = new StringBuilder(launchClassPath.length());
+            for (String s : launchClassPath.split(":")) {
+                if (s.isEmpty()) continue;
+                String safe = sanitizeJarEntry(s);
+                if (safe == null) continue; // duplicate module, already dropped
+                if (sanitized.length() > 0) sanitized.append(':');
+                sanitized.append(safe);
+            }
+            effectiveLaunchClassPath = sanitized.toString();
+        } else {
+            effectiveLaunchClassPath = launchClassPath;
+        }
 
         System.out.println("Args init finished. Now starting game");
 
@@ -165,7 +417,7 @@ public final class Tools {
         for (String s : System.getProperty("java.class.path").split(":")) {
             loader.appendToClassPathForInstrumentation(s);
         }
-        for (String s : launchClassPath.split(":")) {
+        for (String s : effectiveLaunchClassPath.split(":")) {
             if (!s.isEmpty()) {
                 loader.addURL(new File(s).toURI().toURL());
             }
@@ -559,6 +811,12 @@ public final class Tools {
                     continue;
             }
 
+            // NeoForge 20.x installer profiles emit Gradle-style classifier
+            // suffixes inside the version segment ("org.ow2.asm:asm:9.8@jar");
+            // strip them so the numeric version comparisons below parse.
+            int atSign = libItem.name.indexOf('@');
+            if (atSign >= 0) libItem.name = libItem.name.substring(0, atSign);
+
             String[] libParts = libItem.name.split(":");
             if (libParts.length < 3) {
                 System.out.println("Skipping malformed library entry: " + libItem.name);
@@ -639,19 +897,62 @@ createLibraryInfo(libItem);
         // classifier entry, so the jar never lands on the classpath and FML
         // aborts with "Failed to find system mod: forge". Append every
         // *-universal.jar shipped under libraries/net/minecraftforge/forge/.
+        //
+        // SCOPE: instances share one libraries/ tree, so every installed
+        // Forge build lives side by side ("1.20.1-47.0.44", "26.2-65.0.0",
+        // ...). Universal dir names start with their Minecraft version, and
+        // inheritsFrom IS that version, so only pick universals whose
+        // directory matches — otherwise launching one instance drags every
+        // other instance's universal onto the module path and JPMS blows up
+        // on duplicate net.minecraftforge packages.
+        String mcPrefix;
+        if (info.inheritsFrom != null && !info.inheritsFrom.isEmpty()) {
+            mcPrefix = info.inheritsFrom;
+        } else {
+            String id = info.id != null ? info.id : "";
+            int cut = id.indexOf("-forge");
+            if (cut < 0) cut = id.indexOf("-neoforge");
+            mcPrefix = cut > 0 ? id.substring(0, cut) : id;
+        }
         File forgeLibRoot = new File(Tools.DIR_HOME_LIBRARY + "/net/minecraftforge/forge");
         if (forgeLibRoot.isDirectory()) {
             File[] forgeVersionDirs = forgeLibRoot.listFiles();
             if (forgeVersionDirs != null) {
+                List<File> matched = new ArrayList<>();
+                int totalUniversals = 0;
                 for (File forgeVersionDir : forgeVersionDirs) {
                     if (!forgeVersionDir.isDirectory()) continue;
+                    boolean prefixMatch = forgeVersionDir.getName().startsWith(mcPrefix + "-")
+                        || forgeVersionDir.getName().equals(mcPrefix);
                     File[] forgeJars = forgeVersionDir.listFiles();
                     if (forgeJars == null) continue;
                     for (File forgeJar : forgeJars) {
-                        if (forgeJar.getName().endsWith("-universal.jar")
-                                && !libDir.contains(forgeJar.getAbsolutePath())) {
-                            libDir.add(forgeJar.getAbsolutePath());
+                        if (!forgeJar.getName().endsWith("-universal.jar")) continue;
+                        totalUniversals++;
+                        if (prefixMatch) matched.add(forgeJar);
+                    }
+                }
+                List<File> chosen = matched;
+                if (chosen.isEmpty() && totalUniversals > 0) {
+                    // Unknown naming scheme: fall back to the old add-all
+                    // behaviour rather than breaking the FML fix.
+                    for (File forgeVersionDir : forgeVersionDirs) {
+                        File[] forgeJars = forgeVersionDir.listFiles();
+                        if (forgeJars == null) continue;
+                        for (File forgeJar : forgeJars) {
+                            if (forgeJar.getName().endsWith("-universal.jar")) matched.add(forgeJar);
                         }
+                    }
+                    chosen = matched;
+                    System.out.println("[ClassPath] no universal matches MC '" + mcPrefix
+                        + "', falling back to all " + chosen.size());
+                } else if (totalUniversals > chosen.size()) {
+                    System.out.println("[ClassPath] scoped universals to MC '" + mcPrefix + "': "
+                        + chosen.size() + " of " + totalUniversals);
+                }
+                for (File forgeJar : chosen) {
+                    if (!libDir.contains(forgeJar.getAbsolutePath())) {
+                        libDir.add(forgeJar.getAbsolutePath());
                     }
                 }
             }

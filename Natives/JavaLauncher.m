@@ -339,6 +339,108 @@ static BOOL RuntimeSupportsDebugJITMapping(NSString *javaHome) {
     return [contents isEqualToString:@"witch-mirror-mapping-v1\n"];
 }
 
+// ==================== Automatic StikDebug / LiveContainer JIT provisioning ====================
+// Witch implements the universal iOS 26 JIT breakpoint protocol (brk #0xf00d,
+// x16 command in x0/x1). Two automatic paths remove the manual dance of
+// opening StikDebug, selecting the app and assigning a script by hand:
+//
+// 1. LiveContainer: LC reads `jitLaunchScriptJs` (base64 JS) from this app's
+//    LCAppInfo.plist when launching a JIT-required app (LCAppModel.swift) and
+//    feeds it to its JIT enabler, so keeping that key current removes
+//    "hold app -> settings -> select JIT launch Script".
+//
+// 2. StikDebug: the official integration scheme (StikDebug/StikJIT
+//    INTEGRATION.md Part 2):
+//    stikdebug://enable-jit?bundle-id=<bid>&pid=<pid>&script-name=<name>
+//    makes StikDebug attach to OUR pid and service the breakpoints itself.
+static void provisionStikJITScripts(void) {
+    NSString *inBundleScriptPath = [NSBundle.mainBundle pathForResource:@"UniversalJIT26" ofType:@"js"];
+    if (!inBundleScriptPath) {
+        NSLog(@"[StikAutoJIT] UniversalJIT26.js missing from bundle; cannot auto-provision");
+        return;
+    }
+    NSData *scriptData = [NSData dataWithContentsOfFile:inBundleScriptPath];
+    if (scriptData.length == 0) return;
+    NSString *b64 = [scriptData base64EncodedStringWithOptions:0];
+
+    // Keep the Documents copy identical to the bundled protocol version so a
+    // manual import into StikDebug's Scripts section always matches.
+    NSString *docScriptPath =
+        [NSString stringWithFormat:@"%s/UniversalJIT26.js", getenv("POJAV_HOME")];
+    NSData *existingDoc = [NSData dataWithContentsOfFile:docScriptPath];
+    if (!existingDoc || ![existingDoc isEqualToData:scriptData]) {
+        [[NSFileManager defaultManager] removeItemAtPath:docScriptPath error:nil];
+        NSError *copyError = nil;
+        if ([NSFileManager.defaultManager copyItemAtPath:inBundleScriptPath
+                                                 toPath:docScriptPath error:&copyError]) {
+            NSLog(@"[StikAutoJIT] Refreshed Documents/UniversalJIT26.js");
+        } else {
+            NSLog(@"[StikAutoJIT] Failed to refresh Documents copy: %@",
+                  copyError.localizedDescription);
+        }
+    }
+
+    // LiveContainer auto-load path.
+    NSString *lcAppInfoPath =
+        [NSBundle.mainBundle.bundlePath stringByAppendingPathComponent:@"LCAppInfo.plist"];
+    NSMutableDictionary *lcAppInfo =
+        [NSMutableDictionary dictionaryWithContentsOfFile:lcAppInfoPath];
+    if (!lcAppInfo) {
+        NSLog(@"[StikAutoJIT] No LCAppInfo.plist beside the bundle - not running under LiveContainer");
+        return;
+    }
+    if ([lcAppInfo[@"jitLaunchScriptJs"] isEqualToString:b64]) {
+        NSLog(@"[StikAutoJIT] LCAppInfo.plist already carries the current JIT script");
+        return;
+    }
+    lcAppInfo[@"jitLaunchScriptJs"] = b64;
+    BOOL ok = [lcAppInfo writeToFile:lcAppInfoPath atomically:YES];
+    NSLog(@"[StikAutoJIT] LCAppInfo.plist jitLaunchScriptJs %@", ok ? @"updated" : @"write FAILED");
+}
+
+static void requestStikDebugJIT(void) {
+    // Read the bundle ID from the on-disk Info.plist first: LiveContainer may
+    // swizzle [NSBundle bundleIdentifier] to its own container identity, while
+    // StikDebug needs the real target app id (see MeloVertex PR #22).
+    NSDictionary *onDiskInfo = [NSDictionary dictionaryWithContentsOfFile:
+        [NSBundle.mainBundle.bundlePath stringByAppendingPathComponent:@"Info.plist"]];
+    NSString *bundleID = onDiskInfo[@"CFBundleIdentifier"];
+    if (![bundleID isKindOfClass:[NSString class]] || bundleID.length == 0) {
+        bundleID = NSBundle.mainBundle.bundleIdentifier;
+    }
+    if (![bundleID isKindOfClass:[NSString class]] || bundleID.length == 0) {
+        NSLog(@"[StikAutoJIT] Could not determine bundle ID; skipping stikdebug:// request");
+        return;
+    }
+
+    // Developer-selected script filename; normally universal.js. Overridable
+    // via debug.stik_script_name for installs that imported another name.
+    NSString *scriptName = getPrefObject(@"debug.stik_script_name");
+    if (![scriptName isKindOfClass:[NSString class]] || scriptName.length == 0) {
+        scriptName = @"universal.js";
+    }
+
+    NSURLComponents *components =
+        [[NSURLComponents alloc] initWithString:@"stikdebug://enable-jit"];
+    components.queryItems = @[
+        [NSURLQueryItem queryItemWithName:@"bundle-id" value:bundleID],
+        [NSURLQueryItem queryItemWithName:@"pid" value:
+            [[NSNumber numberWithInt:getpid()] stringValue]],
+        [NSURLQueryItem queryItemWithName:@"script-name" value:scriptName],
+    ];
+    NSURL *url = components.URL;
+    if (!url) return;
+
+    dispatch_async(dispatch_get_main_queue(), ^{
+        NSLog(@"[StikAutoJIT] Requesting JIT from StikDebug: %@", url.absoluteString);
+        [[UIApplication sharedApplication] openURL:url options:@{} completionHandler:^(BOOL opened) {
+            NSLog(@"[StikAutoJIT] StikDebug %@", opened ?
+                @"accepted the request - keep it in the foreground/PiP until it finishes, then return to Witch" :
+                @"could not be opened (installed? LocalDevVPN connected?)");
+        }];
+    });
+}
+
 int launchJVM(NSString *username, id launchTarget, int width, int height, int minVersion) {
     return launchJVMWithArgs(username, launchTarget, width, height, minVersion, nil);
 }
@@ -383,6 +485,10 @@ int launchJVMWithArgs(NSString *username, id launchTarget, int width, int height
         // sending our extension first can leave an unattached debugger waiting
         // forever on command 2 (the black screen seen before "probe returned").
         // Use the same brk #0xf00d path as patched libjvm (not legacy brk #0x69).
+        provisionStikJITScripts();
+        if (!traced) {
+            requestStikDebugJIT();
+        }
         void *probeMapping = JIT26PrepareRegion(NULL, getpagesize());
         NSLog(@"[JavaLauncher] JIT26 probe returned %p", probeMapping);
         if (!JIT26ProbeLooksValid(probeMapping)) {
@@ -827,6 +933,16 @@ int launchJVMWithArgs(NSString *username, id launchTarget, int width, int height
     margv[++margc] = "-Djava.awt.headless=false";
     margv[++margc] = "-Dcacio.font.fontmanager=sun.awt.X11FontManager";
     margv[++margc] = "-Dcacio.font.fontscaler=sun.font.FreetypeFontScaler";
+    // The installer progress UI launches the JVM without a GLFW surface, so
+    // windowWidth/windowHeight arrive as 0. Cacio builds its virtual screen
+    // from cacio.managed.screensize and throws
+    // "IllegalArgumentException: Width (0) and height (0) cannot be <= 0"
+    // on a zero size, killing AWT init before Forge/NeoForge installers can
+    // run. Fall back to a nominal 720p desktop when no real size is known.
+    if (width <= 0 || height <= 0) {
+        width = 1280;
+        height = 720;
+    }
     margv[++margc] = [NSString stringWithFormat:@"-Dcacio.managed.screensize=%dx%d", width, height].UTF8String;
     margv[++margc] = "-Dswing.defaultlaf=javax.swing.plaf.metal.MetalLookAndFeel";
     if (isJava8) {
@@ -903,7 +1019,13 @@ int launchJVMWithArgs(NSString *username, id launchTarget, int width, int height
     }
     setenv("LWJGL_VERSION", lwjglVersion.UTF8String, 1);
 
-    NSString *classpath = [NSString stringWithFormat:@"%@/*:%@/*:%@", librariesPath, lwjglDirPath, lwjglJarPath];
+    // NOTE: do NOT append lwjglJarPath explicitly here. The `lwjglDirPath/*`
+    // wildcard already expands to every jar in that folder (including
+    // lwjgl.jar). Adding it a second time makes `libs/lwjgl33/lwjgl.jar` appear
+    // twice on the classpath. Forge/NeoForge (SecureJarHandler's UnionFileSystem)
+    // rejects duplicate keys with `IllegalStateException: Duplicate key ...`,
+    // which crashes older/lower Minecraft versions that use it.
+    NSString *classpath = [NSString stringWithFormat:@"%@/*:%@/*", librariesPath, lwjglDirPath];
     if (launchJar) {
         classpath = [classpath stringByAppendingFormat:@":%@", launchTarget];
         margv[++margc] = [NSString stringWithFormat:@"-Dpojav.runJar=%@", launchTarget].UTF8String;
