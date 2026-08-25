@@ -371,6 +371,21 @@ int launchJVMWithArgs(NSString *username, id launchTarget, int width, int height
         // dialog instead of dying to the home screen.
         BOOL traced = processIsDebugged();
         NSLog(@"[JavaLauncher] JIT26 handshake begin (debugger attached: %d)", traced);
+        if (!traced) {
+            // No debugger servicing breakpoints. The patched JRE on iOS 26+/27
+            // always routes code-cache allocation through brk #0xf00d / 0x6a;
+            // without a debugger those brks raise SIGTRAP which loops forever
+            // (PC stays at the faulting instruction). Show a clear error instead
+            // of hanging with a black screen.
+            showDialog(localize(@"Error", nil),
+                @"JIT is required but no debugger is attached.\n\n"
+                 @"1. Open StikDebug\n"
+                 @"2. Enable JIT for Witch (toggle ON)\n"
+                 @"3. Assign the \"Universal JIT 26\" script\n"
+                 @"4. Close and reopen Witch, then try again");
+            [PLLogOutputView handleExitCode:1];
+            return 1;
+        }
         struct sigaction jitTrapSa = {0};
         struct sigaction oldTrapSa;
         jitTrapSa.sa_handler = onUnservicedBrk;
@@ -442,6 +457,7 @@ int launchJVMWithArgs(NSString *username, id launchTarget, int width, int height
         }
         // Activate Library Validation bypass for external runtime and dylibs (JNA, etc)
         init_bypassDyldLibValidation();
+        NSLog(@"[JavaLauncher] DyldLVBypass init completed");
     } else {
         NSLog(@"[DyldLVBypass] Hook disabled! Loading unsigned dylib will cause code signature error.");
     }

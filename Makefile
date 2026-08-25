@@ -340,14 +340,23 @@ jre: native
 	if ls jre*.tar.xz >/dev/null 2>&1; then rm -f jre*.tar.xz; fi; \
 	rm -rf $(SOURCEDIR)/depends/java-{8,17,21,25}-openjdk/{ASSEMBLY_EXCEPTION,bin,include,jre,legal,LICENSE,man,THIRD_PARTY_README,lib/{ct.sym,jspawnhelper,libjsig.dylib,src.zip,tools.jar}}; \
 	rm -f $(SOURCEDIR)/depends/java-{8,17,21,25}-openjdk/.amethyst-mirror-mapping; \
+	rm -f $(SOURCEDIR)/depends/java-{8,17,21,25}-openjdk/.witch-mirror-mapping; \
 	printf 'witch-mirror-mapping-v1\n' > $(SOURCEDIR)/depends/java-17-openjdk/.witch-mirror-mapping; \
 	printf 'witch-mirror-mapping-v1\n' > $(SOURCEDIR)/depends/java-21-openjdk/.witch-mirror-mapping; \
 	printf 'witch-mirror-mapping-v1\n' > $(SOURCEDIR)/depends/java-25-openjdk/.witch-mirror-mapping; \
+	for ver in 17 21; do \
+		jvm="$(SOURCEDIR)/depends/java-$$ver-openjdk/lib/server/libjvm.dylib"; \
+		if [ -f "$$jvm" ]; then \
+			python3 $(SOURCEDIR)/scripts/patch_jre_mirror_runtime.py $$ver "$$jvm" || true; \
+		fi; \
+	done; \
+	jvm25="$(SOURCEDIR)/depends/java-25-openjdk/lib/server/libjvm.dylib"; \
+	if [ -f "$$jvm25" ]; then \
+		python3 $(SOURCEDIR)/scripts/patch_jre25_runtime.py "$$jvm25" || true; \
+	fi; \
 	for ver in 21 25; do \
 		jvm="$(SOURCEDIR)/depends/java-$$ver-openjdk/lib/server/libjvm.dylib"; \
 		if [ -f "$$jvm" ]; then \
-			python3 $(SOURCEDIR)/scripts/patch_libjvm_mirror_brk.py "$$jvm"; \
-			python3 $(SOURCEDIR)/scripts/patch_libjvm_jit_alloc.py "$$jvm"; \
 			if ! otool -l "$$jvm" >/dev/null 2>&1; then \
 				echo "[jre] ERROR: libjvm.dylib for Java $$ver failed Mach-O validation (corrupt build/download?)"; \
 				exit 1; \

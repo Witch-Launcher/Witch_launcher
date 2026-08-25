@@ -2,6 +2,7 @@
 
 #include "jni.h"
 #include <dlfcn.h>
+#include <os/lock.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
@@ -225,6 +226,31 @@ static double hardwareDeviceVersion(NSString *identifier) {
     return digits.doubleValue;
 }
 
+static BOOL DeviceLikelyHasTXMFromChipID(void) {
+    NSUInteger (*MGGetSInt64Answer)(NSString *) = dlsym(RTLD_DEFAULT, "MGGetSint64Answer");
+    if (MGGetSInt64Answer == NULL) {
+        // Failing closed would select the legacy mapping path on the exact
+        // systems where Apple made Preboot unreadable. Prefer the TXM-safe
+        // path on recent systems when MobileGestalt is unavailable.
+        if (@available(iOS 19.0, *)) return YES;
+        return NO;
+    }
+
+    switch (MGGetSInt64Answer(@"ChipID")) {
+        case 0x8020: // A12
+        case 0x8027: // A12X/Z
+            return NO;
+        case 0x8030: // A13
+        case 0x8101: // A14
+        case 0x8103: // M1
+            if (@available(iOS 27.0, *)) return YES;
+            return NO;
+        default:
+            if (@available(iOS 19.0, *)) return YES;
+            return NO;
+    }
+}
+
 BOOL DeviceHasTXMReal(void) {
     // The launcher's TXM classification MUST match the debugger's (StikDebug
     // 3.1.6+, ProcessInfo+TXM.swift / PR #416): StikDebug decides whether to
@@ -238,63 +264,80 @@ BOOL DeviceHasTXMReal(void) {
         return YES;
     }
 
-    NSString *machine = hardwareMachineIdentifier();
-    double version = hardwareDeviceVersion(machine);
-    NSLog(@"[JIT] hw.machine=%@ (version %.2f)", machine ?: @"unknown", version);
+    // Try the direct active-Preboot path before falling back to legacy
+    // directory enumeration.
+    static const char *modernTXMPath =
+        "/System/Volumes/Preboot/boot/usr/standalone/firmware/FUD/"
+        "Ap,TrustedExecutionMonitor.img4";
+    if (access(modernTXMPath, F_OK) == 0) return YES;
 
-    if (@available(iOS 27.0, *)) {
-        // iOS 27: every device is TXM except iPad Pro 11"/12.9" (M1),
-        // hardware identifiers iPad8,11 / iPad8,12
-        BOOL txm = (!machine || (![machine isEqualToString:@"iPad8,11"] && ![machine isEqualToString:@"iPad8,12"]));
-        NSLog(@"[JIT] iOS 27 blanket TXM rule: %@", txm ? @"TXM" : @"non-TXM (iPad8,11/8,12)");
-        return txm;
+    DIR *d = opendir("/private/preboot");
+    if (!d) {
+        // /private/preboot is no longer readable on iOS 26.6 and iOS 27.
+        // Fall back to a conservative hardware/OS heuristic.
+        return DeviceLikelyHasTXMFromChipID();
     }
-    if (@available(iOS 26.0, *)) {
-        // iOS 26.x: TXM = iPhone hardware version >= 14.2 (iPhone 13/A15+)
-        // or iPad hardware version >= 14.5; A12/A13/A14/M1 stay non-TXM
-        if (!machine) return NO;
-        if ([machine hasPrefix:@"iPad"]) {
-            return version >= 14.5;
+
+    struct dirent *dir;
+    BOOL hasTXM = NO;
+    while ((dir = readdir(d)) != NULL) {
+        if(strlen(dir->d_name) == 96) {
+            char txmPath[PATH_MAX] = {0};
+            int length = snprintf(txmPath, sizeof(txmPath),
+                "/private/preboot/%s/usr/standalone/firmware/FUD/"
+                "Ap,TrustedExecutionMonitor.img4", dir->d_name);
+            if (length > 0 && (size_t)length < sizeof(txmPath) &&
+                    access(txmPath, F_OK) == 0) {
+                hasTXM = YES;
+                break;
+            }
         }
-        return version >= 14.2;
     }
-    return NO;
+    closedir(d);
+    return hasTXM;
 }
+
 // Thin wrapper of DeviceHasJITFlags to respect overriden flag
-__exported BOOL DeviceHasTXM(void) {
+BOOL DeviceHasTXM(void) {
     return DeviceHasJITFlags(JIT_FLAG_HAS_TXM);
 }
 
 JITFlags DeviceGetJITFlags(BOOL refresh) {
+    static os_unfair_lock cacheLock = OS_UNFAIR_LOCK_INIT;
     static JITFlags cachedFlags = 0;
-    static dispatch_once_t onceToken;
-    if (refresh) onceToken = 0;
-    dispatch_once(&onceToken, ^{
+    static BOOL cacheInitialized = NO;
+
+    os_unfair_lock_lock(&cacheLock);
+    if (refresh || !cacheInitialized) {
+        JITFlags flags = 0;
         const char *s = getenv("JIT_FLAGS");
         if (s) {
             if (s[0] == '0' && tolower(s[1]) == 'b') {
-                cachedFlags = strtoul(s + 2, NULL, 2);
+                flags = strtoul(s + 2, NULL, 2);
             } else {
-                cachedFlags = strtoul(s, NULL, 0);
+                flags = strtoul(s, NULL, 0);
             }
-            NSLog(@"[JIT] Using overridden JIT flags: 0x%X", cachedFlags);
-            return;
-        }
-        
-        if (@available(iOS 26.0, *)) {
-            cachedFlags |= JIT_FLAG_IS_IOS_26;
-            if (!DeviceCanCreateRXMap()) {
-                cachedFlags |= JIT_FLAG_FORCE_MIRRORED;
+            NSLog(@"[JIT] Using overridden JIT flags: 0x%X", flags);
+        } else {
+            if (@available(iOS 26.0, *)) {
+                flags |= JIT_FLAG_IS_IOS_26;
+                if (!DeviceCanCreateRXMap()) {
+                    flags |= JIT_FLAG_FORCE_MIRRORED;
+                }
+            }
+            if (DeviceHasTXMReal()) {
+                flags |= JIT_FLAG_HAS_TXM;
             }
         }
-        if (DeviceHasTXMReal()) {
-            cachedFlags |= JIT_FLAG_HAS_TXM;
-        }
-        
-        if (refresh) NSLog(@"[JIT] Using computed JIT flags: 0x%X", cachedFlags);
-    });
-    return cachedFlags;
+
+        cachedFlags = flags;
+        cacheInitialized = YES;
+    }
+    JITFlags result = cachedFlags;
+    os_unfair_lock_unlock(&cacheLock);
+    return result;
 }
+
 BOOL DeviceHasJITFlags(JITFlags flags) {
     return (DeviceGetJITFlags(NO) & flags) == flags;
 }

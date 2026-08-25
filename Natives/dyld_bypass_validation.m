@@ -94,13 +94,18 @@ bool redirectFunctionMirrored(char *name, void *patchAddr, void *target) {
     }
     
     mirrored += (vm_address_t)patchAddr & PAGE_MASK;
-    vm_protect(mach_task_self(), mirrored, sizeof(patch), NO,
-               VM_PROT_READ | VM_PROT_WRITE);
+    kern_return_t kret = vm_protect(mach_task_self(), mirrored, sizeof(patch), NO,
+               VM_PROT_READ | VM_PROT_WRITE | VM_PROT_COPY);
+    if (kret != KERN_SUCCESS) {
+        NSLog(@"[DyldLVBypass] vm_protect(RW) fails on mirror for %s: 0x%x", name, kret);
+        vm_deallocate(mach_task_self(), mirrored, sizeof(patch));
+        return FALSE;
+    }
     builtin_memcpy((char *)mirrored, patch, sizeof(patch));
     *(void **)((char*)mirrored + 16) = target;
     sys_icache_invalidate((void*)patchAddr, sizeof(patch));
     
-    NSDebugLog(@"[DyldLVBypass] hook %s succeed!", name);
+    NSLog(@"[DyldLVBypass] hook %s succeed!", name);
     
     vm_deallocate(mach_task_self(), mirrored, sizeof(patch));
     return TRUE;
@@ -222,9 +227,13 @@ void* hooked_mmap(void *addr, size_t len, int prot, int flags, int fd, off_t off
             vm_prot_t cur_prot, max_prot;
             kern_return_t ret = vm_remap(mach_task_self(), &mirrored, len, 0, VM_FLAGS_ANYWHERE, mach_task_self(), (vm_address_t)map, false, &cur_prot, &max_prot, VM_INHERIT_SHARE);
             if(ret == KERN_SUCCESS) {
-                vm_protect(mach_task_self(), mirrored, len, NO,
-                           VM_PROT_READ | VM_PROT_WRITE);
-                memcpy((void*)mirrored, memoryLoadedFile, len);
+                kern_return_t mret = vm_protect(mach_task_self(), mirrored, len, NO,
+                           VM_PROT_READ | VM_PROT_WRITE | VM_PROT_COPY);
+                if (mret == KERN_SUCCESS) {
+                    memcpy((void*)mirrored, memoryLoadedFile, len);
+                } else {
+                    NSLog(@"[DyldLVBypass] hooked_mmap: vm_protect(RW) fails on mirror: 0x%x", mret);
+                }
                 vm_deallocate(mach_task_self(), mirrored, len);
             }
         }
@@ -268,26 +277,27 @@ void init_bypassDyldLibValidation() {
 
     NSDebugLog(@"[DyldLVBypass] init");
 
-    // Switch-based logic: strip IS_IOS_26 flag then decide redirect strategy.
-    // This ensures a device with HAS_TXM but without FORCE_MIRRORED (i.e. JIT
-    // debugger attached, can create RX maps) uses redirectFunctionDirect.
-    // On iOS 26+ TXM where vm_protect(RX) fails, redirectFunctionDirect will
-    // safely revert to PROT_READ and return FALSE instead of leaving RW pages.
-    int jitFlags = (int)DeviceGetJITFlags(NO);
-    jitFlags &= ~JIT_FLAG_IS_IOS_26;
-    switch (jitFlags) {
-        case JIT_FLAG_FORCE_MIRRORED | JIT_FLAG_HAS_TXM:
-            NSDebugLog(@"[DyldLVBypass] Using redirectFunctionMirrored");
-            redirectFunction = redirectFunctionMirrored;
-            break;
-        case JIT_FLAG_FORCE_MIRRORED:
-            NSDebugLog(@"[DyldLVBypass] Using redirectFunctionHWBreakpoint");
-            redirectFunction = redirectFunctionHWBreakpoint;
-            break;
-        default:
-            NSDebugLog(@"[DyldLVBypass] Using redirectFunctionDirect");
-            redirectFunction = redirectFunctionDirect;
-            break;
+    // The original switch used exact bitmask matching, so a device with
+    // IS_IOS_26 + HAS_TXM (no FORCE_MIRRORED) — i.e. a normal iPhone 17 on
+    // iOS 26 with StikDebug-provided JIT — fell through to redirectFunction
+    // Direct, whose vm_protect(RX) call iOS 26 blocks. The half-applied
+    // patch left dyld code pages RW with modified bytes, then dyld faulted
+    // executing non-X memory on the next mmap call → SIGBUS ignored → hang
+    // at dlopen(libjli). Use bitmask checks so iOS 26 + TXM correctly picks
+    // the mirrored variant.
+    if (DeviceHasJITFlags(JIT_FLAG_HAS_TXM) &&
+        (DeviceHasJITFlags(JIT_FLAG_IS_IOS_26) || DeviceHasJITFlags(JIT_FLAG_FORCE_MIRRORED))) {
+        NSDebugLog(@"[DyldLVBypass] Using redirectFunctionMirrored");
+        redirectFunction = redirectFunctionMirrored;
+    } else if (DeviceHasJITFlags(JIT_FLAG_FORCE_MIRRORED)) {
+        // Special special case for non-TXM iOS 26+. We can JIT without
+        // script, but we cannot modify existing code in dsc without it.
+        // Use hardware breakpoint to avoid patching dsc code at all.
+        NSDebugLog(@"[DyldLVBypass] Using redirectFunctionHWBreakpoint");
+        redirectFunction = redirectFunctionHWBreakpoint;
+    } else {
+        NSDebugLog(@"[DyldLVBypass] Using redirectFunctionDirect");
+        redirectFunction = redirectFunctionDirect;
     }
     
     // Modifying exec page during execution may cause SIGBUS, so ignore it now
