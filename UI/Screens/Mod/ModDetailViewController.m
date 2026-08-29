@@ -121,7 +121,7 @@ static NSString *const kVerCell = @"VerCell";
 
 - (void)viewDidLoad {
     [super viewDidLoad];
-    self.title = _mod[@"title"] ?: @"Mod";
+    self.title = _mod[@"title"] ?: localize(@"Mod", nil);
     self.view.clipsToBounds = YES;
     [self setupViews];
     [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(updateColors) name:ThemeDidChangeNotification object:nil];
@@ -129,7 +129,6 @@ static NSString *const kVerCell = @"VerCell";
     [self loadVersions];
     // Realtime frosted backdrop behind the whole panel
     [AmethystBlurView installInView:self.view];
-
 }
 
 - (void)setupViews {
@@ -163,7 +162,7 @@ static NSString *const kVerCell = @"VerCell";
     _authorLabel.translatesAutoresizingMaskIntoConstraints = NO;
     _authorLabel.font = [UIFont systemFontOfSize:14 weight:UIFontWeightRegular];
     _authorLabel.textColor = ThemeManager.shared.secondaryTextColor;
-    _authorLabel.text = [NSString stringWithFormat:@"by %@", _mod[@"author"] ?: @"Unknown"];
+    _authorLabel.text = [NSString stringWithFormat:@"%@ %@", localize(@"by", nil), _mod[@"author"] ?: localize(@"Unknown", nil)];
     [content addSubview:_authorLabel];
 
     UIView *statsBar = [[UIView alloc] init];
@@ -177,7 +176,7 @@ static NSString *const kVerCell = @"VerCell";
     _downloadsLabel.font = [UIFont systemFontOfSize:12 weight:UIFontWeightMedium];
     _downloadsLabel.textColor = ThemeManager.shared.accentColor;
     _downloadsLabel.textAlignment = NSTextAlignmentCenter;
-    _downloadsLabel.text = [NSString stringWithFormat:@"%@ downloads", [self formatNumber:_mod[@"downloads"]]];
+    _downloadsLabel.text = [NSString stringWithFormat:@"%@ %@", [self formatNumber:_mod[@"downloads"]], localize(@"downloads", nil)];
     [statsBar addSubview:_downloadsLabel];
 
     _followsLabel = [[UILabel alloc] init];
@@ -185,7 +184,7 @@ static NSString *const kVerCell = @"VerCell";
     _followsLabel.font = [UIFont systemFontOfSize:12 weight:UIFontWeightMedium];
     _followsLabel.textColor = ThemeManager.shared.secondaryTextColor;
     _followsLabel.textAlignment = NSTextAlignmentCenter;
-    _followsLabel.text = [NSString stringWithFormat:@"%@ follows", [self formatNumber:_mod[@"follows"]]];
+    _followsLabel.text = [NSString stringWithFormat:@"%@ %@", [self formatNumber:_mod[@"follows"]], localize(@"follows", nil)];
     [statsBar addSubview:_followsLabel];
 
     _descLabel = [[UILabel alloc] init];
@@ -202,7 +201,7 @@ static NSString *const kVerCell = @"VerCell";
     verHeader.translatesAutoresizingMaskIntoConstraints = NO;
     verHeader.font = [UIFont systemFontOfSize:15 weight:UIFontWeightSemibold];
     verHeader.textColor = ThemeManager.shared.primaryTextColor;
-    verHeader.text = @"Versions  ▼";
+    verHeader.text = [NSString stringWithFormat:@"%@  ▼", localize(@"Versions", nil)];
     verHeader.userInteractionEnabled = YES;
     [verHeader addGestureRecognizer:[[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(toggleVersions)]];
     [content addSubview:verHeader];
@@ -210,7 +209,7 @@ static NSString *const kVerCell = @"VerCell";
     if (_isModpack) {
         _mcVersionBtn = [UIButton buttonWithType:UIButtonTypeSystem];
         _mcVersionBtn.translatesAutoresizingMaskIntoConstraints = NO;
-        [_mcVersionBtn setTitle:@"Select MC Version" forState:UIControlStateNormal];
+        [_mcVersionBtn setTitle:localize(@"Select MC Version", nil) forState:UIControlStateNormal];
         [_mcVersionBtn setTitleColor:ThemeManager.shared.primaryTextColor forState:UIControlStateNormal];
         _mcVersionBtn.backgroundColor = ThemeManager.shared.cardBackgroundColor;
         _mcVersionBtn.layer.cornerRadius = 8;
@@ -244,7 +243,7 @@ static NSString *const kVerCell = @"VerCell";
 
     _downloadBtn = [UIButton buttonWithType:UIButtonTypeSystem];
     _downloadBtn.translatesAutoresizingMaskIntoConstraints = NO;
-    [_downloadBtn setTitle:@"Download" forState:UIControlStateNormal];
+    [_downloadBtn setTitle:localize(@"Download", nil) forState:UIControlStateNormal];
     [_downloadBtn setTitleColor:UIColor.whiteColor forState:UIControlStateNormal];
     _downloadBtn.backgroundColor = ThemeManager.shared.accentColor;
     _downloadBtn.layer.cornerRadius = 10;
@@ -254,7 +253,7 @@ static NSString *const kVerCell = @"VerCell";
 
     _profileBtn = [UIButton buttonWithType:UIButtonTypeSystem];
     _profileBtn.translatesAutoresizingMaskIntoConstraints = NO;
-    NSString *profileTitle = _isModpack ? @"Install Modpack" : @"Download to Profile";
+    NSString *profileTitle = _isModpack ? localize(@"Install Modpack", nil) : localize(@"Download to Profile", nil);
     [_profileBtn setTitle:profileTitle forState:UIControlStateNormal];
     [_profileBtn setTitleColor:UIColor.whiteColor forState:UIControlStateNormal];
     _profileBtn.backgroundColor = ThemeManager.shared.successColor;
@@ -272,7 +271,7 @@ static NSString *const kVerCell = @"VerCell";
     _depsHeader.translatesAutoresizingMaskIntoConstraints = NO;
     _depsHeader.font = [UIFont systemFontOfSize:15 weight:UIFontWeightSemibold];
     _depsHeader.textColor = ThemeManager.shared.primaryTextColor;
-    _depsHeader.text = @"Dependencies";
+    _depsHeader.text = localize(@"Dependencies", nil);
     [_depsContainer addSubview:_depsHeader];
 
     [NSLayoutConstraint activateConstraints:@[

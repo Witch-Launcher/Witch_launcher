@@ -58,6 +58,7 @@ jmethodID method_SystemClipboardDataReceived;
     //JNIEnv* dalvikJNIEnvPtr_ANDROID;
     long showingWindow;
     bool isInputReady, isCursorEntered, isUseStackQueueCall;
+    int currentCursorShape; // Current GLFW/SDL3 cursor shape constant for cursor type switching
     //int savedWidth, savedHeight;
     int windowWidth, windowHeight;
     int physicalWidth, physicalHeight;

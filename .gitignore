@@ -18,7 +18,7 @@ entitlements.codesign.xml
 /sample/
 /.vscode/
 /log/
-
+/plan/
 # Build artifacts (users can build themselves)
 /amethyst-prebuilt-libraries/build/
 # SDL3 build dir is ignored, but the resulting iOS dylibs must be committed

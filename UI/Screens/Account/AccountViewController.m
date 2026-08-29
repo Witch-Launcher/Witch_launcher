@@ -113,22 +113,22 @@
 }
 
 - (void)configureWithAccount:(NSDictionary *)account isSelected:(BOOL)isSelected {
-    _nameLabel.text = account[@"username"] ?: @"Unknown";
+    _nameLabel.text = account[@"username"] ?: localize(@"Unknown", nil);
     BOOL isEly = [account[@"accountType"] isEqualToString:@"elyby"];
     BOOL isPremium = [account[@"xboxGamertag"] length] > 0;
     BOOL isDemo = isPremium && [account[@"profileId"] isEqualToString:@"00000000-0000-0000-0000-000000000000"];
 
     if (isEly) {
-        _typeLabel.text = @"Ely.by";
+        _typeLabel.text = localize(@"account.type.ely", nil);
         _typeLabel.backgroundColor = [UIColor colorWithRed:0.55 green:0.35 blue:0.86 alpha:1];
     } else if (isDemo) {
-        _typeLabel.text = @"Demo";
+        _typeLabel.text = localize(@"account.type.demo", nil);
         _typeLabel.backgroundColor = [UIColor colorWithRed:0.95 green:0.60 blue:0.20 alpha:1];
     } else if (isPremium) {
-        _typeLabel.text = @"Premium";
+        _typeLabel.text = localize(@"account.type.premium", nil);
         _typeLabel.backgroundColor = [UIColor colorWithRed:0.20 green:0.60 blue:0.86 alpha:1];
     } else {
-        _typeLabel.text = @"Local";
+        _typeLabel.text = localize(@"account.type.local", nil);
         _typeLabel.backgroundColor = ThemeManager.shared.secondaryTextColor;
     }
 
@@ -230,7 +230,7 @@ extern NSString *ELY_OAUTH_REDIRECT_URI;
 
     UILabel *titleLabel = [[UILabel alloc] init];
     titleLabel.translatesAutoresizingMaskIntoConstraints = NO;
-    titleLabel.text = @"  Accounts";
+    titleLabel.text = localize(@"account.title", nil);
     titleLabel.font = [UIFont systemFontOfSize:22 weight:UIFontWeightBold];
     titleLabel.textColor = ThemeManager.shared.primaryTextColor;
     [self.view addSubview:titleLabel];
@@ -256,12 +256,12 @@ extern NSString *ELY_OAUTH_REDIRECT_URI;
 
     UILabel *addTitle = [[UILabel alloc] init];
     addTitle.translatesAutoresizingMaskIntoConstraints = NO;
-    addTitle.text = @"Add Account";
+    addTitle.text = localize(@"account.add", nil);
     addTitle.font = [UIFont systemFontOfSize:15 weight:UIFontWeightSemibold];
     addTitle.textColor = ThemeManager.shared.primaryTextColor;
     [_addFormView addSubview:addTitle];
 
-    _addTypeControl = [[UISegmentedControl alloc] initWithItems:@[@"Premium (Microsoft)", @"Local (Offline)", @"Ely.by"]];
+    _addTypeControl = [[UISegmentedControl alloc] initWithItems:@[localize(@"Premium (Microsoft)", nil), localize(@"Local (Offline)", nil), @"Ely.by"]];
     _addTypeControl.translatesAutoresizingMaskIntoConstraints = NO;
     _addTypeControl.selectedSegmentIndex = 1;
     [_addTypeControl addTarget:self action:@selector(addTypeChanged) forControlEvents:UIControlEventValueChanged];
@@ -269,7 +269,7 @@ extern NSString *ELY_OAUTH_REDIRECT_URI;
 
     _usernameField = [[UITextField alloc] init];
     _usernameField.translatesAutoresizingMaskIntoConstraints = NO;
-    _usernameField.placeholder = @"Username";
+    _usernameField.placeholder = localize(@"account.username.placeholder", nil);
     _usernameField.text = @"Player";
     _usernameField.borderStyle = UITextBorderStyleRoundedRect;
     _usernameField.font = [UIFont systemFontOfSize:14];
@@ -283,11 +283,9 @@ extern NSString *ELY_OAUTH_REDIRECT_URI;
     kbToolbar.items = @[flexSpace, doneBtn];
     _usernameField.inputAccessoryView = kbToolbar;
 
-    [_addFormView addSubview:_usernameField];
-
     _passwordField = [[UITextField alloc] init];
     _passwordField.translatesAutoresizingMaskIntoConstraints = NO;
-    _passwordField.placeholder = @"Password";
+    _passwordField.placeholder = localize(@"account.password.placeholder", nil);
     _passwordField.borderStyle = UITextBorderStyleRoundedRect;
     _passwordField.font = [UIFont systemFontOfSize:14];
     _passwordField.hidden = YES;
@@ -310,7 +308,7 @@ extern NSString *ELY_OAUTH_REDIRECT_URI;
 
     _oauthLinkBtn = [UIButton buttonWithType:UIButtonTypeSystem];
     _oauthLinkBtn.translatesAutoresizingMaskIntoConstraints = NO;
-    [_oauthLinkBtn setTitle:@"Sign in with Browser (OAuth2)" forState:UIControlStateNormal];
+    [_oauthLinkBtn setTitle:localize(@"Sign in with Browser (OAuth2)", nil) forState:UIControlStateNormal];
     _oauthLinkBtn.titleLabel.font = [UIFont systemFontOfSize:12];
     [_oauthLinkBtn setTitleColor:ThemeManager.shared.accentColor forState:UIControlStateNormal];
     [_oauthLinkBtn addTarget:self action:@selector(addElyOAuthTapped) forControlEvents:UIControlEventTouchUpInside];
@@ -368,7 +366,7 @@ extern NSString *ELY_OAUTH_REDIRECT_URI;
     BOOL isEly = selected == 2;
 
     _usernameField.hidden = !(isLocal || isEly);
-    _usernameField.placeholder = isEly ? @"Ely.by email or username" : @"Username";
+    _usernameField.placeholder = isEly ? localize(@"account.ely.placeholder", nil) : localize(@"account.username.placeholder", nil);
     if (isLocal && _usernameField.text.length == 0) _usernameField.text = @"Player";
     if (!isLocal && [_usernameField.text isEqualToString:@"Player"]) _usernameField.text = @"";
     if (!isLocal && !isEly) _passwordField.text = @"";
@@ -383,12 +381,12 @@ extern NSString *ELY_OAUTH_REDIRECT_URI;
 
     _addActionBtn.hidden = NO;
     if (isLocal) {
-        [_addActionBtn setTitle:@"Add Local Account" forState:UIControlStateNormal];
-        _usernameField.placeholder = @"Username";
+        [_addActionBtn setTitle:localize(@"Add Local Account", nil) forState:UIControlStateNormal];
+        _usernameField.placeholder = localize(@"account.username.placeholder", nil);
     } else if (isEly) {
-        [_addActionBtn setTitle:@"Login with Ely.by  →" forState:UIControlStateNormal];
+        [_addActionBtn setTitle:localize(@"Login with Ely.by", nil) forState:UIControlStateNormal];
     } else {
-        [_addActionBtn setTitle:@"Login with Microsoft  →" forState:UIControlStateNormal];
+        [_addActionBtn setTitle:localize(@"Login with Microsoft", nil) forState:UIControlStateNormal];
     }
 }
 

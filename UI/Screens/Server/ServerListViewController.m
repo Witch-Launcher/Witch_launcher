@@ -35,13 +35,13 @@ static NSString *kServersFilePath;
     _titleLabel = [[UILabel alloc] init];
     _titleLabel.translatesAutoresizingMaskIntoConstraints = NO;
     _titleLabel.font = [UIFont systemFontOfSize:22 weight:UIFontWeightBold];
-    _titleLabel.text = @"Servers";
+    _titleLabel.text = localize(@"server.add.title", nil);
     [self.view addSubview:_titleLabel];
 
     _addButton = [UIButton buttonWithType:UIButtonTypeSystem];
     _addButton.translatesAutoresizingMaskIntoConstraints = NO;
     _addButton.titleLabel.font = [UIFont systemFontOfSize:14 weight:UIFontWeightSemibold];
-    [_addButton setTitle:@"+ Add" forState:UIControlStateNormal];
+    [_addButton setTitle:localize(@"server.connect", nil) forState:UIControlStateNormal];
     _addButton.backgroundColor = [UIColor clearColor];
     _addButton.tintColor = ThemeManager.shared.accentColor;
     [_addButton addTarget:self action:@selector(addServerTapped) forControlEvents:UIControlEventTouchUpInside];
@@ -98,15 +98,15 @@ static NSString *kServersFilePath;
 
 - (void)addServerTapped {
     [HapticManager.shared play:HapticTypeLight];
-    UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Add Server" message:nil preferredStyle:UIAlertControllerStyleAlert];
+    UIAlertController *alert = [UIAlertController alertControllerWithTitle:localize(@"server.add.title", nil) message:nil preferredStyle:UIAlertControllerStyleAlert];
     [alert addTextFieldWithConfigurationHandler:^(UITextField *field) {
-        field.placeholder = @"Server name (e.g. Hypixel)";
+        field.placeholder = localize(@"server.name.placeholder", nil);
     }];
     [alert addTextFieldWithConfigurationHandler:^(UITextField *field) {
-        field.placeholder = @"Address (e.g. mc.hypixel.net)";
+        field.placeholder = localize(@"server.address.placeholder", nil);
     }];
-    [alert addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
-    [alert addAction:[UIAlertAction actionWithTitle:@"Add" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
+    [alert addAction:[UIAlertAction actionWithTitle:localize(@"server.cancel", nil) style:UIAlertActionStyleCancel handler:nil]];
+    [alert addAction:[UIAlertAction actionWithTitle:localize(@"server.connect", nil) style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
         NSString *name = alert.textFields[0].text;
         NSString *address = alert.textFields[1].text;
         if (name.length > 0 && address.length > 0) {

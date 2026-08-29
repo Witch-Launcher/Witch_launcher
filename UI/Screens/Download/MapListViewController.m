@@ -8,6 +8,7 @@
 #import "VersionDirectoryManager.h"
 #import "ios_uikit_bridge.h"
 #import "AmethystBlurView.h"
+#import "utils.h"
 
 @interface MapListViewController () <UITableViewDelegate, UITableViewDataSource, UISearchBarDelegate>
 @property (nonatomic) UISearchBar *searchBar;
@@ -51,7 +52,7 @@
     _searchBar = [[UISearchBar alloc] init];
     _searchBar.translatesAutoresizingMaskIntoConstraints = NO;
     _searchBar.delegate = self;
-    _searchBar.placeholder = @"Search maps...";
+    _searchBar.placeholder = localize(@"download.search.maps", nil);
     _searchBar.searchBarStyle = UISearchBarStyleMinimal;
     [self.view addSubview:_searchBar];
 
@@ -62,7 +63,7 @@
 
     _emptyLabel = [[UILabel alloc] init];
     _emptyLabel.translatesAutoresizingMaskIntoConstraints = NO;
-    _emptyLabel.text = @"No maps found.\nTry a different search.";
+    _emptyLabel.text = localize(@"download.empty.maps", nil);
     _emptyLabel.numberOfLines = 0;
     _emptyLabel.textAlignment = NSTextAlignmentCenter;
     _emptyLabel.font = [UIFont systemFontOfSize:14 weight:UIFontWeightRegular];
@@ -144,7 +145,7 @@
         _timeoutTimer = [NSTimer scheduledTimerWithTimeInterval:15 repeats:NO block:^(NSTimer *timer) {
             if (weakSelf.spinner.isAnimating) {
                 [weakSelf.spinner stopAnimating];
-                weakSelf.errorLabel.text = @"Request timed out.\nCheck your internet connection.";
+                weakSelf.errorLabel.text = localize(@"download.error.timeout", nil);
                 weakSelf.errorLabel.hidden = NO;
             }
         }];

@@ -1,8 +1,30 @@
-# Welecome to Witch launcher
+# Welecome to Witch launcher for iOS
 
 [Fork by Za_d626(DuyAnh662)](https://discord.gg/qmbuRvaEq)
+This repository contains the code for our iOS and iPadOS port of Amethyst. Looking for [Android?](https://github.com/AngelAuraMC/Amethyst-Android)
 
-Thanks to vibecodest and [Catsruledogs](https://github.com/catsruledogs/Amethyst-iOS-25.git), T1k-T1k for the source code!
+## Introduction
+Amethyst is a Minecraft: Java Edition launcher for Android, iOS, and iPadOS, based off of zhuowei's [Boardwalk](https://github.com/zhuowei/Boardwalk) and [Amethyst-iOS](https://github.com/AngelAuraMC/Amethyst-iOS) project.
+* Supports most versions of Minecraft: Java Edition, from the very first beta to the newest snapshots.
+* Supports Forge, NeoForge, Fabric, OptiFine, and Quilt for you to customize the experience with supported mods.
+* Includes customizable on-screen controls, keyboard and mouse support, and game controller support.
+* Optimized for jailbroken and TrollStore devices to enable better capabilities.
+* Microsoft account and demo mode support for logging into Minecraft.
+* ...and much more!
+
+## Contributors
+Amethyst is amazing, and surprisingly stable, and it wouldn't be this way without the commmunity that helped and contribute to the project! Some notable names:
+
+@crystall1nedev - Project manager, iOS port developer  
+@khanhduytran0 - iOS port developer  
+@artdeell  
+@Mathius-Boulay  
+@zhuowei  
+@jkcoxson   
+@Diatrus    
+@Za_d626    
+@Catsruledogs   
+@T1k-T1k    
 
 ## Third party components and their licenses
 - [Witch](https://github.com/Ynnyny/Witch_launcher): [GNU General Public License v3.0](https://github.com/Ynnyny/Witch_launcher/blob/main/LICENSE)

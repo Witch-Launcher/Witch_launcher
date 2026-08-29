@@ -49,6 +49,12 @@ public class PojavLauncher {
             System.setProperty("jna.boot.library.path", jnaTmpDir);
         }
 
+        // Create logs directory before any class loading triggers log4j init.
+        // Fabric/Forge log4j configs write logs/latest.log relative to user.dir.
+        try {
+            new File(System.getProperty("user.dir"), "logs").mkdirs();
+        } catch (Exception ignored) {}
+
         // Skip JNA's internal class-initialization that tries to dlopen dyld
         // shared-cache images (non-existent on iOS), preventing spurious
         // UnsatisfiedLinkError during Native.<clinit>

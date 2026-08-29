@@ -25,6 +25,7 @@
 #import "touchcontroller_jni_bridge.h"
 #import "touchcontroller_launcher.h"
 #import "CursorManager.h"
+#import "CursorTypeManager.h"
 
 #include "glfw_keycodes.h"
 #include "utils.h"
@@ -54,6 +55,10 @@ static GameSurfaceView* pojavWindow;
     // Retains UITouch keys so we can safely inspect their phase during the
     // stale-touch sweep (see sendTouchControllerStaleUps).
     NSMapTable<id, NSNumber*>* touchControllerIndexMap;
+    
+    // Hover gesture tracking for click detection
+    CGPoint hoverStartPoint;
+    BOOL hoverMoved;
 }
 
 @property(nonatomic) NSDictionary* metadata;
@@ -230,6 +235,8 @@ static GameSurfaceView* pojavWindow;
     self.mousePointerView.hidden = !virtualMouseEnabled;
     self.mousePointerView.image = [CursorManager imageForCursor:[CursorManager currentCursorName]];
     self.mousePointerView.userInteractionEnabled = NO;
+    self.mousePointerView.contentMode = UIViewContentModeCenter;
+    self.mousePointerView.layer.magnificationFilter = kCAFilterNearest;
     [self.touchView addSubview:self.mousePointerView];
     self.mousePointerView.frame = [CursorManager displayFrameForMouseFrame:virtualMouseFrame];
 
@@ -282,7 +289,21 @@ static GameSurfaceView* pojavWindow;
     if (GCMouse.current != nil) {
         [self registerMouseCallbacks:GCMouse.current];
     }
-    
+
+    // Observe cursor type changes from the game (via GLFW/SDL3 JNI calls)
+    [[NSNotificationCenter defaultCenter] addObserverForName:CursorTypeDidChangeNotification
+                                                      object:nil
+                                                       queue:[NSOperationQueue mainQueue]
+                                                  usingBlock:^(NSNotification *note) {
+        if (!virtualMouseEnabled) return;
+        NSString *typeId = note.userInfo[@"typeId"];
+        if (typeId) {
+            UIImage *img = [CursorTypeManager imageForType:typeId];
+            NSLog(@"[CursorObserver] typeId=%@ img=%@ size=%@", typeId, img, NSStringFromCGSize(img.size));
+            self.mousePointerView.image = img;
+            self.mousePointerView.frame = [CursorManager displayFrameForMouseFrame:virtualMouseFrame typeId:typeId];
+        }
+    }];
 
     // TODO: deal with multiple controllers by letting users decide which one to use?
     self.controllerConnectCallback = [[NSNotificationCenter defaultCenter] addObserverForName:GCControllerDidConnectNotification object:nil queue:[NSOperationQueue mainQueue] usingBlock:^(NSNotification *note) {
@@ -446,8 +467,9 @@ static GameSurfaceView* pojavWindow;
     // Update virtual mouse scale
     CGFloat mouseScale = getPrefFloat(@"control.mouse_scale") / 100.0;
     virtualMouseFrame = CGRectMake(self.view.frame.size.width / 2, self.view.frame.size.height / 2, 18.0 * mouseScale, 27 * mouseScale);
-    self.mousePointerView.image = [CursorManager imageForCursor:[CursorManager currentCursorName]];
-    self.mousePointerView.frame = [CursorManager displayFrameForMouseFrame:virtualMouseFrame];
+    NSString *activeTypeId = [CursorTypeManager currentActiveTypeId];
+    self.mousePointerView.image = [CursorTypeManager imageForType:activeTypeId];
+    self.mousePointerView.frame = [CursorManager displayFrameForMouseFrame:virtualMouseFrame typeId:activeTypeId];
 
     self.shouldHideControlsFromRecording = getPrefFloat(@"control.recording_hide");
     [self.ctrlView hideViewFromCapture:self.shouldHideControlsFromRecording];
@@ -548,8 +570,12 @@ static GameSurfaceView* pojavWindow;
         CallbackBridge_nativeSendCursorPos(ACTION_DOWN, lastVirtualMousePoint.x * screenScale, lastVirtualMousePoint.y * screenScale);
         virtualMouseFrame.origin.x = self.view.frame.size.width / 2;
         virtualMouseFrame.origin.y = self.view.frame.size.height / 2;
-        self.mousePointerView.frame = [CursorManager displayFrameForMouseFrame:virtualMouseFrame];
+        NSString *activeTypeId = [CursorTypeManager currentActiveTypeId];
+        self.mousePointerView.frame = [CursorManager displayFrameForMouseFrame:virtualMouseFrame typeId:activeTypeId];
     }
+    
+    // Update cursor type based on grab state
+    [CursorTypeManager setCursorHidden:(isGrabbing == JNI_TRUE)];
 
     self.scrollPanGesture.enabled = !isGrabbing;
     self.mousePointerView.hidden = isGrabbing || !virtualMouseEnabled;
@@ -658,7 +684,8 @@ static GameSurfaceView* pojavWindow;
         [self updateSavedResolution];
         [GyroInput updateOrientation];
     } completion:^(id<UIViewControllerTransitionCoordinatorContext>  _Nonnull context) {
-        virtualMouseFrame = [CursorManager mouseFrameForDisplayFrame:self.mousePointerView.frame];
+        NSString *activeTypeId = [CursorTypeManager currentActiveTypeId];
+        virtualMouseFrame = [CursorManager mouseFrameForDisplayFrame:self.mousePointerView.frame typeId:activeTypeId];
     }];
     [super viewWillTransitionToSize:size withTransitionCoordinator:coordinator];
 }
@@ -686,7 +713,9 @@ static GameSurfaceView* pojavWindow;
             virtualMouseFrame.origin.x = clamp(virtualMouseFrame.origin.x, 0, self.surfaceView.frame.size.width);
             virtualMouseFrame.origin.y = clamp(virtualMouseFrame.origin.y, 0, self.surfaceView.frame.size.height);
             lastVirtualMousePoint = location;
-            self.mousePointerView.frame = [CursorManager displayFrameForMouseFrame:virtualMouseFrame];
+            NSString *activeTypeId = [CursorTypeManager currentActiveTypeId];
+            self.mousePointerView.frame = [CursorManager displayFrameForMouseFrame:virtualMouseFrame typeId:activeTypeId];
+            
             CallbackBridge_nativeSendCursorPos(event, virtualMouseFrame.origin.x * screenScale, virtualMouseFrame.origin.y * screenScale);
             return;
         }
@@ -971,14 +1000,35 @@ static GameSurfaceView* pojavWindow;
     switch (sender.state) {
         case UIGestureRecognizerStateBegan:
             NSLog(@"[Input] Pointer hover began");
+            hoverStartPoint = point;
+            hoverMoved = NO;
             [self sendTouchPoint:point withEvent:ACTION_DOWN];
             break;
         case UIGestureRecognizerStateChanged:
             [self sendTouchPoint:point withEvent:ACTION_MOVE];
+            if (hypotf(point.x - hoverStartPoint.x, point.y - hoverStartPoint.y) > 5.0) {
+                hoverMoved = YES;
+            }
             break;
         case UIGestureRecognizerStateEnded:
         case UIGestureRecognizerStateCancelled:
             [self sendTouchPoint:point withEvent:ACTION_UP];
+            // Send click if hover didn't move much (click detection for hover/mouse)
+            if (!hoverMoved && virtualMouseEnabled) {
+                CallbackBridge_nativeSendMouseButton(GLFW_MOUSE_BUTTON_LEFT, 1, 0);
+                dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 33 * NSEC_PER_MSEC), dispatch_get_main_queue(), ^{
+                    CallbackBridge_nativeSendMouseButton(GLFW_MOUSE_BUTTON_LEFT, 0, 0);
+                });
+            }
+            // Reset cursor to normal when mouse leaves the game area
+            if (virtualMouseEnabled) {
+                NSString *normalTypeId = @"normal";
+                UIImage *normalImg = [CursorTypeManager imageForType:normalTypeId];
+                self.mousePointerView.image = normalImg;
+                self.mousePointerView.frame = [CursorManager displayFrameForMouseFrame:virtualMouseFrame typeId:normalTypeId];
+                // Notify the game to reset cursor shape
+                [CursorTypeManager handleCursorShapeChange:0x6001 isSDL3:NO]; // GLFW_ARROW_CURSOR
+            }
             break;
         default:
             // point = CGPointMake(-1, -1);

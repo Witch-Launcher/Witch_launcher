@@ -9,6 +9,7 @@
 #import "authenticator/BaseAuthenticator.h"
 #import "ios_uikit_bridge.h"
 #import "CursorManager.h"
+#import "CursorTypeManager.h"
 #include "glfw_keycodes.h"
 #include "utils.h"
 
@@ -149,9 +150,12 @@ void AWTInputBridge_sendKey(int keycode) {
     self.virtualMouseFrame = CGRectMake(frame.size.width / 2, frame.size.height / 2, 18, 27);
     self.mousePointerView = [[UIImageView alloc] initWithFrame:self.virtualMouseFrame];
     self.mousePointerView.hidden = !virtualMouseEnabled;
-    self.mousePointerView.image = [CursorManager imageForCursor:[CursorManager currentCursorName]];
+    NSString *activeTypeId = [CursorTypeManager currentActiveTypeId];
+    self.mousePointerView.image = [CursorTypeManager imageForType:activeTypeId];
+    self.mousePointerView.contentMode = UIViewContentModeCenter;
+    self.mousePointerView.layer.magnificationFilter = kCAFilterNearest;
     [surfaceView addSubview:self.mousePointerView];
-    self.mousePointerView.frame = [CursorManager displayFrameForMouseFrame:self.virtualMouseFrame];
+    self.mousePointerView.frame = [CursorManager displayFrameForMouseFrame:self.virtualMouseFrame typeId:activeTypeId];
 
     return self;
 }
@@ -179,7 +183,8 @@ void AWTInputBridge_sendKey(int keycode) {
         // Update cursor's origin
         _virtualMouseFrame.origin.x = clamp(self.virtualMouseFrame.origin.x + location.x, 0, self.frame.size.width * self.zoomScale);
         _virtualMouseFrame.origin.y = clamp(self.virtualMouseFrame.origin.y + location.y, 0, self.frame.size.height * self.zoomScale);
-        self.mousePointerView.frame = [CursorManager displayFrameForMouseFrame:self.virtualMouseFrame];
+        NSString *activeTypeId = [CursorTypeManager currentActiveTypeId];
+        self.mousePointerView.frame = [CursorManager displayFrameForMouseFrame:self.virtualMouseFrame typeId:activeTypeId];
         location = self.virtualMouseFrame.origin;
 
         CGPoint minimumContentOffset = CGPointMake(-self.contentInset.left, -self.contentInset.top);
@@ -202,7 +207,8 @@ void AWTInputBridge_sendKey(int keycode) {
         // Keep virtual mouse in the middle of screen while zooming
         _virtualMouseFrame.origin.x = (self.contentOffset.x + self.center.x) / self.zoomScale;
         _virtualMouseFrame.origin.y = (self.contentOffset.y + self.center.y) / self.zoomScale;
-        self.mousePointerView.frame = [CursorManager displayFrameForMouseFrame:self.virtualMouseFrame];
+        NSString *activeTypeId = [CursorTypeManager currentActiveTypeId];
+        self.mousePointerView.frame = [CursorManager displayFrameForMouseFrame:self.virtualMouseFrame typeId:activeTypeId];
         // Send cursor position to AWT
         CGFloat screenScale = UIScreen.mainScreen.scale * getPrefFloat(@"video.resolution") / 100.0;
         AWTInputBridge_nativeSendData(EVENT_TYPE_CURSOR_POS, (int)(_virtualMouseFrame.origin.x * screenScale), (int)(_virtualMouseFrame.origin.y * screenScale), 0, 0);
@@ -252,6 +258,21 @@ void AWTInputBridge_sendKey(int keycode) {
     self.surfaceScrollView.maximumZoomScale = 5;
     self.surfaceScrollView.scrollEnabled = NO;
     [self.view addSubview:self.surfaceScrollView];
+
+    // Observe cursor type changes from the game (via GLFW/SDL3 JNI calls)
+    [[NSNotificationCenter defaultCenter] addObserverForName:CursorTypeDidChangeNotification
+                                                      object:nil
+                                                       queue:[NSOperationQueue mainQueue]
+                                                  usingBlock:^(NSNotification *note) {
+        if (!virtualMouseEnabled) return;
+        NSString *typeId = note.userInfo[@"typeId"];
+        if (typeId) {
+            UIImage *img = [CursorTypeManager imageForType:typeId];
+            NSLog(@"[CursorObserver-GUI] typeId=%@ img=%@ size=%@", typeId, img, NSStringFromCGSize(img.size));
+            self.surfaceScrollView.mousePointerView.image = img;
+            self.surfaceScrollView.mousePointerView.frame = [CursorManager displayFrameForMouseFrame:self.surfaceScrollView.virtualMouseFrame typeId:typeId];
+        }
+    }];
 
     self.inputTextField = [[TrackedTextField alloc] initWithFrame:CGRectMake(0, -32.0, self.view.frame.size.width, 30.0)];
     self.inputTextField.backgroundColor = UIColor.secondarySystemBackgroundColor;
@@ -522,7 +543,8 @@ dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
         self.ctrlView.frame = UIEdgeInsetsInsetRect(self.view.frame, self.view.safeAreaInsets);
         [self.ctrlView.subviews makeObjectsPerformSelector:@selector(update)];
     } completion:^(id<UIViewControllerTransitionCoordinatorContext>  _Nonnull context) {
-        self.surfaceScrollView.virtualMouseFrame = self.surfaceScrollView.mousePointerView.frame;
+        NSString *activeTypeId = [CursorTypeManager currentActiveTypeId];
+        self.surfaceScrollView.virtualMouseFrame = [CursorManager mouseFrameForDisplayFrame:self.surfaceScrollView.mousePointerView.frame typeId:activeTypeId];
     }];
     [super viewWillTransitionToSize:size withTransitionCoordinator:coordinator];
 }

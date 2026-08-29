@@ -4,6 +4,7 @@
 #import "ios_uikit_bridge.h"
 #import <UniformTypeIdentifiers/UniformTypeIdentifiers.h>
 #import "AmethystBlurView.h"
+#import "utils.h"
 
 @interface FileBrowserViewController ()
 @property (nonatomic) UILabel *pathLabel;
@@ -22,7 +23,7 @@
 
 - (void)viewDidLoad {
     [super viewDidLoad];
-    self.title = @"File Manager";
+    self.title = localize(@"File Manager", nil);
     self.navigationItem.rightBarButtonItem = [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemDone target:self action:@selector(dismissFileBrowser)];
     self.view.backgroundColor = ThemeManager.shared.backgroundColor;
 
@@ -75,7 +76,7 @@
 
     _emptyLabel = [[UILabel alloc] init];
     _emptyLabel.translatesAutoresizingMaskIntoConstraints = NO;
-    _emptyLabel.text = @"This folder is empty.\nTap + to add files or folders.";
+    _emptyLabel.text = localize(@"filebrowser.empty", nil);
     _emptyLabel.numberOfLines = 0;
     _emptyLabel.textAlignment = NSTextAlignmentCenter;
     _emptyLabel.font = [UIFont systemFontOfSize:14 weight:UIFontWeightRegular];
@@ -102,7 +103,7 @@
     _addFileBtn = [UIButton buttonWithType:UIButtonTypeSystem];
     _addFileBtn.translatesAutoresizingMaskIntoConstraints = NO;
     [_addFileBtn setImage:[UIImage systemImageNamed:@"doc.badge.plus"] forState:UIControlStateNormal];
-    [_addFileBtn setTitle:@" Add File" forState:UIControlStateNormal];
+    [_addFileBtn setTitle:localize(@"Add File", nil) forState:UIControlStateNormal];
     _addFileBtn.tintColor = ThemeManager.shared.accentColor;
     _addFileBtn.titleLabel.font = [UIFont systemFontOfSize:14 weight:UIFontWeightMedium];
     [_addFileBtn addTarget:self action:@selector(addFileTapped) forControlEvents:UIControlEventTouchUpInside];
@@ -111,7 +112,7 @@
     _addFolderBtn = [UIButton buttonWithType:UIButtonTypeSystem];
     _addFolderBtn.translatesAutoresizingMaskIntoConstraints = NO;
     [_addFolderBtn setImage:[UIImage systemImageNamed:@"folder.badge.plus"] forState:UIControlStateNormal];
-    [_addFolderBtn setTitle:@" Add Folder" forState:UIControlStateNormal];
+    [_addFolderBtn setTitle:localize(@"Add Folder", nil) forState:UIControlStateNormal];
     _addFolderBtn.tintColor = ThemeManager.shared.accentColor;
     _addFolderBtn.titleLabel.font = [UIFont systemFontOfSize:14 weight:UIFontWeightMedium];
     [_addFolderBtn addTarget:self action:@selector(addFolderTapped) forControlEvents:UIControlEventTouchUpInside];
@@ -125,7 +126,7 @@
     _pasteBtn = [UIButton buttonWithType:UIButtonTypeSystem];
     _pasteBtn.translatesAutoresizingMaskIntoConstraints = NO;
     [_pasteBtn setImage:[UIImage systemImageNamed:@"doc.on.clipboard"] forState:UIControlStateNormal];
-    [_pasteBtn setTitle:@" Paste" forState:UIControlStateNormal];
+    [_pasteBtn setTitle:localize(@"Paste", nil) forState:UIControlStateNormal];
     _pasteBtn.tintColor = ThemeManager.shared.accentColor;
     _pasteBtn.titleLabel.font = [UIFont systemFontOfSize:14 weight:UIFontWeightMedium];
     _pasteBtn.hidden = YES;
@@ -238,13 +239,13 @@
 }
 
 - (void)addFolderTapped {
-    UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"New Folder"
-                                                                   message:@"Enter folder name:" preferredStyle:UIAlertControllerStyleAlert];
+    UIAlertController *alert = [UIAlertController alertControllerWithTitle:localize(@"New Folder", nil)
+                                                                    message:localize(@"Enter folder name:", nil) preferredStyle:UIAlertControllerStyleAlert];
     [alert addTextFieldWithConfigurationHandler:^(UITextField *field) {
-        field.placeholder = @"Folder name";
+        field.placeholder = localize(@"filebrowser.folder_name.placeholder", nil);
     }];
-    [alert addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
-    [alert addAction:[UIAlertAction actionWithTitle:@"Create" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
+    [alert addAction:[UIAlertAction actionWithTitle:localize(@"Cancel", nil) style:UIAlertActionStyleCancel handler:nil]];
+    [alert addAction:[UIAlertAction actionWithTitle:localize(@"Create", nil) style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
         NSString *name = alert.textFields[0].text;
         if (name.length == 0) return;
         NSString *currentPath = _pathStack.lastObject;
@@ -252,7 +253,7 @@
         NSError *error = nil;
         [[NSFileManager defaultManager] createDirectoryAtPath:newPath withIntermediateDirectories:NO attributes:nil error:&error];
         if (error) {
-            showDialog(@"Error", error.localizedDescription);
+            showDialog(localize(@"Error", nil), error.localizedDescription);
         } else {
             [self loadItems];
         }
@@ -270,7 +271,7 @@
         NSError *error = nil;
         [[NSFileManager defaultManager] copyItemAtURL:url toURL:[NSURL fileURLWithPath:destPath] error:&error];
         if (error) {
-            showDialog(@"Import Error", [NSString stringWithFormat:@"%@: %@", url.lastPathComponent, error.localizedDescription]);
+            showDialog(localize(@"Import Error", nil), [NSString stringWithFormat:@"%@: %@", url.lastPathComponent, error.localizedDescription]);
         }
     }
     [self loadItems];

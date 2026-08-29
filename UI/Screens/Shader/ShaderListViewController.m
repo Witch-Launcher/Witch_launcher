@@ -10,6 +10,7 @@
 #import "VersionDirectoryManager.h"
 #import "ios_uikit_bridge.h"
 #import "AmethystBlurView.h"
+#import "utils.h"
 
 @interface ShaderListViewController () <UITableViewDelegate, UITableViewDataSource, UISearchBarDelegate>
 @property (nonatomic) UILabel *titleLabel;
@@ -54,17 +55,17 @@
     _titleLabel = [[UILabel alloc] init];
     _titleLabel.translatesAutoresizingMaskIntoConstraints = NO;
     _titleLabel.font = [UIFont systemFontOfSize:22 weight:UIFontWeightBold];
-    _titleLabel.text = @"Shaders";
+    _titleLabel.text = localize(@"Shaders", nil);
     [self.view addSubview:_titleLabel];
 
     _searchBar = [[UISearchBar alloc] init];
     _searchBar.translatesAutoresizingMaskIntoConstraints = NO;
     _searchBar.delegate = self;
-    _searchBar.placeholder = @"Search shader packs...";
+    _searchBar.placeholder = localize(@"download.search.shaders", nil);
     _searchBar.searchBarStyle = UISearchBarStyleMinimal;
     [self.view addSubview:_searchBar];
 
-    _typeControl = [[UISegmentedControl alloc] initWithItems:@[@"All", @"Iris", @"Optifine"]];
+    _typeControl = [[UISegmentedControl alloc] initWithItems:@[localize(@"All", nil), @"Iris", @"Optifine"]];
     _typeControl.translatesAutoresizingMaskIntoConstraints = NO;
     _typeControl.selectedSegmentIndex = 0;
     [_typeControl addTarget:self action:@selector(typeChanged) forControlEvents:UIControlEventValueChanged];
@@ -77,7 +78,7 @@
 
     _emptyLabel = [[UILabel alloc] init];
     _emptyLabel.translatesAutoresizingMaskIntoConstraints = NO;
-    _emptyLabel.text = @"No shader packs found.\nTry a different search.";
+    _emptyLabel.text = localize(@"download.empty.shaders", nil);
     _emptyLabel.numberOfLines = 0;
     _emptyLabel.textAlignment = NSTextAlignmentCenter;
     _emptyLabel.font = [UIFont systemFontOfSize:14 weight:UIFontWeightRegular];

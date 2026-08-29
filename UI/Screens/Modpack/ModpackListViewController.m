@@ -9,6 +9,7 @@
 #import "MrpackInstaller.h"
 #import "ios_uikit_bridge.h"
 #import "AmethystBlurView.h"
+#import "utils.h"
 
 @interface ModpackListViewController () <UITableViewDelegate, UITableViewDataSource, UISearchBarDelegate, UIDocumentPickerDelegate>
 @property (nonatomic) UILabel *titleLabel;
@@ -53,12 +54,12 @@
     _titleLabel = [[UILabel alloc] init];
     _titleLabel.translatesAutoresizingMaskIntoConstraints = NO;
     _titleLabel.font = [UIFont systemFontOfSize:22 weight:UIFontWeightBold];
-    _titleLabel.text = @"Modpacks";
+    _titleLabel.text = localize(@"Modpacks", nil);
     [self.view addSubview:_titleLabel];
 
     _importButton = [UIButton buttonWithType:UIButtonTypeSystem];
     _importButton.translatesAutoresizingMaskIntoConstraints = NO;
-    [_importButton setTitle:@"Import .mrpack" forState:UIControlStateNormal];
+    [_importButton setTitle:localize(@"Import .mrpack", nil) forState:UIControlStateNormal];
     [_importButton setImage:[UIImage systemImageNamed:@"square.and.arrow.down"] forState:UIControlStateNormal];
     _importButton.titleLabel.font = [UIFont systemFontOfSize:13 weight:UIFontWeightSemibold];
     [_importButton addTarget:self action:@selector(importMrpack) forControlEvents:UIControlEventTouchUpInside];
@@ -67,7 +68,7 @@
     _searchBar = [[UISearchBar alloc] init];
     _searchBar.translatesAutoresizingMaskIntoConstraints = NO;
     _searchBar.delegate = self;
-    _searchBar.placeholder = @"Search modpacks...";
+    _searchBar.placeholder = localize(@"download.search.modpacks", nil);
     _searchBar.searchBarStyle = UISearchBarStyleMinimal;
     [self.view addSubview:_searchBar];
 
@@ -78,7 +79,7 @@
 
     _emptyLabel = [[UILabel alloc] init];
     _emptyLabel.translatesAutoresizingMaskIntoConstraints = NO;
-    _emptyLabel.text = @"No modpacks found.\nTry a different search.";
+    _emptyLabel.text = localize(@"download.empty.modpacks", nil);
     _emptyLabel.numberOfLines = 0;
     _emptyLabel.textAlignment = NSTextAlignmentCenter;
     _emptyLabel.font = [UIFont systemFontOfSize:14 weight:UIFontWeightRegular];

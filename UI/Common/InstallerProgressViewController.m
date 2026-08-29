@@ -46,7 +46,7 @@
     self.titleLabel.font = [UIFont systemFontOfSize:19 weight:UIFontWeightBold];
     self.titleLabel.textColor = UIColor.whiteColor;
     self.titleLabel.textAlignment = NSTextAlignmentCenter;
-    self.titleLabel.text = self.installTitle ?: @"Installing...";
+    self.titleLabel.text = self.installTitle ?: localize(@"Installing...", nil);
     [self.view addSubview:self.titleLabel];
 
     self.statusLabel = [[UILabel alloc] init];
@@ -56,7 +56,7 @@
     self.statusLabel.textAlignment = NSTextAlignmentCenter;
     self.statusLabel.numberOfLines = 1;
     self.statusLabel.lineBreakMode = NSLineBreakByTruncatingMiddle;
-    self.statusLabel.text = @"Starting JVM...";
+    self.statusLabel.text = localize(@"Starting JVM...", nil);
     [self.view addSubview:self.statusLabel];
 
     self.progressView = [[UIProgressView alloc] initWithProgressViewStyle:UIProgressViewStyleDefault];
@@ -70,7 +70,7 @@
     self.percentLabel.font = [UIFont systemFontOfSize:14 weight:UIFontWeightBold];
     self.percentLabel.textColor = ThemeManager.shared.accentColor;
     self.percentLabel.textAlignment = NSTextAlignmentCenter;
-    self.percentLabel.text = @"0%";
+    self.percentLabel.text = localize(@"0%", nil);
     [self.view addSubview:self.percentLabel];
 
     self.logTextView = [[UITextView alloc] init];
@@ -88,7 +88,7 @@
 
     self.cancelBtn = [UIButton buttonWithType:UIButtonTypeSystem];
     self.cancelBtn.translatesAutoresizingMaskIntoConstraints = NO;
-    [self.cancelBtn setTitle:@"Cancel" forState:UIControlStateNormal];
+    [self.cancelBtn setTitle:localize(@"Cancel", nil) forState:UIControlStateNormal];
     [self.cancelBtn setTitleColor:UIColor.systemRedColor forState:UIControlStateNormal];
     self.cancelBtn.titleLabel.font = [UIFont systemFontOfSize:16 weight:UIFontWeightSemibold];
     [self.cancelBtn addTarget:self action:@selector(cancelPressed) forControlEvents:UIControlEventTouchUpInside];
@@ -146,7 +146,7 @@
         int version = [JavaGUIViewController requiredJavaVersionForJar:self.jarPath];
         if (version <= 0) {
             dispatch_async(dispatch_get_main_queue(), ^{
-                self.statusLabel.text = @"Failed to read installer jar";
+                self.statusLabel.text = localize(@"Failed to read installer jar", nil);
                 [self finishWithExitCode:-1 fatal:YES];
             });
             return;

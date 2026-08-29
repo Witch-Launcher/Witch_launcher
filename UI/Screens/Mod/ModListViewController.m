@@ -15,6 +15,7 @@
 #import "CurseForgeService.h"
 #import "AFImageDownloader.h"
 #import "AmethystBlurView.h"
+#import "utils.h"
 
 @interface ModTagView : UIView
 @property (nonatomic) UILabel *label;
@@ -110,7 +111,7 @@
 
         _versionBtn = [UIButton buttonWithType:UIButtonTypeSystem];
         _versionBtn.translatesAutoresizingMaskIntoConstraints = NO;
-        [_versionBtn setTitle:@"Select Version" forState:UIControlStateNormal];
+        [_versionBtn setTitle:localize(@"Select Version", nil) forState:UIControlStateNormal];
         [_versionBtn setTitleColor:ThemeManager.shared.primaryTextColor forState:UIControlStateNormal];
         _versionBtn.backgroundColor = ThemeManager.shared.cardBackgroundColor;
         _versionBtn.layer.cornerRadius = 6;
@@ -126,7 +127,7 @@
 
         _downloadBtn = [UIButton buttonWithType:UIButtonTypeSystem];
         _downloadBtn.translatesAutoresizingMaskIntoConstraints = NO;
-        [_downloadBtn setTitle:@"Download" forState:UIControlStateNormal];
+        [_downloadBtn setTitle:localize(@"Download", nil) forState:UIControlStateNormal];
         [_downloadBtn setTitleColor:UIColor.whiteColor forState:UIControlStateNormal];
         _downloadBtn.backgroundColor = ThemeManager.shared.accentColor;
         _downloadBtn.layer.cornerRadius = 6;
@@ -258,14 +259,14 @@
 - (void)applyInstallState {
     ThemeManager *theme = ThemeManager.shared;
     if ([_installState isEqualToString:@"installed"]) {
-        [_downloadBtn setTitle:@"Đã cài ✓" forState:UIControlStateNormal];
+        [_downloadBtn setTitle:localize(@"Installed", nil) forState:UIControlStateNormal];
         _downloadBtn.backgroundColor = theme.successColor;
     } else if ([_installState isEqualToString:@"update"]) {
-        [_downloadBtn setTitle:@"↑ Update" forState:UIControlStateNormal];
+        [_downloadBtn setTitle:localize(@"Update", nil) forState:UIControlStateNormal];
         _downloadBtn.backgroundColor = theme.warningColor;
         [_downloadBtn setTitleColor:[UIColor blackColor] forState:UIControlStateNormal];
     } else {
-        [_downloadBtn setTitle:@"Download" forState:UIControlStateNormal];
+        [_downloadBtn setTitle:localize(@"Download", nil) forState:UIControlStateNormal];
         _downloadBtn.backgroundColor = theme.accentColor;
         [_downloadBtn setTitleColor:UIColor.whiteColor forState:UIControlStateNormal];
     }
@@ -313,7 +314,7 @@
 - (instancetype)init {
     self = [super initWithStyle:UITableViewStyleInsetGrouped];
     if (self) {
-        self.title = @"Chọn Version";
+        self.title = localize(@"Select Version", nil);
         self.tableView.rowHeight = 52;
     }
     return self;
@@ -363,10 +364,10 @@
 - (NSString *)tableView:(UITableView *)tableView titleForHeaderInSection:(NSInteger)section {
     if (![self hasCompatibleSection] && ![self hasOtherSection]) return nil;
     if ([self hasCompatibleSection] && [self hasOtherSection]) {
-        return section == 0 ? @"Tương thích profile" : @"Các version khác";
+        return section == 0 ? localize(@"Compatible with profile", nil) : localize(@"Other versions", nil);
     }
-    if ([self hasCompatibleSection]) return @"Tương thích profile";
-    return @"Các version khác";
+    if ([self hasCompatibleSection]) return localize(@"Compatible with profile", nil);
+    return localize(@"Other versions", nil);
 }
 
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section {
@@ -512,7 +513,7 @@
 
     _emptyLabel = [[UILabel alloc] init];
     _emptyLabel.translatesAutoresizingMaskIntoConstraints = NO;
-    _emptyLabel.text = @"No mods found.\nTry a different search.";
+    _emptyLabel.text = localize(@"No mods found.\nTry a different search.", nil);
     _emptyLabel.numberOfLines = 0;
     _emptyLabel.textAlignment = NSTextAlignmentCenter;
     _emptyLabel.font = [UIFont systemFontOfSize:14 weight:UIFontWeightRegular];
@@ -642,7 +643,7 @@
         _timeoutTimer = [NSTimer scheduledTimerWithTimeInterval:15 repeats:NO block:^(NSTimer *timer) {
             if (weakSelf.spinner.isAnimating) {
                 [weakSelf.spinner stopAnimating];
-                weakSelf.errorLabel.text = @"Request timed out.\nCheck your internet connection.";
+                weakSelf.errorLabel.text = localize(@"Request timed out.\nCheck your internet connection.", nil);
                 [weakSelf.view bringSubviewToFront:weakSelf.errorLabel];
                 weakSelf.errorLabel.hidden = NO;
             }

@@ -8,6 +8,7 @@
 #import <PhotosUI/PhotosUI.h>
 #import <UniformTypeIdentifiers/UniformTypeIdentifiers.h>
 #import "AmethystBlurView.h"
+#import "utils.h"
 
 @interface CursorManageViewController () <UITableViewDelegate, UITableViewDataSource, PHPickerViewControllerDelegate, UIDocumentPickerDelegate>
 
@@ -23,7 +24,7 @@
 - (void)viewDidLoad {
     [super viewDidLoad];
     self.view.backgroundColor = ThemeManager.shared.contentBackgroundColor;
-    self.navigationItem.title = @"Mouse Cursors";
+    self.navigationItem.title = localize(@"Mouse Cursors", nil);
 
     _addButton = [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemAdd target:self action:@selector(showImportOptions)];
     self.navigationItem.rightBarButtonItem = _addButton;
@@ -61,16 +62,17 @@
 #pragma mark - Import
 
 - (void)showImportOptions {
-    UIAlertController *sheet = [UIAlertController alertControllerWithTitle:@"Add Cursor"
-                                                                   message:@"Choose an image, GIF, or cursor file"
+    [HapticManager.shared play:HapticTypeLight];
+    UIAlertController *sheet = [UIAlertController alertControllerWithTitle:localize(@"cursor.detail.add_cursor", nil)
+                                                                   message:localize(@"Choose an image, GIF, or cursor file", nil)
                                                             preferredStyle:UIAlertControllerStyleActionSheet];
-    [sheet addAction:[UIAlertAction actionWithTitle:@"Photo Library" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
+    [sheet addAction:[UIAlertAction actionWithTitle:localize(@"cursor.detail.photo_library", nil) style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
         [self openPhotoPicker];
     }]];
-    [sheet addAction:[UIAlertAction actionWithTitle:@"Files" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
+    [sheet addAction:[UIAlertAction actionWithTitle:localize(@"cursor.detail.files", nil) style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
         [self openDocumentPicker];
     }]];
-    [sheet addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
+    [sheet addAction:[UIAlertAction actionWithTitle:localize(@"cursor.detail.cancel", nil) style:UIAlertActionStyleCancel handler:nil]];
 
     if (UIDevice.currentDevice.userInterfaceIdiom == UIUserInterfaceIdiomPad) {
         sheet.popoverPresentationController.barButtonItem = _addButton;
@@ -112,7 +114,7 @@
 
     PHPickerResult *result = results.firstObject;
     NSItemProvider *provider = result.itemProvider;
-    NSString *name = provider.suggestedName ?: @"Cursor";
+    NSString *name = provider.suggestedName ?: localize(@"Cursor", nil);
 
     if ([provider hasItemConformingToTypeIdentifier:UTTypeGIF.identifier]) {
         [provider loadFileRepresentationForTypeIdentifier:UTTypeGIF.identifier completionHandler:^(NSURL *url, NSError *error) {
@@ -134,7 +136,7 @@
 - (void)documentPicker:(UIDocumentPickerViewController *)controller didPickDocumentsAtURLs:(NSArray<NSURL *> *)urls {
     if (urls.count == 0) return;
     NSURL *url = urls.firstObject;
-    NSString *name = url.lastPathComponent.stringByDeletingPathExtension ?: @"Cursor";
+    NSString *name = url.lastPathComponent.stringByDeletingPathExtension ?: localize(@"Cursor", nil);
     [self finishImportAtURL:url name:name];
 }
 
@@ -160,7 +162,7 @@
 - (void)handleImportResult:(NSString *)cursor error:(NSError *)error {
     self.isImporting = NO;
     if (!cursor) {
-        showDialog(@"Import Failed", error ? error.localizedDescription : @"Unsupported image format");
+        showDialog(localize(@"cursor.detail.import_failed", nil), error ? error.localizedDescription : localize(@"cursor.detail.unsupported_format", nil));
         return;
     }
     // Auto-select the newly imported cursor
@@ -214,13 +216,13 @@
     BOOL isDefault = [CursorManager isDefaultCursor:name];
     BOOL isCurrent = [[CursorManager currentCursorName] isEqualToString:name];
 
-    cell.textLabel.text = isDefault ? @"Default (built-in)" : name;
+    cell.textLabel.text = isDefault ? localize(@"cursor.detail.default_builtin", nil) : name;
     cell.textLabel.textColor = ThemeManager.shared.primaryTextColor;
 
     CGPoint hitbox = [CursorManager hitboxForCursor:name];
-    cell.detailTextLabel.text = [NSString stringWithFormat:@"Hitbox: (%.0f, %.0f)%@",
+    cell.detailTextLabel.text = [NSString stringWithFormat:localize(@"cursor.detail.hitbox_format", nil),
                                  hitbox.x, hitbox.y,
-                                 isCurrent ? @"  •  In use" : @""];
+                                 isCurrent ? localize(@"In use", nil) : @""];
     cell.detailTextLabel.textColor = isCurrent ? ThemeManager.shared.accentColor : ThemeManager.shared.secondaryTextColor;
 
     UIImageView *icon = (UIImageView *)cell.accessoryView;
@@ -243,9 +245,9 @@
     NSString *name = _cursorNames[indexPath.row];
     BOOL isDefault = [CursorManager isDefaultCursor:name];
 
-    UIContextualAction *editHitbox = [UIContextualAction contextualActionWithStyle:UIContextualActionStyleNormal
-                                                                            title:@"Hitbox"
-                                                                            handler:^(UIContextualAction *action, UIView *sourceView, void (^completionHandler)(BOOL)) {
+UIContextualAction *editHitbox = [UIContextualAction contextualActionWithStyle:UIContextualActionStyleNormal
+                                                                             title:localize(@"cursor.detail.hitbox", nil)
+                                                                             handler:^(UIContextualAction *action, UIView *sourceView, void (^completionHandler)(BOOL)) {
         completionHandler(YES);
         [self openHitboxEditorForCursor:name];
     }];
@@ -255,8 +257,8 @@
 
     if (!isDefault) {
         UIContextualAction *delete = [UIContextualAction contextualActionWithStyle:UIContextualActionStyleDestructive
-                                                                             title:@"Delete"
-                                                                             handler:^(UIContextualAction *action, UIView *sourceView, void (^completionHandler)(BOOL)) {
+                                                                              title:localize(@"cursor.detail.delete", nil)
+                                                                              handler:^(UIContextualAction *action, UIView *sourceView, void (^completionHandler)(BOOL)) {
             completionHandler(YES);
             [self confirmDeleteCursor:name];
         }];
@@ -267,14 +269,14 @@
 }
 
 - (void)confirmDeleteCursor:(NSString *)name {
-    UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Delete Cursor"
-                                                                   message:[NSString stringWithFormat:@"Delete cursor \"%@\"?", name]
-                                                            preferredStyle:UIAlertControllerStyleAlert];
-    [alert addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
-    [alert addAction:[UIAlertAction actionWithTitle:@"Delete" style:UIAlertActionStyleDestructive handler:^(UIAlertAction *action) {
+    UIAlertController *alert = [UIAlertController alertControllerWithTitle:localize(@"cursor.manage.delete_title", nil)
+                                                                    message:[NSString stringWithFormat:localize(@"cursor.manage.delete_confirm", nil), name]
+                                                             preferredStyle:UIAlertControllerStyleAlert];
+    [alert addAction:[UIAlertAction actionWithTitle:localize(@"cursor.detail.cancel", nil) style:UIAlertActionStyleCancel handler:nil]];
+    [alert addAction:[UIAlertAction actionWithTitle:localize(@"cursor.detail.delete", nil) style:UIAlertActionStyleDestructive handler:^(UIAlertAction *action) {
         BOOL ok = [CursorManager deleteCursor:name];
         if (!ok) {
-            showDialog(@"Error", @"Failed to delete cursor.");
+            showDialog(localize(@"Error", nil), localize(@"Failed to delete cursor.", nil));
             return;
         }
         if ([[CursorManager currentCursorName] isEqualToString:name]) {
@@ -286,7 +288,7 @@
 }
 
 - (NSString *)tableView:(UITableView *)tableView titleForFooterInSection:(NSInteger)section {
-    return @"The default cursor cannot be deleted. Swipe a cursor left to edit its hitbox or delete it.";
+    return localize(@"The default cursor cannot be deleted. Swipe a cursor left to edit its hitbox or delete it.", nil);
 }
 
 @end

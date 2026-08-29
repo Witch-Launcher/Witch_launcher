@@ -366,3 +366,273 @@
 "launcher.download" = "Đang tải xuống...";
 "preference.title.gamepad_sensitivity" = "Độ nhạy tay cầm";
 "preference.title.lwjgl_version" = "Phiên bản LWJGL";
+
+"cursor.settings.title" = "Cài đặt con trỏ";
+"cursor.settings.enable_switching" = "Bật chuyển đổi kiểu con trỏ";
+"cursor.settings.master_switch" = "Công tắc chính";
+"cursor.settings.cursor_types" = "Các loại con trỏ";
+"cursor.settings.master_switch.footer" = "Bật để tự động chuyển đổi con trỏ khi trò chơi yêu cầu hình dạng khác. Tắt để luôn sử dụng con trỏ Bình thường.";
+"cursor.settings.cursor_types.footer" = "Nhấn vào một loại con trỏ để tùy chỉnh hình ảnh và vùng click. Mỗi loại có nhóm con trỏ riêng biệt.";
+
+"cursor.detail.add_cursor" = "Thêm con trỏ";
+"cursor.detail.choose_image" = "Chọn ảnh hoặc GIF";
+"cursor.detail.photo_library" = "Thư viện ảnh";
+"cursor.detail.files" = "Tệp tin";
+"cursor.detail.cancel" = "Hủy";
+"cursor.detail.import_failed" = "Nhập thất bại";
+"cursor.detail.unsupported_format" = "Định dạng ảnh không được hỗ trợ";
+"cursor.detail.current_cursor" = "Con trỏ hiện tại";
+"cursor.detail.default_builtin" = "Mặc định (tích hợp)";
+"cursor.detail.hitbox_format" = "Vùng click: (%.0f, %.0f)%@";
+"cursor.detail.hitbox_selected" = "  \xE2\x9C\x93 đã chọn";
+"cursor.detail.hitbox" = "Vùng click";
+"cursor.detail.delete" = "Xóa";
+"cursor.detail.delete_title" = "Xóa con trỏ";
+"cursor.detail.delete_confirm" = "Xóa con trỏ \"%@\"?";
+"cursor.detail.section.header" = "Nhóm con trỏ (nhấn để chọn, vuốt để tùy chọn)";
+"cursor.detail.section.footer" = "Mỗi loại con trỏ có nhóm con trỏ riêng biệt. Vuốt trái để chỉnh vùng click hoặc xóa. Nhập con trỏ mới với nút +.";
+
+"cursor.type.normal" = "Chọn thường";
+"cursor.type.link" = "Chọn liên kết";
+"cursor.type.text" = "Chọn văn bản";
+"cursor.type.busy" = "Đang bận";
+"cursor.type.working" = "Đang làm việc";
+"cursor.type.precision" = "Chọn chính xác";
+"cursor.type.unavailable" = "Không khả dụng";
+"cursor.type.vresize" = "Thay đổi dọc";
+"cursor.type.hresize" = "Thay đổi ngang";
+"cursor.type.diagonal" = "Thay đổi chéo";
+"cursor.type.move" = "Di chuyển";
+"cursor.type.help" = "Chọn trợ giúp";
+"cursor.type.hidden" = "Ẩn";
+
+"general.enabled" = "Đã bật";
+"general.disabled" = "Đã tắt";
+"general.active" = "Đang hoạt động";
+
+"cursor.settings.cursor" = "Con trỏ";
+
+"preference.title.lwjgl_version" = "Phiên bản LWJGL";
+"preference.title.screen_orientation" = "Hướng màn hình";
+"preference.title.theme" = "Chủ đề";
+"preference.title.launcher_logo" = "Logo Launcher";
+"preference.title.curseforge_api_key" = "Khóa API CurseForge";
+"preference.detail.curseforge_api_key" = "Dán khóa API CurseForge của bạn vào đây";
+"preference.title.optimization_level" = "Mức tối ưu hóa";
+"preference.title.debug_server_port" = "Cổng Server Debug";
+"preference.title.debug_server_token" = "Token Server Debug";
+
+"appearance.accent_color" = "Màu nhấn";
+"appearance.text_color" = "Màu chữ";
+"appearance.secondary_text_color" = "Màu chữ phụ";
+"appearance.background_color" = "Màu nền";
+"appearance.sidebar_color" = "Màu thanh bên";
+"appearance.top_bar_color" = "Màu thanh trên";
+"appearance.right_panel_color" = "Màu panel phải";
+"appearance.content_card_color" = "Màu thẻ nội dung";
+"appearance.background" = "Hình nền";
+"appearance.ui_opacity" = "Độ mờ UI";
+"appearance.background_blur" = "Làm mờ nền";
+"appearance.ui_panels_blur" = "Làm mờ panel UI";
+"appearance.top_bar_blur" = "Làm mờ thanh trên";
+"appearance.left_bar_blur" = "Làm mờ thanh trái";
+"appearance.right_panel_blur" = "Làm mờ panel phải";
+"appearance.bar_border_thickness" = "Độ dày viền thanh";
+"appearance.export_theme" = "Xuất chủ đề giao diện";
+"appearance.import_theme" = "Nhập chủ đề giao diện";
+"appearance.reset" = "Đặt lại giao diện";
+
+"theme.system" = "Hệ thống";
+"theme.dark" = "Tối";
+"theme.light" = "Sáng";
+"logo.purple" = "Tím";
+"logo.blue" = "Xanh";
+"logo.dev" = "Dev";
+"orientation.off" = "Tắt";
+"orientation.portrait" = "Dọc";
+"orientation.landscape" = "Ngang";
+
+"server.add.title" = "Thêm Server";
+"server.name.placeholder" = "Tên server (VD: Hypixel)";
+"server.address.placeholder" = "Địa chỉ (VD: mc.hypixel.net)";
+"server.cancel" = "Hủy";
+"server.connect" = "Kết nối";
+
+"version.fetching" = "Đang tải manifest phiên bản...";
+"version.unknown_loader" = "Loader không xác định";
+
+"download.search.resource_packs" = "Tìm resource pack...";
+"download.search.maps" = "Tìm map...";
+"download.search.modpacks" = "Tìm modpack...";
+"download.search.shaders" = "Tìm shader...";
+"download.search.mods" = "Tìm mod...";
+"download.empty.resource_packs" = "Không tìm thấy resource pack.\nThử tìm kiếm khác.";
+"download.empty.maps" = "Không tìm thấy map.\nThử tìm kiếm khác.";
+"download.empty.modpacks" = "Không tìm thấy modpack.\nThử tìm kiếm khác.";
+"download.empty.shaders" = "Không tìm thấy shader pack.\nThử tìm kiếm khác.";
+"download.error.timeout" = "Hết thời gian yêu cầu.\nKiểm tra kết nối internet.";
+
+"dependency.progress" = "0%";
+"dependency.speed_calculating" = "Đang tính...";
+"dependency.speed_unknown" = "--";
+"dependency.status_failed" = "Thất bại";
+"dependency.status_completed" = "Hoàn tất";
+"dependency.status_cancelled" = "Đã hủy";
+"dependency.overall_progress" = "0 / 0";
+
+"filebrowser.empty" = "Thư mục này trống.\nNhấn + để thêm tệp hoặc thư mục.";
+"filebrowser.folder_name.placeholder" = "Tên thư mục";
+
+"profile.installed.curseforge" = " CurseForge ";
+"profile.installed.modrinth" = " Modrinth ";
+"profile.list.active_badge" = " Đang dùng ";
+"profile.list.name.placeholder" = "Tên profile (VD: Survival, Creative, Modded...)";
+"profile.settings.title" = "Cài đặt Profile";
+
+"account.type.ely" = "Ely.by";
+"account.type.demo" = "Demo";
+"account.type.premium" = "Premium";
+"account.type.local" = "Nội bộ";
+"account.title" = "Tài khoản";
+"account.add" = "Thêm tài khoản";
+"account.username.placeholder" = "Tên người dùng";
+"account.password.placeholder" = "Mật khẩu";
+"account.ely.placeholder" = "Email hoặc tên người dùng Ely.by";
+"account.totp.placeholder" = "123456";
+
+"mainmenu.title" = "Witch Launcher";
+
+"cursor.manage.import_title" = "Nhập Con Trỏ";
+"cursor.manage.import_message" = "Thêm hình ảnh con trỏ tùy chỉnh";
+"cursor.manage.photo_library" = "Thư viện ảnh";
+"cursor.manage.files" = "Tệp tin";
+"cursor.manage.delete_title" = "Xóa Con Trỏ";
+"cursor.manage.delete_confirm" = "Xóa con trỏ \"%@\"?";
+"cursor.manage.select_title" = "Chọn Con Trỏ";
+"cursor.manage.select_message" = "Chọn con trỏ cho loại này";
+"cursor.manage.choose_cursor" = "Chọn Con Trỏ...";
+"cursor.manage.reset_default" = "Đặt lại Con Trỏ Mặc Định";
+"cursor.manage.import_new" = "Nhập Con Trỏ Mới...";
+"cursor.manage.edit_hitbox" = "Chỉnh Vùng Click";
+
+"Modpacks" = "Modpack";
+"Import .mrpack" = "Nhập .mrpack";
+
+"Shaders" = "Shader";
+"All" = "Tất cả";
+
+"Premium (Microsoft)" = "Premium (Microsoft)";
+"Local (Offline)" = "Nội bộ (Offline)";
+"Sign in with Browser (OAuth2)" = "Đăng nhập bằng trình duyệt (OAuth2)";
+"Add Local Account" = "Thêm tài khoản nội bộ";
+"Login with Ely.by" = "Đăng nhập Ely.by";
+"Login with Microsoft" = "Đăng nhập Microsoft";
+"Unknown" = "Không xác định";
+
+"Enable" = "Bật";
+"Disable" = "Tắt";
+"In use" = "Đang dùng";
+
+"File Manager" = "Quản lý tệp";
+"Add File" = "Thêm tệp";
+"Add Folder" = "Thêm thư mục";
+"Paste" = "Dán";
+"New Folder" = "Thư mục mới";
+"Enter folder name:" = "Nhập tên thư mục:";
+"Folder name" = "Tên thư mục";
+"Cancel" = "Hủy";
+"Create" = "Tạo";
+"Error" = "Lỗi";
+"Import Error" = "Lỗi nhập";
+
+"File Manager" = "Quản lý tệp";
+"Add File" = "Thêm tệp";
+"Add Folder" = "Thêm thư mục";
+"Paste" = "Dán";
+"New Folder" = "Thư mục mới";
+"Enter folder name:" = "Nhập tên thư mục:";
+"Folder name" = "Tên thư mục";
+"Cancel" = "Hủy";
+"Create" = "Tạo";
+"Error" = "Lỗi";
+
+"Profiles" = "Profiles";
+"Create New Profile" = "Tạo Profile mới";
+"Profile name already exists" = "Tên profile đã tồn tại";
+"Notification" = "Thông báo";
+"OK" = "OK";
+"Current Profile" = "Profile hiện tại";
+"Other Profiles" = "Profile khác";
+
+"Download Hub" = "Trung tâm tải xuống";
+"Browse and install content for Minecraft" = "Duyệt và cài đặt nội dung cho Minecraft";
+"Game" = "Trò chơi";
+"Install & manage versions" = "Cài đặt & quản lý phiên bản";
+"Mod" = "Mod";
+"Browse Modrinth mods" = "Duyệt mod Modrinth";
+"Modpack" = "Modpack";
+"Curated mod collections" = "Bộ sưu tập mod được chọn lọc";
+"Shader" = "Shader";
+"Iris & Optifine packs" = "Gói Iris & Optifine";
+"Resource Pack" = "Resource Pack";
+"Textures & visual overhauls" = "Kết cấu & hiệu ứng hình ảnh";
+"Maps" = "Map";
+"Worlds & adventure maps" = "Thế giới & bản đồ phiêu lưu";
+
+"Select Version" = "Chọn phiên bản";
+"Download" = "Tải xuống";
+"Installed" = "Đã cài ✓";
+"Update" = "Cập nhật";
+"Compatible with profile" = "Tương thích profile";
+"Other versions" = "Các version khác";
+
+"Mod" = "Mod";
+"by" = "bởi";
+"Unknown" = "Không xác định";
+"downloads" = "lượt tải";
+"follows" = "lượt theo dõi";
+"Versions" = "Phiên bản";
+"Select MC Version" = "Chọn phiên bản MC";
+"Install Modpack" = "Cài Modpack";
+"Download to Profile" = "Tải về Profile";
+"Dependencies" = "Phụ thuộc";
+
+"Mouse Cursors" = "Con trỏ chuột";
+"Choose an image, GIF, or cursor file" = "Chọn ảnh, GIF, hoặc tệp con trỏ";
+"Cursor" = "Con trỏ";
+"Failed to delete cursor." = "Xóa con trỏ thất bại.";
+"The default cursor cannot be deleted. Swipe a cursor left to edit its hitbox or delete it." = "Con trỏ mặc định không thể xóa. Vuốt trái con trỏ để chỉnh vùng click hoặc xóa.";
+
+"Mod Loader" = "Mod Loader";
+"Set" = "Đặt";
+"Delete %@?" = "Xóa %@?";
+"This will permanently delete this profile and version. This action cannot be undone." = "Hành động này sẽ xóa vĩnh viễn profile và phiên bản này. Không thể hoàn tác.";
+"Account Required" = "Yêu cầu tài khoản";
+"Please add and select an account first." = "Vui lòng thêm và chọn tài khoản trước.";
+"Minecraft Not Purchased" = "Minecraft chưa mua";
+"Your Microsoft account has not purchased Minecraft. Please purchase the game from minecraft.net to play." = "Tài khoản Microsoft của bạn chưa mua Minecraft. Vui lòng mua game tại minecraft.net để chơi.";
+"No Version" = "Không có phiên bản";
+"Please select a version from the sidebar first." = "Vui lòng chọn phiên bản từ thanh bên trước.";
+
+"Save" = "Lưu";
+"Drag or tap to place the hitbox point (the tip of the cursor)." = "Kéo hoặc chạm để đặt điểm vùng click (đầu con trỏ).";
+
+"Game Versions" = "Các phiên bản trò chơi";
+
+"No mods found.\nTry a different search." = "Không tìm thấy mod.\nThử tìm kiếm khác.";
+"Request timed out.\nCheck your internet connection." = "Hết thời gian yêu cầu.\nKiểm tra kết nối internet.";
+
+"Download Dependencies" = "Tải Dependencies";
+"Installing:" = "Đang cài:";
+"0 / 0" = "0 / 0";
+"Cancel All" = "Hủy tất cả";
+"Close" = "Đóng";
+"Calculating..." = "Đang tính...";
+"Failed" = "Thất bại";
+"Completed" = "Hoàn tất";
+"Cancelled" = "Đã hủy";
+
+"Installing..." = "Đang cài đặt...";
+"Starting JVM..." = "Đang khởi động JVM...";
+"0%" = "0%";
+"Failed to read installer jar" = "Không thể đọc tệp cài đặt";

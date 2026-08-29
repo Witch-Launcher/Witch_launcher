@@ -1170,9 +1170,6 @@ public class NanoVG {
         }
         return nnvgCreateFontMem(ctx, memAddress(name), memAddress(data), data.remaining(), freeData ? 1 : 0);
     }
-    public static int nvgCreateFontMem(@NativeType("NVGcontext *") long ctx, @NativeType("char const *") ByteBuffer name, @NativeType("unsigned char *") ByteBuffer data, int freeData) {
-        return nvgCreateFontMem(ctx, name, data, freeData == 0 ? false : true);
-    }
 
     /** {@code int nvgCreateFontMem(NVGcontext * ctx, char const * name, unsigned char * data, int ndata, int freeData)} */
     public static int nvgCreateFontMem(@NativeType("NVGcontext *") long ctx, @NativeType("char const *") CharSequence name, @NativeType("unsigned char *") ByteBuffer data, @NativeType("int") boolean freeData) {
@@ -1188,9 +1185,6 @@ public class NanoVG {
             stack.setPointer(stackPointer);
         }
     }
-    public static int nvgCreateFontMem(@NativeType("NVGcontext *") long ctx, @NativeType("char const *") CharSequence name, @NativeType("unsigned char *") ByteBuffer data, int freeData) {
-        return nvgCreateFontMem(ctx, name, data, freeData == 0 ? false : true);
-    }
 
     // --- [ nvgCreateFontMemAtIndex ] ---
 
@@ -1204,9 +1198,6 @@ public class NanoVG {
             checkNT1(name);
         }
         return nnvgCreateFontMemAtIndex(ctx, memAddress(name), memAddress(data), data.remaining(), freeData ? 1 : 0, fontIndex);
-    }
-    public static int nvgCreateFontMemAtIndex(@NativeType("NVGcontext *") long ctx, @NativeType("char const *") ByteBuffer name, @NativeType("unsigned char *") ByteBuffer data, int freeData, int fontIndex) {
-        return nvgCreateFontMemAtIndex(ctx, name, data, freeData == 0 ? false : true, fontIndex);
     }
 
     /** {@code int nvgCreateFontMemAtIndex(NVGcontext * ctx, char const * name, unsigned char * data, int ndata, int freeData, int fontIndex)} */
@@ -1222,9 +1213,6 @@ public class NanoVG {
         } finally {
             stack.setPointer(stackPointer);
         }
-    }
-    public static int nvgCreateFontMemAtIndex(@NativeType("NVGcontext *") long ctx, @NativeType("char const *") CharSequence name, @NativeType("unsigned char *") ByteBuffer data, int freeData, int fontIndex) {
-        return nvgCreateFontMemAtIndex(ctx, name, data, freeData == 0 ? false : true, fontIndex);
     }
 
     // --- [ nvgFindFont ] ---

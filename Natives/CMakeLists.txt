@@ -336,8 +336,9 @@ egl_bridge.m
    ../UI/App/MainCoordinator.m
    ../UI/Managers/VersionDirectoryManager.m
    ../UI/Managers/DownloadManager.m
-   ../UI/Managers/CursorManager.m
-   ../UI/Managers/InstalledModsManager.m
+    ../UI/Managers/CursorManager.m
+    ../UI/Managers/CursorTypeManager.m
+    ../UI/Managers/InstalledModsManager.m
    ../UI/Screens/MainMenu/MainMenuViewController.m
    ../UI/Screens/CrashLog/CrashLogAnalyzer.m
    ../UI/Screens/CrashLog/CrashScreenViewController.m
@@ -352,8 +353,9 @@ egl_bridge.m
    ../UI/Screens/Server/ServerListViewController.m
    ../UI/Screens/Settings/SettingsViewController.m
    ../UI/Screens/Settings/CreditsService.m
-   ../UI/Screens/Settings/CursorManageViewController.m
-   ../UI/Screens/Settings/CursorHitboxEditorViewController.m
+    ../UI/Screens/Settings/CursorSettingsViewController.m
+    ../UI/Screens/Settings/CursorTypeDetailViewController.m
+    ../UI/Screens/Settings/CursorHitboxEditorViewController.m
    ../UI/Screens/Account/AccountViewController.m
    ../UI/Screens/ProfileSettings/ProfileSettingsViewController.m
    ../UI/Screens/Download/DownloadHubViewController.m
@@ -383,6 +385,7 @@ target_link_libraries(Witch
   "-framework CoreImage"
   "-framework CoreMotion"
   "-framework GameController"
+  "-framework IOSurface"
   "-framework IOKit"
   "-framework PhotosUI"
   "-framework QuartzCore"

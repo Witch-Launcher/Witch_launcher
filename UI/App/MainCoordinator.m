@@ -178,13 +178,13 @@
 }
 
 - (void)showVersionPicker {
-    UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Select Version" message:nil preferredStyle:UIAlertControllerStyleAlert];
+    UIAlertController *alert = [UIAlertController alertControllerWithTitle:localize(@"Select Version", nil) message:nil preferredStyle:UIAlertControllerStyleAlert];
     [alert addTextFieldWithConfigurationHandler:^(UITextField *field) {
         field.placeholder = @"e.g. 1.21.4";
         field.text = VersionDirectoryManager.shared.currentVersion;
     }];
-    [alert addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
-    [alert addAction:[UIAlertAction actionWithTitle:@"Set" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
+    [alert addAction:[UIAlertAction actionWithTitle:localize(@"Cancel", nil) style:UIAlertActionStyleCancel handler:nil]];
+    [alert addAction:[UIAlertAction actionWithTitle:localize(@"Set", nil) style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
         NSString *ver = alert.textFields[0].text;
         if (ver.length > 0) {
             VersionDirectoryManager.shared.currentVersion = ver;
@@ -195,14 +195,14 @@
 }
 
 - (void)showModLoaderPicker {
-    UIAlertController *sheet = [UIAlertController alertControllerWithTitle:@"Mod Loader" message:nil preferredStyle:UIAlertControllerStyleActionSheet];
+    UIAlertController *sheet = [UIAlertController alertControllerWithTitle:localize(@"Mod Loader", nil) message:nil preferredStyle:UIAlertControllerStyleActionSheet];
     NSArray *loaders = @[@"Vanilla", @"Fabric", @"Forge", @"Quilt", @"NeoForge"];
     for (NSString *loader in loaders) {
         [sheet addAction:[UIAlertAction actionWithTitle:loader style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
             setPrefObject(@"internal.mod_loader", loader);
         }]];
     }
-    [sheet addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
+    [sheet addAction:[UIAlertAction actionWithTitle:localize(@"Cancel", nil) style:UIAlertActionStyleCancel handler:nil]];
     [self.rootVC presentViewController:sheet animated:YES completion:nil];
 }
 
@@ -224,11 +224,11 @@
 }
 
 - (void)removeVersion:(NSString *)versionName {
-    UIAlertController *alert = [UIAlertController alertControllerWithTitle:[NSString stringWithFormat:@"Delete %@?", versionName]
-                                                                   message:@"This will permanently delete this profile and version. This action cannot be undone."
-                                                            preferredStyle:UIAlertControllerStyleAlert];
-    [alert addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
-    [alert addAction:[UIAlertAction actionWithTitle:@"Delete" style:UIAlertActionStyleDestructive handler:^(UIAlertAction *action) {
+    UIAlertController *alert = [UIAlertController alertControllerWithTitle:[NSString stringWithFormat:localize(@"Delete %@?", nil), versionName]
+                                                                    message:localize(@"This will permanently delete this profile and version. This action cannot be undone.", nil)
+                                                             preferredStyle:UIAlertControllerStyleAlert];
+    [alert addAction:[UIAlertAction actionWithTitle:localize(@"Cancel", nil) style:UIAlertActionStyleCancel handler:nil]];
+    [alert addAction:[UIAlertAction actionWithTitle:localize(@"Delete", nil) style:UIAlertActionStyleDestructive handler:^(UIAlertAction *action) {
         NSString *path = [VersionDirectoryManager.shared versionPathForVersion:versionName];
         [[NSFileManager defaultManager] removeItemAtPath:path error:nil];
         [self.rootVC.rightPanelVC refreshVersions];
@@ -274,18 +274,18 @@
 - (void)launchGame {
     NSString *accountName = BaseAuthenticator.current.authData[@"username"];
     if (!accountName) {
-        showDialog(@"Account Required", @"Please add and select an account first.");
+        showDialog(localize(@"Account Required", nil), localize(@"Please add and select an account first.", nil));
         return;
     }
 
     if ([accountName hasPrefix:@"Demo."]) {
-        showDialog(@"Minecraft Not Purchased", @"Your Microsoft account has not purchased Minecraft. Please purchase the game from minecraft.net to play.");
+        showDialog(localize(@"Minecraft Not Purchased", nil), localize(@"Your Microsoft account has not purchased Minecraft. Please purchase the game from minecraft.net to play.", nil));
         return;
     }
 
     NSString *versionStr = VersionDirectoryManager.shared.currentVersion;
     if (versionStr.length == 0) {
-        showDialog(@"No Version", @"Please select a version from the sidebar first.");
+        showDialog(localize(@"No Version", nil), localize(@"Please select a version from the sidebar first.", nil));
         return;
     }
 
@@ -298,18 +298,18 @@
 - (void)launchWithServer:(NSDictionary *)server {
     NSString *accountName = BaseAuthenticator.current.authData[@"username"];
     if (!accountName) {
-        showDialog(@"Account Required", @"Please add and select an account first.");
+        showDialog(localize(@"Account Required", nil), localize(@"Please add and select an account first.", nil));
         return;
     }
 
     if ([accountName hasPrefix:@"Demo."]) {
-        showDialog(@"Minecraft Not Purchased", @"Your Microsoft account has not purchased Minecraft. Please purchase the game from minecraft.net to play.");
+        showDialog(localize(@"Minecraft Not Purchased", nil), localize(@"Your Microsoft account has not purchased Minecraft. Please purchase the game from minecraft.net to play.", nil));
         return;
     }
 
     NSString *versionStr = VersionDirectoryManager.shared.currentVersion;
     if (versionStr.length == 0) {
-        showDialog(@"No Version", @"Please select a version from the sidebar first.");
+        showDialog(localize(@"No Version", nil), localize(@"Please select a version from the sidebar first.", nil));
         return;
     }
     [self showProgressAlert:localize(@"launcher.checking", nil)];

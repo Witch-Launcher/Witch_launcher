@@ -489,3 +489,273 @@
 "launcher.download" = "Downloading...";
 "preference.title.gamepad_sensitivity" = "Gamepad Sensitivity";
 "preference.title.lwjgl_version" = "LWJGL Version";
+
+"cursor.settings.title" = "Cursor Settings";
+"cursor.settings.enable_switching" = "Enable Cursor Type Switching";
+"cursor.settings.master_switch" = "Master Switch";
+"cursor.settings.cursor_types" = "Cursor Types";
+"cursor.settings.master_switch.footer" = "Turn ON to automatically switch cursors when the game requests a different shape. Turn OFF to always use the Normal cursor.";
+"cursor.settings.cursor_types.footer" = "Tap a cursor type to customize its cursor image and hitbox. Each type has its own independent cursor pool.";
+
+"cursor.detail.add_cursor" = "Add Cursor";
+"cursor.detail.choose_image" = "Choose an image or GIF";
+"cursor.detail.photo_library" = "Photo Library";
+"cursor.detail.files" = "Files";
+"cursor.detail.cancel" = "Cancel";
+"cursor.detail.import_failed" = "Import Failed";
+"cursor.detail.unsupported_format" = "Unsupported image format";
+"cursor.detail.current_cursor" = "Current Cursor";
+"cursor.detail.default_builtin" = "Default (built-in)";
+"cursor.detail.hitbox_format" = "Hitbox: (%.0f, %.0f)%@";
+"cursor.detail.hitbox_selected" = "  \xE2\x9C\x93 selected";
+"cursor.detail.hitbox" = "Hitbox";
+"cursor.detail.delete" = "Delete";
+"cursor.detail.delete_title" = "Delete Cursor";
+"cursor.detail.delete_confirm" = "Delete cursor \"%@\"?";
+"cursor.detail.section.header" = "Cursor Pool (tap to select, swipe for options)";
+"cursor.detail.section.footer" = "Each cursor type has its own independent cursor pool. Swipe left to edit hitbox or delete. Import new cursors with the + button.";
+
+"cursor.type.normal" = "Normal Select";
+"cursor.type.link" = "Link Select";
+"cursor.type.text" = "Text Select";
+"cursor.type.busy" = "Busy";
+"cursor.type.working" = "Working in Background";
+"cursor.type.precision" = "Precision Select";
+"cursor.type.unavailable" = "Unavailable";
+"cursor.type.vresize" = "Vertical Resize";
+"cursor.type.hresize" = "Horizontal Resize";
+"cursor.type.diagonal" = "Diagonal Resize";
+"cursor.type.move" = "Move";
+"cursor.type.help" = "Help Select";
+"cursor.type.hidden" = "Hidden";
+
+"general.enabled" = "Enabled";
+"general.disabled" = "Disabled";
+"general.active" = "Active";
+
+"cursor.settings.cursor" = "Cursor";
+
+"preference.title.lwjgl_version" = "LWJGL Version";
+"preference.title.screen_orientation" = "Screen Orientation";
+"preference.title.theme" = "Theme";
+"preference.title.launcher_logo" = "Launcher Logo";
+"preference.title.curseforge_api_key" = "CurseForge API Key";
+"preference.detail.curseforge_api_key" = "Paste your CurseForge API key here";
+"preference.title.optimization_level" = "Optimization Level";
+"preference.title.debug_server_port" = "Debug Server Port";
+"preference.title.debug_server_token" = "Debug Server Token";
+
+"appearance.accent_color" = "Accent Color";
+"appearance.text_color" = "Text Color";
+"appearance.secondary_text_color" = "Secondary Text Color";
+"appearance.background_color" = "Background Color";
+"appearance.sidebar_color" = "Sidebar Color";
+"appearance.top_bar_color" = "Top Bar Color";
+"appearance.right_panel_color" = "Right Panel Color";
+"appearance.content_card_color" = "Content Card Color";
+"appearance.background" = "Background";
+"appearance.ui_opacity" = "UI Opacity";
+"appearance.background_blur" = "Background Blur";
+"appearance.ui_panels_blur" = "UI Panels Blur";
+"appearance.top_bar_blur" = "Top Bar Blur";
+"appearance.left_bar_blur" = "Left Bar Blur";
+"appearance.right_panel_blur" = "Right Panel Blur";
+"appearance.bar_border_thickness" = "Bar Border Thickness";
+"appearance.export_theme" = "Export Appearance Theme";
+"appearance.import_theme" = "Import Appearance Theme";
+"appearance.reset" = "Reset Appearance";
+
+"theme.system" = "System";
+"theme.dark" = "Dark";
+"theme.light" = "Light";
+"logo.purple" = "Purple";
+"logo.blue" = "Blue";
+"logo.dev" = "Dev";
+"orientation.off" = "Off";
+"orientation.portrait" = "Portrait";
+"orientation.landscape" = "Landscape";
+
+"server.add.title" = "Add Server";
+"server.name.placeholder" = "Server name (e.g. Hypixel)";
+"server.address.placeholder" = "Address (e.g. mc.hypixel.net)";
+"server.cancel" = "Cancel";
+"server.connect" = "Connect";
+
+"version.fetching" = "Fetching version manifest...";
+"version.unknown_loader" = "Unknown loader";
+
+"download.search.resource_packs" = "Search resource packs...";
+"download.search.maps" = "Search maps...";
+"download.search.modpacks" = "Search modpacks...";
+"download.search.shaders" = "Search shader packs...";
+"download.search.mods" = "Search mods...";
+"download.empty.resource_packs" = "No resource packs found.\nTry a different search.";
+"download.empty.maps" = "No maps found.\nTry a different search.";
+"download.empty.modpacks" = "No modpacks found.\nTry a different search.";
+"download.empty.shaders" = "No shader packs found.\nTry a different search.";
+"download.error.timeout" = "Request timed out.\nCheck your internet connection.";
+
+"dependency.progress" = "0%";
+"dependency.speed_calculating" = "Calculating...";
+"dependency.speed_unknown" = "--";
+"dependency.status_failed" = "Failed";
+"dependency.status_completed" = "Completed";
+"dependency.status_cancelled" = "Cancelled";
+"dependency.overall_progress" = "0 / 0";
+
+"filebrowser.empty" = "This folder is empty.\nTap + to add files or folders.";
+"filebrowser.folder_name.placeholder" = "Folder name";
+
+"profile.installed.curseforge" = " CurseForge ";
+"profile.installed.modrinth" = " Modrinth ";
+"profile.list.active_badge" = " Active ";
+"profile.list.name.placeholder" = "Profile name (e.g. Survival, Creative, Modded...)";
+"profile.settings.title" = "Profile Settings";
+
+"account.type.ely" = "Ely.by";
+"account.type.demo" = "Demo";
+"account.type.premium" = "Premium";
+"account.type.local" = "Local";
+"account.title" = "Accounts";
+"account.add" = "Add Account";
+"account.username.placeholder" = "Username";
+"account.password.placeholder" = "Password";
+"account.ely.placeholder" = "Ely.by email or username";
+"account.totp.placeholder" = "123456";
+
+"mainmenu.title" = "Witch Launcher";
+
+"cursor.manage.import_title" = "Import Cursor";
+"cursor.manage.import_message" = "Add a custom cursor image";
+"cursor.manage.photo_library" = "Photo Library";
+"cursor.manage.files" = "Files";
+"cursor.manage.delete_title" = "Delete Cursor";
+"cursor.manage.delete_confirm" = "Delete cursor \"%@\"?";
+"cursor.manage.select_title" = "Select Cursor";
+"cursor.manage.select_message" = "Choose a cursor for this type";
+"cursor.manage.choose_cursor" = "Choose Cursor...";
+"cursor.manage.reset_default" = "Reset to Default Cursor";
+"cursor.manage.import_new" = "Import New Cursor...";
+"cursor.manage.edit_hitbox" = "Edit Hitbox";
+
+"Modpacks" = "Modpacks";
+"Import .mrpack" = "Import .mrpack";
+
+"Shaders" = "Shaders";
+"All" = "All";
+
+"Premium (Microsoft)" = "Premium (Microsoft)";
+"Local (Offline)" = "Local (Offline)";
+"Sign in with Browser (OAuth2)" = "Sign in with Browser (OAuth2)";
+"Add Local Account" = "Add Local Account";
+"Login with Ely.by" = "Login with Ely.by";
+"Login with Microsoft" = "Login with Microsoft";
+"Unknown" = "Unknown";
+
+"Enable" = "Enable";
+"Disable" = "Disable";
+"In use" = "In use";
+
+"File Manager" = "File Manager";
+"Add File" = "Add File";
+"Add Folder" = "Add Folder";
+"Paste" = "Paste";
+"New Folder" = "New Folder";
+"Enter folder name:" = "Enter folder name:";
+"Folder name" = "Folder name";
+"Cancel" = "Cancel";
+"Create" = "Create";
+"Error" = "Error";
+"Import Error" = "Import Error";
+
+"File Manager" = "File Manager";
+"Add File" = "Add File";
+"Add Folder" = "Add Folder";
+"Paste" = "Paste";
+"New Folder" = "New Folder";
+"Enter folder name:" = "Enter folder name:";
+"Folder name" = "Folder name";
+"Cancel" = "Cancel";
+"Create" = "Create";
+"Error" = "Error";
+
+"Profiles" = "Profiles";
+"Create New Profile" = "Create New Profile";
+"Profile name already exists" = "Profile name already exists";
+"Notification" = "Notification";
+"OK" = "OK";
+"Current Profile" = "Current Profile";
+"Other Profiles" = "Other Profiles";
+
+"Download Hub" = "Download Hub";
+"Browse and install content for Minecraft" = "Browse and install content for Minecraft";
+"Game" = "Game";
+"Install & manage versions" = "Install & manage versions";
+"Mod" = "Mod";
+"Browse Modrinth mods" = "Browse Modrinth mods";
+"Modpack" = "Modpack";
+"Curated mod collections" = "Curated mod collections";
+"Shader" = "Shader";
+"Iris & Optifine packs" = "Iris & Optifine packs";
+"Resource Pack" = "Resource Pack";
+"Textures & visual overhauls" = "Textures & visual overhauls";
+"Maps" = "Maps";
+"Worlds & adventure maps" = "Worlds & adventure maps";
+
+"Select Version" = "Select Version";
+"Download" = "Download";
+"Installed" = "Installed";
+"Update" = "Update";
+"Compatible with profile" = "Compatible with profile";
+"Other versions" = "Other versions";
+
+"Mod" = "Mod";
+"by" = "by";
+"Unknown" = "Unknown";
+"downloads" = "downloads";
+"follows" = "follows";
+"Versions" = "Versions";
+"Select MC Version" = "Select MC Version";
+"Install Modpack" = "Install Modpack";
+"Download to Profile" = "Download to Profile";
+"Dependencies" = "Dependencies";
+
+"Mouse Cursors" = "Mouse Cursors";
+"Choose an image, GIF, or cursor file" = "Choose an image, GIF, or cursor file";
+"Cursor" = "Cursor";
+"Failed to delete cursor." = "Failed to delete cursor.";
+"The default cursor cannot be deleted. Swipe a cursor left to edit its hitbox or delete it." = "The default cursor cannot be deleted. Swipe a cursor left to edit its hitbox or delete it.";
+
+"Mod Loader" = "Mod Loader";
+"Set" = "Set";
+"Delete %@?" = "Delete %@?";
+"This will permanently delete this profile and version. This action cannot be undone." = "This will permanently delete this profile and version. This action cannot be undone.";
+"Account Required" = "Account Required";
+"Please add and select an account first." = "Please add and select an account first.";
+"Minecraft Not Purchased" = "Minecraft Not Purchased";
+"Your Microsoft account has not purchased Minecraft. Please purchase the game from minecraft.net to play." = "Your Microsoft account has not purchased Minecraft. Please purchase the game from minecraft.net to play.";
+"No Version" = "No Version";
+"Please select a version from the sidebar first." = "Please select a version from the sidebar first.";
+
+"Save" = "Save";
+"Drag or tap to place the hitbox point (the tip of the cursor)." = "Drag or tap to place the hitbox point (the tip of the cursor).";
+
+"Game Versions" = "Game Versions";
+
+"No mods found.\nTry a different search." = "No mods found.\nTry a different search.";
+"Request timed out.\nCheck your internet connection." = "Request timed out.\nCheck your internet connection.";
+
+"Download Dependencies" = "Download Dependencies";
+"Installing:" = "Installing:";
+"0 / 0" = "0 / 0";
+"Cancel All" = "Cancel All";
+"Close" = "Close";
+"Calculating..." = "Calculating...";
+"Failed" = "Failed";
+"Completed" = "Completed";
+"Cancelled" = "Cancelled";
+
+"Installing..." = "Installing...";
+"Starting JVM..." = "Starting JVM...";
+"0%" = "0%";
+"Failed to read installer jar" = "Failed to read installer jar";

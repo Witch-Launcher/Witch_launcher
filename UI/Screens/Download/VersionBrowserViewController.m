@@ -7,6 +7,7 @@
 #import "VersionDirectoryManager.h"
 #import "UnzipKit.h"
 #import "AmethystBlurView.h"
+#import "utils.h"
 
 @interface VersionBrowserViewController () <UITableViewDelegate, UITableViewDataSource, UIDocumentPickerDelegate>
 @property (nonatomic) UISegmentedControl *typeFilter;
@@ -127,7 +128,7 @@ static NSArray *kLoaders;
 
 - (void)fetchVersions {
     [_spinner startAnimating];
-    _statusLabel.text = @"Fetching version manifest...";
+    _statusLabel.text = localize(@"version.fetching", nil);
     _tableView.hidden = YES;
 
     NSURL *manifestURL = [NSURL URLWithString:@"https://piston-meta.mojang.com/mc/game/version_manifest_v2.json"];
@@ -214,7 +215,7 @@ static NSArray *kLoaders;
 
     if (!apiURL) {
         [self.spinner stopAnimating];
-        _statusLabel.text = @"Unknown loader";
+        _statusLabel.text = localize(@"version.unknown_loader", nil);
         return;
     }
 

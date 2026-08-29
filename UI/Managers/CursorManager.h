@@ -2,48 +2,69 @@
 
 NS_ASSUME_NONNULL_BEGIN
 
-/// Quản lý các con trỏ chuột ảo trong thư mục Documents/cursors.
+/// Quản lý các con trỏ chuột ảo.
+/// Hỗ trợ pool chung (legacy) và pool riêng theo cursor type.
 /// Mỗi con trỏ là một thư mục chứa ảnh (image.png hoặc image.gif)
 /// và file hitbox.json lưu toạ độ hitbox (điểm "nóng" của con trỏ).
 @interface CursorManager : NSObject
 
-/// Đường dẫn thư mục gốc (Documents/cursors), tự tạo nếu chưa có.
-+ (NSString *)cursorsDirectory;
+#pragma mark - Legacy shared pool (vẫn giữ để backward-compat)
 
-/// Tên con trỏ mặc định ("default") - không thể xoá.
++ (NSString *)cursorsDirectory;
 + (NSString *)defaultCursorName;
 + (BOOL)isDefaultCursor:(NSString *)name;
-
-/// Danh sách tên con trỏ đã cài đặt (luôn có "default" ở đầu).
 + (NSArray<NSString *> *)cursorNames;
-
-/// Con trỏ đang được chọn (pref control.virtmouse_cursor).
 + (NSString *)currentCursorName;
 + (void)setCurrentCursorName:(NSString *)name;
-
-/// Ảnh của con trỏ (hỗ trợ PNG/GIF); default dùng ảnh MousePointer có sẵn.
 + (UIImage *)imageForCursor:(NSString *)name;
-
-/// Toạ độ hitbox (theo điểm ảnh của ảnh gốc).
 + (CGPoint)hitboxForCursor:(NSString *)name;
 + (void)setHitboxForCursor:(NSString *)name hitbox:(CGPoint)hitbox;
-
-/// Xoá con trỏ (không thể xoá con trỏ mặc định).
 + (BOOL)deleteCursor:(NSString *)name;
-
-/// Import con trỏ từ URL/file (png, jpg, gif, webp, cur, ani...).
-/// Trả về tên con trỏ vừa tạo, nil nếu thất bại.
 + (nullable NSString *)importCursorFromURL:(NSURL *)url withName:(NSString *)name error:(NSError **)error;
-
-/// Import con trỏ từ UIImage.
 + (nullable NSString *)importCursorFromImage:(UIImage *)image withName:(NSString *)name error:(NSError **)error;
-
-/// Tính frame hiển thị con trỏ: mouseFrame.origin là vị trí chuột,
-/// frame trả về đã offset theo hitbox và tỉ lệ control.mouse_scale.
 + (CGRect)displayFrameForMouseFrame:(CGRect)mouseFrame;
-
-/// Ngược lại của displayFrameForMouseFrame.
 + (CGRect)mouseFrameForDisplayFrame:(CGRect)displayFrame;
+
+#pragma mark - Per-type cursor pool
+
+/// Thư mục cursors cho 1 type: Documents/cursor_types/{typeId}/
++ (NSString *)cursorsDirectoryForType:(NSString *)typeId;
+
+/// Danh sách cursor names trong 1 type (luôn có "default" ở đầu).
++ (NSArray<NSString *> *)cursorNamesForType:(NSString *)typeId;
+
+/// Cursor đang chọn cho 1 type (pref control.cursortype_{typeId}_cursor).
++ (NSString *)currentCursorForType:(NSString *)typeId;
++ (void)setCurrentCursor:(NSString *)cursorName forType:(NSString *)typeId;
+
+/// Ảnh cursor trong 1 type (hỗ trợ PNG/GIF); default dùng MousePointer.
++ (UIImage *)imageForCursor:(NSString *)name inType:(NSString *)typeId;
+
+/// Hitbox trong 1 type.
++ (CGPoint)hitboxForCursor:(NSString *)name inType:(NSString *)typeId;
++ (void)setHitboxForCursor:(NSString *)name hitbox:(CGPoint)hitbox inType:(NSString *)typeId;
+
+/// Xoá cursor trong 1 type (không thể xoá "default").
++ (BOOL)deleteCursor:(NSString *)name inType:(NSString *)typeId;
+
+/// Import cursor vào pool của 1 type.
++ (nullable NSString *)importCursorFromURL:(NSURL *)url withName:(NSString *)name forType:(NSString *)typeId error:(NSError **)error;
++ (nullable NSString *)importCursorFromImage:(UIImage *)image withName:(NSString *)name forType:(NSString *)typeId error:(NSError **)error;
+
+#pragma mark - Composite image (cursor decoration)
+
+/// Tạo ảnh composited: cursor shape mặc định làm nền + custom cursor overlay lên trên.
+/// typeId xác định cursor shape nào dùng làm nền (arrow cho normal, hand cho link...).
++ (UIImage *)compositeImageForType:(NSString *)typeId;
+
+/// Ảnh cursor shape mặc định cho từng type.
++ (nullable UIImage *)defaultShapeImageForType:(NSString *)typeId;
+
+/// Calculate display frame for a specific cursor type (uses per-type cursor pool).
++ (CGRect)displayFrameForMouseFrame:(CGRect)mouseFrame typeId:(NSString *)typeId;
+
+/// Convert display frame back to mouse frame for a specific cursor type.
++ (CGRect)mouseFrameForDisplayFrame:(CGRect)displayFrame typeId:(NSString *)typeId;
 
 @end
 

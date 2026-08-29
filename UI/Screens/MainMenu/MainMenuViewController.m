@@ -5,6 +5,7 @@
 #import "LauncherPreferences.h"
 #import "config.h"
 #import "AmethystBlurView.h"
+#import "utils.h"
 
 static NSString *const NewsURLString = @"https://raw.githubusercontent.com/Ynnyny/Angel-Aura-Amethyst-iOS/refs/heads/main/news.md";
 static const NSTimeInterval NewsRefreshInterval = 300.0; // 5 minutes
@@ -78,7 +79,7 @@ static const NSTimeInterval NewsRefreshInterval = 300.0; // 5 minutes
     _titleLabel = [[UILabel alloc] init];
     _titleLabel.translatesAutoresizingMaskIntoConstraints = NO;
     _titleLabel.font = [UIFont systemFontOfSize:24 weight:UIFontWeightBold];
-    _titleLabel.text = @"Witch Launcher";
+    _titleLabel.text = localize(@"mainmenu.title", nil);
     [self.view addSubview:_titleLabel];
 
     _versionLabel = [[UILabel alloc] init];
