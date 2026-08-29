@@ -4,6 +4,7 @@
 #import "HapticManager.h"
 #import "ios_uikit_bridge.h"
 #import <AVFoundation/AVFoundation.h>
+#import "utils.h"
 
 @interface CursorHitboxEditorViewController ()
 
@@ -22,13 +23,17 @@
     [super viewDidLoad];
 
     self.view.backgroundColor = ThemeManager.shared.contentBackgroundColor;
-    self.navigationItem.title = @"Hitbox";
-    self.navigationItem.rightBarButtonItem = [[UIBarButtonItem alloc] initWithTitle:@"Save"
-                                                                              style:UIBarButtonItemStyleDone
-                                                                             target:self
-                                                                             action:@selector(saveHitbox)];
+    self.navigationItem.title = localize(@"cursor.detail.hitbox", nil);
+    self.navigationItem.rightBarButtonItem = [[UIBarButtonItem alloc] initWithTitle:localize(@"Save", nil)
+                                                                               style:UIBarButtonItemStyleDone
+                                                                              target:self
+                                                                              action:@selector(saveHitbox)];
 
-    _cursorImage = [CursorManager imageForCursor:self.cursorName];
+    if (self.typeId) {
+        _cursorImage = [CursorManager compositeImageForType:self.typeId];
+    } else {
+        _cursorImage = [CursorManager imageForCursor:self.cursorName];
+    }
 
     _imageView = [[UIImageView alloc] initWithImage:_cursorImage];
     _imageView.contentMode = UIViewContentModeScaleAspectFit;
@@ -80,7 +85,7 @@
         [_hintLabel.bottomAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.bottomAnchor constant:-24],
     ]];
 
-    _hintLabel.text = @"Drag or tap to place the hitbox point (the tip of the cursor).";
+    _hintLabel.text = localize(@"Drag or tap to place the hitbox point (the tip of the cursor).", nil);
 
     UIPanGestureRecognizer *pan = [[UIPanGestureRecognizer alloc] initWithTarget:self action:@selector(handleTouch:)];
     pan.minimumNumberOfTouches = 1;
@@ -101,7 +106,12 @@
 
 /// Vẽ marker tại vị trí hitbox hiện tại (toạ độ theo ảnh gốc -> toạ độ view).
 - (void)syncMarkerFromHitbox {
-    CGPoint hitbox = [CursorManager hitboxForCursor:self.cursorName];
+    CGPoint hitbox;
+    if (self.typeId) {
+        hitbox = [CursorManager hitboxForCursor:self.cursorName inType:self.typeId];
+    } else {
+        hitbox = [CursorManager hitboxForCursor:self.cursorName];
+    }
     CGPoint point = [self viewPointFromImagePoint:hitbox];
     [self placeMarkerAtPoint:point];
     _coordinateLabel.text = [NSString stringWithFormat:@"X: %.0f   Y: %.0f", hitbox.x, hitbox.y];
@@ -154,7 +164,11 @@
 
 - (void)saveHitbox {
     CGPoint imgPoint = [self imagePointFromViewPoint:_hitboxMarker.center];
-    [CursorManager setHitboxForCursor:self.cursorName hitbox:imgPoint];
+    if (self.typeId) {
+        [CursorManager setHitboxForCursor:self.cursorName hitbox:imgPoint inType:self.typeId];
+    } else {
+        [CursorManager setHitboxForCursor:self.cursorName hitbox:imgPoint];
+    }
     [HapticManager.shared play:HapticTypeSuccess];
     if (self.navigationController) {
         [self.navigationController popViewControllerAnimated:YES];
