@@ -1,5 +1,5 @@
 # Welecome to Witch launcher for iOS
-
+[![Development Build](https://img.shields.io/github/actions/workflow/status/Witch-Launcher/Witch_launcher/development.yml?branch=beta&style=for-the-badge)](https://github.com/Witch-Launcher/Witch_launcher/actions/workflows/development.yml)  
 [Fork by Za_d626(DuyAnh662)](https://discord.gg/qmbuRvaEq)
 This repository contains the code for our iOS and iPadOS port of Amethyst. Looking for [Android?](https://github.com/AngelAuraMC/Amethyst-Android)
 
