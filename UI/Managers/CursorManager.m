@@ -829,13 +829,11 @@ static NSMutableDictionary<NSString *, UIImage *> *_shapeImageCache;
     if (![self isDefaultCursor:cursorName]) {
         UIImage *customImage = [self imageForCursor:cursorName inType:typeId];
         if (customImage) {
-            NSLog(@"[CursorManager] compositeForType=%@ cursor=%@ -> custom", typeId, cursorName);
             return customImage;
         }
     }
 
     UIImage *shape = [self defaultShapeImageForType:typeId];
-    NSLog(@"[CursorManager] compositeForType=%@ cursor=%@ -> shape=%@", typeId, cursorName, shape);
     return shape;
 }
 

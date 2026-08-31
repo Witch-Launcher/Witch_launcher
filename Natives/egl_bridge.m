@@ -1,4 +1,6 @@
 #import "SurfaceViewController.h"
+#import "framegen/framegen.h"
+#import "LauncherPreferences.h"
 
 #include "jni.h"
 #include <assert.h>
@@ -43,33 +45,75 @@ static atomic_uint_fast64_t widgetSwapCountOwn;
 static atomic_uint_fast64_t widgetMetalFrameCount;
 
 static IMP origNextDrawable;
+static IMP origNextDrawableWithSize;
+
 static id widgetSwizzledNextDrawable(id self, SEL _cmd) {
     atomic_fetch_add_explicit(&widgetMetalFrameCount, 1, memory_order_relaxed);
-    return ((id (*)(id, SEL))origNextDrawable)(self, _cmd);
+    id drawable = ((id (*)(id, SEL))origNextDrawable)(self, _cmd);
+    if (fg_is_enabled() && fg_is_supported()) {
+        fg_on_next_drawable(drawable, (CAMetalLayer*)self);
+    }
+    return drawable;
 }
 
-static IMP origNextDrawableWithSize;
 static id widgetSwizzledNextDrawableWithSize(id self, SEL _cmd, CGSize size) {
     atomic_fetch_add_explicit(&widgetMetalFrameCount, 1, memory_order_relaxed);
-    return ((id (*)(id, SEL, CGSize))origNextDrawableWithSize)(self, _cmd, size);
+    id drawable = ((id (*)(id, SEL, CGSize))origNextDrawableWithSize)(self, _cmd, size);
+    if (fg_is_enabled() && fg_is_supported()) {
+        fg_on_next_drawable(drawable, (CAMetalLayer*)self);
+    }
+    return drawable;
 }
 
 static void widgetHookMetalOnce(void) {
     static dispatch_once_t once;
     dispatch_once(&once, ^{
-        Class cls = CAMetalLayer.class;
-        Method m = class_getInstanceMethod(cls, @selector(nextDrawable));
-        if (m) {
-            origNextDrawable = method_getImplementation(m);
-            method_setImplementation(m, (IMP)widgetSwizzledNextDrawable);
-        }
-        SEL sizeSel = NSSelectorFromString(@"nextDrawableWithSize:");
-        Method m2 = class_getInstanceMethod(cls, sizeSel);
-        if (m2) {
-            origNextDrawableWithSize = method_getImplementation(m2);
-            method_setImplementation(m2, (IMP)widgetSwizzledNextDrawableWithSize);
+        // Only install the CAMetalLayer swizzle when Frame Generation is ON.
+        // The swizzle intercepts MoltenVK's nextDrawable globally — even as a
+        // passthrough it can interfere with the rendering pipeline, causing
+        // black screens when FG is OFF.
+        if (getPrefBool(@"video.frame_generation")) {
+            Class cls = CAMetalLayer.class;
+            Method m = class_getInstanceMethod(cls, @selector(nextDrawable));
+            if (m) {
+                origNextDrawable = method_getImplementation(m);
+                method_setImplementation(m, (IMP)widgetSwizzledNextDrawable);
+            }
+            SEL sizeSel = NSSelectorFromString(@"nextDrawableWithSize:");
+            Method m2 = class_getInstanceMethod(cls, sizeSel);
+            if (m2) {
+                origNextDrawableWithSize = method_getImplementation(m2);
+                method_setImplementation(m2, (IMP)widgetSwizzledNextDrawableWithSize);
+            }
+            fg_hook_metal_layer((CAMetalLayer*)SurfaceViewController.surface.layer);
+            NSLog(@"[FrameGen] widgetHookMetalOnce: swizzle+hooks installed, FG ON");
+        } else {
+            NSLog(@"[FrameGen] widgetHookMetalOnce: skipped (FG OFF, no swizzle)");
         }
     });
+}
+
+// Called from fg_hook_metal_layer when FG is enabled at runtime
+// (e.g. user toggles FG ON from Settings after launching with FG OFF).
+// Installs the class-level CAMetalLayer swizzle if not already installed.
+void widgetEnsureMetalSwizzle(void) {
+    static BOOL installed = NO;
+    if (installed) return;
+    installed = YES;
+
+    Class cls = CAMetalLayer.class;
+    Method m = class_getInstanceMethod(cls, @selector(nextDrawable));
+    if (m) {
+        origNextDrawable = method_getImplementation(m);
+        method_setImplementation(m, (IMP)widgetSwizzledNextDrawable);
+    }
+    SEL sizeSel = NSSelectorFromString(@"nextDrawableWithSize:");
+    Method m2 = class_getInstanceMethod(cls, sizeSel);
+    if (m2) {
+        origNextDrawableWithSize = method_getImplementation(m2);
+        method_setImplementation(m2, (IMP)widgetSwizzledNextDrawableWithSize);
+    }
+    NSLog(@"[FrameGen] widgetEnsureMetalSwizzle: swizzle installed at runtime");
 }
 
 uint64_t pojavSwapCount(void) {

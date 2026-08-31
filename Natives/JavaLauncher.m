@@ -729,6 +729,18 @@ int launchJVMWithArgs(NSString *username, id launchTarget, int width, int height
     NSString *librariesPath = [NSString stringWithFormat:@"%@/libs", NSBundle.mainBundle.bundlePath];
     margv[++margc] = [NSString stringWithFormat:@"-javaagent:%@/cacio-init-agent.jar=", librariesPath].UTF8String;
     margv[++margc] = [NSString stringWithFormat:@"-javaagent:%@/patchjna_agent.jar=", librariesPath].UTF8String;
+    // Frame Generation works with all renderers that use MetalVK→MoltenVK→Metal pipeline:
+    // MobileGlues, LTW, Zink (VK_ZINK), MoltenVK, MTL_ANGLE
+    if (getPrefBool(@"video.frame_generation")) {
+        BOOL usesMoltenVK = [renderer isEqualToString:@ RENDERER_NAME_MOLTENVK]
+                         || [renderer isEqualToString:@ RENDERER_NAME_MOBILEGLUES]
+                         || [renderer isEqualToString:@ RENDERER_NAME_LTW]
+                         || [renderer hasPrefix:@"libOSMesa"]
+                         || [renderer isEqualToString:@ RENDERER_NAME_MTL_ANGLE];
+        if (usesMoltenVK) {
+            margv[++margc] = [NSString stringWithFormat:@"-javaagent:%@/framegen-agent.jar=", librariesPath].UTF8String;
+        }
+    }
     if(getPrefBool(@"general.cosmetica")) {
         margv[++margc] = [NSString stringWithFormat:@"-javaagent:%@/arc_dns_injector.jar=23.95.137.176", librariesPath].UTF8String;
     }

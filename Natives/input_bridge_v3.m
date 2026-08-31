@@ -30,6 +30,8 @@
 #include "JavaLauncher.h"
 #include "touchcontroller_jni_bridge.h"
 
+extern void JNI_OnLoad_framegen(JavaVM* vm, void* reserved);
+
 jint (*orig_ProcessImpl_forkAndExec)(JNIEnv *env, jobject process, jint mode, jbyteArray helperpath, jbyteArray prog, jbyteArray argBlock, jint argc, jbyteArray envBlock, jint envc, jbyteArray dir, jintArray std_fds, jboolean redirectErrorStream);
 jlong (*orig_ProcessHandleImpl_isAlive0)(JNIEnv *env, jclass clazz, jlong jpid);
 
@@ -273,6 +275,9 @@ jint JNI_OnLoad(JavaVM* vm, void* reserved) {
     // (see touchcontroller_jni_bridge.c), so this may safely fail if the
     // launcher classes are not loaded yet.
     touchcontroller_jni_init(vm);
+
+    // Register FrameGen native methods
+    JNI_OnLoad_framegen(vm, reserved);
 
     return JNI_VERSION_1_4;
 }

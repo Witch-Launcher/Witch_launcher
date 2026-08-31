@@ -9,6 +9,7 @@
 #include "bridge_tbl.h"
 #include "osm_bridge.h"
 #include "osmesa_internal.h"
+#include "framegen/framegen.h"
 
 static osmesa_library handle;
 
@@ -179,6 +180,16 @@ void osm_swap_buffers() {
         handle.glFinish(); // this will force osmesa to write the last rendered image into the buffer
     }
     osm_thread_entry_t* e = pthread_getspecific(osm_thread_entry_key);
+
+    // Use static buffer to avoid per-frame malloc/free overhead.
+    // The buffer is only used until dispatch_async delivers it to main thread.
+    // Double-buffer: alternate between two static buffers so the main thread
+    // can safely read one while we write the other.
+    static void* staticBufs[2] = {0};
+    static size_t staticBufSizes[2] = {0};
+    static int bufIdx = 0;
+    static uint64_t swapCounter = 0;
+
     size_t pixelBytes = 0;
     void* copy = NULL;
     GLsizei copyWidth = 0;
@@ -187,20 +198,62 @@ void osm_swap_buffers() {
         copyWidth = e->width;
         copyHeight = e->height;
         pixelBytes = (size_t)e->width * (size_t)e->height * 4;
-        copy = malloc(pixelBytes);
-        memcpy(copy, e->buffer, pixelBytes);
+
+        // Alternate buffers — main thread reads the previous one via CGDataProvider,
+        // we write into the current one. osm_release_buffer_data is NOT called
+        // for static buffers (they persist).
+        int myIdx = bufIdx;
+        bufIdx = (bufIdx + 1) % 2;
+        swapCounter++;
+
+        if (staticBufSizes[myIdx] < pixelBytes) {
+            staticBufs[myIdx] = reallocf(staticBufs[myIdx], pixelBytes);
+            staticBufSizes[myIdx] = pixelBytes;
+        }
+        copy = staticBufs[myIdx];
+        if (copy) {
+            memcpy(copy, e->buffer, pixelBytes);
+        }
     }
     osm_render_window_t bundle = currentBundle ? currentBundle->osm : (osm_render_window_t){0};
     pthread_mutex_unlock(&osm_render_lock);
     if (copy == NULL) {
         return;
     }
+
+    // Frame Generation: capture frame and try to interpolate
+    // Return values: 0=raw, 1=interpolated
+    if (copyWidth > 0 && copyHeight > 0) {
+        fg_capture_frame_from_osmesa(copy, copyWidth, copyHeight);
+    }
+
+    CGColorSpaceRef cs = bundle.color_space ? CGColorSpaceRetain(bundle.color_space) : CGColorSpaceCreateDeviceRGB();
+
     dispatch_async(dispatch_get_main_queue(), ^{
-    CGDataProviderRef bitmapProvider = CGDataProviderCreateWithData(copy, copy, pixelBytes, osm_release_buffer_data);
-    CGImageRef bitmap = CGImageCreate(copyWidth, copyHeight, 8, 32, 4 * copyWidth, bundle.color_space, kCGImageAlphaNoneSkipLast | kCGBitmapByteOrderDefault, bitmapProvider, NULL, FALSE, kCGRenderingIntentDefault);
-    SurfaceViewController.surface.layer.contents = (__bridge id)bitmap;
-    CGImageRelease(bitmap);
+    // Cached finalCopy buffer: avoid per-frame malloc/free (8MB per frame at 1080p).
+    // The render thread writes into staticBufs[bufIdx], main thread reads a DIFFERENT buffer.
+    // We keep a separate cached buffer for CGImage that persists across frames.
+    static void* cachedFinalCopy = NULL;
+    static size_t cachedFinalCopySize = 0;
+    if (cachedFinalCopySize < pixelBytes) {
+        free(cachedFinalCopy);
+        cachedFinalCopy = malloc(pixelBytes);
+        cachedFinalCopySize = cachedFinalCopy ? pixelBytes : 0;
+    }
+    void* finalCopy = cachedFinalCopy;
+    if (finalCopy) {
+        memcpy(finalCopy, copy, pixelBytes);
+    } else {
+        finalCopy = copy; // fallback: use static buffer directly
+    }
+    CGDataProviderRef bitmapProvider = CGDataProviderCreateWithData(NULL, finalCopy, pixelBytes, NULL);
+    CGImageRef bitmap = CGImageCreate(copyWidth, copyHeight, 8, 32, 4 * copyWidth, cs, kCGImageAlphaNoneSkipLast | kCGBitmapByteOrderDefault, bitmapProvider, NULL, FALSE, kCGRenderingIntentDefault);
+    if (bitmap) {
+        SurfaceViewController.surface.layer.contents = (__bridge id)bitmap;
+        CGImageRelease(bitmap);
+    }
     CGDataProviderRelease(bitmapProvider);
+    CGColorSpaceRelease(cs);
     });
 }
 

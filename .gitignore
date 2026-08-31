@@ -19,6 +19,9 @@ entitlements.codesign.xml
 /.vscode/
 /log/
 /plan/
+note.md
+/.config/
+
 # Build artifacts (users can build themselves)
 /amethyst-prebuilt-libraries/build/
 # SDL3 build dir is ignored, but the resulting iOS dylibs must be committed
@@ -48,3 +51,5 @@ entitlements.codesign.xml
 
 # Website moved to separate repo (witch-launcher-web)
 /web/
+
+*.class

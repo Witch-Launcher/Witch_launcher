@@ -25,6 +25,9 @@
 "preference.title.widget_temp_unit.c" = "Celsius (°C)";
 "preference.title.widget_temp_unit.f" = "Fahrenheit (°F)";
 "preference.title.widget_show_batt" = "Show Battery";
+"preference.title.widget_show_fgfps" = "Show FG FPS";
+"preference.title.widget_show_clock" = "Show Clock";
+"preference.title.widget_show_lowpower" = "Show Low Power Mode";
 "preference.title.widget_bg_opacity" = "Widget Background";
 
 "game.note.airplay" = "Minecraft is being displayed in AirPlay mirrored display";
@@ -303,6 +306,8 @@
 
 "preference.title.fullscreen_airplay" = "Fullscreen AirPlay";
 "preference.detail.fullscreen_airplay" = "Allows presenting fullscreen game window on the external display rather than mirroring everything on screen.";
+"preference.title.frame_generation" = "Frame Generation";
+"preference.detail.frame_generation" = "Interpolates intermediate frames to increase apparent FPS. Requires MoltenVK renderer and Metal compute support. May increase battery usage and device temperature.";
 "preference.title.silence_other_audio" = "Pause audio when game opens";
 "preference.detail.silence_other_audio" = "Enable to allow Amethyst to pause audio from other apps, such as Music, when launching the game.";
 "preference.title.silence_with_switch" = "Disable audio with silent switch";

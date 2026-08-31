@@ -8,6 +8,7 @@
 #import "CreditsService.h"
 #import "config.h"
 #import "CustomControlsViewController.h"
+#import "framegen/framegen.h"
 #import "AmethystBlurView.h"
 #import <PhotosUI/PhotosUI.h>
 #import <UniformTypeIdentifiers/UniformTypeIdentifiers.h>
@@ -94,11 +95,15 @@
                 @{@"key": @"f", @"name": localize(@"preference.title.widget_temp_unit.f", nil)},
             ]},
             @{@"type": @"switch", @"label": localize(@"preference.title.widget_show_batt", nil), @"key": @"general.widget_show_batt"},
+            @{@"type": @"switch", @"label": localize(@"preference.title.widget_show_fgfps", nil), @"key": @"general.widget_show_fgfps"},
+            @{@"type": @"switch", @"label": localize(@"preference.title.widget_show_clock", nil), @"key": @"general.widget_show_clock"},
+            @{@"type": @"switch", @"label": localize(@"preference.title.widget_show_lowpower", nil), @"key": @"general.widget_show_lowpower"},
             @{@"type": @"slider", @"label": localize(@"preference.title.widget_bg_opacity", nil), @"key": @"general.widget_bg_opacity", @"min": @0, @"max": @80, @"suffix": @"%"},
         ]},
         @{@"title": localize(@"Game", nil), @"items": @[
             @{@"type": @"picker", @"label": localize(@"preference.title.lwjgl_version", nil), @"key": @"java.lwjgl_version", @"options": lwjglItems, @"default": @"(auto)"},
             @{@"type": @"switch", @"label": localize(@"preference.title.fullscreen_airplay", nil), @"key": @"video.fullscreen_airplay"},
+            @{@"type": @"switch", @"label": localize(@"preference.title.frame_generation", nil), @"key": @"video.frame_generation"},
         ]},
         @{@"title": localize(@"Audio", nil), @"items": @[
             @{@"type": @"switch", @"label": localize(@"preference.title.allow_microphone", nil), @"key": @"video.allow_microphone"},
@@ -886,6 +891,13 @@
         [self reloadTables];
     } else if ([item[@"key"] isEqualToString:@"general.liquid_glass"]) {
         [[NSNotificationCenter defaultCenter] postNotificationName:@"LiquidGlassDidChangeNotification" object:nil];
+    } else if ([item[@"key"] isEqualToString:@"video.frame_generation"]) {
+        // Runtime toggle: enable/disable native FrameGen immediately.
+        // When enabling: Metal pipeline is initialized on-demand via fg_set_enabled().
+        // Camera data will only be available if the Java agent was loaded at launch.
+        // When disabling: ring buffer is cleared, all interpolation stops.
+        fg_set_enabled(sender.on);
+        NSLog(@"[Settings] Frame Generation toggled: %d", sender.on);
     }
 }
 

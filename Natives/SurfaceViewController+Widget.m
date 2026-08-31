@@ -3,6 +3,7 @@
 #import "ThemeManager.h"
 #import "utils.h"
 #import "system_monitor.h"
+#import "framegen/framegen.h"
 
 #import <mach/mach.h>
 #import <QuartzCore/QuartzCore.h>
@@ -27,6 +28,7 @@ static double widgetBattPct = -1.0;
 static double widgetCores[TM_MAX_CORES];
 static int widgetCoreCount = 0;
 static double widgetSampleAt = 0;
+static int widgetBattCharging = -1;
 
 static CGFloat widgetPrefScale(void) {
     id v = getPrefObject(@"general.widget_scale");
@@ -239,6 +241,10 @@ static NSString *widgetShortBytes(uint64_t bytes) {
         self.widgetFpsLabel = [self widgetMakeLabelWithFontSize:14 weight:UIFontWeightSemibold];
         [self.widgetView addSubview:self.widgetFpsLabel];
 
+        self.widgetFgFpsLabel = [self widgetMakeLabelWithFontSize:11 weight:UIFontWeightMedium];
+        self.widgetFgFpsLabel.textColor = [UIColor colorWithHue:0.75 saturation:0.85 brightness:1 alpha:1];
+        [self.widgetView addSubview:self.widgetFgFpsLabel];
+
         self.widgetRamLabel = [self widgetMakeLabelWithFontSize:12 weight:UIFontWeightMedium];
         self.widgetRamLabel.textColor = [UIColor colorWithWhite:1 alpha:0.92];
         [self.widgetView addSubview:self.widgetRamLabel];
@@ -250,6 +256,16 @@ static NSString *widgetShortBytes(uint64_t bytes) {
         self.widgetBattLabel = [self widgetMakeLabelWithFontSize:12 weight:UIFontWeightMedium];
         self.widgetBattLabel.textColor = widgetBattColor();
         [self.widgetView addSubview:self.widgetBattLabel];
+
+        // B5: Clock label
+        self.widgetClockLabel = [self widgetMakeLabelWithFontSize:11 weight:UIFontWeightRegular];
+        self.widgetClockLabel.textColor = [UIColor colorWithWhite:1 alpha:0.75];
+        [self.widgetView addSubview:self.widgetClockLabel];
+
+        // B4: Low power mode label
+        self.widgetLowPowerLabel = [self widgetMakeLabelWithFontSize:11 weight:UIFontWeightMedium];
+        self.widgetLowPowerLabel.textColor = [UIColor systemYellowColor];
+        [self.widgetView addSubview:self.widgetLowPowerLabel];
 
         self.widgetBarView = [[UIView alloc] initWithFrame:CGRectZero];
         self.widgetBarView.layer.cornerRadius = 5;
@@ -628,6 +644,20 @@ static NSString *widgetShortBytes(uint64_t bytes) {
         widgetLastFpsTime = 0;
     }
 
+    // FG FPS: show interpolated display FPS when frame generation is active
+    BOOL fgFpsOn = getPrefBool(@"general.widget_show_fgfps");
+    if (fgFpsOn) {
+        FGStats fg = fg_get_stats();
+        if (fg.isSupported && fg.isActive) {
+            self.widgetFgFpsLabel.text = [NSString stringWithFormat:@"FG: %.0f", fg.displayFPS];
+            self.widgetFgFpsLabel.hidden = NO;
+        } else {
+            self.widgetFgFpsLabel.hidden = YES;
+        }
+    } else {
+        self.widgetFgFpsLabel.hidden = YES;
+    }
+
     // CPU/GPU/temperature/battery: sample at ~1Hz when any unit is enabled
     BOOL cpuOn = getPrefBool(@"general.widget_show_cpu");
     BOOL gpuOn = getPrefBool(@"general.widget_show_gpu");
@@ -650,6 +680,7 @@ static NSString *widgetShortBytes(uint64_t bytes) {
         widgetGpuUsage = -1.0;
         widgetTempC = -1.0;
         widgetBattPct = -1.0;
+        widgetBattCharging = -1;
         widgetCoreCount = 0;
     }
 
@@ -765,12 +796,34 @@ static NSString *widgetShortBytes(uint64_t bytes) {
     self.widgetBattLabel.hidden = !battOn;
     if (battOn) {
         if (widgetBattPct >= 0) {
-            self.widgetBattLabel.text = [NSString stringWithFormat:@"BAT %d%%", (int)lround(widgetBattPct)];
+            const char *plug = widgetBattCharging > 0 ? " \u26A1" : "";
+            self.widgetBattLabel.text = [NSString stringWithFormat:@"BAT %d%%%s", (int)lround(widgetBattPct), plug];
             self.widgetBattLabel.textColor = (widgetBattPct <= kBatWarnPct) ? UIColor.systemRedColor : widgetBattColor();
         } else {
             self.widgetBattLabel.text = @"BAT \u2013";
             self.widgetBattLabel.textColor = widgetBattColor();
         }
+    }
+
+    // B4: Power saving mode
+    BOOL lowPowerOn = getPrefBool(@"general.widget_show_lowpower");
+    BOOL isLowPower = NSProcessInfo.processInfo.lowPowerModeEnabled;
+    self.widgetLowPowerLabel.hidden = !lowPowerOn || !isLowPower;
+    if (lowPowerOn && isLowPower) {
+        self.widgetLowPowerLabel.text = @"\u26A1 LOW POWER";
+    }
+
+    // B5: Clock display
+    BOOL clockOn = getPrefBool(@"general.widget_show_clock");
+    self.widgetClockLabel.hidden = !clockOn;
+    if (clockOn) {
+        static NSDateFormatter *clockFormatter = nil;
+        static dispatch_once_t onceToken;
+        dispatch_once(&onceToken, ^{
+            clockFormatter = [[NSDateFormatter alloc] init];
+            clockFormatter.dateFormat = @"HH:mm";
+        });
+        self.widgetClockLabel.text = [clockFormatter stringFromDate:[NSDate date]];
     }
 
     // Tight layout: size widget to content
@@ -781,6 +834,12 @@ static NSString *widgetShortBytes(uint64_t bytes) {
     CGFloat contentW = 0;
     if (fpsOn) {
         contentW = MAX(contentW, ceil([self.widgetFpsLabel sizeThatFits:CGSizeMake(CGFLOAT_MAX, 15)].width));
+    }
+    if (fgFpsOn) {
+        FGStats fg = fg_get_stats();
+        if (fg.isSupported && fg.isActive) {
+            contentW = MAX(contentW, ceil([self.widgetFgFpsLabel sizeThatFits:CGSizeMake(CGFLOAT_MAX, 12)].width));
+        }
     }
     if (ramTextOn) {
         contentW = MAX(contentW, ceil([self.widgetRamLabel sizeThatFits:CGSizeMake(CGFLOAT_MAX, 14)].width));
@@ -793,6 +852,12 @@ static NSString *widgetShortBytes(uint64_t bytes) {
     }
     if (battOn) {
         contentW = MAX(contentW, ceil([self.widgetBattLabel sizeThatFits:CGSizeMake(CGFLOAT_MAX, 14)].width));
+    }
+    if (lowPowerOn && isLowPower) {
+        contentW = MAX(contentW, ceil([self.widgetLowPowerLabel sizeThatFits:CGSizeMake(CGFLOAT_MAX, 14)].width));
+    }
+    if (clockOn) {
+        contentW = MAX(contentW, ceil([self.widgetClockLabel sizeThatFits:CGSizeMake(CGFLOAT_MAX, 14)].width));
     }
     if (cpuOn || gpuOn) {
         if (!cgBars && !cgRing) {
@@ -826,6 +891,13 @@ static NSString *widgetShortBytes(uint64_t bytes) {
         self.widgetFpsLabel.frame = CGRectMake(xPad, y, barW, 15);
         y += 17;
     }
+    if (fgFpsOn) {
+        FGStats fg = fg_get_stats();
+        if (fg.isSupported && fg.isActive) {
+            self.widgetFgFpsLabel.frame = CGRectMake(xPad, y, barW, 12);
+            y += 14;
+        }
+    }
     if (ramBarOn) {
         self.widgetBarView.frame = CGRectMake(xPad, y, barW, barH);
         [self widgetLayoutBarWithWidth:barW height:barH
@@ -844,6 +916,18 @@ static NSString *widgetShortBytes(uint64_t bytes) {
 
     if (battOn) {
         self.widgetBattLabel.frame = CGRectMake(xPad, y, barW, 14);
+        y += 16;
+    }
+
+    // B4: Low power mode
+    if (lowPowerOn && isLowPower) {
+        self.widgetLowPowerLabel.frame = CGRectMake(xPad, y, barW, 14);
+        y += 16;
+    }
+
+    // B5: Clock
+    if (clockOn) {
+        self.widgetClockLabel.frame = CGRectMake(xPad, y, barW, 14);
         y += 16;
     }
 
@@ -892,7 +976,7 @@ static NSString *widgetShortBytes(uint64_t bytes) {
     }
     CGFloat height = y + yPad - 5;
 
-    BOOL anyContentOn = fpsOn || ramTextOn || ramBarOn || tempOn || battOn || cpuOn || gpuOn;
+    BOOL anyContentOn = fpsOn || fgFpsOn || ramTextOn || ramBarOn || tempOn || battOn || clockOn || cpuOn || gpuOn;
     if (!anyContentOn) {
         // Nothing enabled yet: keep a visible tile instead of an invisible sliver
         self.widgetEmptyIcon.hidden = NO;
@@ -963,6 +1047,7 @@ static NSString *widgetShortBytes(uint64_t bytes) {
     widgetGpuUsage = tm_gpu_usage_percent();
     widgetTempC = tm_battery_temperature_celsius();
     widgetBattPct = tm_battery_percent();
+    widgetBattCharging = tm_battery_is_charging();
 }
 
 - (void)widgetUpdatePercentLabel:(UILabel *)label name:(NSString *)name usage:(double)usage color:(UIColor *)color {

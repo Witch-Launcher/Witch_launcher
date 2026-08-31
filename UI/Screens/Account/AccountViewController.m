@@ -276,6 +276,7 @@ extern NSString *ELY_OAUTH_REDIRECT_URI;
     _usernameField.hidden = YES;
     _usernameField.returnKeyType = UIReturnKeyDone;
     [_usernameField addTarget:self action:@selector(dismissKeyboard) forControlEvents:UIControlEventEditingDidEndOnExit];
+    [_addFormView addSubview:_usernameField];
 
     UIToolbar *kbToolbar = [[UIToolbar alloc] initWithFrame:CGRectMake(0, 0, self.view.frame.size.width, 44)];
     UIBarButtonItem *flexSpace = [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemFlexibleSpace target:nil action:nil];

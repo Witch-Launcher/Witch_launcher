@@ -25,6 +25,9 @@
 "preference.title.widget_temp_unit.c" = "Độ C (°C)";
 "preference.title.widget_temp_unit.f" = "Độ F (°F)";
 "preference.title.widget_show_batt" = "Hiển thị pin";
+"preference.title.widget_show_fgfps" = "Hiển thị FG FPS";
+"preference.title.widget_show_clock" = "Hiển thị đồng hồ";
+"preference.title.widget_show_lowpower" = "Hiển thị chế độ tiết kiệm pin";
 "preference.title.widget_bg_opacity" = "Độ đậm nền Widget";
 
 "game.note.airplay" = "Minecraft đang được hiển thị trên màn hình AirPlay";
@@ -217,6 +220,8 @@
 
 "preference.title.fullscreen_airplay" = "AirPlay toàn màn hình";
 "preference.detail.fullscreen_airplay" = "Cho phép chiếu toàn màn hình cửa sổ game thay vì chiếu mọi thứ trên màn hình ngoài.";
+"preference.title.frame_generation" = "Tạo Khung Hình (Frame Generation)";
+"preference.detail.frame_generation" = "Nội suy các khung hình trung gian để tăng FPS hiển thị. Yêu cầu renderer MoltenVK và hỗ trợ Metal compute. Có thể tăng_pin và nhiệt độ thiết bị.";
 "preference.title.silence_other_audio" = "Tạm dừng âm thanh khi trò chơi mở ra";
 "preference.detail.silence_other_audio" = "Bật để cho phép Amethyst tạm dừng âm thanh từ các ứng dụng khác, chẳng hạn như Âm nhạc, khi khởi chạy trò chơi.";
 "preference.title.silence_with_switch" = "Tắt âm thanh bằng công tắc im lặng";

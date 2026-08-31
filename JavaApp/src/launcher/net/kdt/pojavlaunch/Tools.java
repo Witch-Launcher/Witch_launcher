@@ -139,6 +139,46 @@ public final class Tools {
         }
     }
 
+    /**
+     * Install the Frame Generation patcher.
+     * Gets Instrumentation from the FrameGenAgent and registers
+     * a ClassFileTransformer that patches GameRenderer to call
+     * FrameGenBridge.updateCamera() on every frame.
+     *
+     * This is launcher-side patching — no Fabric/Modloader dependency.
+     *
+     * NOTE: FrameGenAgent is loaded via -javaagent (not from launcher.jar),
+     * so Class.forName may throw ClassNotFoundException if the agent wasn't
+     * loaded. In that case, we gracefully skip patching.
+     */
+    private static void installFrameGenPatcher() {
+        try {
+            // Get Instrumentation from the agent (loaded via -javaagent)
+            Class<?> agentClass = Class.forName("net.vda.witchlaunch.framegen.FrameGenAgent");
+            java.lang.reflect.Method getInst = agentClass.getMethod("getInstrumentation");
+            Object instObj = getInst.invoke(null);
+
+            if (instObj instanceof java.lang.instrument.Instrumentation) {
+                java.lang.instrument.Instrumentation inst = (java.lang.instrument.Instrumentation) instObj;
+
+                // Call FrameGenPatcher.install() which registers the transformer
+                Class<?> patcherClass = Class.forName("net.vda.witchlaunch.framegen.FrameGenPatcher");
+                java.lang.reflect.Method installMethod = patcherClass.getMethod("install", java.lang.instrument.Instrumentation.class);
+                installMethod.invoke(null, inst);
+
+                System.out.println("[FrameGen] Patcher installed successfully");
+            } else {
+                System.out.println("[FrameGen] Agent not loaded (Instrumentation null), FG patching skipped");
+            }
+        } catch (ClassNotFoundException e) {
+            // Agent not on classpath — FG not available (agent loads via -javaagent)
+            System.out.println("[FrameGen] Agent not found on classpath, FG patching skipped");
+        } catch (Throwable t) {
+            System.err.println("[FrameGen] Failed to install patcher: " + t);
+            t.printStackTrace();
+        }
+    }
+
     public static void launchMinecraft(MinecraftAccount profile, final JMinecraftVersionList.Version versionInfo) throws Throwable {
         System.out.println("[DEBUG] launchMinecraft: id=" + versionInfo.id + " inheritsFrom=" + versionInfo.inheritsFrom + " assets=" + versionInfo.assets + " mainClass=" + versionInfo.mainClass);
         injectVoxyMemoryStorageConfig();
@@ -175,6 +215,9 @@ public final class Tools {
         if (mainClass != null && (mainClass.contains("fabric") || mainClass.contains("quilt"))) {
             loadLog4jLibraries(loader);
         }
+
+        // Install Frame Generation patcher (patches GameRenderer to call FrameGenBridge)
+        installFrameGenPatcher();
 
         Class<?> clazz = loader.loadClass(mainClass);
         Method method = clazz.getMethod("main", String[].class);

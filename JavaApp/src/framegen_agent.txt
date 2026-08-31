@@ -1,0 +1,4 @@
+Premain-Class: net.vda.witchlaunch.framegen.FrameGenAgent
+Agent-Class: net.vda.witchlaunch.framegen.FrameGenAgent
+Can-Retransform-Classes: true
+Can-Redefine-Classes: true

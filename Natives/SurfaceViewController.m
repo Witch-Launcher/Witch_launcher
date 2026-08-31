@@ -299,7 +299,7 @@ static GameSurfaceView* pojavWindow;
         NSString *typeId = note.userInfo[@"typeId"];
         if (typeId) {
             UIImage *img = [CursorTypeManager imageForType:typeId];
-            NSLog(@"[CursorObserver] typeId=%@ img=%@ size=%@", typeId, img, NSStringFromCGSize(img.size));
+
             self.mousePointerView.image = img;
             self.mousePointerView.frame = [CursorManager displayFrameForMouseFrame:virtualMouseFrame typeId:typeId];
         }

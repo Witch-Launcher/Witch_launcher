@@ -24,9 +24,11 @@ $(shell mkdir -p $(JAVAC_TMPDIR))
 SOURCES := $(shell find $(SOURCEDIR) -type f -name '*.java')
 CLASSES := $(SOURCES:$(SOURCEDIR)/%.java=$(OUTPUTDIR)/%.class)
 
-TARGETS := $(shell find $(SOURCEDIR) -mindepth 1 -maxdepth 1 -type d)
+TARGETS := $(shell find $(SOURCEDIR) -mindepth 1 -maxdepth 1 -type d ! -name agent)
 TARGETS := $(TARGETS:$(SOURCEDIR)/%=$(OUTPUTDIR)/%.jar)
 TARGETS += $(OUTPUTDIR)/lwjgl-3.3.3.jar $(OUTPUTDIR)/lwjgl-3.3.6.jar $(OUTPUTDIR)/lwjgl-3.4.1.jar $(OUTPUTDIR)/cacio-init-agent.jar
+# framegen-agent is built from src/agent directory
+TARGETS += $(OUTPUTDIR)/framegen-agent.jar
 
 # Add all jars to classpath and allow compiling with private API
 JCFLAGS := -J-Djava.io.tmpdir=$(JAVAC_TMPDIR) -cp "$(subst $() $(),:,$(wildcard $(SOURCEDIR)/*/):$(wildcard libs/*/*.jar))" -XDignore.symbol.file
@@ -78,6 +80,14 @@ $(OUTPUTDIR)/launcher.jar: $(CLASSES) $(OUTPUTDIR)/lwjgl-3.4.1.jar
 	@unzip -o -p $(OUTPUTDIR)/lwjgl-3.4.1.jar 'org/lwjgl/glfw/GLFWNativeCocoa$$Functions.class' > '$(basename $@)/macosfix/GLFWNativeCocoa$$Functions.class'
 	@mkdir -p $(basename $@)/launchwrapper
 	@cp libs/launchwrapper-1.12.jar $(basename $@)/launchwrapper/launchwrapper-1.12.jar
+	@# Include FrameGen classes in launcher.jar so FrameGenBridge is on the
+	@# application classpath (needed by JNI FindClass and launcher-side patcher).
+	@# NOTE: FrameGenAgent.class is NOT included here — it must be loaded via
+	@# -javaagent so its premain() receives Instrumentation. Including it in
+	@# launcher.jar would create a separate class instance with null Instrumentation.
+	@mkdir -p $(basename $@)/net/vda/witchlaunch/framegen
+	@cp $(OUTPUTDIR)/agent/net/vda/witchlaunch/framegen/FrameGenBridge.class $(basename $@)/net/vda/witchlaunch/framegen/ 2>/dev/null || true
+	@cp $(OUTPUTDIR)/agent/net/vda/witchlaunch/framegen/FrameGenPatcher.class $(basename $@)/net/vda/witchlaunch/framegen/ 2>/dev/null || true
 	@find $(basename $@) -name '*.class' -size 0 | grep -v '\$$' && { echo "Error: found empty class files"; exit 1; } || true
 	@$(BOOTJDK)/jar -cf $@ -C $(basename $@) .
 	# com.apple.ios.audio must live in EXACTLY ONE jar so it is exported by
@@ -137,6 +147,13 @@ $(OUTPUTDIR)/cacio-init-agent.jar: $(CLASSES)
 	@set -e
 	@echo "Creating $@"
 	@$(BOOTJDK)/jar -cfm $@ $(SOURCEDIR)/cacio_init_agent.txt -C $(basename $@) .
+
+$(OUTPUTDIR)/framegen-agent.jar: $(CLASSES)
+	@set -e
+	@echo "Creating $@"
+	@mkdir -p $(OUTPUTDIR)/framegen-agent
+	@cp -r $(OUTPUTDIR)/agent/* $(OUTPUTDIR)/framegen-agent/
+	@$(BOOTJDK)/jar -cfm $@ $(SOURCEDIR)/framegen_agent.txt -C $(OUTPUTDIR)/framegen-agent .
 
 clean:
 	rm -rf $(OUTPUTDIR)

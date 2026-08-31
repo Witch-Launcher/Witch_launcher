@@ -246,6 +246,9 @@ add_executable(Witch
   ctxbridges/osm_bridge.m
   ctxbridges/vk_bridge.m
 
+  framegen/framegen.mm
+  framegen/framegen_jni_bridge.m
+
   debug/DebugServer.m
  
   customcontrols/ControlButton.m

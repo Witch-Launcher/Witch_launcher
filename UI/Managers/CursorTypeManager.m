@@ -280,8 +280,7 @@ static NSArray<NSDictionary *> *_cursorTypeDefinitions;
                                                       userInfo:userInfo];
     });
 
-    NSLog(@"[CursorTypeManager] Cursor shape changed: shape=0x%X isSDL3=%d -> type=%@ cursor=%@",
-          shape, isSDL3, typeId, cursorName);
+
 }
 
 + (void)setCursorHidden:(BOOL)hidden {
@@ -310,7 +309,7 @@ static NSArray<NSDictionary *> *_cursorTypeDefinitions;
                                                       userInfo:userInfo];
     });
     
-    NSLog(@"[CursorTypeManager] Cursor manually set to %@", hidden ? @"hidden" : @"normal");
+
 }
 
 #pragma mark - Display

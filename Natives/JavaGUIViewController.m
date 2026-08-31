@@ -268,7 +268,7 @@ void AWTInputBridge_sendKey(int keycode) {
         NSString *typeId = note.userInfo[@"typeId"];
         if (typeId) {
             UIImage *img = [CursorTypeManager imageForType:typeId];
-            NSLog(@"[CursorObserver-GUI] typeId=%@ img=%@ size=%@", typeId, img, NSStringFromCGSize(img.size));
+
             self.surfaceScrollView.mousePointerView.image = img;
             self.surfaceScrollView.mousePointerView.frame = [CursorManager displayFrameForMouseFrame:self.surfaceScrollView.virtualMouseFrame typeId:typeId];
         }
