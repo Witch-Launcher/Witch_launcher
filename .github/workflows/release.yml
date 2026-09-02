@@ -178,11 +178,12 @@ jobs:
           # Install cryptography for encrypt script (fast, cached via pip)
           python3 -m pip install --quiet --break-system-packages cryptography 2>&1 | tail -n 5 || pip3 install --quiet cryptography 2>&1 | tail -n 5 || true
           if [ -n "$WITCH_ENCRYPTION_KEY" ]; then
-            echo "Injecting ENCRYPTED WitchConfig.h (AES-256-GCM) — values are enc_v1:*** masked"
+            echo "Injecting ENCRYPTED WitchConfig.h (SERVER-ONLY, no master key in IPA) — enc_v1:*** masked"
           else
             echo "No WITCH_ENCRYPTION_KEY — injecting PLAIN WitchConfig.h (public build)"
           fi
-          python3 scripts/encrypt_witch_config.py --out Natives/Config/WitchConfig.h
+          # --server-only: master key stays ONLY on server, IPA holds only enc_v1, no WITCH_ENCRYPTION_KEY
+          python3 scripts/encrypt_witch_config.py --server-only --out Natives/Config/WitchConfig.h
           echo "--- WitchConfig.h (masked) ---"
           # Never cat raw secrets — show only masked preview
           sed -E 's/enc_v1:[A-Za-z0-9+\/=]{20,}/enc_v1:***/g' Natives/Config/WitchConfig.h || cat Natives/Config/WitchConfig.h
