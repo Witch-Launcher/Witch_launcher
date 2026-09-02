@@ -3,6 +3,7 @@
 #import <CommonCrypto/CommonHMAC.h>
 #import <CommonCrypto/CommonDigest.h>
 #import <UIKit/UIKit.h>
+#import "WitchCrypto.h"
 #if __has_include("Config/WitchConfig.h")
 #import "Config/WitchConfig.h"
 #else
@@ -15,6 +16,8 @@
 static NSString* WitchProxyBaseURL2(void) {
     NSString *url = getPrefObject(@"witch.proxy_base_url");
     if ([url isKindOfClass:[NSString class]]) {
+        NSString *dec = [WitchCrypto decryptPrefValue:url];
+        if (dec) url = dec;
         url = [url stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
         if (url.length > 0) {
             if ([url hasSuffix:@"/"]) url = [url substringToIndex:url.length-1];
@@ -23,6 +26,8 @@ static NSString* WitchProxyBaseURL2(void) {
     }
     NSString *bundled = WITCH_DEFAULT_BASE_URL;
     if ([bundled isKindOfClass:[NSString class]] && bundled.length > 0) {
+        NSString *dec = [WitchCrypto decryptIfNeeded:bundled];
+        if (dec) bundled = dec;
         if ([bundled hasSuffix:@"/"]) bundled = [bundled substringToIndex:bundled.length-1];
         return bundled;
     }
@@ -30,16 +35,30 @@ static NSString* WitchProxyBaseURL2(void) {
 }
 static NSString* WitchProxyToken2(void) {
     id v = getPrefObject(@"witch.proxy_token");
-    if ([v isKindOfClass:[NSString class]] && [(NSString*)v length] >0) return v;
+    if ([v isKindOfClass:[NSString class]] && [(NSString*)v length] >0) {
+        NSString *dec = [WitchCrypto decryptPrefValue:v];
+        return dec ?: v;
+    }
     NSString *bundled = WITCH_DEFAULT_PROXY_TOKEN;
-    return ([bundled isKindOfClass:[NSString class]] && bundled.length>0) ? bundled : nil;
+    if ([bundled isKindOfClass:[NSString class]] && bundled.length>0) {
+        NSString *dec = [WitchCrypto decryptIfNeeded:bundled];
+        return dec ?: bundled;
+    }
+    return nil;
 }
 static NSString* WitchProxyHMACSecret2(void) {
     id v = getPrefObject(@"witch.proxy_hmac");
     if (!v) v = getPrefObject(@"witch.proxy_hmac_secret");
-    if ([v isKindOfClass:[NSString class]] && [(NSString*)v length]>0) return v;
+    if ([v isKindOfClass:[NSString class]] && [(NSString*)v length]>0) {
+        NSString *dec = [WitchCrypto decryptPrefValue:v];
+        return dec ?: v;
+    }
     NSString *bundled = WITCH_DEFAULT_HMAC_SECRET;
-    return ([bundled isKindOfClass:[NSString class]] && bundled.length>0) ? bundled : nil;
+    if ([bundled isKindOfClass:[NSString class]] && bundled.length>0) {
+        NSString *dec = [WitchCrypto decryptIfNeeded:bundled];
+        return dec ?: bundled;
+    }
+    return nil;
 }
 static NSString* WitchDeviceId2(void) {
     NSString *did = [[NSUserDefaults standardUserDefaults] stringForKey:@"witch.device_id"];
@@ -247,9 +266,18 @@ static NSString* HMACSHA256Hex2(NSString *secret, NSString *message) {
         bodyStr = [[NSString alloc] initWithData:jsonData encoding:NSUTF8StringEncoding];
     }
     req.HTTPBody = bodyData;
-    // Auth headers
+    // Auth headers (with transport encryption)
     NSString *token = WitchProxyToken2();
-    if (token.length > 0) [req setValue:[NSString stringWithFormat:@"Bearer %@", token] forHTTPHeaderField:@"Authorization"];
+    if (token.length > 0) {
+        NSString *transport = token;
+        if ([WitchCrypto isEnabled]) {
+            NSString *enc = [WitchCrypto encryptForTransport:token];
+            if (enc.length>0) { transport = enc; [req setValue:@"1" forHTTPHeaderField:@"X-Witch-Enc"]; }
+        }
+        [req setValue:[NSString stringWithFormat:@"Bearer %@", transport] forHTTPHeaderField:@"Authorization"];
+    } else if ([WitchCrypto isEnabled]) {
+        [req setValue:@"1" forHTTPHeaderField:@"X-Witch-Enc"];
+    }
     NSString *secret = WitchProxyHMACSecret2();
     if (secret.length > 0) {
         NSString *timestamp = [NSString stringWithFormat:@"%.0f", [[NSDate date] timeIntervalSince1970]*1000];

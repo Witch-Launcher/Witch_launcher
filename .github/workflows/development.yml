@@ -134,33 +134,31 @@ jobs:
           xcrun --sdk iphoneos --show-sdk-version
           echo "SDKPATH=$SDKPATH"
 
-      - name: Inject Witch private config (BuildKeys like Zalith Launcher 2)
+      - name: Inject Witch private config (AES-256-GCM encrypted BuildKeys)
         env:
           WITCH_BASE_URL: ${{ secrets.WITCH_BASE_URL }}
           WITCH_HMAC_SECRET: ${{ secrets.WITCH_HMAC_SECRET }}
           WITCH_PROXY_TOKEN: ${{ secrets.WITCH_PROXY_TOKEN }}
+          WITCH_CURSEFORGE_API_KEY: ${{ secrets.WITCH_CURSEFORGE_API_KEY }}
+          WITCH_ENCRYPTION_KEY: ${{ secrets.WITCH_ENCRYPTION_KEY }}
         run: |
           mkdir -p Natives/Config
-          if [ -n "$WITCH_BASE_URL" ]; then
-            echo "Injecting private WitchConfig.h from secrets"
-            cat > Natives/Config/WitchConfig.h <<EOF
-          #pragma once
-          #define WITCH_DEFAULT_BASE_URL @"$WITCH_BASE_URL"
-          #define WITCH_DEFAULT_HMAC_SECRET @"$WITCH_HMAC_SECRET"
-          #define WITCH_DEFAULT_PROXY_TOKEN @"$WITCH_PROXY_TOKEN"
-          #define WITCH_DEFAULT_CURSEFORGE_API_KEY @""
-          EOF
-          else
-            echo "No private Witch secrets found — using public dummy (empty) WitchConfig.h"
-            cat > Natives/Config/WitchConfig.h <<'EOF'
-          #pragma once
-          #define WITCH_DEFAULT_BASE_URL @""
-          #define WITCH_DEFAULT_HMAC_SECRET @""
-          #define WITCH_DEFAULT_PROXY_TOKEN @""
-          #define WITCH_DEFAULT_CURSEFORGE_API_KEY @""
-          EOF
+          if [ -n "$WITCH_ENCRYPTION_KEY" ]; then
+            echo "::add-mask::$WITCH_ENCRYPTION_KEY"
+            echo "::add-mask::$WITCH_HMAC_SECRET"
+            echo "::add-mask::$WITCH_PROXY_TOKEN"
+            echo "::add-mask::$WITCH_BASE_URL"
           fi
-          cat Natives/Config/WitchConfig.h
+          python3 -m pip install --quiet --break-system-packages cryptography 2>&1 | tail -n 5 || pip3 install --quiet cryptography 2>&1 | tail -n 5 || true
+          if [ -n "$WITCH_ENCRYPTION_KEY" ]; then
+            echo "Injecting ENCRYPTED WitchConfig.h (AES-256-GCM) — values are enc_v1:*** masked"
+          else
+            echo "No WITCH_ENCRYPTION_KEY — injecting PLAIN WitchConfig.h (public build)"
+          fi
+          python3 scripts/encrypt_witch_config.py --out Natives/Config/WitchConfig.h
+          echo "--- WitchConfig.h (masked) ---"
+          sed -E 's/enc_v1:[A-Za-z0-9+\/=]{20,}/enc_v1:***/g' Natives/Config/WitchConfig.h || cat Natives/Config/WitchConfig.h
+          echo "--- end masked ---"
 
       # Fetch the official prebuilt iOS arm64 JREs instead of compiling
       # OpenJDK from source: far faster and immune to the cross-build

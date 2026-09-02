@@ -1,8 +1,15 @@
 // Witch build-time config — copy to WitchConfig.h and fill your private values
 // This file is GITIGNORED — never commit WitchConfig.h with real secrets
 // BuildKeys pattern like Zalith Launcher 2 (Android) — keys injected at build time via CI secrets
+// === ENCRYPTED BUILD (AES-256-GCM) ===
+// Khi có WITCH_ENCRYPTION_KEY (64 hex, 32 bytes) trong CI secrets, toàn bộ giá trị dưới đây
+// sẽ được mã hoá thành enc_v1:<base64(iv+ct+tag)> và key mã hoá được obfuscate bằng XOR+salt.
+// Xem scripts/encrypt_witch_config.py để tạo file này. Không bao giờ commit key thật.
 
 #pragma once
+
+// 1) Plain fallback cho public builds (không có encryption key) — để trống
+// Khi build private có WITCH_ENCRYPTION_KEY, các giá trị này sẽ là enc_v1:... và được WitchCrypto decrypt runtime.
 
 // Default Witch Worker URL for public builds (empty = user must enter in Settings → Network)
 // For your private release build, set your own worker URL here (or via xcconfig)
@@ -10,9 +17,23 @@
 
 // HMAC / Bearer secrets — leave empty for public builds (user will enter in Settings)
 // For private CI build, inject via environment: e.g. echo "#define WITCH_HMAC_SECRET @\"$SECRET\"" > WitchConfig.h
+// Với encrypted build: giá trị sẽ là @"enc_v1:..." và được giải bằng WitchCrypto
 #define WITCH_DEFAULT_HMAC_SECRET @""
 #define WITCH_DEFAULT_PROXY_TOKEN @""
 
 // Optional: CurseForge API key for direct mode (if you want to ship a fallback key)
 // Leave empty to force Witch proxy or user-owned key
 #define WITCH_DEFAULT_CURSEFORGE_API_KEY @""
+
+// 2) Master encryption key (obfuscated) — chỉ có khi WITCH_ENCRYPTION_KEY được set trong CI
+// Ví dụ khi có key: (được tạo bởi scripts/encrypt_witch_config.py)
+//   #define WITCH_ENCRYPTION_ENABLED 1
+//   #define WITCH_ENCRYPTION_KEY_SALT 0xA5
+//   #define WITCH_ENCRYPTION_KEY_OBF_B64 @"<base64 của key XOR salt+index>"
+//   #undef WITCH_DEFAULT_BASE_URL
+//   #define WITCH_DEFAULT_BASE_URL @"enc_v1:..."
+// Khi không có key:
+//   #define WITCH_ENCRYPTION_ENABLED 0
+#ifndef WITCH_ENCRYPTION_ENABLED
+#define WITCH_ENCRYPTION_ENABLED 0
+#endif

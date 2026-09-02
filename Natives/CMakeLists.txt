@@ -343,10 +343,11 @@ egl_bridge.m
     ../UI/Managers/CursorManager.m
     ../UI/Managers/CursorTypeManager.m
     ../UI/Managers/InstalledModsManager.m
-   ../UI/Screens/MainMenu/MainMenuViewController.m
-    WitchAIService.m
-    WitchLogReporter.m
-    WitchAppAttest.m
+    ../UI/Screens/MainMenu/MainMenuViewController.m
+     WitchAIService.m
+     WitchLogReporter.m
+     WitchAppAttest.m
+     WitchCrypto.m
    ../UI/Screens/CrashLog/CrashLogAnalyzer.m
    ../UI/Screens/CrashLog/CrashScreenViewController.m
    ../UI/Screens/AI/WitchAIChatViewController.m

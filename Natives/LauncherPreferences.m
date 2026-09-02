@@ -4,6 +4,7 @@
 #import "PLPreferences.h"
 #import "UIKit+hook.h"
 #import <CoreFoundation/CoreFoundation.h>
+#import "WitchCrypto.h"
 
 static PLPreferences* pref;
 
@@ -26,8 +27,38 @@ void toggleIsolatedPref(BOOL forceEnable) {
     [pref toggleIsolationForced:forceEnable];
 }
 
+static BOOL WitchShouldEncryptPref(NSString *key) {
+    if (!key) return NO;
+    // Encrypt all sensitive witch keys + user-owned keys
+    if ([key isEqualToString:@"witch.proxy_token"]) return YES;
+    if ([key isEqualToString:@"witch.proxy_hmac"]) return YES;
+    if ([key isEqualToString:@"witch.proxy_hmac_secret"]) return YES;
+    if ([key isEqualToString:@"witch.proxy_base_url"]) return YES;
+    if ([key isEqualToString:@"witch.curseforge_own_key"]) return YES;
+    if ([key isEqualToString:@"witch.ai_own_key"]) return YES;
+    if ([key isEqualToString:@"curseforge.api_key"]) return YES;
+    return NO;
+}
+
 id getPrefObject(NSString *key) {
-    return [pref getObject:key];
+    id val = [pref getObject:key];
+    if (WitchShouldEncryptPref(key) && [val isKindOfClass:[NSString class]]) {
+        NSString *s = (NSString *)val;
+        if ([WitchCrypto isEncryptedString:s]) {
+            NSString *dec = [WitchCrypto decryptPrefValue:s];
+            return dec ?: s;
+        } else if (s.length > 0 && [WitchCrypto isEnabled]) {
+            // Lazy migration: plain pref -> encrypt at rest in background
+            NSString *keyCopy = [key copy];
+            NSString *valCopy = [s copy];
+            dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
+                // Re-encrypt via setPrefObject (will apply WitchShouldEncryptPref check)
+                // Delay slightly to avoid reentrancy during launch
+                setPrefObject(keyCopy, valCopy);
+            });
+        }
+    }
+    return val;
 }
 BOOL getPrefBool(NSString *key) {
     return [getPrefObject(key) boolValue];
@@ -40,6 +71,15 @@ NSInteger getPrefInt(NSString *key) {
 }
 
 void setPrefObject(NSString *key, id value) {
+    // Auto-encrypt sensitive witch prefs at rest (AES-256-GCM)
+    if (WitchShouldEncryptPref(key) && [value isKindOfClass:[NSString class]]) {
+        NSString *s = (NSString *)value;
+        if (s.length > 0 && ![WitchCrypto isEncryptedString:s] && [WitchCrypto isEnabled]) {
+            NSString *enc = [WitchCrypto encryptPrefValue:s];
+            if (enc.length > 0) value = enc;
+        }
+        // empty string stays empty (clearing pref)
+    }
     [pref setObject:key value:value];
 }
 void setPrefBool(NSString *key, BOOL value) {

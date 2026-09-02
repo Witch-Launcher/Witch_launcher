@@ -12,6 +12,7 @@
 #define WITCH_DEFAULT_CURSEFORGE_API_KEY @""
 #endif
 #import "WitchAppAttest.h"
+#import "WitchCrypto.h"
 
 static NSString * const kCurseForgeBaseURL = @"https://api.curseforge.com/v1";
 static NSInteger const kMinecraftGameId = 432;
@@ -31,16 +32,20 @@ static BOOL WitchServerEnabled(void) {
 static NSString* WitchProxyBaseURL(void) {
     NSString *url = getPrefObject(@"witch.proxy_base_url");
     if ([url isKindOfClass:[NSString class]]) {
+        // pref may be encrypted enc_v1:... -> decrypt
+        NSString *dec = [WitchCrypto decryptPrefValue:url];
+        if (dec) url = dec;
         url = [url stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
         if (url.length > 0) {
             if ([url hasSuffix:@"/"]) url = [url substringToIndex:url.length-1];
             return url;
         }
     }
-    // Build-time fallback (Zalith pattern): WITCH_DEFAULT_BASE_URL injected via Config/WitchConfig.h
-    // For public GitHub builds it is @"" → user must enter in Settings → Network
+    // Build-time fallback (Zalith pattern): WITCH_DEFAULT_BASE_URL injected via Config/WitchConfig.h (may be enc_v1:...)
     NSString *bundled = WITCH_DEFAULT_BASE_URL;
     if ([bundled isKindOfClass:[NSString class]] && bundled.length > 0) {
+        NSString *dec = [WitchCrypto decryptIfNeeded:bundled];
+        if (dec) bundled = dec;
         if ([bundled hasSuffix:@"/"]) bundled = [bundled substringToIndex:bundled.length-1];
         return bundled;
     }
@@ -48,16 +53,32 @@ static NSString* WitchProxyBaseURL(void) {
 }
 static NSString* WitchProxyToken(void) {
     id v = getPrefObject(@"witch.proxy_token");
-    if ([v isKindOfClass:[NSString class]] && [(NSString*)v length] > 0) return v;
+    if ([v isKindOfClass:[NSString class]] && [(NSString*)v length] > 0) {
+        NSString *dec = [WitchCrypto decryptPrefValue:v];
+        if (dec.length > 0) return dec;
+        return v;
+    }
     NSString *bundled = WITCH_DEFAULT_PROXY_TOKEN;
-    return ([bundled isKindOfClass:[NSString class]] && bundled.length > 0) ? bundled : nil;
+    if ([bundled isKindOfClass:[NSString class]] && bundled.length > 0) {
+        NSString *dec = [WitchCrypto decryptIfNeeded:bundled];
+        return dec ?: bundled;
+    }
+    return nil;
 }
 static NSString* WitchProxyHMACSecret(void) {
     id v = getPrefObject(@"witch.proxy_hmac");
     if (!v) v = getPrefObject(@"witch.proxy_hmac_secret");
-    if ([v isKindOfClass:[NSString class]] && [(NSString*)v length] > 0) return v;
+    if ([v isKindOfClass:[NSString class]] && [(NSString*)v length] > 0) {
+        NSString *dec = [WitchCrypto decryptPrefValue:v];
+        if (dec.length > 0) return dec;
+        return v;
+    }
     NSString *bundled = WITCH_DEFAULT_HMAC_SECRET;
-    return ([bundled isKindOfClass:[NSString class]] && bundled.length > 0) ? bundled : nil;
+    if ([bundled isKindOfClass:[NSString class]] && bundled.length > 0) {
+        NSString *dec = [WitchCrypto decryptIfNeeded:bundled];
+        return dec ?: bundled;
+    }
+    return nil;
 }
 static NSString* WitchCurseForgeSource(void) {
     NSString *v = getPrefObject(@"witch.curseforge_source");
@@ -173,7 +194,19 @@ static NSString* HMACSHA256Hex(NSString *secret, NSString *message) {
 - (void)addWitchAuthHeaders:(NSMutableURLRequest*)req pathWithQuery:(NSString*)pathWithQuery body:(NSString*)bodyString {
     NSString *token = WitchProxyToken();
     if (token.length > 0) {
-        [req setValue:[NSString stringWithFormat:@"Bearer %@", token] forHTTPHeaderField:@"Authorization"];
+        NSString *transport = token;
+        // Encrypt token for transport if master key is available (B: at-rest + transport)
+        if ([WitchCrypto isEnabled]) {
+            NSString *enc = [WitchCrypto encryptForTransport:token];
+            if (enc.length > 0) {
+                transport = enc;
+                [req setValue:@"1" forHTTPHeaderField:@"X-Witch-Enc"];
+            }
+        }
+        [req setValue:[NSString stringWithFormat:@"Bearer %@", transport] forHTTPHeaderField:@"Authorization"];
+    } else if ([WitchCrypto isEnabled]) {
+        // Even without token, indicate enc capability for prioritized anonymous handling
+        [req setValue:@"1" forHTTPHeaderField:@"X-Witch-Enc"];
     }
     NSString *secret = WitchProxyHMACSecret();
     if (secret.length > 0) {
