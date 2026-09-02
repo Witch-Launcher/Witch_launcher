@@ -28,8 +28,11 @@ extern dispatch_group_t fatalExitGroup;
     if ([WitchAppAttest isSupported]) {
         dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
             [WitchAppAttest attestIfNeededWithCompletion:^(NSString *token, NSError *error){
-                if (token) NSLog(@"[WitchAppAttest] ready");
-                else NSLog(@"[WitchAppAttest] not ready: %@", error.localizedDescription);
+                if (token) {
+                    NSLog(@"[WitchAppAttest] ready");
+                } else {
+                    NSLog(@"[WitchAppAttest] not ready: %@", error.localizedDescription);
+                }
             }];
         });
     }

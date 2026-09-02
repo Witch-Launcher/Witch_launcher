@@ -7,7 +7,7 @@
 #include "jni.h"
 
 // Remove date + time from NSLog, unneeded
-#define NSLog(args...) customNSLog(__FILE__,__LINE__,__PRETTY_FUNCTION__,args);
+#define NSLog(args...) customNSLog(__FILE__,__LINE__,__PRETTY_FUNCTION__,args)
 
 // Control button actions
 #define ACTION_DOWN 0
