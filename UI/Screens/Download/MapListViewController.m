@@ -9,6 +9,8 @@
 #import "ios_uikit_bridge.h"
 #import "AmethystBlurView.h"
 #import "utils.h"
+#import "CurseForgeService.h"
+#import "LauncherPreferences.h"
 
 @interface MapListViewController () <UITableViewDelegate, UITableViewDataSource, UISearchBarDelegate>
 @property (nonatomic) UISearchBar *searchBar;
@@ -26,6 +28,9 @@
 @property (nonatomic) BOOL isRestoringPage;
 @property (nonatomic) BOOL adjustingContentOffset;
 @property (nonatomic) NSString *currentQuery;
+@property (nonatomic) NSString *selectedSource;
+@property (nonatomic) UISegmentedControl *sourceControl;
+@property (nonatomic) NSLayoutConstraint *sourceControlWidthConstraint;
 @end
 
 @implementation MapListViewController
@@ -33,6 +38,7 @@
 - (void)viewDidLoad {
     [super viewDidLoad];
     [AmethystBlurView installInView:self.view];
+    _selectedSource = @"modrinth";
     _pageCache = [NSMutableDictionary dictionary];
     _pageOffsets = [NSMutableArray array];
     _hasMore = YES;
@@ -55,6 +61,17 @@
     _searchBar.placeholder = localize(@"download.search.maps", nil);
     _searchBar.searchBarStyle = UISearchBarStyleMinimal;
     [self.view addSubview:_searchBar];
+
+    _sourceControl = [[UISegmentedControl alloc] initWithItems:@[@"Modrinth", @"CurseForge"]];
+    _sourceControl.translatesAutoresizingMaskIntoConstraints = NO;
+    _sourceControl.selectedSegmentIndex = 0;
+    _sourceControl.selectedSegmentTintColor = ThemeManager.shared.accentColor;
+    _sourceControl.layer.cornerRadius = 8;
+    _sourceControl.clipsToBounds = YES;
+    [_sourceControl setTitleTextAttributes:@{NSForegroundColorAttributeName: ThemeManager.shared.primaryTextColor, NSFontAttributeName: [UIFont systemFontOfSize:11 weight:UIFontWeightMedium]} forState:UIControlStateNormal];
+    [_sourceControl setTitleTextAttributes:@{NSForegroundColorAttributeName: UIColor.whiteColor, NSFontAttributeName: [UIFont systemFontOfSize:11 weight:UIFontWeightSemibold]} forState:UIControlStateSelected];
+    [_sourceControl addTarget:self action:@selector(sourceChanged) forControlEvents:UIControlEventValueChanged];
+    [self.view addSubview:_sourceControl];
 
     _spinner = [[UIActivityIndicatorView alloc] initWithActivityIndicatorStyle:UIActivityIndicatorViewStyleLarge];
     _spinner.translatesAutoresizingMaskIntoConstraints = NO;
@@ -91,10 +108,16 @@
 
     [_tableView registerClass:[AmethystProjectCell class] forCellReuseIdentifier:@"MapCell"];
 
+    _sourceControlWidthConstraint = [_sourceControl.widthAnchor constraintEqualToConstant:160];
     [NSLayoutConstraint activateConstraints:@[
         [_searchBar.topAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.topAnchor constant:8],
         [_searchBar.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor constant:12],
-        [_searchBar.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor constant:-12],
+        [_searchBar.trailingAnchor constraintEqualToAnchor:_sourceControl.leadingAnchor constant:-8],
+
+        [_sourceControl.centerYAnchor constraintEqualToAnchor:_searchBar.centerYAnchor],
+        [_sourceControl.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor constant:-12],
+        _sourceControlWidthConstraint,
+        [_sourceControl.heightAnchor constraintEqualToConstant:32],
 
         [_spinner.centerXAnchor constraintEqualToAnchor:self.view.centerXAnchor],
         [_spinner.centerYAnchor constraintEqualToAnchor:self.view.centerYAnchor],
@@ -127,6 +150,14 @@
     _searchBar.tintColor = theme.accentColor;
     _emptyLabel.textColor = theme.secondaryTextColor;
     _errorLabel.textColor = theme.errorColor;
+    _sourceControl.selectedSegmentTintColor = theme.accentColor;
+    [_sourceControl setTitleTextAttributes:@{NSForegroundColorAttributeName: theme.primaryTextColor, NSFontAttributeName: [UIFont systemFontOfSize:11 weight:UIFontWeightMedium]} forState:UIControlStateNormal];
+    [_sourceControl setTitleTextAttributes:@{NSForegroundColorAttributeName: UIColor.whiteColor, NSFontAttributeName: [UIFont systemFontOfSize:11 weight:UIFontWeightSemibold]} forState:UIControlStateSelected];
+}
+
+- (void)sourceChanged {
+    _selectedSource = _sourceControl.selectedSegmentIndex == 0 ? @"modrinth" : @"curseforge";
+    [self loadMapsWithQuery:_searchBar.text ?: @"" offset:0];
 }
 
 - (void)loadMapsWithQuery:(NSString *)query offset:(NSInteger)offset {
@@ -153,7 +184,7 @@
         _isLoadingMore = YES;
     }
 
-    [ModrinthService.shared searchProjectsWithType:@"mod" query:query offset:offset limit:50 categoryFilter:@"worldgen" loaderFilter:nil gameVersionFilter:nil completion:^(NSArray<NSDictionary *> *results, NSError *error) {
+    void (^handleResults)(NSArray *, NSError *) = ^(NSArray<NSDictionary *> *results, NSError *error) {
         [self.timeoutTimer invalidate];
         [self.spinner stopAnimating];
         self.isLoadingMore = NO;
@@ -177,7 +208,13 @@
             self.errorLabel.text = error.localizedDescription ?: @"Failed to load maps.";
             self.errorLabel.hidden = NO;
         }
-    }];
+    };
+    if ([_selectedSource isEqualToString:@"curseforge"]) {
+        // CurseForge Worlds classId 17 (Worlds)
+        [CurseForgeService.shared searchProjectsWithClassId:17 query:query offset:offset limit:50 loaderFilter:nil gameVersionFilter:nil completion:handleResults];
+    } else {
+        [ModrinthService.shared searchProjectsWithType:@"mod" query:query offset:offset limit:50 categoryFilter:@"worldgen" loaderFilter:nil gameVersionFilter:nil completion:handleResults];
+    }
 }
 
 - (void)trimMapsIfNeeded {

@@ -158,47 +158,58 @@ function JIT26NewBreakpoints(brkResponse) {
     }
 }
 
+function readRegister(regNum) {
+    const hexReg = regNum.toString(16);
+    let regResponse = send_command(`p${hexReg};thread:${tid};`);
+    if (!regResponse || regResponse.startsWith('E') || regResponse.length < 16) {
+        regResponse = send_command(`p${hexReg}`);
+    }
+    if (regResponse && !regResponse.startsWith('E') && regResponse.length >= 16) {
+        return littleEndianHexStringToNumber(regResponse.substr(0, 16));
+    }
+    return null;
+}
+
 function parseRegNum(brkResponse, regNum) {
     const hex = regNum.toString(16).padStart(2, '0');
     const match = new RegExp(`${hex}:(?<reg>[0-9a-f]{16});`).exec(brkResponse);
-    return match ? littleEndianHexStringToNumber(match.groups['reg']) : null;
+    if (match) {
+        return littleEndianHexStringToNumber(match.groups['reg']);
+    }
+    return readRegister(regNum);
 }
 
 // brk 0x6a: patched libjvm stops after mirror vm_remap (replaces printf).
 function JIT26HandleBrk0x6a(brkResponse) {
     let rw = x1;
     let rx = parseRegNum(brkResponse, 0x02);
-    let size = parseRegNum(brkResponse, 0x13);
     if (!rx) {
-        rx = parseRegNum(brkResponse, 0x14);
+        rx = parseRegNum(brkResponse, 0x00);
     }
     if (!rw) {
-        rw = parseRegNum(brkResponse, 0x08);
+        rw = parseRegNum(brkResponse, 0x01);
     }
     if (!rx || !rw) {
-        log(`Mirror prepare brk 0x6a: missing rx/rw (x1=${x1}, x2=${parseRegNum(brkResponse, 0x02)})`);
+        log(`Mirror prepare brk 0x6a: missing rx/rw (rw=${rw}, rx=${rx})`);
         return;
     }
-    // Mirror superpage lives in a fixed 4 GB band (0x700000000-0x800000000).
-    // Reject out-of-band pairs: a register-layout shift between JDK builds
-    // would otherwise prepare_memory_region() on random addresses.
-    if (rx < 0x700000000n || rx >= 0x800000000n || rw <= rx || rw > 0x800000000n) {
+    // Accept any valid 64-bit user-space address range (0x100000000-0x800000000).
+    if (rx < 0x100000000n || rx >= 0x800000000n || rw < 0x100000000n || rw >= 0x800000000n) {
         log(`Mirror prepare brk 0x6a: out-of-band rx=0x${rx.toString(16)} rw=0x${rw.toString(16)}, skipping (layout drift?)`);
         return;
     }
-    if (!size || size < 16n * 1024n * 1024n) {
-        if (rw > rx) {
-            size = rw - rx;
-        } else {
-            log(`Mirror prepare brk 0x6a: invalid mirror layout rx=${rx} rw=${rw}`);
-            return;
+    let size = 0xf000000n; // 240 MB default
+    if (rw > rx) {
+        let diff = rw - rx;
+        if (diff >= 16n * 1024n * 1024n) {
+            size = diff;
         }
     }
     log(`Mirror prepare brk 0x6a: RX=0x${rx.toString(16)} RW=0x${rw.toString(16)} size=0x${size.toString(16)}`);
     try {
-        prepare_memory_region(rx, size);
-        prepare_memory_region(rw, size);
-        log(`Prepared mirror pair RX=0x${rx.toString(16)} RW=0x${rw.toString(16)}`);
+        let r1 = prepare_memory_region(rx, size);
+        let r2 = prepare_memory_region(rw, size);
+        log(`Prepared mirror pair RX=0x${rx.toString(16)} (${r1}) RW=0x${rw.toString(16)} (${r2})`);
     } catch (e) {
         log(`ERROR: mirror prepare failed: ${e}`);
     }
@@ -277,7 +288,7 @@ function JIT26PrepareRegion(brkResponse) {
     log(`prepareJITPageResponse = ${prepareJITPageResponse}`);
 
     // Mirror-mapped code cache uses a paired RW view at RX+size on iOS 26+/27.
-    if (allocSize >= mirrorMin && jitPageAddress >= 0x700000000n && jitPageAddress < 0x800000000n) {
+    if (allocSize >= mirrorMin && jitPageAddress >= 0x100000000n && jitPageAddress < 0x800000000n) {
         const rwAddress = jitPageAddress + allocSize;
         try {
             prepare_memory_region(rwAddress, allocSize);

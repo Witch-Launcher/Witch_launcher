@@ -97,6 +97,7 @@ void AmethystJIT26PrepareMirrorPair(void *rx, void *rw, size_t size);
 void init_hookFunctions();
 void init_hookUIKitConstructor();
 void init_setupMultiDir();
+void init_setupUniversalJITScript(BOOL copyToClipboard);
 
 BOOL PLPatchMachOPlatformForFile(const char *path);
 

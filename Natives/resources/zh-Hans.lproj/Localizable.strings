@@ -284,3 +284,7 @@
 "controller_configurator.section.footer.menu_mappings" = "当鼠标未被锁定时，如在标题屏幕或暂停菜单中时绑定。";
 "controller_configurator.section.controller_style" = "手柄类型";
 "controller_configurator.section.footer.controller_style" = "在此配置器中显示不同的手柄按钮名称。";
+
+"preference.title.framegen_mode" = "插帧模式 (FrameGen)";
+"preference.title.framegen_mode.motion_adaptive" = "GPU 动态适应插帧 (MADI)";
+"preference.title.framegen_mode.camera_reproject" = "GPU 3D 相机重投影";

@@ -108,6 +108,28 @@ NSError* saveJSONToFile(NSDictionary *dict, NSString *path) {
 
 NSString* localize(NSString* key, NSString* comment) {
     if (!key) return @"";
+    // 1) Check launcher.language pref (en/vi) — default en
+    NSString *forcedLang = nil;
+    @try {
+        extern id getPrefObject(NSString *key);
+        id val = getPrefObject(@"launcher.language");
+        if ([val isKindOfClass:[NSString class]] && [(NSString*)val length] > 0) {
+            forcedLang = val;
+        }
+    } @catch(...) {}
+    if (forcedLang) {
+        NSString *path = [[NSBundle mainBundle] pathForResource:forcedLang ofType:@"lproj"];
+        if (path) {
+            NSBundle *bundle = [NSBundle bundleWithPath:path];
+            NSString *v = [bundle localizedStringForKey:key value:nil table:nil];
+            if (v && ![v isEqualToString:key]) return v;
+            // fallback to en
+            NSString *enPath = [[NSBundle mainBundle] pathForResource:@"en" ofType:@"lproj"];
+            NSBundle *enBundle = [NSBundle bundleWithPath:enPath];
+            NSString *enVal = [enBundle localizedStringForKey:key value:key table:nil];
+            if (enVal && ![enVal isEqualToString:key]) return enVal;
+        }
+    }
     NSString *value = [[NSBundle mainBundle] localizedStringForKey:key value:key table:nil];
     if (![NSLocale.preferredLanguages[0] isEqualToString:@"en"] && [value isEqualToString:key]) {
         NSString* path = [NSBundle.mainBundle pathForResource:@"en" ofType:@"lproj"];
@@ -302,6 +324,57 @@ BOOL DeviceHasTXM(void) {
     return DeviceHasJITFlags(JIT_FLAG_HAS_TXM);
 }
 
+void init_setupUniversalJITScript(BOOL copyToClipboard) {
+    NSString *inBundleScriptPath = [NSBundle.mainBundle pathForResource:@"UniversalJIT26" ofType:@"js"];
+    if (!inBundleScriptPath) {
+        NSLog(@"[JIT] UniversalJIT26.js not found in main bundle");
+        return;
+    }
+
+    NSError *error = nil;
+    NSString *scriptContent = [NSString stringWithContentsOfFile:inBundleScriptPath encoding:NSUTF8StringEncoding error:&error];
+    if (!scriptContent || scriptContent.length == 0) {
+        NSLog(@"[JIT] Failed to read UniversalJIT26.js: %@", error.localizedDescription);
+        return;
+    }
+
+    const char *pojavHome = getenv("POJAV_HOME");
+    if (pojavHome) {
+        NSString *documentsScriptPath = [NSString stringWithFormat:@"%s/UniversalJIT26.js", pojavHome];
+        if (![[NSFileManager defaultManager] fileExistsAtPath:documentsScriptPath] ||
+            ![[NSString stringWithContentsOfFile:documentsScriptPath encoding:NSUTF8StringEncoding error:nil] isEqualToString:scriptContent]) {
+            [[NSFileManager defaultManager] removeItemAtPath:documentsScriptPath error:nil];
+            [scriptContent writeToFile:documentsScriptPath atomically:YES encoding:NSUTF8StringEncoding error:&error];
+            if (error) {
+                NSLog(@"[JIT] Failed to write UniversalJIT26.js to Documents: %@", error.localizedDescription);
+            } else {
+                NSLog(@"[JIT] Synced UniversalJIT26.js to Documents");
+            }
+        }
+    }
+
+    // Update LCAppInfo.plist for LiveContainer automatic JIT script loading
+    NSString *lcAppInfoPath = [NSBundle.mainBundle.bundlePath stringByAppendingPathComponent:@"LCAppInfo.plist"];
+    NSMutableDictionary *lcAppInfo = [NSMutableDictionary dictionaryWithContentsOfFile:lcAppInfoPath];
+    if (lcAppInfo) {
+        NSString *base64Script = [[scriptContent dataUsingEncoding:NSUTF8StringEncoding] base64EncodedStringWithOptions:0];
+        if (![lcAppInfo[@"jitLaunchScriptJs"] isEqualToString:base64Script]) {
+            lcAppInfo[@"jitLaunchScriptJs"] = base64Script;
+            if ([lcAppInfo writeToFile:lcAppInfoPath atomically:YES]) {
+                NSLog(@"[JIT] Updated LCAppInfo.plist with UniversalJIT26 script");
+            }
+        }
+    }
+
+    // Automatically copy script to UIPasteboard so user can paste it directly into StikDebug
+    if (copyToClipboard) {
+        dispatch_async(dispatch_get_main_queue(), ^{
+            UIPasteboard.generalPasteboard.string = scriptContent;
+            NSLog(@"[JIT] UniversalJIT26.js copied to clipboard for StikDebug");
+        });
+    }
+}
+
 JITFlags DeviceGetJITFlags(BOOL refresh) {
     static os_unfair_lock cacheLock = OS_UNFAIR_LOCK_INIT;
     static JITFlags cachedFlags = 0;
@@ -321,9 +394,9 @@ JITFlags DeviceGetJITFlags(BOOL refresh) {
         } else {
             if (@available(iOS 26.0, *)) {
                 flags |= JIT_FLAG_IS_IOS_26;
-                if (!DeviceCanCreateRXMap()) {
-                    flags |= JIT_FLAG_FORCE_MIRRORED;
-                }
+                // On iOS 26+ and iOS 27+, direct RX allocations for JIT code cache are blocked
+                // and require debugger-backed mirror prepare regardless of single-page mprotect quirks.
+                flags |= JIT_FLAG_FORCE_MIRRORED;
             }
             if (DeviceHasTXMReal()) {
                 flags |= JIT_FLAG_HAS_TXM;
@@ -344,9 +417,9 @@ BOOL DeviceHasJITFlags(JITFlags flags) {
 
 BOOL DeviceNeedsDebugJITMapping(void) {
     // This is a capability decision, not a TXM firmware-detection decision.
-    // MirrorMappedCodeCache now means that the Universal JIT script has been
-    // installed and HotSpot may request its RX mapping from the debugger.
-    return DeviceHasJITFlags(JIT_FLAG_IS_IOS_26 | JIT_FLAG_FORCE_MIRRORED);
+    // On iOS 26+ and iOS 27+, HotSpot uses MirrorMappedCodeCache and
+    // requires debugger-backed JIT mapping via StikDebug / UniversalJIT26.
+    return DeviceHasJITFlags(JIT_FLAG_IS_IOS_26) || DeviceHasJITFlags(JIT_FLAG_FORCE_MIRRORED);
 }
 
 BOOL JIT26IsLikelyDebuggerKeepAttached(void) {

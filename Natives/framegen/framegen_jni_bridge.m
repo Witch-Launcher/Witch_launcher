@@ -76,14 +76,17 @@ JNIEXPORT jboolean JNICALL Java_net_vda_witchlaunch_framegen_FrameGenBridge_isSu
     return fg_is_supported() ? JNI_TRUE : JNI_FALSE;
 }
 
-// Called from fg_on_next_drawable() to capture camera data from Java side.
-// Runs on render thread — safe because FrameGenBridge uses only static methods.
+// Called to capture camera data from Java side.
+// Throttled to max 20Hz and uses cached JNI class/method refs for near-zero overhead.
 void fg_request_camera_capture(void) {
-    if (!gJavaVM) {
-        static BOOL loggedNoVM;
-        if (!loggedNoVM) { loggedNoVM = YES; NSLog(@"[FrameGen] fg_request_camera_capture: no gJavaVM"); }
+    if (!gJavaVM) return;
+
+    static double lastCaptureTime = 0;
+    double now = CACurrentMediaTime();
+    if (now - lastCaptureTime < 0.05) { // 20 Hz throttle
         return;
     }
+    lastCaptureTime = now;
 
     JNIEnv* env = NULL;
     BOOL needsDetach = NO;
@@ -92,28 +95,27 @@ void fg_request_camera_capture(void) {
         (*gJavaVM)->AttachCurrentThread(gJavaVM, &env, NULL);
         needsDetach = YES;
     } else if (status != JNI_OK || !env) {
-        static BOOL loggedEnvFail;
-        if (!loggedEnvFail) { loggedEnvFail = YES; NSLog(@"[FrameGen] fg_request_camera_capture: GetEnv failed (%d)", status); }
         return;
     }
 
-    jclass cls = (*env)->FindClass(env, "net/vda/witchlaunch/framegen/FrameGenBridge");
-    if (cls) {
-        jmethodID mid = (*env)->GetStaticMethodID(env, cls, "captureCameraData", "()V");
-        if (mid) {
-            (*env)->CallStaticVoidMethod(env, cls, mid);
-            if ((*env)->ExceptionCheck(env)) {
-                (*env)->ExceptionClear(env);
-                static BOOL loggedExc;
-                if (!loggedExc) { loggedExc = YES; NSLog(@"[FrameGen] captureCameraData threw exception"); }
+    static jclass cachedCls = NULL;
+    static jmethodID cachedMid = NULL;
+    if (!cachedCls) {
+        jclass localCls = (*env)->FindClass(env, "net/vda/witchlaunch/framegen/FrameGenBridge");
+        if (localCls) {
+            cachedCls = (*env)->NewGlobalRef(env, localCls);
+            (*env)->DeleteLocalRef(env, localCls);
+            if (cachedCls) {
+                cachedMid = (*env)->GetStaticMethodID(env, cachedCls, "captureCameraData", "()V");
             }
-        } else {
-            static BOOL loggedNoMethod;
-            if (!loggedNoMethod) { loggedNoMethod = YES; NSLog(@"[FrameGen] captureCameraData method not found"); }
         }
-    } else {
-        static BOOL loggedNoClass;
-        if (!loggedNoClass) { loggedNoClass = YES; NSLog(@"[FrameGen] FrameGenBridge class not found"); }
+    }
+
+    if (cachedCls && cachedMid) {
+        (*env)->CallStaticVoidMethod(env, cachedCls, cachedMid);
+        if ((*env)->ExceptionCheck(env)) {
+            (*env)->ExceptionClear(env);
+        }
     }
 
     if (needsDetach) {

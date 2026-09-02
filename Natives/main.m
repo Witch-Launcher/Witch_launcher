@@ -323,6 +323,7 @@ int main(int argc, char *argv[]) {
 
     init_setupResolvConf();
     init_setupMultiDir();
+    init_setupUniversalJITScript(YES);
     toggleIsolatedPref(NO);
     [PLProfiles updateCurrent];
     init_setupAccounts();

@@ -40,11 +40,12 @@ include_directories(
   "../UI/Screens/Modpack"
   "../UI/Screens/Shader"
   "../UI/Screens/Server"
-  "../UI/Screens/Settings"
-  "../UI/Screens/Account"
-  "../UI/Screens/Download"
-  "../UI/Screens/FileBrowser"
-  "../UI/Screens/ProfileSettings"
+   "../UI/Screens/Settings"
+   "../UI/Screens/Account"
+   "../UI/Screens/Download"
+   "../UI/Screens/FileBrowser"
+   "../UI/Screens/ProfileSettings"
+   "../UI/Screens/AI"
   "installer/modpack"
 )
 
@@ -343,8 +344,12 @@ egl_bridge.m
     ../UI/Managers/CursorTypeManager.m
     ../UI/Managers/InstalledModsManager.m
    ../UI/Screens/MainMenu/MainMenuViewController.m
+    WitchAIService.m
+    WitchLogReporter.m
+    WitchAppAttest.m
    ../UI/Screens/CrashLog/CrashLogAnalyzer.m
    ../UI/Screens/CrashLog/CrashScreenViewController.m
+   ../UI/Screens/AI/WitchAIChatViewController.m
    ../UI/Screens/Game/GameListViewController.m
    ../UI/Screens/Mod/ModListViewController.m
    ../UI/Screens/Mod/ModDetailViewController.m
@@ -399,6 +404,7 @@ target_link_libraries(Witch
   "-framework UniformTypeIdentifiers"
   "-framework UnzipKit"
   "-framework WebKit"
+  "-framework DeviceCheck"
   "-weak_framework SafariServices"
 )
 set_target_properties(Witch PROPERTIES

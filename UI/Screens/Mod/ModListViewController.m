@@ -554,13 +554,14 @@
 
     [_tableView registerClass:[ModCell class] forCellReuseIdentifier:@"ModCell"];
 
-    BOOL hasCurseForgeAPI = [getPrefObject(@"curseforge.api_key") isKindOfClass:NSString.class] && [getPrefObject(@"curseforge.api_key") length] > 0;
-    _sourceControl.hidden = !hasCurseForgeAPI;
-    _sourceControlWidthConstraint = [_sourceControl.widthAnchor constraintEqualToConstant:hasCurseForgeAPI ? 160 : 0];
+    // Luôn hiển thị toggle CurseForge <-> Modrinth (kể cả khi dùng Witch proxy, không cần own key)
+    BOOL showToggle = YES;
+    _sourceControl.hidden = !showToggle;
+    _sourceControlWidthConstraint = [_sourceControl.widthAnchor constraintEqualToConstant:showToggle ? 160 : 0];
     [NSLayoutConstraint activateConstraints:@[
         [_searchBar.topAnchor constraintEqualToAnchor:self.view.topAnchor constant:8],
         [_searchBar.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor constant:12],
-        [_searchBar.trailingAnchor constraintEqualToAnchor:_sourceControl.leadingAnchor constant:(hasCurseForgeAPI ? -8 : -12)],
+        [_searchBar.trailingAnchor constraintEqualToAnchor:_sourceControl.leadingAnchor constant:(showToggle ? -8 : -12)],
 
         [_spinner.centerXAnchor constraintEqualToAnchor:self.view.centerXAnchor],
         [_spinner.centerYAnchor constraintEqualToAnchor:self.view.centerYAnchor],

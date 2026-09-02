@@ -40,6 +40,9 @@
             @"max_framerate": @YES,
             @"performance_hud": @NO,
             @"frame_generation": @NO,
+            @"framegen_mode": @"motion_adaptive",
+            @"framegen_target_fps": @(60),
+            @"framegen_fg2_submode": @"interp",
             @"fullscreen_airplay": @YES,
             @"silence_other_audio": @NO,
             @"silence_with_switch": @NO,
@@ -132,6 +135,20 @@
             @"glsl_cache_size": @(32),
             @"api_features": @(0xFFFFFFFF)
         }.mutableCopy,
+        @"witch": @{
+            @"server_enabled": @YES,
+            @"proxy_base_url": @"",
+            @"proxy_token": @"",
+            @"proxy_hmac": @"",
+            @"curseforge_source": @"server",
+            @"curseforge_own_key": @"",
+            @"ai_enabled": @YES,
+            @"ai_source": @"server",
+            @"ai_own_key": @"",
+            @"ai_own_base": @"",
+            @"ai_own_model": @"",
+            @"ai_language": @"auto"
+        }.mutableCopy,
         @"internal": @{
             @"isolated": @NO,
             @"latest_version": [NSDictionary new]
@@ -159,6 +176,7 @@
             @"debug_server_localhost_only": @NO
         }.mutableCopy;
         defaults[@"launcher"] = @{
+            @"language": @"en",
             @"theme": @"System",
             @"logo_style": (CONFIG_RELEASE ? @"purple" : @"dev")
         }.mutableCopy;
@@ -321,6 +339,24 @@
         [self.globalPref setValue:value forKeyPath:key];
         [self saveGlobalPref];
         return YES;
+    }
+    // Key doesn't exist yet — create it in the correct section
+    // Key path format: "section.keyname" (e.g. "video.framegen_mode")
+    NSRange dotRange = [key rangeOfString:@"."];
+    if (dotRange.location != NSNotFound) {
+        NSString *section = [key substringToIndex:dotRange.location];
+        NSString *keyName = [key substringFromIndex:dotRange.location + 1];
+        NSMutableDictionary *target = self.instancePref ?: self.globalPref;
+        if (target[section]) {
+            target[section][keyName] = value;
+            if (target == self.instancePref) {
+                [self saveInstancePref];
+            } else {
+                [self saveGlobalPref];
+            }
+            NSLog(@"[PLPreferences] Created new preference %@ = %@", key, value);
+            return YES;
+        }
     }
     NSLog(@"[PLPreferences] Setter could not find preference %@", key);
     return NO;

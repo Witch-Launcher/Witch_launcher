@@ -13,7 +13,7 @@
 #import <PhotosUI/PhotosUI.h>
 #import <UniformTypeIdentifiers/UniformTypeIdentifiers.h>
 
-@interface SettingsViewController () <UITableViewDelegate, UITableViewDataSource, UIScrollViewDelegate, UIColorPickerViewControllerDelegate, UINavigationControllerDelegate, UIImagePickerControllerDelegate, PHPickerViewControllerDelegate, UIDocumentPickerDelegate>
+@interface SettingsViewController () <UITableViewDelegate, UITableViewDataSource, UIScrollViewDelegate, UIColorPickerViewControllerDelegate, UINavigationControllerDelegate, UIImagePickerControllerDelegate, PHPickerViewControllerDelegate, UIDocumentPickerDelegate, UISearchBarDelegate>
 @property (nonatomic) NSArray *sections;
 @property (nonatomic) UIScrollView *tabBarScroll;
 @property (nonatomic) NSLayoutConstraint *tabWidthConstraint;
@@ -24,6 +24,10 @@
 @property (nonatomic) BOOL skipOffsetSync;
 @property (nonatomic, copy) void (^pendingColorPickCallback)(UIColor *);
 @property (nonatomic) AmethystBlurView *panelBlur;
+// Search
+@property (nonatomic, strong) UISearchBar *settingsSearchBar;
+@property (nonatomic, strong) UITableView *searchResultsTable;
+@property (nonatomic, strong) NSArray *searchResults; // array of @{@"tab":title, @"tabIndex":@, @"item":dict, @"row":@}
 @end
 
 @implementation SettingsViewController
@@ -49,14 +53,62 @@
     NSArray *glVersions = @[@"0", @"3.0", @"3.1", @"3.2", @"3.3", @"4.0", @"4.1", @"4.2", @"4.3", @"4.4", @"4.5", @"4.6"];
     NSArray *zinkOptLevels = @[@"-1", @"0", @"1", @"2", @"3", @"4", @"5"];
 
+    
     _sections = @[
-        @{@"title": localize(@"Render", nil), @"items": @[
+        @{@"title": localize(@"General", nil), @"items": @[
+            @{@"type": @"picker", @"label": localize(@"preference.title.language", nil), @"key": @"launcher.language", @"options": @[
+                @{@"key": @"en", @"name": @"English"},
+                @{@"key": @"vi", @"name": @"Tiếng Việt"},
+            ], @"default": @"en"},
+            @{@"type": @"picker", @"label": localize(@"preference.title.theme", nil), @"key": @"launcher.theme", @"options": @[
+                @{@"key": @"System", @"name": localize(@"theme.system", nil)},
+                @{@"key": @"Dark", @"name": localize(@"theme.dark", nil)},
+                @{@"key": @"Light", @"name": localize(@"theme.light", nil)},
+            ], @"default": @"System"},
+            @{@"type": @"picker", @"label": localize(@"preference.title.launcher_logo", nil), @"key": @"launcher.logo_style", @"options": @[
+                @{@"key": @"purple", @"name": localize(@"logo.purple", nil)},
+                @{@"key": @"blue", @"name": localize(@"logo.blue", nil)},
+                @{@"key": @"dev", @"name": localize(@"logo.dev", nil)},
+            ], @"default": (CONFIG_RELEASE ? @"purple" : @"dev"), @"preview": @YES},
+            @{@"type": @"picker", @"label": localize(@"preference.title.screen_orientation", nil), @"key": @"general.orientation_lock", @"options": @[
+                @{@"key": @"off", @"name": localize(@"orientation.off", nil)},
+                @{@"key": @"portrait", @"name": localize(@"orientation.portrait", nil)},
+                @{@"key": @"landscape", @"name": localize(@"orientation.landscape", nil)},
+            ], @"default": @"off"},
+            @{@"type": @"navigate", @"label": localize(@"preference.title.game_directory", nil), @"vc": @"LauncherPrefGameDirViewController"},
+            @{@"type": @"navigate", @"label": localize(@"preference.title.manage_runtime", nil) , @"vc": @"LauncherPrefManageJREViewController"},
+            @{@"type": @"switch", @"label": localize(@"preference.title.debug_logging", nil), @"key": @"general.debug_logging"},
+            @{@"type": @"switch", @"label": localize(@"preference.title.debug_ipad_ui", nil), @"key": @"debug.debug_ipad_ui"},
+            @{@"type": @"switch", @"label": localize(@"preference.title.debug_skip_wait_jit", nil), @"key": @"debug.debug_skip_wait_jit"},
+            @{@"type": @"switch", @"label": localize(@"preference.title.debug_always_attached_jit", nil), @"key": @"debug.debug_always_attached_jit"},
+            @{@"type": @"switch", @"label": localize(@"preference.title.debug_hide_home_indicator", nil), @"key": @"debug.debug_hide_home_indicator"},
+            @{@"type": @"switch", @"label": localize(@"preference.title.debug_auto_correction", nil), @"key": @"debug.debug_auto_correction"},
+        ]},
+        @{@"title": localize(@"Game", nil), @"items": @[
+            @{@"type": @"picker", @"label": localize(@"preference.title.lwjgl_version", nil), @"key": @"java.lwjgl_version", @"options": lwjglItems, @"default": @"(auto)"},
             @{@"type": @"picker", @"label": localize(@"preference.title.renderer", nil), @"key": @"video.renderer", @"options": rendererOptions, @"default": @"auto"},
             @{@"type": @"slider", @"label": localize(@"preference.title.resolution", nil), @"key": @"video.resolution", @"min": @25, @"max": @150, @"suffix": @"%"},
             @{@"type": @"switch", @"label": localize(@"preference.title.max_framerate", nil), @"key": @"video.max_framerate"},
             @{@"type": @"switch", @"label": localize(@"preference.title.performance_hud", nil), @"key": @"video.performance_hud"},
+            @{@"type": @"switch", @"label": localize(@"preference.title.fullscreen_airplay", nil), @"key": @"video.fullscreen_airplay"},
+            @{@"type": @"switch", @"label": localize(@"preference.title.frame_generation", nil), @"key": @"video.frame_generation"},
+            @{@"type": @"slider", @"label": localize(@"preference.title.framegen_target_fps", nil), @"key": @"video.framegen_target_fps", @"min": @30, @"max": @120, @"suffix": @" FPS"},
+            @{@"type": @"picker", @"label": localize(@"preference.title.framegen_mode", nil), @"key": @"video.framegen_mode", @"default": @"motion_adaptive", @"options": @[
+                @{@"key": @"motion_adaptive", @"name": localize(@"preference.title.framegen_mode.motion_adaptive", nil)},
+                @{@"key": @"camera_reproject", @"name": localize(@"preference.title.framegen_mode.camera_reproject", nil)}
+            ]},
+            @{@"type": @"picker", @"label": localize(@"preference.title.framegen_fg2_submode", nil), @"key": @"video.framegen_fg2_submode", @"default": @"interp", @"options": @[
+                @{@"key": @"interp", @"name": localize(@"preference.title.framegen_fg2_submode.interp", nil)},
+                @{@"key": @"predict", @"name": localize(@"preference.title.framegen_fg2_submode.predict", nil)}
+            ]},
+            @{@"type": @"slider", @"label": localize(@"preference.title.allocated_memory", nil), @"key": @"java.allocated_memory", @"min": @256, @"max": @((NSProcessInfo.processInfo.physicalMemory / 1048576) * 0.85), @"suffix": @"MB"},
+            @{@"type": @"switch", @"label": localize(@"preference.title.auto_ram", nil), @"key": @"java.auto_ram"},
+            @{@"type": @"text", @"label": localize(@"preference.title.java_args", nil), @"key": @"java.java_args", @"placeholder": @"-Xmx2G -Xms512M"},
+            @{@"type": @"text", @"label": localize(@"preference.title.env_variables", nil), @"key": @"java.env_variables", @"placeholder": @"VAR=value"},
+            @{@"type": @"switch", @"label": localize(@"preference.title.check_sha", nil), @"key": @"general.check_sha"},
+            @{@"type": @"switch", @"label": localize(@"preference.title.cosmetica", nil), @"key": @"general.cosmetica"},
         ]},
-        @{@"title": localize(@"Custom Controls", nil), @"items": @[
+        @{@"title": localize(@"Controls", nil), @"items": @[
             @{@"type": @"slider", @"label": localize(@"preference.title.button_scale", nil), @"key": @"control.button_scale", @"min": @30, @"max": @200, @"suffix": @"%"},
             @{@"type": @"slider", @"label": localize(@"preference.title.mouse_scale", nil), @"key": @"control.mouse_scale", @"min": @30, @"max": @200, @"suffix": @"%"},
             @{@"type": @"slider", @"label": localize(@"preference.title.mouse_speed", nil), @"key": @"control.mouse_speed", @"min": @10, @"max": @300, @"suffix": @"%"},
@@ -72,8 +124,12 @@
             @{@"type": @"slider", @"label": localize(@"preference.title.press_duration", nil), @"key": @"control.press_duration", @"min": @100, @"max": @1000, @"suffix": @"ms"},
             @{@"type": @"navigate", @"label": localize(@"Cursor Settings", nil), @"vc": @"CursorSettingsViewController"},
             @{@"type": @"navigate", @"label": localize(@"Edit Controls Layout", nil), @"vc": @"CustomControlsViewController"},
+            @{@"type": @"picker", @"label": localize(@"preference.title.default_gamepad_ctrl", nil), @"key": @"control.controller_type", @"options": @[@"none", @"mfi", @"ps4", @"ps5", @"xbox"], @"default": @"none"},
+            @{@"type": @"slider", @"label": localize(@"preference.title.gamepad_sensitivity", nil), @"key": @"control.gamepad_sensitivity", @"min": @10, @"max": @300, @"suffix": @"%"},
+            @{@"type": @"switch", @"label": localize(@"preference.title.hardware_hide", nil), @"key": @"control.hardware_hide"},
+            @{@"type": @"navigate", @"label": localize(@"Gamepad Layout", nil), @"vc": @"LauncherPrefContCfgViewController"},
         ]},
-        @{@"title": localize(@"In-Game Widget", nil), @"items": @[
+        @{@"title": localize(@"Widget", nil), @"items": @[
             @{@"type": @"switch", @"label": localize(@"preference.title.widget_menu", nil), @"key": @"general.widget_menu"},
             @{@"type": @"switch", @"label": localize(@"preference.title.widget_show_fps", nil), @"key": @"general.widget_show_fps"},
             @{@"type": @"switch", @"label": localize(@"preference.title.widget_show_cpu", nil), @"key": @"general.widget_show_cpu"},
@@ -100,52 +156,7 @@
             @{@"type": @"switch", @"label": localize(@"preference.title.widget_show_lowpower", nil), @"key": @"general.widget_show_lowpower"},
             @{@"type": @"slider", @"label": localize(@"preference.title.widget_bg_opacity", nil), @"key": @"general.widget_bg_opacity", @"min": @0, @"max": @80, @"suffix": @"%"},
         ]},
-        @{@"title": localize(@"Game", nil), @"items": @[
-            @{@"type": @"picker", @"label": localize(@"preference.title.lwjgl_version", nil), @"key": @"java.lwjgl_version", @"options": lwjglItems, @"default": @"(auto)"},
-            @{@"type": @"switch", @"label": localize(@"preference.title.fullscreen_airplay", nil), @"key": @"video.fullscreen_airplay"},
-            @{@"type": @"switch", @"label": localize(@"preference.title.frame_generation", nil), @"key": @"video.frame_generation"},
-        ]},
-        @{@"title": localize(@"Audio", nil), @"items": @[
-            @{@"type": @"switch", @"label": localize(@"preference.title.allow_microphone", nil), @"key": @"video.allow_microphone"},
-            @{@"type": @"picker", @"label": localize(@"preference.title.microphone_source", nil), @"key": @"video.microphone_source", @"options": @[@"auto", @"front", @"bottom", @"back"], @"default": @"auto"},
-            @{@"type": @"switch", @"label": localize(@"preference.title.silence_other_audio", nil), @"key": @"video.silence_other_audio"},
-        ]},
-        @{@"title": localize(@"Gamepad", nil), @"items": @[
-            @{@"type": @"picker", @"label": localize(@"preference.title.default_gamepad_ctrl", nil), @"key": @"control.controller_type", @"options": @[@"none", @"mfi", @"ps4", @"ps5", @"xbox"], @"default": @"none"},
-            @{@"type": @"slider", @"label": localize(@"preference.title.gamepad_sensitivity", nil), @"key": @"control.gamepad_sensitivity", @"min": @10, @"max": @300, @"suffix": @"%"},
-            @{@"type": @"switch", @"label": localize(@"preference.title.hardware_hide", nil), @"key": @"control.hardware_hide"},
-            @{@"type": @"navigate", @"label": localize(@"Gamepad Layout", nil), @"vc": @"LauncherPrefContCfgViewController"},
-        ]},
-        @{@"title": localize(@"Launcher", nil), @"items": @[
-            @{@"type": @"navigate", @"label": localize(@"preference.title.game_directory", nil), @"vc": @"LauncherPrefGameDirViewController"},
-            @{@"type": @"navigate", @"label": localize(@"preference.title.manage_runtime", nil) , @"vc": @"LauncherPrefManageJREViewController"},
-            @{@"type": @"text", @"label": localize(@"preference.title.java_args", nil), @"key": @"java.java_args", @"placeholder": @"-Xmx2G -Xms512M"},
-            @{@"type": @"text", @"label": localize(@"preference.title.env_variables", nil), @"key": @"java.env_variables", @"placeholder": @"VAR=value"},
-            @{@"type": @"slider", @"label": localize(@"preference.title.allocated_memory", nil), @"key": @"java.allocated_memory", @"min": @256, @"max": @((NSProcessInfo.processInfo.physicalMemory / 1048576) * 0.85), @"suffix": @"MB"},
-            @{@"type": @"switch", @"label": localize(@"preference.title.auto_ram", nil), @"key": @"java.auto_ram"},
-            @{@"type": @"switch", @"label": localize(@"preference.title.check_sha", nil), @"key": @"general.check_sha"},
-            @{@"type": @"switch", @"label": localize(@"preference.title.cosmetica", nil), @"key": @"general.cosmetica"},
-            @{@"type": @"picker", @"label": localize(@"preference.title.screen_orientation", nil), @"key": @"general.orientation_lock", @"options": @[
-                @{@"key": @"off", @"name": localize(@"orientation.off", nil)},
-                @{@"key": @"portrait", @"name": localize(@"orientation.portrait", nil)},
-                @{@"key": @"landscape", @"name": localize(@"orientation.landscape", nil)},
-            ], @"default": @"off"},
-            @{@"type": @"picker", @"label": localize(@"preference.title.theme", nil), @"key": @"launcher.theme", @"options": @[
-                @{@"key": @"System", @"name": localize(@"theme.system", nil)},
-                @{@"key": @"Dark", @"name": localize(@"theme.dark", nil)},
-                @{@"key": @"Light", @"name": localize(@"theme.light", nil)},
-            ], @"default": @"System"},
-            @{@"type": @"picker", @"label": localize(@"preference.title.launcher_logo", nil), @"key": @"launcher.logo_style", @"options": @[
-                @{@"key": @"purple", @"name": localize(@"logo.purple", nil)},
-                @{@"key": @"blue", @"name": localize(@"logo.blue", nil)},
-                @{@"key": @"dev", @"name": localize(@"logo.dev", nil)},
-            ], @"default": (CONFIG_RELEASE ? @"purple" : @"dev"), @"preview": @YES},
-            @{@"type": @"text", @"label": localize(@"preference.title.curseforge_api_key", nil), @"key": @"curseforge.api_key", @"placeholder": localize(@"preference.detail.curseforge_api_key", nil)},
-            @{@"type": @"switch", @"label": localize(@"preference.title.debug_logging", nil), @"key": @"general.debug_logging"},
-            @{@"type": @"switch", @"label": localize(@"preference.title.debug_ipad_ui", nil), @"key": @"debug.debug_ipad_ui"},
-            @{@"type": @"switch", @"label": localize(@"preference.title.debug_skip_wait_jit", nil), @"key": @"debug.debug_skip_wait_jit"},
-        ]},
-        @{@"title": localize(@"MobileGlues", nil), @"items": @[
+        @{@"title": localize(@"Graphics", nil), @"items": @[
             @{@"type": @"switch", @"label": localize(@"preference.title.enable_angle", nil), @"key": @"mobileglues.enable_angle"},
             @{@"type": @"picker", @"label": localize(@"preference.title.enable_no_error", nil), @"key": @"mobileglues.enable_no_error", @"options": @[@"0", @"1", @"2"], @"default": @"0"},
             @{@"type": @"switch", @"label": localize(@"preference.title.enable_ext_timer_query", nil), @"key": @"mobileglues.enable_ext_timer_query"},
@@ -156,18 +167,38 @@
             @{@"type": @"switch", @"label": localize(@"preference.title.angle_depth_clear_fix_mode", nil), @"key": @"mobileglues.angle_depth_clear_fix_mode"},
             @{@"type": @"picker", @"label": localize(@"preference.title.custom_gl_version", nil), @"key": @"mobileglues.custom_gl_version", @"options": glVersions, @"default": @"0"},
             @{@"type": @"picker", @"label": localize(@"preference.title.fsr1_setting", nil), @"key": @"mobileglues.fsr1_setting", @"options": @[@"0", @"1", @"2", @"3", @"4", @"5"], @"default": @"0"},
-        ]},
-        @{@"title": localize(@"Zink", nil), @"items": @[
             @{@"type": @"picker", @"label": localize(@"preference.title.optimization_level", nil), @"key": @"zink.optimization_level", @"options": zinkOptLevels, @"default": @"-1"},
             @{@"type": @"picker", @"label": localize(@"preference.title.zink_gl_override", nil), @"key": @"zink.gl_override", @"options": @[@"0", @"3.3", @"4.0", @"4.1", @"4.3", @"4.6"], @"default": @"0"},
             @{@"type": @"switch", @"label": localize(@"preference.title.zink_enable_gl_thread", nil), @"key": @"zink.enable_gl_thread"},
             @{@"type": @"slider", @"label": localize(@"preference.title.zink_glsl_cache_size", nil), @"key": @"zink.glsl_cache_size", @"min": @8, @"max": @512, @"suffix": @"MB"},
             @{@"type": @"picker", @"label": localize(@"preference.title.zink_api_features", nil), @"key": @"zink.api_features", @"options": @[@"0", @"1", @"2", @"3"], @"default": @"3"},
         ]},
-        @{@"title": localize(@"Debug", nil), @"items": @[
-            @{@"type": @"switch", @"label": localize(@"preference.title.debug_always_attached_jit", nil), @"key": @"debug.debug_always_attached_jit"},
-            @{@"type": @"switch", @"label": localize(@"preference.title.debug_hide_home_indicator", nil), @"key": @"debug.debug_hide_home_indicator"},
-            @{@"type": @"switch", @"label": localize(@"preference.title.debug_auto_correction", nil), @"key": @"debug.debug_auto_correction"},
+        @{@"title": localize(@"Network", nil), @"items": @[
+            @{@"type": @"switch", @"label": localize(@"preference.title.witch_enabled", nil), @"key": @"witch.server_enabled", @"default": @YES},
+            @{@"type": @"text", @"label": localize(@"preference.title.witch_base_url", nil), @"key": @"witch.proxy_base_url", @"placeholder": localize(@"preference.detail.witch_base_url", nil)},
+            @{@"type": @"text", @"label": localize(@"preference.title.witch_token", nil), @"key": @"witch.proxy_token", @"placeholder": @"Bearer token"},
+            @{@"type": @"text", @"label": localize(@"preference.title.witch_hmac", nil), @"key": @"witch.proxy_hmac", @"placeholder": @"HMAC secret"},
+            @{@"type": @"picker", @"label": localize(@"preference.title.witch_cf_source", nil), @"key": @"witch.curseforge_source", @"options": @[
+                @{@"key": @"server", @"name": localize(@"preference.option.server", nil)},
+                @{@"key": @"own", @"name": localize(@"preference.option.own", nil)},
+            ], @"default": @"server"},
+            @{@"type": @"text", @"label": localize(@"preference.title.witch_cf_own_key", nil), @"key": @"witch.curseforge_own_key", @"placeholder": @"x-api-key (if own)"},
+            @{@"type": @"switch", @"label": localize(@"preference.title.ai_enabled", nil), @"key": @"witch.ai_enabled", @"default": @YES},
+            @{@"type": @"picker", @"label": localize(@"preference.title.ai_source", nil), @"key": @"witch.ai_source", @"options": @[
+                @{@"key": @"server", @"name": localize(@"preference.option.server", nil)},
+                @{@"key": @"own", @"name": localize(@"preference.option.own", nil)},
+            ], @"default": @"server"},
+            @{@"type": @"text", @"label": localize(@"preference.title.ai_own_key", nil), @"key": @"witch.ai_own_key", @"placeholder": @"sk-..."},
+            @{@"type": @"text", @"label": localize(@"preference.title.ai_own_base", nil), @"key": @"witch.ai_own_base", @"placeholder": @"https://api.openai.com/v1"},
+            @{@"type": @"text", @"label": localize(@"preference.title.ai_own_model", nil), @"key": @"witch.ai_own_model", @"placeholder": @"gpt-4o-mini"},
+            @{@"type": @"picker", @"label": localize(@"preference.title.ai_language", nil), @"key": @"witch.ai_language", @"options": @[
+                @{@"key": @"auto", @"name": localize(@"preference.option.auto", nil)},
+                @{@"key": @"vi", @"name": @"Tiếng Việt"},
+                @{@"key": @"en", @"name": @"English"},
+            ], @"default": @"auto"},
+            @{@"type": @"switch", @"label": localize(@"preference.title.allow_microphone", nil), @"key": @"video.allow_microphone"},
+            @{@"type": @"picker", @"label": localize(@"preference.title.microphone_source", nil), @"key": @"video.microphone_source", @"options": @[@"auto", @"front", @"bottom", @"back"], @"default": @"auto"},
+            @{@"type": @"switch", @"label": localize(@"preference.title.silence_other_audio", nil), @"key": @"video.silence_other_audio"},
             @{@"type": @"switch", @"label": localize(@"preference.title.debug_server_enabled", nil), @"key": @"debug.debug_server_enabled"},
             @{@"type": @"text", @"label": localize(@"preference.title.debug_server_port", nil), @"key": @"debug.debug_server_port", @"placeholder": @"9090"},
             @{@"type": @"text", @"label": localize(@"preference.title.debug_server_token", nil), @"key": @"debug.debug_server_token", @"placeholder": @""},
@@ -196,6 +227,7 @@
         ]},
         @{@"title": localize(@"credits.title", nil), @"items": [self creditsItems]},
     ];
+
 
     NSUInteger appearanceIndex = NSNotFound;
     for (NSUInteger i = 0; i < _sections.count; i++) {
@@ -274,21 +306,49 @@
     self.navigationItem.rightBarButtonItem = [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemDone target:self action:@selector(dismissSettings)];
     self.navigationItem.leftBarButtonItem = [[UIBarButtonItem alloc] initWithTitle:localize(@"preference.title.reset_settings", nil) style:UIBarButtonItemStylePlain target:self action:@selector(resetSettings)];
 
+    // Settings search bar (flat list, grouped by tab)
+    _settingsSearchBar = [[UISearchBar alloc] init];
+    _settingsSearchBar.translatesAutoresizingMaskIntoConstraints = NO;
+    _settingsSearchBar.placeholder = localize(@"Search settings...", nil);
+    _settingsSearchBar.searchBarStyle = UISearchBarStyleMinimal;
+    _settingsSearchBar.delegate = self;
+    _settingsSearchBar.showsCancelButton = NO;
+    [self.view addSubview:_settingsSearchBar];
+
+    _searchResultsTable = [[UITableView alloc] initWithFrame:CGRectZero style:UITableViewStyleGrouped];
+    _searchResultsTable.translatesAutoresizingMaskIntoConstraints = NO;
+    _searchResultsTable.delegate = self;
+    _searchResultsTable.dataSource = self;
+    _searchResultsTable.backgroundColor = [UIColor clearColor];
+    _searchResultsTable.hidden = YES;
+    [_searchResultsTable registerClass:[UITableViewCell class] forCellReuseIdentifier:@"SearchCell"];
+    [self.view addSubview:_searchResultsTable];
+
     [self setupTabBar];
     [self setupPages];
     [self setupBackgroundBlur];
 
     _tabWidthConstraint = [_tabBarScroll.widthAnchor constraintEqualToConstant:132];
     [NSLayoutConstraint activateConstraints:@[
-        [_tabBarScroll.topAnchor constraintEqualToAnchor:self.view.topAnchor],
+        [_settingsSearchBar.topAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.topAnchor constant:4],
+        [_settingsSearchBar.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor constant:8],
+        [_settingsSearchBar.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor constant:-8],
+        [_settingsSearchBar.heightAnchor constraintEqualToConstant:36],
+
+        [_tabBarScroll.topAnchor constraintEqualToAnchor:_settingsSearchBar.bottomAnchor constant:4],
         [_tabBarScroll.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor],
         [_tabBarScroll.bottomAnchor constraintEqualToAnchor:self.view.bottomAnchor],
         _tabWidthConstraint,
 
-        [_pageScroll.topAnchor constraintEqualToAnchor:self.view.topAnchor],
+        [_pageScroll.topAnchor constraintEqualToAnchor:_settingsSearchBar.bottomAnchor constant:4],
         [_pageScroll.leadingAnchor constraintEqualToAnchor:_tabBarScroll.trailingAnchor],
         [_pageScroll.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor],
         [_pageScroll.bottomAnchor constraintEqualToAnchor:self.view.bottomAnchor],
+
+        [_searchResultsTable.topAnchor constraintEqualToAnchor:_settingsSearchBar.bottomAnchor constant:4],
+        [_searchResultsTable.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor],
+        [_searchResultsTable.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor],
+        [_searchResultsTable.bottomAnchor constraintEqualToAnchor:self.view.bottomAnchor],
     ]];
 }
 
@@ -479,6 +539,65 @@
     [_tabBarScroll scrollRectToVisible:CGRectInset(btn.frame, 0, -40) animated:YES];
 }
 
+#pragma mark - Settings Search (flat list grouped by tab)
+
+- (void)searchBar:(UISearchBar *)searchBar textDidChange:(NSString *)searchText {
+    if (searchBar != _settingsSearchBar) {
+        if ([searchBar isKindOfClass:[UISearchBar class]] && searchText.length == 0) {
+            // Let other delegates handle
+        }
+        return;
+    }
+    NSString *query = [searchText stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceCharacterSet]].lowercaseString;
+    if (query.length == 0) {
+        self.searchResults = nil;
+        self.searchResultsTable.hidden = YES;
+        _tabBarScroll.hidden = NO;
+        _pageScroll.hidden = NO;
+        return;
+    }
+    NSMutableArray *results = [NSMutableArray array];
+    for (NSUInteger tabIdx = 0; tabIdx < _sections.count; tabIdx++) {
+        NSDictionary *section = _sections[tabIdx];
+        NSString *tabTitle = section[@"title"] ?: @"";
+        NSArray *items = section[@"items"] ?: @[];
+        for (NSUInteger row = 0; row < items.count; row++) {
+            NSDictionary *item = items[row];
+            NSString *label = item[@"label"] ?: @"";
+            NSString *key = item[@"key"] ?: @"";
+            if ([label.lowercaseString containsString:query] || [key.lowercaseString containsString:query] || [tabTitle.lowercaseString containsString:query]) {
+                [results addObject:@{@"tab": tabTitle, @"tabIndex": @(tabIdx), @"item": item, @"row": @(row)}];
+            }
+        }
+    }
+    self.searchResults = results;
+    self.searchResultsTable.hidden = NO;
+    _tabBarScroll.hidden = YES;
+    _pageScroll.hidden = YES;
+    [self.searchResultsTable reloadData];
+}
+
+- (void)searchBarSearchButtonClicked:(UISearchBar *)searchBar {
+    if (searchBar == _settingsSearchBar) [searchBar resignFirstResponder];
+}
+
+- (void)searchBarCancelButtonClicked:(UISearchBar *)searchBar {
+    if (searchBar == _settingsSearchBar) {
+        searchBar.text = @"";
+        [self searchBar:searchBar textDidChange:@""];
+        [searchBar resignFirstResponder];
+        searchBar.showsCancelButton = NO;
+    }
+}
+
+- (void)searchBarTextDidBeginEditing:(UISearchBar *)searchBar {
+    if (searchBar == _settingsSearchBar) searchBar.showsCancelButton = YES;
+}
+
+- (void)searchBarTextDidEndEditing:(UISearchBar *)searchBar {
+    if (searchBar == _settingsSearchBar && searchBar.text.length == 0) searchBar.showsCancelButton = NO;
+}
+
 #pragma mark - TableView
 
 - (NSDictionary *)itemsForTable:(UITableView *)tableView {
@@ -490,14 +609,17 @@
 }
 
 - (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView {
+    if (tableView == _searchResultsTable) return 1;
     return 1;
 }
 
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section {
+    if (tableView == _searchResultsTable) return self.searchResults.count;
     return [self itemsForTable:tableView].count;
 }
 
 - (NSString *)tableView:(UITableView *)tableView titleForHeaderInSection:(NSInteger)section {
+    if (tableView == _searchResultsTable) return nil;
     return _sections[tableView.tag][@"title"];
 }
 
@@ -509,10 +631,12 @@
 }
 
 - (CGFloat)tableView:(UITableView *)tableView heightForHeaderInSection:(NSInteger)section {
+    if (tableView == _searchResultsTable) return 0;
     return 36;
 }
 
 - (CGFloat)tableView:(UITableView *)tableView heightForRowAtIndexPath:(NSIndexPath *)indexPath {
+    if (tableView == _searchResultsTable) return 48;
     NSDictionary *item = [self itemAtIndexPath:indexPath inTable:tableView];
     if ([item[@"type"] isEqualToString:@"label"]) {
         return 64;
@@ -521,6 +645,26 @@
 }
 
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {
+    if (tableView == _searchResultsTable) {
+        UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:@"SearchCell" forIndexPath:indexPath];
+        NSDictionary *entry = self.searchResults[indexPath.row];
+        NSDictionary *item = entry[@"item"];
+        NSString *tab = entry[@"tab"];
+        cell.textLabel.text = item[@"label"] ?: @"";
+        cell.detailTextLabel.text = tab;
+        if (!cell.detailTextLabel.text) {
+            cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:@"SearchCell"];
+            cell.textLabel.text = item[@"label"] ?: @"";
+            cell.detailTextLabel.text = tab;
+        }
+        cell.textLabel.font = [UIFont systemFontOfSize:15];
+        cell.detailTextLabel.font = [UIFont systemFontOfSize:12];
+        cell.detailTextLabel.textColor = ThemeManager.shared.secondaryTextColor;
+        cell.backgroundColor = ThemeManager.shared.cardBackgroundColor;
+        cell.textLabel.textColor = ThemeManager.shared.primaryTextColor;
+        cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
+        return cell;
+    }
     NSDictionary *item = [self itemAtIndexPath:indexPath inTable:tableView];
     NSString *type = item[@"type"];
     NSString *cellId = type;
@@ -818,6 +962,30 @@
 }
 
 - (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)indexPath {
+    if (tableView == _searchResultsTable) {
+        [tableView deselectRowAtIndexPath:indexPath animated:YES];
+        NSDictionary *entry = self.searchResults[indexPath.row];
+        NSInteger tabIdx = [entry[@"tabIndex"] integerValue];
+        NSInteger row = [entry[@"row"] integerValue];
+        // Hide search and jump to tab
+        _settingsSearchBar.text = @"";
+        [self searchBar:_settingsSearchBar textDidChange:@""];
+        [_settingsSearchBar resignFirstResponder];
+        [self setPage:tabIdx animated:YES];
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.35 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            UITableView *targetTable = self.pageTables[tabIdx];
+            NSIndexPath *targetPath = [NSIndexPath indexPathForRow:row inSection:0];
+            [targetTable scrollToRowAtIndexPath:targetPath atScrollPosition:UITableViewScrollPositionMiddle animated:YES];
+            // Flash cell
+            UITableViewCell *cell = [targetTable cellForRowAtIndexPath:targetPath];
+            UIColor *orig = cell.backgroundColor;
+            cell.backgroundColor = [ThemeManager.shared.accentColor colorWithAlphaComponent:0.3];
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.8 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+                cell.backgroundColor = orig;
+            });
+        });
+        return;
+    }
     [tableView deselectRowAtIndexPath:indexPath animated:YES];
     NSDictionary *item = [self itemAtIndexPath:indexPath inTable:tableView];
     NSString *type = item[@"type"];
@@ -892,10 +1060,8 @@
     } else if ([item[@"key"] isEqualToString:@"general.liquid_glass"]) {
         [[NSNotificationCenter defaultCenter] postNotificationName:@"LiquidGlassDidChangeNotification" object:nil];
     } else if ([item[@"key"] isEqualToString:@"video.frame_generation"]) {
-        // Runtime toggle: enable/disable native FrameGen immediately.
-        // When enabling: Metal pipeline is initialized on-demand via fg_set_enabled().
-        // Camera data will only be available if the Java agent was loaded at launch.
-        // When disabling: ring buffer is cleared, all interpolation stops.
+        [[NSUserDefaults standardUserDefaults] setBool:sender.on forKey:@"video.frame_generation"];
+        [[NSUserDefaults standardUserDefaults] synchronize];
         fg_set_enabled(sender.on);
         NSLog(@"[Settings] Frame Generation toggled: %d", sender.on);
     }
@@ -940,6 +1106,8 @@
         setPrefFloat(item[@"key"], val);
         if ([item[@"key"] isEqualToString:@"video.resolution"]) {
             [[NSNotificationCenter defaultCenter] postNotificationName:@"ResolutionDidChangeNotification" object:nil];
+        } else if ([item[@"key"] isEqualToString:@"video.framegen_target_fps"]) {
+            fg_set_target_fps((int)val);
         }
         // Any *_blur slider drives realtime frosted surfaces; let them refresh.
         BOOL isBlurSlider = [item[@"key"] hasPrefix:@"amethyst_"] && [item[@"key"] hasSuffix:@"_blur"];
@@ -996,6 +1164,12 @@
                 } else if ([item[@"key"] isEqualToString:@"launcher.logo_style"]) {
                     applyLauncherAppIcon();
                     [[NSNotificationCenter defaultCenter] postNotificationName:@"LauncherLogoDidChangeNotification" object:nil];
+                } else if ([item[@"key"] isEqualToString:@"video.framegen_mode"]) {
+                    BOOL isCamera = [key isEqualToString:@"camera_reproject"];
+                    fg_set_mode(isCamera ? FG_MODE_CAMERA_REPROJECT : FG_MODE_MOTION_ADAPTIVE);
+                } else if ([item[@"key"] isEqualToString:@"video.framegen_fg2_submode"]) {
+                    BOOL isPredict = [key isEqualToString:@"predict"];
+                    fg_set_fg2_submode(isPredict ? FG2_SUBMODE_PREDICT : FG2_SUBMODE_INTERP);
                 }
                 [self reloadTables];
             }]];

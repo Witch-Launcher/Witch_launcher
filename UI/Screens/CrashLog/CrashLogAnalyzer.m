@@ -92,21 +92,27 @@ static NSString *newestHsErr(void) {
     result.latestLogPath = logPath;
     result.crashReportPath = crashPath;
     result.hsErrPath = hsErrPath;
-    result.fullLog = logContent ?: (crashContent ?: @"");
+    // Full log gộp cả 3 nguồn để AI và full view có đủ thông tin
+    NSMutableArray<NSString *> *allParts = [NSMutableArray array];
+    if (logContent.length > 0) [allParts addObject:logContent];
+    if (crashContent.length > 0) [allParts addObject:[NSString stringWithFormat:@"\n===== CRASH REPORT (%@) =====\n%@", crashPath.lastPathComponent, crashContent]];
+    if (hsErrContent.length > 0) [allParts addObject:[NSString stringWithFormat:@"\n===== HS_ERR (%@) =====\n%@", hsErrPath.lastPathComponent, hsErrContent]];
+    result.fullLog = [allParts componentsJoinedByString:@"\n"];
 
+    // Luôn tính 100 dòng cuối cho người đọc (trên máy, không phải AI)
+    NSArray<NSString *> *allLines = [result.fullLog componentsSeparatedByString:@"\n"];
+    NSUInteger start = allLines.count > 100 ? allLines.count - 100 : 0;
+    NSString *last100 = [[allLines subarrayWithRange:NSMakeRange(start, allLines.count - start)] componentsJoinedByString:@"\n"];
+
+    // Dùng hits để xác định category, nhưng excerpt mặc định vẫn là 100 dòng cuối (theo yêu cầu fix)
     NSMutableArray<NSArray<NSString *> *> *blockSources = [NSMutableArray array];
     if (logContent) [blockSources addObject:[logContent componentsSeparatedByString:@"\n"]];
     if (crashContent) [blockSources addObject:[crashContent componentsSeparatedByString:@"\n"]];
 
-    // Prefer the modloader's own user-facing message (e.g. Fabric's
-    // "Some of your mods are incompatible with the game or each other!"
-    // followed by the solution/missing dependencies list). The message runs
-    // from the "FormattedException:" / "Missing or unsupported mandatory
-    // dependencies:" line until the first stack trace ("    at ...") line.
     NSString *modloaderMessage = [self extractModloaderMessageFromBlocks:blockSources];
     if (modloaderMessage.length > 0) {
         result.category = CrashLogCategoryModConflict;
-        result.excerpt = modloaderMessage;
+        result.excerpt = last100;
         return result;
     }
 
@@ -124,7 +130,7 @@ static NSString *newestHsErr(void) {
 
     if ([self hitCount:modHits] > 0) {
         result.category = CrashLogCategoryModConflict;
-        result.excerpt = [self buildExcerptFromHits:modHits blocks:blockSources];
+        result.excerpt = last100;
         return result;
     }
 
@@ -145,7 +151,7 @@ static NSString *newestHsErr(void) {
 
     if ([self hitCount:errorHits] > 0) {
         result.category = CrashLogCategoryError;
-        result.excerpt = [self buildExcerptFromHits:errorHits blocks:blockSources];
+        result.excerpt = last100;
         return result;
     }
 
@@ -157,15 +163,13 @@ static NSString *newestHsErr(void) {
         ] inBlocks:hsErrBlocks];
         if ([self hitCount:hsErrHits] > 0) {
             result.category = CrashLogCategoryError;
-            result.excerpt = [self buildExcerptFromHits:hsErrHits blocks:hsErrBlocks];
+            result.excerpt = last100;
             return result;
         }
     }
 
     result.category = CrashLogCategoryRaw;
-    NSArray<NSString *> *lines = [result.fullLog componentsSeparatedByString:@"\n"];
-    NSUInteger start = lines.count > 100 ? lines.count - 100 : 0;
-    result.excerpt = [[lines subarrayWithRange:NSMakeRange(start, lines.count - start)] componentsJoinedByString:@"\n"];
+    result.excerpt = last100;
     return result;
 }
 

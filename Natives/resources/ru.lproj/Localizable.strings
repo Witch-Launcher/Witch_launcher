@@ -245,3 +245,7 @@
 
 "controller_configurator.section.config_files" = "Текущий файл настроек";
 "controller_configurator.section.controller_style" = "Тип контроллера";
+
+"preference.title.framegen_mode" = "Режим генерации кадров";
+"preference.title.framegen_mode.motion_adaptive" = "Адаптивный GPU (MADI)";
+"preference.title.framegen_mode.camera_reproject" = "3D репроекция камеры GPU";

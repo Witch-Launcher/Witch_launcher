@@ -38,19 +38,7 @@ public class FrameGenAgent {
             System.err.println("[FrameGenAgent] Could not install patcher in premain: " + t.getMessage());
         }
 
-        // Enable FrameGen on the native side.
-        // The agent is only loaded when video.frame_generation preference is ON
-        // (gated by JavaLauncher.m), so calling setEnabled(true) here is safe —
-        // it will never execute when the user has FG disabled.
-        try {
-            Class<?> bridgeClass = Class.forName("net.vda.witchlaunch.framegen.FrameGenBridge");
-            java.lang.reflect.Method setEnabledMethod = bridgeClass.getMethod("setEnabled", boolean.class);
-            setEnabledMethod.invoke(null, true);
-            System.out.println("[FrameGenAgent] FrameGen enabled on native side");
-        } catch (Throwable t) {
-            System.err.println("[FrameGenAgent] Could not enable FG natively: " + t.getMessage());
-        }
-
+        // Native side is enabled by JavaLauncher.m before JVM start.
         System.out.println("[FrameGenAgent] Agent installed successfully");
     }
 

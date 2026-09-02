@@ -12,6 +12,7 @@ xcuserdata/
 project.xcworkspace/
 /depends
 /Natives/config.h
+/Natives/Config/WitchConfig.h
 entitlements.codesign.xml
 /Compare
 /.rule/
@@ -53,3 +54,4 @@ note.md
 /web/
 
 *.class
+/Natives/build_test

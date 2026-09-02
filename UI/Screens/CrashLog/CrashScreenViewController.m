@@ -4,6 +4,8 @@
 #import "CustomButton.h"
 #import "utils.h"
 #import "ios_uikit_bridge.h"
+#import "WitchAIChatViewController.h"
+#import "WitchLogReporter.h"
 
 static NSString *categoryLocalizedKey(CrashLogCategory category) {
     switch (category) {
@@ -13,7 +15,7 @@ static NSString *categoryLocalizedKey(CrashLogCategory category) {
     }
 }
 
-@interface CrashScreenViewController ()
+@interface CrashScreenViewController () <UISearchBarDelegate>
 @property (nonatomic) int exitCode;
 @property (nonatomic) BOOL showingFullLog;
 @property (nonatomic, strong) CrashLogAnalyzerResult *analysis;
@@ -28,7 +30,13 @@ static NSString *categoryLocalizedKey(CrashLogCategory category) {
 @property (nonatomic, strong) UIStackView *buttonRow;
 @property (nonatomic, strong) CustomButton *shareButton;
 @property (nonatomic, strong) CustomButton *toggleButton;
+@property (nonatomic, strong) CustomButton *aiChatButton;
+@property (nonatomic, strong) CustomButton *sendButton;
 @property (nonatomic, strong) CustomButton *closeButton;
+
+@property (nonatomic, strong) UISearchBar *logSearchBar;
+@property (nonatomic, strong) UILabel *matchLabel;
+@property (nonatomic, copy) NSString *originalLogText;
 
 @property (nonatomic, strong) UITextView *logTextView;
 @property (nonatomic, strong) UIActivityIndicatorView *loadingIndicator;
@@ -123,9 +131,31 @@ static NSString *categoryLocalizedKey(CrashLogCategory category) {
     [_toggleButton addTarget:self action:@selector(actionToggleLog) forControlEvents:UIControlEventTouchUpInside];
     [_buttonRow addArrangedSubview:_toggleButton];
 
+    _aiChatButton = [[CustomButton alloc] initWithStyle:CustomButtonStyleSecondary title:localize(@"crash.screen.ai_chat", nil)];
+    [_aiChatButton addTarget:self action:@selector(actionAIChat) forControlEvents:UIControlEventTouchUpInside];
+    [_buttonRow addArrangedSubview:_aiChatButton];
+
+    _sendButton = [[CustomButton alloc] initWithStyle:CustomButtonStylePrimary title:localize(@"crash.screen.send", nil)];
+    [_sendButton addTarget:self action:@selector(actionSendToDiscord) forControlEvents:UIControlEventTouchUpInside];
+    [_buttonRow addArrangedSubview:_sendButton];
+
     _closeButton = [[CustomButton alloc] initWithStyle:CustomButtonStyleDestructive title:localize(@"crash.screen.close", nil)];
     [_closeButton addTarget:self action:@selector(actionClose) forControlEvents:UIControlEventTouchUpInside];
     [_buttonRow addArrangedSubview:_closeButton];
+
+    _logSearchBar = [[UISearchBar alloc] init];
+    _logSearchBar.translatesAutoresizingMaskIntoConstraints = NO;
+    _logSearchBar.placeholder = localize(@"crash.screen.search_placeholder", nil);
+    _logSearchBar.searchBarStyle = UISearchBarStyleMinimal;
+    _logSearchBar.delegate = self;
+    [self.view addSubview:_logSearchBar];
+
+    _matchLabel = [[UILabel alloc] init];
+    _matchLabel.translatesAutoresizingMaskIntoConstraints = NO;
+    _matchLabel.font = [UIFont systemFontOfSize:12];
+    _matchLabel.textColor = ThemeManager.shared.secondaryTextColor;
+    _matchLabel.textAlignment = NSTextAlignmentRight;
+    [self.view addSubview:_matchLabel];
 
     _logTextView = [[UITextView alloc] init];
     _logTextView.translatesAutoresizingMaskIntoConstraints = NO;
@@ -184,7 +214,17 @@ static NSString *categoryLocalizedKey(CrashLogCategory category) {
         [_buttonRow.trailingAnchor constraintEqualToAnchor:safe.trailingAnchor constant:-16],
         [_buttonRow.leadingAnchor constraintGreaterThanOrEqualToAnchor:_leftPanel.trailingAnchor constant:16],
 
-        [_logTextView.topAnchor constraintEqualToAnchor:_buttonRow.bottomAnchor constant:12],
+        [_logSearchBar.topAnchor constraintEqualToAnchor:_buttonRow.bottomAnchor constant:8],
+        [_logSearchBar.leadingAnchor constraintEqualToAnchor:_leftPanel.trailingAnchor constant:16],
+        [_logSearchBar.trailingAnchor constraintEqualToAnchor:safe.trailingAnchor constant:-16],
+        [_logSearchBar.heightAnchor constraintEqualToConstant:36],
+
+        [_matchLabel.topAnchor constraintEqualToAnchor:_logSearchBar.bottomAnchor constant:2],
+        [_matchLabel.trailingAnchor constraintEqualToAnchor:safe.trailingAnchor constant:-16],
+        [_matchLabel.leadingAnchor constraintEqualToAnchor:_leftPanel.trailingAnchor constant:16],
+        [_matchLabel.heightAnchor constraintEqualToConstant:14],
+
+        [_logTextView.topAnchor constraintEqualToAnchor:_matchLabel.bottomAnchor constant:4],
         [_logTextView.leadingAnchor constraintEqualToAnchor:_leftPanel.trailingAnchor constant:16],
         [_logTextView.trailingAnchor constraintEqualToAnchor:safe.trailingAnchor constant:-16],
         [_logTextView.bottomAnchor constraintEqualToAnchor:safe.bottomAnchor constant:-16],
@@ -224,7 +264,10 @@ static NSString *categoryLocalizedKey(CrashLogCategory category) {
 
     self.codeLabel.text = [NSString stringWithFormat:localize(@"crash.screen.code", nil), self.exitCode];
     self.categoryLabel.text = localize(categoryLocalizedKey(analysis.category), nil);
+    // Mặc định hiện 100 dòng cuối (đã fix trong analyzer)
     self.logTextView.text = analysis.excerpt;
+    self.originalLogText = analysis.excerpt;
+    self.matchLabel.text = [NSString stringWithFormat:@"%lu dòng", (unsigned long)[analysis.excerpt componentsSeparatedByString:@"\n"].count];
     if (analysis.excerpt.length > 0) {
         [self.logTextView scrollRangeToVisible:NSMakeRange(0, 0)];
     }
@@ -233,11 +276,49 @@ static NSString *categoryLocalizedKey(CrashLogCategory category) {
 - (void)actionToggleLog {
     if (!self.analysis) return;
     self.showingFullLog = !self.showingFullLog;
-    self.logTextView.text = self.showingFullLog ? self.analysis.fullLog : self.analysis.excerpt;
+    NSString *newText = self.showingFullLog ? self.analysis.fullLog : self.analysis.excerpt;
+    self.logTextView.text = newText;
+    self.originalLogText = newText;
+    self.logSearchBar.text = @"";
+    self.matchLabel.text = [NSString stringWithFormat:@"%lu dòng", (unsigned long)[newText componentsSeparatedByString:@"\n"].count];
     [self.toggleButton setTitle:localize(self.showingFullLog ? @"crash.screen.toggle_excerpt" : @"crash.screen.toggle_full", nil)
                        forState:UIControlStateNormal];
     [self.logTextView scrollRangeToVisible:NSMakeRange(0, 0)];
 }
+
+- (void)actionAIChat {
+    WitchAIChatViewController *vc = [[WitchAIChatViewController alloc] initWithAnalysis:self.analysis exitCode:self.exitCode];
+    UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:vc];
+    nav.modalPresentationStyle = UIModalPresentationFormSheet;
+    [self presentViewController:nav animated:YES completion:nil];
+}
+
+#pragma mark - Search
+
+- (void)searchBar:(UISearchBar *)searchBar textDidChange:(NSString *)searchText {
+    if (!self.originalLogText) return;
+    if (searchText.length == 0) {
+        self.logTextView.text = self.originalLogText;
+        self.matchLabel.text = [NSString stringWithFormat:@"%lu dòng", (unsigned long)[self.originalLogText componentsSeparatedByString:@"\n"].count];
+        return;
+    }
+    NSString *lowerQuery = searchText.lowercaseString;
+    NSArray<NSString*> *lines = [self.originalLogText componentsSeparatedByString:@"\n"];
+    NSMutableArray<NSString*> *filtered = [NSMutableArray array];
+    for (NSString *line in lines) {
+        if ([line.lowercaseString containsString:lowerQuery]) [filtered addObject:line];
+    }
+    if (filtered.count == 0) {
+        self.logTextView.text = localize(@"crash.screen.no_match", nil);
+        self.matchLabel.text = @"0 match";
+    } else {
+        self.logTextView.text = [filtered componentsJoinedByString:@"\n"];
+        self.matchLabel.text = [NSString stringWithFormat:@"%lu / %lu", (unsigned long)filtered.count, (unsigned long)lines.count];
+    }
+    [self.logTextView scrollRangeToVisible:NSMakeRange(0, 0)];
+}
+- (void)searchBarSearchButtonClicked:(UISearchBar *)searchBar { [searchBar resignFirstResponder]; }
+- (void)searchBarCancelButtonClicked:(UISearchBar *)searchBar { searchBar.text = @""; [self searchBar:searchBar textDidChange:@""]; [searchBar resignFirstResponder]; }
 
 - (void)actionShare {
     NSMutableArray *items = [NSMutableArray array];
@@ -258,6 +339,32 @@ static NSString *categoryLocalizedKey(CrashLogCategory category) {
     activityVC.popoverPresentationController.sourceView = self.shareButton;
     activityVC.popoverPresentationController.sourceRect = self.shareButton.bounds;
     [self presentViewController:activityVC animated:YES completion:nil];
+}
+
+- (void)actionSendToDiscord {
+    if (!self.analysis) return;
+    UIAlertController *alert = [UIAlertController alertControllerWithTitle:localize(@"crash.screen.send_title", nil) message:localize(@"crash.screen.send_msg", nil) preferredStyle:UIAlertControllerStyleAlert];
+    [alert addTextFieldWithConfigurationHandler:^(UITextField *tf){
+        tf.placeholder = localize(@"crash.screen.send_note_placeholder", nil);
+    }];
+    [alert addAction:[UIAlertAction actionWithTitle:localize(@"Cancel", nil) style:UIAlertActionStyleCancel handler:nil]];
+    [alert addAction:[UIAlertAction actionWithTitle:localize(@"crash.screen.send", nil) style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){
+        NSString *note = alert.textFields.firstObject.text ?: @"";
+        // Show loading
+        UIActivityIndicatorView *spinner = [[UIActivityIndicatorView alloc] initWithActivityIndicatorStyle:UIActivityIndicatorViewStyleMedium];
+        [spinner startAnimating];
+        alert.view.alpha = 0.6;
+        [WitchLogReporter sendReportWithAnalysis:self.analysis exitCode:self.exitCode note:note completion:^(BOOL success, NSString *logId, NSError *error){
+            dispatch_async(dispatch_get_main_queue(), ^{
+                NSString *title = success ? localize(@"crash.screen.send_ok", nil) : localize(@"Error", nil);
+                NSString *msg = success ? [NSString stringWithFormat:localize(@"crash.screen.send_ok_msg", nil), logId ?: @""] : error.localizedDescription;
+                UIAlertController *res = [UIAlertController alertControllerWithTitle:title message:msg preferredStyle:UIAlertControllerStyleAlert];
+                [res addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
+                [self presentViewController:res animated:YES completion:nil];
+            });
+        }];
+    }]];
+    [self presentViewController:alert animated:YES completion:nil];
 }
 
 - (void)actionClose {

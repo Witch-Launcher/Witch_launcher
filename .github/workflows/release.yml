@@ -159,6 +159,34 @@ jobs:
           cd depends && unzip -o jre25-ios-aarch64.zip && rm -f jre25-ios-aarch64.zip
           cd depends && tar xf jre25-ios-arm64-*.tar.xz -C java-25-openjdk
 
+      - name: Inject Witch private config (BuildKeys like Zalith Launcher 2)
+        env:
+          WITCH_BASE_URL: ${{ secrets.WITCH_BASE_URL }}
+          WITCH_HMAC_SECRET: ${{ secrets.WITCH_HMAC_SECRET }}
+          WITCH_PROXY_TOKEN: ${{ secrets.WITCH_PROXY_TOKEN }}
+        run: |
+          mkdir -p Natives/Config
+          if [ -n "$WITCH_BASE_URL" ]; then
+            echo "Injecting private WitchConfig.h from secrets"
+            cat > Natives/Config/WitchConfig.h <<EOF
+          #pragma once
+          #define WITCH_DEFAULT_BASE_URL @"$WITCH_BASE_URL"
+          #define WITCH_DEFAULT_HMAC_SECRET @"$WITCH_HMAC_SECRET"
+          #define WITCH_DEFAULT_PROXY_TOKEN @"$WITCH_PROXY_TOKEN"
+          #define WITCH_DEFAULT_CURSEFORGE_API_KEY @""
+          EOF
+          else
+            echo "No private Witch secrets — using public dummy"
+            cat > Natives/Config/WitchConfig.h <<'EOF'
+          #pragma once
+          #define WITCH_DEFAULT_BASE_URL @""
+          #define WITCH_DEFAULT_HMAC_SECRET @""
+          #define WITCH_DEFAULT_PROXY_TOKEN @""
+          #define WITCH_DEFAULT_CURSEFORGE_API_KEY @""
+          EOF
+          fi
+          cat Natives/Config/WitchConfig.h
+
       - name: Build for ${{ matrix.platform_name }}
         env:
           password: ${{ secrets.ELLIE_MINI_SECRET }}

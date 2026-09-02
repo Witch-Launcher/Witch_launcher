@@ -556,7 +556,10 @@ payload: native dep_mg lwgjl java jre assets
 	if [ '$(SLIMMED_ONLY)' != '1' ]; then \
 		cp -R $(OUTPUTDIR)/java_runtimes $(OUTPUTDIR)/Payload/Witch.app; \
 	fi
-	ldid -S $(OUTPUTDIR)/Payload/Witch.app; \
+	# Always run the platform retag FIRST before signing so CodeResources hashes stay intact.
+	$(call METHOD_MACHO_JRE,$(OUTPUTDIR)/Payload/Witch.app,$(call METHOD_CHANGE_PLAT,$(PLATFORM),$$file)); \
+	$(call METHOD_MACHO_JRE,$(OUTPUTDIR)/java_runtimes,$(call METHOD_CHANGE_PLAT,$(PLATFORM),$$file));
+	chmod -R 755 $(OUTPUTDIR)/Payload
 	if [ '$(TROLLSTORE_JIT_ENT)' == '1' ]; then \
 		ldid -S$(SOURCEDIR)/entitlements.trollstore.xml $(OUTPUTDIR)/Payload/Witch.app/Witch; \
 	elif [ '$(PLATFORM)' == '6' ]; then \
@@ -564,15 +567,7 @@ payload: native dep_mg lwgjl java jre assets
 	else \
 		ldid -S$(SOURCEDIR)/entitlements.sideload.xml $(OUTPUTDIR)/Payload/Witch.app/Witch; \
 	fi
-	chmod -R 755 $(OUTPUTDIR)/Payload
-	# Always run the platform retag — it's idempotent on already-iOS-tagged
-	# Mach-Os, and catches dylibs we drop in fresh from Maven (which ship
-	# tagged platform=macos and would be silently rejected by iOS dyld).
-	# Originally guarded by `[ PLATFORM != 2 ]` on the assumption that all
-	# committed dylibs were already iOS-tagged — that broke when v19 added
-	# the 3.3.5 lwjgl-stb dylib straight from upstream.
-	$(call METHOD_MACHO_JRE,$(OUTPUTDIR)/Payload/Witch.app,$(call METHOD_CHANGE_PLAT,$(PLATFORM),$$file)); \
-	$(call METHOD_MACHO_JRE,$(OUTPUTDIR)/java_runtimes,$(call METHOD_CHANGE_PLAT,$(PLATFORM),$$file));
+	ldid -S $(OUTPUTDIR)/Payload/Witch.app;
 	echo '[Witch v$(VERSION)] payload - end'
 
 deploy:

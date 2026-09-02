@@ -27,6 +27,7 @@
 #import "VersionDirectoryManager.h"
 #import "TouchControllerManager.h"
 #import "authenticator/BaseAuthenticator.h"
+#import "framegen/framegen.h"
 
 static NSString *dhNativeLibPath = nil;
 
@@ -366,6 +367,9 @@ int launchJVMWithArgs(NSString *username, id launchTarget, int width, int height
     NSLog(@"[JavaLauncher] JIT flags 0x%X -> requiresDebugJITMapping=%d jit26Handshake=%d",
         (unsigned)DeviceGetJITFlags(NO), requiresDebugJITMapping, jit26Handshake);
     if (jit26Handshake) {
+        // Ensure UniversalJIT26.js is synced to Documents, LCAppInfo.plist, and Clipboard
+        init_setupUniversalJITScript(YES);
+
         // Keep StikDebug attached through probe, JVM init, and mirror prepare.
         // Catch unserviced handshake brks (SIGTRAP) so the app shows an error
         // dialog instead of dying to the home screen.
@@ -377,11 +381,12 @@ int launchJVMWithArgs(NSString *username, id launchTarget, int width, int height
             // without a debugger those brks raise SIGTRAP which loops forever
             // (PC stays at the faulting instruction). Show a clear error instead
             // of hanging with a black screen.
+            init_setupUniversalJITScript(YES);
             showDialog(localize(@"Error", nil),
                 @"JIT is required but no debugger is attached.\n\n"
                  @"1. Open StikDebug\n"
                  @"2. Enable JIT for Witch (toggle ON)\n"
-                 @"3. Assign the \"Universal JIT 26\" script\n"
+                 @"3. UniversalJIT26.js has been copied to your clipboard & synced to Documents / LiveContainer\n"
                  @"4. Close and reopen Witch, then try again");
             [PLLogOutputView handleExitCode:1];
             return 1;
@@ -402,45 +407,35 @@ int launchJVMWithArgs(NSString *username, id launchTarget, int width, int height
         NSLog(@"[JavaLauncher] JIT26 probe returned %p", probeMapping);
         if (!JIT26ProbeLooksValid(probeMapping)) {
             sigaction(SIGTRAP, &oldTrapSa, NULL);
-            NSString *inBundleScriptPath = [NSBundle.mainBundle pathForResource:@"UniversalJIT26" ofType:@"js"];
-            NSString *documentsScriptPath = [NSString stringWithFormat:@"%s/UniversalJIT26.js", getenv("POJAV_HOME")];
-            if (inBundleScriptPath) {
-                [[NSFileManager defaultManager] removeItemAtPath:documentsScriptPath error:nil];
-                [NSFileManager.defaultManager copyItemAtPath:inBundleScriptPath toPath:documentsScriptPath error:nil];
-            }
+            init_setupUniversalJITScript(YES);
             NSString *lcAppInfoPath = [NSBundle.mainBundle.bundlePath stringByAppendingPathComponent:@"LCAppInfo.plist"];
-            NSMutableDictionary *lcAppInfo = [NSMutableDictionary dictionaryWithContentsOfFile:lcAppInfoPath];
-            if (lcAppInfo && inBundleScriptPath) {
-                lcAppInfo[@"jitLaunchScriptJs"] = [[NSData dataWithContentsOfFile:inBundleScriptPath] base64EncodedStringWithOptions:0];
-                if ([lcAppInfo writeToFile:lcAppInfoPath atomically:YES]) {
-                    showDialog(localize(@"Error", nil),
-                        [NSString stringWithFormat:
-                            @"StikDebug probe failed (got %p). Expected a real RX page, not a legacy error code. "
-                             @"Witch refreshed UniversalJIT26.js — restart LiveContainer, re-enable JIT, then try again.",
-                            probeMapping]);
-                    [PLLogOutputView handleExitCode:1];
-                    return 1;
-                }
+            if ([fm fileExistsAtPath:lcAppInfoPath]) {
+                showDialog(localize(@"Error", nil),
+                    [NSString stringWithFormat:
+                        @"StikDebug probe failed (got %p). Expected a real RX page, not a legacy error code.\n\n"
+                         @"Witch refreshed UniversalJIT26.js in LiveContainer & clipboard — restart LiveContainer, re-enable JIT, then try again.",
+                        probeMapping]);
+                [PLLogOutputView handleExitCode:1];
+                return 1;
             }
             showDialog(localize(@"Error", nil),
                 [NSString stringWithFormat:
-                    @"StikDebug probe failed (got %p). JIT is not servicing Witch's breakpoints. "
+                    @"StikDebug probe failed (got %p). JIT is not servicing Witch's breakpoints.\n\n"
                      @"Make sure the JIT toggle for Witch in StikDebug is ON, close and reopen Witch after "
-                     @"enabling it, and that the assigned script is \"Universal JIT 26\". "
-                     @"UniversalJIT26.js was refreshed in Witch Documents — re-assign it in StikDebug "
-                     @"(long-press → Assign Script), re-enable JIT, then launch again.",
+                     @"enabling it, and that the assigned script is \"Universal JIT 26\".\n\n"
+                     @"UniversalJIT26.js was copied to your clipboard and refreshed in Witch Documents — "
+                     @"paste/assign it in StikDebug, re-enable JIT, then launch again.",
                     probeMapping]);
             [PLLogOutputView handleExitCode:1];
             return 1;
         }
-        // The probe has now attached the assigned base script, so command 2
-        // reliably loads our 0x69/0x6a mirror-handler overrides.
-        NSString *extensionScript = [NSString stringWithContentsOfFile:
-            [NSBundle.mainBundle pathForResource:@"UniversalJIT26Extension" ofType:@"js"]];
+        NSString *extPath = [NSBundle.mainBundle pathForResource:@"UniversalJIT26Extension" ofType:@"js"];
+        NSString *extensionScript = extPath ? [NSString stringWithContentsOfFile:extPath encoding:NSUTF8StringEncoding error:nil] : nil;
         if (extensionScript.length > 0) {
+            NSLog(@"[JavaLauncher] Loading UniversalJIT26Extension.js (%lu bytes)", (unsigned long)extensionScript.length);
             JIT26SendJITScript(extensionScript);
         } else {
-            NSLog(@"[JavaLauncher] UniversalJIT26Extension.js is missing; using assigned base JIT script only");
+            NSLog(@"[JavaLauncher] UniversalJIT26Extension.js is missing or empty; using assigned base JIT script only");
         }
         // Debugger is servicing us — restore default SIGTRAP behavior for the JVM run.
         sigaction(SIGTRAP, &oldTrapSa, NULL);
@@ -729,9 +724,14 @@ int launchJVMWithArgs(NSString *username, id launchTarget, int width, int height
     NSString *librariesPath = [NSString stringWithFormat:@"%@/libs", NSBundle.mainBundle.bundlePath];
     margv[++margc] = [NSString stringWithFormat:@"-javaagent:%@/cacio-init-agent.jar=", librariesPath].UTF8String;
     margv[++margc] = [NSString stringWithFormat:@"-javaagent:%@/patchjna_agent.jar=", librariesPath].UTF8String;
+    BOOL fgEnabled = getPrefBool(@"video.frame_generation");
+    [[NSUserDefaults standardUserDefaults] setBool:fgEnabled forKey:@"video.frame_generation"];
+    [[NSUserDefaults standardUserDefaults] synchronize];
+    fg_set_enabled(fgEnabled);
+
     // Frame Generation works with all renderers that use MetalVK→MoltenVK→Metal pipeline:
-    // MobileGlues, LTW, Zink (VK_ZINK), MoltenVK, MTL_ANGLE
-    if (getPrefBool(@"video.frame_generation")) {
+    // MobileGlues, LTW, Zink (VK_ZINK), MoltenVK, MTL_ANGLE, OSMesa
+    if (fgEnabled) {
         BOOL usesMoltenVK = [renderer isEqualToString:@ RENDERER_NAME_MOLTENVK]
                          || [renderer isEqualToString:@ RENDERER_NAME_MOBILEGLUES]
                          || [renderer isEqualToString:@ RENDERER_NAME_LTW]

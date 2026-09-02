@@ -134,6 +134,34 @@ jobs:
           xcrun --sdk iphoneos --show-sdk-version
           echo "SDKPATH=$SDKPATH"
 
+      - name: Inject Witch private config (BuildKeys like Zalith Launcher 2)
+        env:
+          WITCH_BASE_URL: ${{ secrets.WITCH_BASE_URL }}
+          WITCH_HMAC_SECRET: ${{ secrets.WITCH_HMAC_SECRET }}
+          WITCH_PROXY_TOKEN: ${{ secrets.WITCH_PROXY_TOKEN }}
+        run: |
+          mkdir -p Natives/Config
+          if [ -n "$WITCH_BASE_URL" ]; then
+            echo "Injecting private WitchConfig.h from secrets"
+            cat > Natives/Config/WitchConfig.h <<EOF
+          #pragma once
+          #define WITCH_DEFAULT_BASE_URL @"$WITCH_BASE_URL"
+          #define WITCH_DEFAULT_HMAC_SECRET @"$WITCH_HMAC_SECRET"
+          #define WITCH_DEFAULT_PROXY_TOKEN @"$WITCH_PROXY_TOKEN"
+          #define WITCH_DEFAULT_CURSEFORGE_API_KEY @""
+          EOF
+          else
+            echo "No private Witch secrets found — using public dummy (empty) WitchConfig.h"
+            cat > Natives/Config/WitchConfig.h <<'EOF'
+          #pragma once
+          #define WITCH_DEFAULT_BASE_URL @""
+          #define WITCH_DEFAULT_HMAC_SECRET @""
+          #define WITCH_DEFAULT_PROXY_TOKEN @""
+          #define WITCH_DEFAULT_CURSEFORGE_API_KEY @""
+          EOF
+          fi
+          cat Natives/Config/WitchConfig.h
+
       # Fetch the official prebuilt iOS arm64 JREs instead of compiling
       # OpenJDK from source: far faster and immune to the cross-build
       # configure flakiness (freetype/cups/flags) seen on CI runners.

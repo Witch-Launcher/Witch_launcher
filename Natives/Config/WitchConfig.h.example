@@ -1,0 +1,18 @@
+// Witch build-time config — copy to WitchConfig.h and fill your private values
+// This file is GITIGNORED — never commit WitchConfig.h with real secrets
+// BuildKeys pattern like Zalith Launcher 2 (Android) — keys injected at build time via CI secrets
+
+#pragma once
+
+// Default Witch Worker URL for public builds (empty = user must enter in Settings → Network)
+// For your private release build, set your own worker URL here (or via xcconfig)
+#define WITCH_DEFAULT_BASE_URL @""
+
+// HMAC / Bearer secrets — leave empty for public builds (user will enter in Settings)
+// For private CI build, inject via environment: e.g. echo "#define WITCH_HMAC_SECRET @\"$SECRET\"" > WitchConfig.h
+#define WITCH_DEFAULT_HMAC_SECRET @""
+#define WITCH_DEFAULT_PROXY_TOKEN @""
+
+// Optional: CurseForge API key for direct mode (if you want to ship a fallback key)
+// Leave empty to force Witch proxy or user-owned key
+#define WITCH_DEFAULT_CURSEFORGE_API_KEY @""
