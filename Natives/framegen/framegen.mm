@@ -167,7 +167,7 @@ static void fgMatrixInverse4x4(const float* m, float* out) {
 
 // Shader now uses precomputed inverse matrices from CPU (A7)
 // No manualInverse() needed in shader — huge performance win
-static const char* kReprojectionShader = R"(
+static const char* kReprojectionShader = R"METAL(
 #include <metal_stdlib>
 using namespace metal;
 
@@ -237,9 +237,9 @@ kernel void reprojectionKernel(
     float4 result = mix(currSample, predicted, confidence);
     output.write(result, gid);
 }
-)";
+)METAL";
 
-static const char* kSimpleBlendShader = R"(
+static const char* kSimpleBlendShader = R"METAL(
 #include <metal_stdlib>
 using namespace metal;
 
@@ -260,7 +260,7 @@ kernel void simpleBlendKernel(
     float4 result = mix(curr, prev, interpFactor);
     output.write(result, gid);
 }
-)";
+)METAL";
 
 // MARK: - Camera-Guided Motion-Adaptive & Temporal Interp Shaders (GPU)
 // Uses game camera rotation vector from JNI to shift 3D scene smoothly with zero noise,
@@ -274,7 +274,7 @@ struct CameraGuidedUniforms {
     float isPredictive;
 };
 
-static const char* kMotionAdaptiveShader = R"(
+static const char* kMotionAdaptiveShader = R"METAL(
 #include <metal_stdlib>
 using namespace metal;
 
@@ -359,10 +359,10 @@ kernel void motionAdaptiveKernel(
     float4 finalColor = mix(curCenter, predicted, confidence);
     output.write(finalColor, gid);
 }
-)";
+)METAL";
 
 // MARK: - Temporal Interpolation Shader (Mode 2 Sub-A & Sub-B)
-static const char* kTemporalInterpShader = R"(
+static const char* kTemporalInterpShader = R"METAL(
 #include <metal_stdlib>
 using namespace metal;
 
@@ -474,14 +474,14 @@ kernel void temporalInterpKernel(
         output.write(res, gid);
     }
 }
-)";
+)METAL";
 // MARK: - Predictive Shader (extrapolate forward from current frame)
 // Instead of interpolating between two frames, this predicts the NEXT frame
 // by applying forward motion vector to the current frame.
 // This eliminates ghosting because we never blend two different images.
 // v2: Added edge-aware blending, disocclusion detection, adaptive predict factor.
 
-static const char* kPredictionShader = R"(
+static const char* kPredictionShader = R"METAL(
 #include <metal_stdlib>
 using namespace metal;
 
@@ -568,7 +568,7 @@ kernel void predictionKernel(
 
     output.write(result, gid);
 }
-)";
+)METAL";
 
 // MARK: - Forward Declarations
 
