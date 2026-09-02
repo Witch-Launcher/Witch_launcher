@@ -5,6 +5,16 @@ configure_file(${CMAKE_CURRENT_LIST_DIR}/config.h.in ${CMAKE_CURRENT_LIST_DIR}/c
 
 set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -target arm64-apple-ios -mcpu=apple-a9 -fcommon -fobjc-arc -ObjC -Wno-error=implicit-function-declaration -F'${CMAKE_OSX_SYSROOT}/System/Cryptexes/OS/System/Library/Frameworks' -mios-version-min=14.0")
 set(CMAKE_C_FLAGS_DEBUG "-funwind-tables -g")
+# Ensure C++ / Objective-C++ use the same iOS target and ARC flags as C.
+# Without this, .mm files (framegen.mm) compiled with empty CXX_FLAGS default to
+# host SDK / wrong std and fail on raw-string Metal shaders (R"METAL) with
+# 'use of undeclared identifier R' and 'metal_stdlib file not found' on Xcode 16.2
+# (CI macos-14). Also forces C++17 for raw string support.
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -target arm64-apple-ios -mcpu=apple-a9 -fcommon -fobjc-arc -ObjC -Wno-error=implicit-function-declaration -F'${CMAKE_OSX_SYSROOT}/System/Cryptexes/OS/System/Library/Frameworks' -mios-version-min=14.0 -std=c++17 -stdlib=libc++")
+set(CMAKE_CXX_FLAGS_DEBUG "-funwind-tables -g")
+set(CMAKE_OBJCXX_FLAGS "${CMAKE_CXX_FLAGS}")
+set(CMAKE_OBJC_FLAGS "${CMAKE_C_FLAGS}")
+set(CMAKE_OBJC_FLAGS_DEBUG "${CMAKE_C_FLAGS_DEBUG}")
 
 if("${CMAKE_HOST_SYSTEM_NAME}" MATCHES "Linux|^GNU$|Android")
 set(GLOBAL_LDFLAGS "-isysroot ${CMAKE_OSX_SYSROOT} -Wl,-syslibroot,${CMAKE_OSX_SYSROOT} -fuse-ld=lld")
@@ -411,4 +421,9 @@ target_link_libraries(Witch
 set_target_properties(Witch PROPERTIES
   MACOSX_BUNDLE TRUE
   MACOSX_FRAMEWORK_IDENTIFIER org.cmake.ExecutableTarget
-  MACOSX_BUNDLE_INFO_PLIST "${CMAKE_CURRENT_LIST_DIR}/Info.plist")
+  MACOSX_BUNDLE_INFO_PLIST "${CMAKE_CURRENT_LIST_DIR}/Info.plist"
+  CXX_STANDARD 17
+  CXX_STANDARD_REQUIRED ON
+  OBJCXX_STANDARD 17
+  OBJCXX_STANDARD_REQUIRED ON
+)

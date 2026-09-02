@@ -167,100 +167,98 @@ static void fgMatrixInverse4x4(const float* m, float* out) {
 
 // Shader now uses precomputed inverse matrices from CPU (A7)
 // No manualInverse() needed in shader — huge performance win
-static const char* kReprojectionShader = R"METAL(
-#include <metal_stdlib>
-using namespace metal;
+static const char* kReprojectionShader = "\n"
+"#include <metal_stdlib>\n"
+"using namespace metal;\n"
+"\n"
+"struct CameraData {\n"
+"    float4x4 viewMatrix;\n"
+"    float4x4 projMatrix;\n"
+"    float4x4 prevViewMatrix;\n"
+"    float4x4 prevProjMatrix;\n"
+"    float4x4 invViewMatrix;    // Precomputed on CPU (A7)\n"
+"    float4x4 invProjMatrix;    // Precomputed on CPU (A7)\n"
+"    float2 viewportSize;\n"
+"    float interpFactor;\n"
+"};\n"
+"\n"
+"kernel void reprojectionKernel(\n"
+"    texture2d<float, access::sample> prevColor [[texture(0)]],\n"
+"    texture2d<float, access::sample> currColor [[texture(1)]],\n"
+"    texture2d<float, access::sample> prevDepth [[texture(2)]],\n"
+"    texture2d<float, access::sample> currDepth [[texture(3)]],\n"
+"    texture2d<float, access::write> output [[texture(4)]],\n"
+"    constant CameraData& cameraData [[buffer(0)]],\n"
+"    uint2 gid [[thread_position_in_grid]]\n"
+") {\n"
+"    if (gid.x >= (uint)cameraData.viewportSize.x || gid.y >= (uint)cameraData.viewportSize.y) return;\n"
+"\n"
+"    float2 uv = (float2(gid) + 0.5) / cameraData.viewportSize;\n"
+"\n"
+"    // Sample depth (A2: placeholder depth is 1.0 when nil)\n"
+"    constexpr sampler depthSampler(coord::normalized, filter::nearest, address::clamp_to_edge);\n"
+"    float currDepthVal = currDepth.sample(depthSampler, uv).r;\n"
+"\n"
+"    // Reconstruct view-space position from current frame depth\n"
+"    float2 ndc = uv * 2.0 - 1.0;\n"
+"    float4 clipPos = float4(ndc, currDepthVal * 2.0 - 1.0, 1.0);\n"
+"\n"
+"    // Clip -> View space (using precomputed inverse projection)\n"
+"    float4 viewPos = cameraData.invProjMatrix * clipPos;\n"
+"    viewPos /= viewPos.w;\n"
+"\n"
+"    // View -> World space (using precomputed inverse view)\n"
+"    float4 worldPos = cameraData.invViewMatrix * viewPos;\n"
+"\n"
+"    // World -> Previous frame clip space\n"
+"    float4 prevClip = cameraData.prevViewMatrix * worldPos;\n"
+"    prevClip = cameraData.prevProjMatrix * prevClip;\n"
+"    prevClip /= prevClip.w;\n"
+"\n"
+"    // Previous clip -> UV\n"
+"    float2 prevUV = (prevClip.xy + 1.0) * 0.5;\n"
+"\n"
+"    // Motion vector: direction from prev→curr position\n"
+"    float2 motionVector = uv - prevUV;\n"
+"\n"
+"    // FORWARD EXTRAPOLATION: project current frame pixels along motion direction\n"
+"    // to predict where they will be at the NEXT frame\n"
+"    constexpr sampler colorSampler(coord::normalized, filter::linear, address::clamp_to_edge);\n"
+"    float2 predictedUV = uv + motionVector * cameraData.interpFactor;\n"
+"    predictedUV = clamp(predictedUV, float2(0.0), float2(1.0));\n"
+"\n"
+"    float4 currSample = currColor.sample(colorSampler, uv);\n"
+"    float4 predicted = currColor.sample(colorSampler, predictedUV);\n"
+"\n"
+"    // Confidence: if prediction diverges too much from current, it's occluded — use current\n"
+"    float predDiff = dot(abs(predicted.rgb - currSample.rgb), float3(0.299, 0.587, 0.114));\n"
+"    float confidence = 1.0 - smoothstep(0.12, 0.4, predDiff);\n"
+"\n"
+"    float4 result = mix(currSample, predicted, confidence);\n"
+"    output.write(result, gid);\n"
+"}\n";
 
-struct CameraData {
-    float4x4 viewMatrix;
-    float4x4 projMatrix;
-    float4x4 prevViewMatrix;
-    float4x4 prevProjMatrix;
-    float4x4 invViewMatrix;    // Precomputed on CPU (A7)
-    float4x4 invProjMatrix;    // Precomputed on CPU (A7)
-    float2 viewportSize;
-    float interpFactor;
-};
-
-kernel void reprojectionKernel(
-    texture2d<float, access::sample> prevColor [[texture(0)]],
-    texture2d<float, access::sample> currColor [[texture(1)]],
-    texture2d<float, access::sample> prevDepth [[texture(2)]],
-    texture2d<float, access::sample> currDepth [[texture(3)]],
-    texture2d<float, access::write> output [[texture(4)]],
-    constant CameraData& cameraData [[buffer(0)]],
-    uint2 gid [[thread_position_in_grid]]
-) {
-    if (gid.x >= (uint)cameraData.viewportSize.x || gid.y >= (uint)cameraData.viewportSize.y) return;
-
-    float2 uv = (float2(gid) + 0.5) / cameraData.viewportSize;
-
-    // Sample depth (A2: placeholder depth is 1.0 when nil)
-    constexpr sampler depthSampler(coord::normalized, filter::nearest, address::clamp_to_edge);
-    float currDepthVal = currDepth.sample(depthSampler, uv).r;
-
-    // Reconstruct view-space position from current frame depth
-    float2 ndc = uv * 2.0 - 1.0;
-    float4 clipPos = float4(ndc, currDepthVal * 2.0 - 1.0, 1.0);
-
-    // Clip -> View space (using precomputed inverse projection)
-    float4 viewPos = cameraData.invProjMatrix * clipPos;
-    viewPos /= viewPos.w;
-
-    // View -> World space (using precomputed inverse view)
-    float4 worldPos = cameraData.invViewMatrix * viewPos;
-
-    // World -> Previous frame clip space
-    float4 prevClip = cameraData.prevViewMatrix * worldPos;
-    prevClip = cameraData.prevProjMatrix * prevClip;
-    prevClip /= prevClip.w;
-
-    // Previous clip -> UV
-    float2 prevUV = (prevClip.xy + 1.0) * 0.5;
-
-    // Motion vector: direction from prev→curr position
-    float2 motionVector = uv - prevUV;
-
-    // FORWARD EXTRAPOLATION: project current frame pixels along motion direction
-    // to predict where they will be at the NEXT frame
-    constexpr sampler colorSampler(coord::normalized, filter::linear, address::clamp_to_edge);
-    float2 predictedUV = uv + motionVector * cameraData.interpFactor;
-    predictedUV = clamp(predictedUV, float2(0.0), float2(1.0));
-
-    float4 currSample = currColor.sample(colorSampler, uv);
-    float4 predicted = currColor.sample(colorSampler, predictedUV);
-
-    // Confidence: if prediction diverges too much from current, it's occluded — use current
-    float predDiff = dot(abs(predicted.rgb - currSample.rgb), float3(0.299, 0.587, 0.114));
-    float confidence = 1.0 - smoothstep(0.12, 0.4, predDiff);
-
-    float4 result = mix(currSample, predicted, confidence);
-    output.write(result, gid);
-}
-)METAL";
-
-static const char* kSimpleBlendShader = R"METAL(
-#include <metal_stdlib>
-using namespace metal;
-
-kernel void simpleBlendKernel(
-    texture2d<float, access::sample> prevColor [[texture(0)]],
-    texture2d<float, access::sample> currColor [[texture(1)]],
-    texture2d<float, access::write> output [[texture(2)]],
-    constant float& interpFactor [[buffer(0)]],
-    uint2 gid [[thread_position_in_grid]]
-) {
-    if (gid.x >= output.get_width() || gid.y >= output.get_height()) return;
-
-    constexpr sampler colorSampler(coord::normalized, filter::linear, address::clamp_to_edge);
-    float2 uv = (float2(gid) + 0.5) / float2(output.get_width(), output.get_height());
-
-    float4 prev = prevColor.sample(colorSampler, uv);
-    float4 curr = currColor.sample(colorSampler, uv);
-    float4 result = mix(curr, prev, interpFactor);
-    output.write(result, gid);
-}
-)METAL";
+static const char* kSimpleBlendShader = "\n"
+"#include <metal_stdlib>\n"
+"using namespace metal;\n"
+"\n"
+"kernel void simpleBlendKernel(\n"
+"    texture2d<float, access::sample> prevColor [[texture(0)]],\n"
+"    texture2d<float, access::sample> currColor [[texture(1)]],\n"
+"    texture2d<float, access::write> output [[texture(2)]],\n"
+"    constant float& interpFactor [[buffer(0)]],\n"
+"    uint2 gid [[thread_position_in_grid]]\n"
+") {\n"
+"    if (gid.x >= output.get_width() || gid.y >= output.get_height()) return;\n"
+"\n"
+"    constexpr sampler colorSampler(coord::normalized, filter::linear, address::clamp_to_edge);\n"
+"    float2 uv = (float2(gid) + 0.5) / float2(output.get_width(), output.get_height());\n"
+"\n"
+"    float4 prev = prevColor.sample(colorSampler, uv);\n"
+"    float4 curr = currColor.sample(colorSampler, uv);\n"
+"    float4 result = mix(curr, prev, interpFactor);\n"
+"    output.write(result, gid);\n"
+"}\n";
 
 // MARK: - Camera-Guided Motion-Adaptive & Temporal Interp Shaders (GPU)
 // Uses game camera rotation vector from JNI to shift 3D scene smoothly with zero noise,
@@ -274,301 +272,298 @@ struct CameraGuidedUniforms {
     float isPredictive;
 };
 
-static const char* kMotionAdaptiveShader = R"METAL(
-#include <metal_stdlib>
-using namespace metal;
-
-struct CameraGuidedUniforms {
-    float2 viewportSize;
-    float2 cameraShiftUV;
-    float interpFactor;
-    float hasLastInterp;
-    float isPredictive;
-};
-
-// 3x3 Local Motion Search to handle non-camera motion (player walking, mobs, water, block breaking)
-inline float2 findLocalMotion(
-    texture2d<float, access::sample> prevColor,
-    texture2d<float, access::sample> currColor,
-    sampler linearSampler,
-    sampler pointSampler,
-    float2 uv,
-    float2 texel,
-    float2 baseShift
-) {
-    float4 curCenter = currColor.sample(pointSampler, uv);
-    float4 prvCenter = prevColor.sample(pointSampler, clamp(uv - baseShift, float2(0.0), float2(1.0)));
-
-    float baseDiff = dot(abs(curCenter.rgb - prvCenter.rgb), float3(0.299, 0.587, 0.114));
-    if (baseDiff < 0.05) return baseShift; // Already matches well
-
-    float minDiff = baseDiff;
-    float2 bestOffset = baseShift;
-    float2 step = texel * 2.5;
-
-    for (int dy = -1; dy <= 1; dy++) {
-        for (int dx = -1; dx <= 1; dx++) {
-            if (dx == 0 && dy == 0) continue;
-            float2 testShift = baseShift + float2(float(dx), float(dy)) * step;
-            float4 testPrev = prevColor.sample(linearSampler, clamp(uv - testShift, float2(0.0), float2(1.0)));
-            float diff = dot(abs(curCenter.rgb - testPrev.rgb), float3(0.299, 0.587, 0.114));
-            if (diff < minDiff) {
-                minDiff = diff;
-                bestOffset = testShift;
-            }
-        }
-    }
-
-    return bestOffset;
-}
-
-kernel void motionAdaptiveKernel(
-    texture2d<float, access::sample> prevColor [[texture(0)]],
-    texture2d<float, access::sample> currColor [[texture(1)]],
-    texture2d<float, access::write> output [[texture(2)]],
-    constant CameraGuidedUniforms& uniforms [[buffer(0)]],
-    uint2 gid [[thread_position_in_grid]]
-) {
-    if (gid.x >= (uint)uniforms.viewportSize.x || gid.y >= (uint)uniforms.viewportSize.y) return;
-
-    float2 uv = (float2(gid) + 0.5) / uniforms.viewportSize;
-    constexpr sampler pointSampler(coord::normalized, filter::nearest, address::clamp_to_edge);
-    constexpr sampler linearSampler(coord::normalized, filter::linear, address::clamp_to_edge);
-
-    float4 curCenter = currColor.sample(pointSampler, uv);
-    float4 prvCenter = prevColor.sample(pointSampler, uv);
-
-    // 1. Static UI / HUD preservation (Hotbar, Crosshair, Hearts, Text)
-    float3 diff = abs(curCenter.rgb - prvCenter.rgb);
-    if ((diff.r + diff.g + diff.b) < 0.04) {
-        output.write(curCenter, gid);
-        return;
-    }
-
-    // 2. Camera + Local Motion Estimation
-    float2 texel = 1.0 / uniforms.viewportSize;
-    float2 motionV = findLocalMotion(prevColor, currColor, linearSampler, pointSampler, uv, texel, uniforms.cameraShiftUV);
-
-    // 3. Predictive Forward Extrapolation
-    float2 srcUV = clamp(uv - motionV * uniforms.interpFactor, float2(0.0), float2(1.0));
-    float4 predicted = currColor.sample(linearSampler, srcUV);
-
-    float predDiff = dot(abs(predicted.rgb - curCenter.rgb), float3(0.299, 0.587, 0.114));
-    float confidence = 1.0 - smoothstep(0.15, 0.45, predDiff);
-
-    float4 finalColor = mix(curCenter, predicted, confidence);
-    output.write(finalColor, gid);
-}
-)METAL";
+static const char* kMotionAdaptiveShader = "\n"
+"#include <metal_stdlib>\n"
+"using namespace metal;\n"
+"\n"
+"struct CameraGuidedUniforms {\n"
+"    float2 viewportSize;\n"
+"    float2 cameraShiftUV;\n"
+"    float interpFactor;\n"
+"    float hasLastInterp;\n"
+"    float isPredictive;\n"
+"};\n"
+"\n"
+"// 3x3 Local Motion Search to handle non-camera motion (player walking, mobs, water, block breaking)\n"
+"inline float2 findLocalMotion(\n"
+"    texture2d<float, access::sample> prevColor,\n"
+"    texture2d<float, access::sample> currColor,\n"
+"    sampler linearSampler,\n"
+"    sampler pointSampler,\n"
+"    float2 uv,\n"
+"    float2 texel,\n"
+"    float2 baseShift\n"
+") {\n"
+"    float4 curCenter = currColor.sample(pointSampler, uv);\n"
+"    float4 prvCenter = prevColor.sample(pointSampler, clamp(uv - baseShift, float2(0.0), float2(1.0)));\n"
+"\n"
+"    float baseDiff = dot(abs(curCenter.rgb - prvCenter.rgb), float3(0.299, 0.587, 0.114));\n"
+"    if (baseDiff < 0.05) return baseShift; // Already matches well\n"
+"\n"
+"    float minDiff = baseDiff;\n"
+"    float2 bestOffset = baseShift;\n"
+"    float2 step = texel * 2.5;\n"
+"\n"
+"    for (int dy = -1; dy <= 1; dy++) {\n"
+"        for (int dx = -1; dx <= 1; dx++) {\n"
+"            if (dx == 0 && dy == 0) continue;\n"
+"            float2 testShift = baseShift + float2(float(dx), float(dy)) * step;\n"
+"            float4 testPrev = prevColor.sample(linearSampler, clamp(uv - testShift, float2(0.0), float2(1.0)));\n"
+"            float diff = dot(abs(curCenter.rgb - testPrev.rgb), float3(0.299, 0.587, 0.114));\n"
+"            if (diff < minDiff) {\n"
+"                minDiff = diff;\n"
+"                bestOffset = testShift;\n"
+"            }\n"
+"        }\n"
+"    }\n"
+"\n"
+"    return bestOffset;\n"
+"}\n"
+"\n"
+"kernel void motionAdaptiveKernel(\n"
+"    texture2d<float, access::sample> prevColor [[texture(0)]],\n"
+"    texture2d<float, access::sample> currColor [[texture(1)]],\n"
+"    texture2d<float, access::write> output [[texture(2)]],\n"
+"    constant CameraGuidedUniforms& uniforms [[buffer(0)]],\n"
+"    uint2 gid [[thread_position_in_grid]]\n"
+") {\n"
+"    if (gid.x >= (uint)uniforms.viewportSize.x || gid.y >= (uint)uniforms.viewportSize.y) return;\n"
+"\n"
+"    float2 uv = (float2(gid) + 0.5) / uniforms.viewportSize;\n"
+"    constexpr sampler pointSampler(coord::normalized, filter::nearest, address::clamp_to_edge);\n"
+"    constexpr sampler linearSampler(coord::normalized, filter::linear, address::clamp_to_edge);\n"
+"\n"
+"    float4 curCenter = currColor.sample(pointSampler, uv);\n"
+"    float4 prvCenter = prevColor.sample(pointSampler, uv);\n"
+"\n"
+"    // 1. Static UI / HUD preservation (Hotbar, Crosshair, Hearts, Text)\n"
+"    float3 diff = abs(curCenter.rgb - prvCenter.rgb);\n"
+"    if ((diff.r + diff.g + diff.b) < 0.04) {\n"
+"        output.write(curCenter, gid);\n"
+"        return;\n"
+"    }\n"
+"\n"
+"    // 2. Camera + Local Motion Estimation\n"
+"    float2 texel = 1.0 / uniforms.viewportSize;\n"
+"    float2 motionV = findLocalMotion(prevColor, currColor, linearSampler, pointSampler, uv, texel, uniforms.cameraShiftUV);\n"
+"\n"
+"    // 3. Predictive Forward Extrapolation\n"
+"    float2 srcUV = clamp(uv - motionV * uniforms.interpFactor, float2(0.0), float2(1.0));\n"
+"    float4 predicted = currColor.sample(linearSampler, srcUV);\n"
+"\n"
+"    float predDiff = dot(abs(predicted.rgb - curCenter.rgb), float3(0.299, 0.587, 0.114));\n"
+"    float confidence = 1.0 - smoothstep(0.15, 0.45, predDiff);\n"
+"\n"
+"    float4 finalColor = mix(curCenter, predicted, confidence);\n"
+"    output.write(finalColor, gid);\n"
+"}\n";
 
 // MARK: - Temporal Interpolation Shader (Mode 2 Sub-A & Sub-B)
-static const char* kTemporalInterpShader = R"METAL(
-#include <metal_stdlib>
-using namespace metal;
-
-struct CameraGuidedUniforms {
-    float2 viewportSize;
-    float2 cameraShiftUV;
-    float interpFactor;
-    float hasLastInterp;
-    float isPredictive;
-};
-
-inline float2 findLocalMotion(
-    texture2d<float, access::sample> prevColor,
-    texture2d<float, access::sample> currColor,
-    sampler linearSampler,
-    sampler pointSampler,
-    float2 uv,
-    float2 texel,
-    float2 baseShift
-) {
-    float4 curCenter = currColor.sample(pointSampler, uv);
-    float4 prvCenter = prevColor.sample(pointSampler, clamp(uv - baseShift, float2(0.0), float2(1.0)));
-
-    float baseDiff = dot(abs(curCenter.rgb - prvCenter.rgb), float3(0.299, 0.587, 0.114));
-    if (baseDiff < 0.05) return baseShift;
-
-    float minDiff = baseDiff;
-    float2 bestOffset = baseShift;
-    float2 step = texel * 2.5;
-
-    for (int dy = -1; dy <= 1; dy++) {
-        for (int dx = -1; dx <= 1; dx++) {
-            if (dx == 0 && dy == 0) continue;
-            float2 testShift = baseShift + float2(float(dx), float(dy)) * step;
-            float4 testPrev = prevColor.sample(linearSampler, clamp(uv - testShift, float2(0.0), float2(1.0)));
-            float diff = dot(abs(curCenter.rgb - testPrev.rgb), float3(0.299, 0.587, 0.114));
-            if (diff < minDiff) {
-                minDiff = diff;
-                bestOffset = testShift;
-            }
-        }
-    }
-
-    return bestOffset;
-}
-
-kernel void temporalInterpKernel(
-    texture2d<float, access::sample> prevColor [[texture(0)]],
-    texture2d<float, access::sample> currColor [[texture(1)]],
-    texture2d<float, access::sample> lastInterp [[texture(2)]],
-    texture2d<float, access::write> output [[texture(3)]],
-    constant CameraGuidedUniforms& uniforms [[buffer(0)]],
-    uint2 gid [[thread_position_in_grid]]
-) {
-    if (gid.x >= (uint)uniforms.viewportSize.x || gid.y >= (uint)uniforms.viewportSize.y) return;
-
-    float2 uv = (float2(gid) + 0.5) / uniforms.viewportSize;
-    constexpr sampler pointSampler(coord::normalized, filter::nearest, address::clamp_to_edge);
-    constexpr sampler linearSampler(coord::normalized, filter::linear, address::clamp_to_edge);
-
-    float4 curPx = currColor.sample(pointSampler, uv);
-    float4 prvPx = prevColor.sample(pointSampler, uv);
-
-    // 1. Static UI preservation (Hotbar, Crosshair, Hearts, Text)
-    float3 diff = abs(curPx.rgb - prvPx.rgb);
-    if ((diff.r + diff.g + diff.b) < 0.04) {
-        output.write(curPx, gid);
-        return;
-    }
-
-    // 2. Camera + Local Motion Estimation
-    float2 texel = 1.0 / uniforms.viewportSize;
-    float2 motionV = findLocalMotion(prevColor, currColor, linearSampler, pointSampler, uv, texel, uniforms.cameraShiftUV);
-
-    if (uniforms.isPredictive > 0.5) {
-        // Sub-Option B: Predictive Forward Extrapolation (Dựng trước)
-        float2 srcUV = clamp(uv - motionV * uniforms.interpFactor, float2(0.0), float2(1.0));
-        float4 predicted = currColor.sample(linearSampler, srcUV);
-
-        float predDiff = dot(abs(predicted.rgb - curPx.rgb), float3(0.299, 0.587, 0.114));
-        float conf = 1.0 - smoothstep(0.15, 0.45, predDiff);
-        float4 res = mix(curPx, predicted, conf);
-
-        if (uniforms.hasLastInterp > 0.5) {
-            float4 lastPx = lastInterp.sample(linearSampler, uv);
-            res = mix(lastPx, res, 0.85);
-        }
-        output.write(res, gid);
-    } else {
-        // Sub-Option A: Temporal Interpolation In-Between (Nội suy giữa 2 frame ở t=0.5)
-        float t = uniforms.interpFactor;
-        float2 prevUV = clamp(uv - motionV * t, float2(0.0), float2(1.0));
-        float2 currUV = clamp(uv + motionV * (1.0 - t), float2(0.0), float2(1.0));
-
-        float4 prevWarped = prevColor.sample(linearSampler, prevUV);
-        float4 currWarped = currColor.sample(linearSampler, currUV);
-
-        float4 blended = mix(prevWarped, currWarped, t);
-
-        float warpDiff = dot(abs(prevWarped.rgb - currWarped.rgb), float3(0.299, 0.587, 0.114));
-        float conf = 1.0 - smoothstep(0.15, 0.45, warpDiff);
-        float4 fallback = mix(prvPx, curPx, t);
-        float4 res = mix(fallback, blended, conf);
-
-        if (uniforms.hasLastInterp > 0.5) {
-            float4 lastPx = lastInterp.sample(linearSampler, uv);
-            res = mix(lastPx, res, 0.80);
-        }
-        output.write(res, gid);
-    }
-}
-)METAL";
+static const char* kTemporalInterpShader = "\n"
+"#include <metal_stdlib>\n"
+"using namespace metal;\n"
+"\n"
+"struct CameraGuidedUniforms {\n"
+"    float2 viewportSize;\n"
+"    float2 cameraShiftUV;\n"
+"    float interpFactor;\n"
+"    float hasLastInterp;\n"
+"    float isPredictive;\n"
+"};\n"
+"\n"
+"inline float2 findLocalMotion(\n"
+"    texture2d<float, access::sample> prevColor,\n"
+"    texture2d<float, access::sample> currColor,\n"
+"    sampler linearSampler,\n"
+"    sampler pointSampler,\n"
+"    float2 uv,\n"
+"    float2 texel,\n"
+"    float2 baseShift\n"
+") {\n"
+"    float4 curCenter = currColor.sample(pointSampler, uv);\n"
+"    float4 prvCenter = prevColor.sample(pointSampler, clamp(uv - baseShift, float2(0.0), float2(1.0)));\n"
+"\n"
+"    float baseDiff = dot(abs(curCenter.rgb - prvCenter.rgb), float3(0.299, 0.587, 0.114));\n"
+"    if (baseDiff < 0.05) return baseShift;\n"
+"\n"
+"    float minDiff = baseDiff;\n"
+"    float2 bestOffset = baseShift;\n"
+"    float2 step = texel * 2.5;\n"
+"\n"
+"    for (int dy = -1; dy <= 1; dy++) {\n"
+"        for (int dx = -1; dx <= 1; dx++) {\n"
+"            if (dx == 0 && dy == 0) continue;\n"
+"            float2 testShift = baseShift + float2(float(dx), float(dy)) * step;\n"
+"            float4 testPrev = prevColor.sample(linearSampler, clamp(uv - testShift, float2(0.0), float2(1.0)));\n"
+"            float diff = dot(abs(curCenter.rgb - testPrev.rgb), float3(0.299, 0.587, 0.114));\n"
+"            if (diff < minDiff) {\n"
+"                minDiff = diff;\n"
+"                bestOffset = testShift;\n"
+"            }\n"
+"        }\n"
+"    }\n"
+"\n"
+"    return bestOffset;\n"
+"}\n"
+"\n"
+"kernel void temporalInterpKernel(\n"
+"    texture2d<float, access::sample> prevColor [[texture(0)]],\n"
+"    texture2d<float, access::sample> currColor [[texture(1)]],\n"
+"    texture2d<float, access::sample> lastInterp [[texture(2)]],\n"
+"    texture2d<float, access::write> output [[texture(3)]],\n"
+"    constant CameraGuidedUniforms& uniforms [[buffer(0)]],\n"
+"    uint2 gid [[thread_position_in_grid]]\n"
+") {\n"
+"    if (gid.x >= (uint)uniforms.viewportSize.x || gid.y >= (uint)uniforms.viewportSize.y) return;\n"
+"\n"
+"    float2 uv = (float2(gid) + 0.5) / uniforms.viewportSize;\n"
+"    constexpr sampler pointSampler(coord::normalized, filter::nearest, address::clamp_to_edge);\n"
+"    constexpr sampler linearSampler(coord::normalized, filter::linear, address::clamp_to_edge);\n"
+"\n"
+"    float4 curPx = currColor.sample(pointSampler, uv);\n"
+"    float4 prvPx = prevColor.sample(pointSampler, uv);\n"
+"\n"
+"    // 1. Static UI preservation (Hotbar, Crosshair, Hearts, Text)\n"
+"    float3 diff = abs(curPx.rgb - prvPx.rgb);\n"
+"    if ((diff.r + diff.g + diff.b) < 0.04) {\n"
+"        output.write(curPx, gid);\n"
+"        return;\n"
+"    }\n"
+"\n"
+"    // 2. Camera + Local Motion Estimation\n"
+"    float2 texel = 1.0 / uniforms.viewportSize;\n"
+"    float2 motionV = findLocalMotion(prevColor, currColor, linearSampler, pointSampler, uv, texel, uniforms.cameraShiftUV);\n"
+"\n"
+"    if (uniforms.isPredictive > 0.5) {\n"
+"        // Sub-Option B: Predictive Forward Extrapolation (Dựng trước)\n"
+"        float2 srcUV = clamp(uv - motionV * uniforms.interpFactor, float2(0.0), float2(1.0));\n"
+"        float4 predicted = currColor.sample(linearSampler, srcUV);\n"
+"\n"
+"        float predDiff = dot(abs(predicted.rgb - curPx.rgb), float3(0.299, 0.587, 0.114));\n"
+"        float conf = 1.0 - smoothstep(0.15, 0.45, predDiff);\n"
+"        float4 res = mix(curPx, predicted, conf);\n"
+"\n"
+"        if (uniforms.hasLastInterp > 0.5) {\n"
+"            float4 lastPx = lastInterp.sample(linearSampler, uv);\n"
+"            res = mix(lastPx, res, 0.85);\n"
+"        }\n"
+"        output.write(res, gid);\n"
+"    } else {\n"
+"        // Sub-Option A: Temporal Interpolation In-Between (Nội suy giữa 2 frame ở t=0.5)\n"
+"        float t = uniforms.interpFactor;\n"
+"        float2 prevUV = clamp(uv - motionV * t, float2(0.0), float2(1.0));\n"
+"        float2 currUV = clamp(uv + motionV * (1.0 - t), float2(0.0), float2(1.0));\n"
+"\n"
+"        float4 prevWarped = prevColor.sample(linearSampler, prevUV);\n"
+"        float4 currWarped = currColor.sample(linearSampler, currUV);\n"
+"\n"
+"        float4 blended = mix(prevWarped, currWarped, t);\n"
+"\n"
+"        float warpDiff = dot(abs(prevWarped.rgb - currWarped.rgb), float3(0.299, 0.587, 0.114));\n"
+"        float conf = 1.0 - smoothstep(0.15, 0.45, warpDiff);\n"
+"        float4 fallback = mix(prvPx, curPx, t);\n"
+"        float4 res = mix(fallback, blended, conf);\n"
+"\n"
+"        if (uniforms.hasLastInterp > 0.5) {\n"
+"            float4 lastPx = lastInterp.sample(linearSampler, uv);\n"
+"            res = mix(lastPx, res, 0.80);\n"
+"        }\n"
+"        output.write(res, gid);\n"
+"    }\n"
+"}\n";
 // MARK: - Predictive Shader (extrapolate forward from current frame)
 // Instead of interpolating between two frames, this predicts the NEXT frame
 // by applying forward motion vector to the current frame.
 // This eliminates ghosting because we never blend two different images.
 // v2: Added edge-aware blending, disocclusion detection, adaptive predict factor.
 
-static const char* kPredictionShader = R"METAL(
-#include <metal_stdlib>
-using namespace metal;
-
-struct PredictionData {
-    float4x4 currViewMatrix;
-    float4x4 currProjMatrix;
-    float4x4 prevViewMatrix;
-    float4x4 prevProjMatrix;
-    float4x4 invViewMatrix;
-    float4x4 invProjMatrix;
-    float2 viewportSize;
-    float predictFactor;  // t: 0 = current frame, 1 = predict next frame, >1 = extrapolate further
-};
-
-kernel void predictionKernel(
-    texture2d<float, access::sample> currColor [[texture(0)]],
-    texture2d<float, access::sample> currDepth [[texture(1)]],
-    texture2d<float, access::write> output [[texture(2)]],
-    constant PredictionData& data [[buffer(0)]],
-    uint2 gid [[thread_position_in_grid]]
-) {
-    if (gid.x >= (uint)data.viewportSize.x || gid.y >= (uint)data.viewportSize.y) return;
-
-    float2 uv = (float2(gid) + 0.5) / data.viewportSize;
-
-    // Sample depth (placeholder = 1.0 when no depth buffer)
-    constexpr sampler depthSampler(coord::normalized, filter::nearest, address::clamp_to_edge);
-    float depthVal = currDepth.sample(depthSampler, uv).r;
-
-    // Reconstruct view-space position from current frame depth
-    float2 ndc = uv * 2.0 - 1.0;
-    float4 clipPos = float4(ndc, depthVal * 2.0 - 1.0, 1.0);
-
-    // Clip -> View space
-    float4 viewPos = data.invProjMatrix * clipPos;
-    viewPos /= viewPos.w;
-
-    // View -> World space
-    float4 worldPos = data.invViewMatrix * viewPos;
-
-    // World -> Previous frame clip space (to compute motion vector)
-    float4 prevClip = data.prevViewMatrix * worldPos;
-    prevClip = data.prevProjMatrix * prevClip;
-    prevClip /= prevClip.w;
-
-    // Previous frame UV
-    float2 prevUV = (prevClip.xy + 1.0) * 0.5;
-
-    // Motion vector: direction from current to previous
-    float2 motionVector = prevUV - uv;
-
-    // EXTRAPOLATE FORWARD: to predict next frame, move in OPPOSITE direction
-    float2 predictedUV = uv - motionVector * data.predictFactor;
-    predictedUV = clamp(predictedUV, float2(0.0), float2(1.0));
-
-    // === Edge-aware sampling: detect disocclusion by checking depth gradient ===
-    constexpr sampler colorSampler(coord::normalized, filter::linear, address::clamp_to_edge);
-
-    // Sample neighboring depths to detect edges (disocclusion occurs at depth discontinuities)
-    float2 texelSize = 1.0 / data.viewportSize;
-    float depthL = currDepth.sample(depthSampler, uv + float2(-texelSize.x, 0.0)).r;
-    float depthR = currDepth.sample(depthSampler, uv + float2( texelSize.x, 0.0)).r;
-    float depthU = currDepth.sample(depthSampler, uv + float2(0.0, -texelSize.y)).r;
-    float depthD = currDepth.sample(depthSampler, uv + float2(0.0,  texelSize.y)).r;
-
-    // Depth gradient magnitude (Sobel-like)
-    float depthGrad = abs(depthR - depthL) + abs(depthD - depthU);
-
-    // At depth edges, reduce predict factor to avoid disocclusion artifacts
-    // High gradient = edge = likely occlusion boundary
-    float edgeFactor = 1.0 - saturate(depthGrad * 10.0);
-    float adaptiveFactor = data.predictFactor * mix(0.3, 1.0, edgeFactor);
-
-    // Recalculate predicted UV with adaptive factor
-    predictedUV = uv - motionVector * adaptiveFactor;
-    predictedUV = clamp(predictedUV, float2(0.0), float2(1.0));
-
-    // Sample with motion compensation
-    float4 predictedColor = currColor.sample(colorSampler, predictedUV);
-
-    // === Confidence blending: at edges, blend more toward original position ===
-    float4 originalColor = currColor.sample(colorSampler, uv);
-    float4 result = mix(predictedColor, originalColor, edgeFactor * 0.3);
-
-    output.write(result, gid);
-}
-)METAL";
+static const char* kPredictionShader = "\n"
+"#include <metal_stdlib>\n"
+"using namespace metal;\n"
+"\n"
+"struct PredictionData {\n"
+"    float4x4 currViewMatrix;\n"
+"    float4x4 currProjMatrix;\n"
+"    float4x4 prevViewMatrix;\n"
+"    float4x4 prevProjMatrix;\n"
+"    float4x4 invViewMatrix;\n"
+"    float4x4 invProjMatrix;\n"
+"    float2 viewportSize;\n"
+"    float predictFactor;  // t: 0 = current frame, 1 = predict next frame, >1 = extrapolate further\n"
+"};\n"
+"\n"
+"kernel void predictionKernel(\n"
+"    texture2d<float, access::sample> currColor [[texture(0)]],\n"
+"    texture2d<float, access::sample> currDepth [[texture(1)]],\n"
+"    texture2d<float, access::write> output [[texture(2)]],\n"
+"    constant PredictionData& data [[buffer(0)]],\n"
+"    uint2 gid [[thread_position_in_grid]]\n"
+") {\n"
+"    if (gid.x >= (uint)data.viewportSize.x || gid.y >= (uint)data.viewportSize.y) return;\n"
+"\n"
+"    float2 uv = (float2(gid) + 0.5) / data.viewportSize;\n"
+"\n"
+"    // Sample depth (placeholder = 1.0 when no depth buffer)\n"
+"    constexpr sampler depthSampler(coord::normalized, filter::nearest, address::clamp_to_edge);\n"
+"    float depthVal = currDepth.sample(depthSampler, uv).r;\n"
+"\n"
+"    // Reconstruct view-space position from current frame depth\n"
+"    float2 ndc = uv * 2.0 - 1.0;\n"
+"    float4 clipPos = float4(ndc, depthVal * 2.0 - 1.0, 1.0);\n"
+"\n"
+"    // Clip -> View space\n"
+"    float4 viewPos = data.invProjMatrix * clipPos;\n"
+"    viewPos /= viewPos.w;\n"
+"\n"
+"    // View -> World space\n"
+"    float4 worldPos = data.invViewMatrix * viewPos;\n"
+"\n"
+"    // World -> Previous frame clip space (to compute motion vector)\n"
+"    float4 prevClip = data.prevViewMatrix * worldPos;\n"
+"    prevClip = data.prevProjMatrix * prevClip;\n"
+"    prevClip /= prevClip.w;\n"
+"\n"
+"    // Previous frame UV\n"
+"    float2 prevUV = (prevClip.xy + 1.0) * 0.5;\n"
+"\n"
+"    // Motion vector: direction from current to previous\n"
+"    float2 motionVector = prevUV - uv;\n"
+"\n"
+"    // EXTRAPOLATE FORWARD: to predict next frame, move in OPPOSITE direction\n"
+"    float2 predictedUV = uv - motionVector * data.predictFactor;\n"
+"    predictedUV = clamp(predictedUV, float2(0.0), float2(1.0));\n"
+"\n"
+"    // === Edge-aware sampling: detect disocclusion by checking depth gradient ===\n"
+"    constexpr sampler colorSampler(coord::normalized, filter::linear, address::clamp_to_edge);\n"
+"\n"
+"    // Sample neighboring depths to detect edges (disocclusion occurs at depth discontinuities)\n"
+"    float2 texelSize = 1.0 / data.viewportSize;\n"
+"    float depthL = currDepth.sample(depthSampler, uv + float2(-texelSize.x, 0.0)).r;\n"
+"    float depthR = currDepth.sample(depthSampler, uv + float2( texelSize.x, 0.0)).r;\n"
+"    float depthU = currDepth.sample(depthSampler, uv + float2(0.0, -texelSize.y)).r;\n"
+"    float depthD = currDepth.sample(depthSampler, uv + float2(0.0,  texelSize.y)).r;\n"
+"\n"
+"    // Depth gradient magnitude (Sobel-like)\n"
+"    float depthGrad = abs(depthR - depthL) + abs(depthD - depthU);\n"
+"\n"
+"    // At depth edges, reduce predict factor to avoid disocclusion artifacts\n"
+"    // High gradient = edge = likely occlusion boundary\n"
+"    float edgeFactor = 1.0 - saturate(depthGrad * 10.0);\n"
+"    float adaptiveFactor = data.predictFactor * mix(0.3, 1.0, edgeFactor);\n"
+"\n"
+"    // Recalculate predicted UV with adaptive factor\n"
+"    predictedUV = uv - motionVector * adaptiveFactor;\n"
+"    predictedUV = clamp(predictedUV, float2(0.0), float2(1.0));\n"
+"\n"
+"    // Sample with motion compensation\n"
+"    float4 predictedColor = currColor.sample(colorSampler, predictedUV);\n"
+"\n"
+"    // === Confidence blending: at edges, blend more toward original position ===\n"
+"    float4 originalColor = currColor.sample(colorSampler, uv);\n"
+"    float4 result = mix(predictedColor, originalColor, edgeFactor * 0.3);\n"
+"\n"
+"    output.write(result, gid);\n"
+"}\n";
 
 // MARK: - Forward Declarations
 
