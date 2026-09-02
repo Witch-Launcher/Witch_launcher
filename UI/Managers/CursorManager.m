@@ -525,297 +525,298 @@ static NSMutableDictionary<NSString *, UIImage *> *_shapeImageCache;
     UIGraphicsBeginImageContextWithOptions(canvas, NO, scale);
     CGContextRef ctx = UIGraphicsGetCurrentContext();
     CGContextClearRect(ctx, CGRectMake(0, 0, 32, 32));
-    // Subtle drop shadow for visibility on any game background
-    CGContextSetShadowWithColor(ctx, CGSizeMake(0, 1.2), 2.0, [UIColor colorWithWhite:0 alpha:0.35].CGColor);
+    // Windows Aero shadow - soft drop shadow like Windows 10
+    CGContextSetShadowWithColor(ctx, CGSizeMake(1.0, 1.0), 1.5, [UIColor colorWithWhite:0 alpha:0.45].CGColor);
 
     UIColor *fill = [UIColor whiteColor];
     UIColor *stroke = [UIColor blackColor];
-    CGFloat strokeWidth = 1.5;
+    CGFloat strokeWidth = 1.4;
 
     if ([typeId isEqualToString:@"normal"] || [typeId isEqualToString:@"working"]) {
-        // Modern macOS-style arrow - crisp, with highlight and shadow
+        // Windows 10 Aero Arrow - exact polygon from Wikimedia Commons (public domain, 32x32-32.svg)
+        // Original viewBox 36.67x56.16, points: 18.64 55.17, 11.5 38.49, .75 49.08, .75 1.81, 34.88 35.94, 18.57 36.14, 25.83 51.91
+        // Scale to fit 32x32 with padding, tip at (7,5) matches hitbox (7,5) for normal
+        CGFloat s = 0.48; // scale to fit 53px height -> 25.6 + 5 tip = 30.6 <32
+        CGFloat tx = 7 - 0.75*s;
+        CGFloat ty = 5 - 1.81*s;
         UIBezierPath *path = [UIBezierPath bezierPath];
-        // Tip at (7,5) matches hitbox (7,5) for 32x32
-        [path moveToPoint:CGPointMake(7, 5)];
-        [path addLineToPoint:CGPointMake(7, 22)];
-        [path addLineToPoint:CGPointMake(11.2, 17.8)];
-        [path addLineToPoint:CGPointMake(14.8, 21.4)];
-        [path addLineToPoint:CGPointMake(20.8, 15.2)];
-        [path addLineToPoint:CGPointMake(15.2, 11.8)];
-        [path addLineToPoint:CGPointMake(11.5, 15.2)];
+        [path moveToPoint:CGPointMake(18.64*s+tx, 55.17*s+ty)];
+        [path addLineToPoint:CGPointMake(11.5*s+tx, 38.49*s+ty)];
+        [path addLineToPoint:CGPointMake(0.75*s+tx, 49.08*s+ty)];
+        [path addLineToPoint:CGPointMake(0.75*s+tx, 1.81*s+ty)];
+        [path addLineToPoint:CGPointMake(34.88*s+tx, 35.94*s+ty)];
+        [path addLineToPoint:CGPointMake(18.57*s+tx, 36.14*s+ty)];
+        [path addLineToPoint:CGPointMake(25.83*s+tx, 51.91*s+ty)];
         [path closePath];
-        path.lineJoinStyle = kCGLineJoinRound;
-        path.lineCapStyle = kCGLineCapRound;
-        // Outer stroke
+        path.lineJoinStyle = kCGLineJoinMiter;
+        path.lineCapStyle = kCGLineCapButt;
         [stroke setStroke];
-        path.lineWidth = strokeWidth + 0.9;
+        path.lineWidth = strokeWidth;
         [path stroke];
-        // Fill
         [fill setFill];
         [path fill];
-        // Inner highlight for 3D feel
+        // Inner highlight subtle (Windows aero has soft highlight on left edge)
         UIBezierPath *hi = [UIBezierPath bezierPath];
-        [hi moveToPoint:CGPointMake(7.8, 6.2)];
-        [hi addLineToPoint:CGPointMake(7.8, 20.5)];
-        [hi addLineToPoint:CGPointMake(11.0, 17.0)];
-        hi.lineWidth = 0.7;
+        [hi moveToPoint:CGPointMake(1.5*s+tx, 3.5*s+ty)];
+        [hi addLineToPoint:CGPointMake(1.5*s+tx, 46*s+ty)];
+        hi.lineWidth = 0.6;
         hi.lineCapStyle = kCGLineCapRound;
-        hi.lineJoinStyle = kCGLineJoinRound;
-        [[UIColor colorWithWhite:1 alpha:0.55] setStroke];
+        [[UIColor colorWithWhite:1 alpha:0.35] setStroke];
         [hi stroke];
         if ([typeId isEqualToString:@"working"]) {
-            // Small spinner badge at bottom-right
-            CGRect badge = CGRectMake(19.5, 19.5, 10, 10);
+            // Windows Working In Background: arrow + small blue spinner badge
+            CGRect badge = CGRectMake(18, 18, 11, 11);
             UIBezierPath *bg = [UIBezierPath bezierPathWithOvalInRect:badge];
-            [[UIColor whiteColor] setFill];
-            [bg fill];
-            [[UIColor blackColor] setStroke];
-            bg.lineWidth = 1.2;
-            [bg stroke];
-            UIBezierPath *arc = [UIBezierPath bezierPathWithArcCenter:CGPointMake(24.5, 24.5) radius:3.2 startAngle:-M_PI_2 endAngle:M_PI*0.85 clockwise:YES];
-            arc.lineWidth = 1.3;
+            [[UIColor whiteColor] setFill]; [bg fill];
+            [[UIColor blackColor] setStroke]; bg.lineWidth = 1.1; [bg stroke];
+            // Blue spinner (Windows busy is blue)
+            UIBezierPath *arc = [UIBezierPath bezierPathWithArcCenter:CGPointMake(23.5, 23.5) radius:3.3 startAngle:-M_PI_2 endAngle:M_PI*0.85 clockwise:YES];
+            arc.lineWidth = 1.4;
             arc.lineCapStyle = kCGLineCapRound;
-            [[UIColor blackColor] setStroke];
+            [[UIColor colorWithRed:0.0 green:0.47 blue:0.84 alpha:1] setStroke];
             [arc stroke];
         }
     } else if ([typeId isEqualToString:@"link"]) {
-        // Hand pointer - modern with rounded fingers, smooth palm
-        // Palm
-        UIBezierPath *palm = [UIBezierPath bezierPathWithRoundedRect:CGRectMake(8.5, 14.5, 13, 9) cornerRadius:3];
+        // Windows Aero Hand - white hand with black outline, like Windows 10
+        // Palm + fingers, index extended
+        UIBezierPath *palm = [UIBezierPath bezierPathWithRoundedRect:CGRectMake(9, 13.5, 12.5, 9.5) cornerRadius:3.2];
         [fill setFill]; [palm fill]; [stroke setStroke]; palm.lineWidth = strokeWidth; [palm stroke];
-        // 4 fingers
-        for (int i=0;i<4;i++) {
-            CGFloat x = 9.2 + i*3.1;
-            CGFloat y = (i==1 ? 5.8 : 7.2);
-            CGFloat h = (i==1 ? 9.8 : 8.4);
-            UIBezierPath *finger = [UIBezierPath bezierPathWithRoundedRect:CGRectMake(x, y, 2.5, h) cornerRadius:1.25];
-            [fill setFill]; [finger fill]; [stroke setStroke]; finger.lineWidth = 1.1; [finger stroke];
-        }
+        // Index finger extended up
+        UIBezierPath *index = [UIBezierPath bezierPathWithRoundedRect:CGRectMake(10.2, 4.5, 2.8, 11) cornerRadius:1.4];
+        [fill setFill]; [index fill]; [stroke setStroke]; index.lineWidth = 1.1; [index stroke];
+        // Middle finger
+        UIBezierPath *mid = [UIBezierPath bezierPathWithRoundedRect:CGRectMake(13.4, 7.2, 2.8, 8.2) cornerRadius:1.4];
+        [fill setFill]; [mid fill]; [stroke setStroke]; mid.lineWidth = 1.1; [mid stroke];
+        // Ring finger
+        UIBezierPath *ring = [UIBezierPath bezierPathWithRoundedRect:CGRectMake(16.6, 8.0, 2.8, 7.4) cornerRadius:1.4];
+        [fill setFill]; [ring fill]; [stroke setStroke]; ring.lineWidth = 1.1; [ring stroke];
+        // Pinky
+        UIBezierPath *pinky = [UIBezierPath bezierPathWithRoundedRect:CGRectMake(19.8, 9.2, 2.4, 6.2) cornerRadius:1.2];
+        [fill setFill]; [pinky fill]; [stroke setStroke]; pinky.lineWidth = 1.1; [pinky stroke];
         // Thumb
         UIBezierPath *thumb = [UIBezierPath bezierPath];
-        [thumb moveToPoint:CGPointMake(8.5, 16.5)];
-        [thumb addQuadCurveToPoint:CGPointMake(5.2, 11.5) controlPoint:CGPointMake(5, 15)];
-        [thumb addLineToPoint:CGPointMake(6.8, 10.2)];
-        [thumb addQuadCurveToPoint:CGPointMake(9, 14) controlPoint:CGPointMake(7.8, 12)];
+        [thumb moveToPoint:CGPointMake(9, 15.5)];
+        [thumb addQuadCurveToPoint:CGPointMake(5.5, 11) controlPoint:CGPointMake(5.2, 14)];
+        [thumb addLineToPoint:CGPointMake(7.2, 9.5)];
+        [thumb addQuadCurveToPoint:CGPointMake(9.8, 13.2) controlPoint:CGPointMake(8.2, 11.2)];
         [thumb closePath];
         [fill setFill]; [thumb fill]; [stroke setStroke]; thumb.lineWidth = 1.1; [thumb stroke];
     } else if ([typeId isEqualToString:@"text"]) {
-        // I-beam - crisp with caps, like macOS text cursor
+        // Windows I-beam - thin vertical with caps, classic Windows text cursor
         CGFloat cx=16, cy=16;
-        CGFloat h=15, w=1.8, capW=9, capH=1.6;
-        UIBezierPath *stem = [UIBezierPath bezierPathWithRoundedRect:CGRectMake(cx - w/2, cy - h/2, w, h) cornerRadius:0.9];
-        [fill setFill]; [stem fill]; [stroke setStroke]; stem.lineWidth = 1.3; [stem stroke];
-        UIBezierPath *top = [UIBezierPath bezierPathWithRoundedRect:CGRectMake(cx - capW/2, cy - h/2 - 0.6, capW, capH) cornerRadius:0.8];
-        [fill setFill]; [top fill]; [stroke setStroke]; top.lineWidth = 1.1; [top stroke];
-        UIBezierPath *bot = [UIBezierPath bezierPathWithRoundedRect:CGRectMake(cx - capW/2, cy + h/2 - 1.0, capW, capH) cornerRadius:0.8];
-        [fill setFill]; [bot fill]; [stroke setStroke]; bot.lineWidth = 1.1; [bot stroke];
-        // Inner bright line
-        UIBezierPath *inner = [UIBezierPath bezierPath];
-        [inner moveToPoint:CGPointMake(cx, cy - h/2 + 1)];
-        [inner addLineToPoint:CGPointMake(cx, cy + h/2 -1)];
-        inner.lineWidth = 0.5;
-        [[UIColor colorWithWhite:1 alpha:0.7] setStroke];
-        [inner stroke];
+        CGFloat h=16, w=1.6, capW=8, capH=1.4;
+        // Vertical stem
+        UIBezierPath *stem = [UIBezierPath bezierPathWithRect:CGRectMake(cx - w/2, cy - h/2, w, h)];
+        [fill setFill]; [stem fill]; [stroke setStroke]; stem.lineWidth = 1.0; [stem stroke];
+        // Top cap
+        UIBezierPath *top = [UIBezierPath bezierPathWithRect:CGRectMake(cx - capW/2, cy - h/2, capW, capH)];
+        [fill setFill]; [top fill]; [stroke setStroke]; top.lineWidth = 1.0; [top stroke];
+        // Bottom cap
+        UIBezierPath *bot = [UIBezierPath bezierPathWithRect:CGRectMake(cx - capW/2, cy + h/2 - capH, capW, capH)];
+        [fill setFill]; [bot fill]; [stroke setStroke]; bot.lineWidth = 1.0; [bot stroke];
     } else if ([typeId isEqualToString:@"precision"] || [typeId isEqualToString:@"crosshair"]) {
-        // Precision crosshair - thin, with gap, center dot
+        // Windows Precision - crosshair with thin lines and center dot, Windows style is simple cross
         CGFloat cx=16, cy=16;
-        CGFloat len=11, thick=1.3, gap=3.2;
+        CGFloat len=10, thick=1.0, gap=2.8;
         UIBezierPath *cross = [UIBezierPath bezierPath];
-        // Horizontal left
         [cross appendPath:[UIBezierPath bezierPathWithRect:CGRectMake(cx - len, cy - thick/2, len - gap, thick)]];
-        // Horizontal right
         [cross appendPath:[UIBezierPath bezierPathWithRect:CGRectMake(cx + gap, cy - thick/2, len - gap, thick)]];
-        // Vertical top
         [cross appendPath:[UIBezierPath bezierPathWithRect:CGRectMake(cx - thick/2, cy - len, thick, len - gap)]];
-        // Vertical bottom
         [cross appendPath:[UIBezierPath bezierPathWithRect:CGRectMake(cx - thick/2, cy + gap, thick, len - gap)]];
-        [fill setFill]; [cross fill]; [stroke setStroke]; cross.lineWidth = 0.7; [cross stroke];
-        // Center dot
-        UIBezierPath *dot = [UIBezierPath bezierPathWithOvalInRect:CGRectMake(cx-1.7, cy-1.7, 3.4, 3.4)];
-        [[UIColor blackColor] setFill]; [dot fill];
-        UIBezierPath *dotInner = [UIBezierPath bezierPathWithOvalInRect:CGRectMake(cx-0.7, cy-0.7, 1.4, 1.4)];
-        [[UIColor whiteColor] setFill]; [dotInner fill];
+        [[UIColor blackColor] setFill]; [cross fill];
+        // White inner for contrast
+        // Center dot small
+        UIBezierPath *dot = [UIBezierPath bezierPathWithOvalInRect:CGRectMake(cx-0.9, cy-0.9, 1.8, 1.8)];
+        [[UIColor whiteColor] setFill]; [dot fill];
     } else if ([typeId isEqualToString:@"busy"]) {
-        // Busy - circular spinner 300°
-        CGFloat cx=16, cy=16, r=9;
-        UIBezierPath *circle = [UIBezierPath bezierPathWithArcCenter:CGPointMake(cx, cy) radius:r startAngle:-M_PI_2 endAngle:M_PI*1.33 clockwise:YES];
-        circle.lineWidth = 2.4;
+        // Windows Busy - blue spinning circle (Aero busy is blue)
+        CGFloat cx=16, cy=16, r=8.5;
+        // Outer circle thin
+        UIBezierPath *circle = [UIBezierPath bezierPathWithArcCenter:CGPointMake(cx, cy) radius:r startAngle:-M_PI_2 endAngle:M_PI*1.4 clockwise:YES];
+        circle.lineWidth = 2.6;
         circle.lineCapStyle = kCGLineCapRound;
-        [stroke setStroke]; [circle stroke];
-        UIBezierPath *inner = [UIBezierPath bezierPathWithArcCenter:CGPointMake(cx, cy) radius:r startAngle:-M_PI_2 endAngle:M_PI*1.33 clockwise:YES];
-        inner.lineWidth = 1.0;
-        inner.lineCapStyle = kCGLineCapRound;
-        [[UIColor colorWithWhite:1 alpha:0.92] setStroke];
-        [inner stroke];
-        CGFloat angle = M_PI*1.33;
+        [[UIColor colorWithRed:0.0 green:0.47 blue:0.84 alpha:1] setStroke];
+        [circle stroke];
+        // Black outline for visibility
+        UIBezierPath *outline = [UIBezierPath bezierPathWithArcCenter:CGPointMake(cx, cy) radius:r startAngle:-M_PI_2 endAngle:M_PI*1.4 clockwise:YES];
+        outline.lineWidth = 3.6;
+        [[UIColor blackColor] setStroke];
+        outline.lineCapStyle = kCGLineCapRound;
+        [outline stroke];
+        // Blue on top again
+        [circle stroke];
+        // Arrow head
+        CGFloat angle = M_PI*1.4;
         CGPoint p = CGPointMake(cx + r*cos(angle), cy + r*sin(angle));
-        CGFloat ah = 3.6;
+        CGFloat ah = 3.4;
         UIBezierPath *arrow = [UIBezierPath bezierPath];
         [arrow moveToPoint:p];
         [arrow addLineToPoint:CGPointMake(p.x - ah*cos(angle - M_PI/6), p.y - ah*sin(angle - M_PI/6))];
         [arrow addLineToPoint:CGPointMake(p.x - ah*cos(angle + M_PI/6), p.y - ah*sin(angle + M_PI/6))];
         [arrow closePath];
-        [fill setFill]; [arrow fill]; [stroke setStroke]; arrow.lineWidth = 1.0; [arrow stroke];
+        [[UIColor colorWithRed:0.0 green:0.47 blue:0.84 alpha:1] setFill]; [arrow fill];
+        [[UIColor blackColor] setStroke]; arrow.lineWidth = 0.9; [arrow stroke];
     } else if ([typeId isEqualToString:@"unavailable"]) {
-        // Circle slash - red slash for visibility
+        // Windows Unavailable - red circle slash, Windows style
         CGFloat cx=16, cy=16, r=10;
         UIBezierPath *circle = [UIBezierPath bezierPathWithOvalInRect:CGRectMake(cx-r, cy-r, r*2, r*2)];
-        circle.lineWidth = 2.0;
-        [[UIColor colorWithWhite:1 alpha:0.94] setFill]; [circle fill];
-        [stroke setStroke]; [circle stroke];
-        // Slash - outer black then inner red
+        circle.lineWidth = 1.8;
+        [[UIColor whiteColor] setFill]; [circle fill];
+        [[UIColor blackColor] setStroke]; [circle stroke];
+        UIBezierPath *slash = [UIBezierPath bezierPath];
+        [slash moveToPoint:CGPointMake(cx - r*0.7, cy - r*0.7)];
+        [slash addLineToPoint:CGPointMake(cx + r*0.7, cy + r*0.7)];
+        slash.lineWidth = 2.4;
+        slash.lineCapStyle = kCGLineCapRound;
+        [[UIColor colorWithRed:0.90 green:0.12 blue:0.12 alpha:1] setStroke];
+        [slash stroke];
+        // Black outline for slash
         UIBezierPath *slashBack = [UIBezierPath bezierPath];
-        [slashBack moveToPoint:CGPointMake(cx - r*0.68, cy - r*0.68)];
-        [slashBack addLineToPoint:CGPointMake(cx + r*0.68, cy + r*0.68)];
-        slashBack.lineWidth = 3.4;
-        slashBack.lineCapStyle = kCGLineCapRound;
+        [slashBack moveToPoint:CGPointMake(cx - r*0.7, cy - r*0.7)];
+        [slashBack addLineToPoint:CGPointMake(cx + r*0.7, cy + r*0.7)];
+        slashBack.lineWidth = 3.6;
         [[UIColor blackColor] setStroke];
         [slashBack stroke];
-        UIBezierPath *slash = [UIBezierPath bezierPath];
-        [slash moveToPoint:CGPointMake(cx - r*0.68, cy - r*0.68)];
-        [slash addLineToPoint:CGPointMake(cx + r*0.68, cy + r*0.68)];
-        slash.lineWidth = 2.0;
-        slash.lineCapStyle = kCGLineCapRound;
-        [[UIColor colorWithRed:0.96 green:0.22 blue:0.22 alpha:1] setStroke];
         [slash stroke];
     } else if ([typeId isEqualToString:@"vresize"]) {
-        CGFloat cx=16, cy=16, ah=6, aw=7;
+        // Windows Vertical Resize - two vertical arrows, Windows style is simple thin arrows
+        CGFloat cx=16, cy=16;
+        // Use simple triangle arrows with stem
         UIBezierPath *up = [UIBezierPath bezierPath];
-        [up moveToPoint:CGPointMake(cx, cy - 9)];
-        [up addLineToPoint:CGPointMake(cx - aw/2, cy - 9 + ah)];
-        [up addLineToPoint:CGPointMake(cx - 1.8, cy - 9 + ah)];
-        [up addLineToPoint:CGPointMake(cx - 1.8, cy - 1.8)];
-        [up addLineToPoint:CGPointMake(cx + 1.8, cy - 1.8)];
-        [up addLineToPoint:CGPointMake(cx + 1.8, cy - 9 + ah)];
-        [up addLineToPoint:CGPointMake(cx + aw/2, cy - 9 + ah)];
+        [up moveToPoint:CGPointMake(cx, cy - 10)];
+        [up addLineToPoint:CGPointMake(cx - 4, cy - 4)];
+        [up addLineToPoint:CGPointMake(cx - 1.5, cy - 4)];
+        [up addLineToPoint:CGPointMake(cx - 1.5, cy - 1.5)];
+        [up addLineToPoint:CGPointMake(cx + 1.5, cy - 1.5)];
+        [up addLineToPoint:CGPointMake(cx + 1.5, cy - 4)];
+        [up addLineToPoint:CGPointMake(cx + 4, cy - 4)];
         [up closePath];
         UIBezierPath *down = [UIBezierPath bezierPath];
-        [down moveToPoint:CGPointMake(cx, cy + 9)];
-        [down addLineToPoint:CGPointMake(cx - aw/2, cy + 9 - ah)];
-        [down addLineToPoint:CGPointMake(cx - 1.8, cy + 9 - ah)];
-        [down addLineToPoint:CGPointMake(cx - 1.8, cy + 1.8)];
-        [down addLineToPoint:CGPointMake(cx + 1.8, cy + 1.8)];
-        [down addLineToPoint:CGPointMake(cx + 1.8, cy + 9 - ah)];
-        [down addLineToPoint:CGPointMake(cx + aw/2, cy + 9 - ah)];
+        [down moveToPoint:CGPointMake(cx, cy + 10)];
+        [down addLineToPoint:CGPointMake(cx - 4, cy + 4)];
+        [down addLineToPoint:CGPointMake(cx - 1.5, cy + 4)];
+        [down addLineToPoint:CGPointMake(cx - 1.5, cy + 1.5)];
+        [down addLineToPoint:CGPointMake(cx + 1.5, cy + 1.5)];
+        [down addLineToPoint:CGPointMake(cx + 1.5, cy + 4)];
+        [down addLineToPoint:CGPointMake(cx + 4, cy + 4)];
         [down closePath];
         UIBezierPath *all = [UIBezierPath bezierPath];
         [all appendPath:up]; [all appendPath:down];
-        [fill setFill]; [all fill]; [stroke setStroke]; all.lineWidth = strokeWidth; all.lineJoinStyle = kCGLineJoinRound; [all stroke];
+        [fill setFill]; [all fill]; [stroke setStroke]; all.lineWidth = strokeWidth; [all stroke];
     } else if ([typeId isEqualToString:@"hresize"]) {
-        CGFloat cx=16, cy=16, ah=6, aw=7;
+        CGFloat cx=16, cy=16;
         UIBezierPath *left = [UIBezierPath bezierPath];
-        [left moveToPoint:CGPointMake(cx - 9, cy)];
-        [left addLineToPoint:CGPointMake(cx - 9 + ah, cy - aw/2)];
-        [left addLineToPoint:CGPointMake(cx - 9 + ah, cy - 1.8)];
-        [left addLineToPoint:CGPointMake(cx - 1.8, cy - 1.8)];
-        [left addLineToPoint:CGPointMake(cx - 1.8, cy + 1.8)];
-        [left addLineToPoint:CGPointMake(cx - 9 + ah, cy + 1.8)];
-        [left addLineToPoint:CGPointMake(cx - 9 + ah, cy + aw/2)];
+        [left moveToPoint:CGPointMake(cx - 10, cy)];
+        [left addLineToPoint:CGPointMake(cx - 4, cy - 4)];
+        [left addLineToPoint:CGPointMake(cx - 4, cy - 1.5)];
+        [left addLineToPoint:CGPointMake(cx - 1.5, cy - 1.5)];
+        [left addLineToPoint:CGPointMake(cx - 1.5, cy + 1.5)];
+        [left addLineToPoint:CGPointMake(cx - 4, cy + 1.5)];
+        [left addLineToPoint:CGPointMake(cx - 4, cy + 4)];
         [left closePath];
         UIBezierPath *right = [UIBezierPath bezierPath];
-        [right moveToPoint:CGPointMake(cx + 9, cy)];
-        [right addLineToPoint:CGPointMake(cx + 9 - ah, cy - aw/2)];
-        [right addLineToPoint:CGPointMake(cx + 9 - ah, cy - 1.8)];
-        [right addLineToPoint:CGPointMake(cx + 1.8, cy - 1.8)];
-        [right addLineToPoint:CGPointMake(cx + 1.8, cy + 1.8)];
-        [right addLineToPoint:CGPointMake(cx + 9 - ah, cy + 1.8)];
-        [right addLineToPoint:CGPointMake(cx + 9 - ah, cy + aw/2)];
+        [right moveToPoint:CGPointMake(cx + 10, cy)];
+        [right addLineToPoint:CGPointMake(cx + 4, cy - 4)];
+        [right addLineToPoint:CGPointMake(cx + 4, cy - 1.5)];
+        [right addLineToPoint:CGPointMake(cx + 1.5, cy - 1.5)];
+        [right addLineToPoint:CGPointMake(cx + 1.5, cy + 1.5)];
+        [right addLineToPoint:CGPointMake(cx + 4, cy + 1.5)];
+        [right addLineToPoint:CGPointMake(cx + 4, cy + 4)];
         [right closePath];
         UIBezierPath *all = [UIBezierPath bezierPath];
         [all appendPath:left]; [all appendPath:right];
         [fill setFill]; [all fill]; [stroke setStroke]; all.lineWidth = strokeWidth; [all stroke];
     } else if ([typeId isEqualToString:@"diagonal"]) {
-        // Diagonal NW-SE
+        // Windows Diagonal Resize - NW-SE arrows
         UIBezierPath *a1 = [UIBezierPath bezierPath];
         [a1 moveToPoint:CGPointMake(8, 8)];
         [a1 addLineToPoint:CGPointMake(14, 8)];
-        [a1 addLineToPoint:CGPointMake(14, 10)];
-        [a1 addLineToPoint:CGPointMake(11, 11)];
+        [a1 addLineToPoint:CGPointMake(14, 10.2)];
+        [a1 addLineToPoint:CGPointMake(11.2, 11)];
         [a1 addLineToPoint:CGPointMake(10, 14)];
         [a1 addLineToPoint:CGPointMake(8, 14)];
         [a1 closePath];
         UIBezierPath *a2 = [UIBezierPath bezierPath];
         [a2 moveToPoint:CGPointMake(24, 24)];
         [a2 addLineToPoint:CGPointMake(18, 24)];
-        [a2 addLineToPoint:CGPointMake(18, 22)];
-        [a2 addLineToPoint:CGPointMake(21, 21)];
+        [a2 addLineToPoint:CGPointMake(18, 21.8)];
+        [a2 addLineToPoint:CGPointMake(20.8, 21)];
         [a2 addLineToPoint:CGPointMake(22, 18)];
         [a2 addLineToPoint:CGPointMake(24, 18)];
         [a2 closePath];
         UIBezierPath *all = [UIBezierPath bezierPath];
         [all appendPath:a1]; [all appendPath:a2];
         [fill setFill]; [all fill]; [stroke setStroke]; all.lineWidth = strokeWidth; [all stroke];
-        // Center line with highlight
         UIBezierPath *line = [UIBezierPath bezierPath];
         [line moveToPoint:CGPointMake(10, 10)];
         [line addLineToPoint:CGPointMake(22, 22)];
-        line.lineWidth = 1.7;
-        line.lineCapStyle = kCGLineCapRound;
-        [stroke setStroke]; [line stroke];
-        [[UIColor whiteColor] setStroke]; line.lineWidth = 0.8; [line stroke];
+        line.lineWidth = 1.2;
+        [[UIColor blackColor] setStroke]; [line stroke];
+        [[UIColor whiteColor] setStroke]; line.lineWidth = 0.6; [line stroke];
     } else if ([typeId isEqualToString:@"move"]) {
+        // Windows Move - four arrows, Windows style is simple
         CGFloat cx=16, cy=16;
-        CGFloat ah=5, aw=6;
+        CGFloat ah=5, aw=5;
         UIBezierPath *up = [UIBezierPath bezierPath];
-        [up moveToPoint:CGPointMake(cx, cy - 9.5)];
-        [up addLineToPoint:CGPointMake(cx - aw/2, cy - 9.5 + ah)];
-        [up addLineToPoint:CGPointMake(cx - 1.4, cy - 9.5 + ah)];
-        [up addLineToPoint:CGPointMake(cx - 1.4, cy - 1.6)];
-        [up addLineToPoint:CGPointMake(cx + 1.4, cy - 1.6)];
-        [up addLineToPoint:CGPointMake(cx + 1.4, cy - 9.5 + ah)];
-        [up addLineToPoint:CGPointMake(cx + aw/2, cy - 9.5 + ah)];
+        [up moveToPoint:CGPointMake(cx, cy - 9)];
+        [up addLineToPoint:CGPointMake(cx - aw/2, cy - 9 + ah)];
+        [up addLineToPoint:CGPointMake(cx - 1.2, cy - 9 + ah)];
+        [up addLineToPoint:CGPointMake(cx - 1.2, cy - 1.2)];
+        [up addLineToPoint:CGPointMake(cx + 1.2, cy - 1.2)];
+        [up addLineToPoint:CGPointMake(cx + 1.2, cy - 9 + ah)];
+        [up addLineToPoint:CGPointMake(cx + aw/2, cy - 9 + ah)];
         [up closePath];
         UIBezierPath *down = [UIBezierPath bezierPath];
-        [down moveToPoint:CGPointMake(cx, cy + 9.5)];
-        [down addLineToPoint:CGPointMake(cx - aw/2, cy + 9.5 - ah)];
-        [down addLineToPoint:CGPointMake(cx - 1.4, cy + 9.5 - ah)];
-        [down addLineToPoint:CGPointMake(cx - 1.4, cy + 1.6)];
-        [down addLineToPoint:CGPointMake(cx + 1.4, cy + 1.6)];
-        [down addLineToPoint:CGPointMake(cx + 1.4, cy + 9.5 - ah)];
-        [down addLineToPoint:CGPointMake(cx + aw/2, cy + 9.5 - ah)];
+        [down moveToPoint:CGPointMake(cx, cy + 9)];
+        [down addLineToPoint:CGPointMake(cx - aw/2, cy + 9 - ah)];
+        [down addLineToPoint:CGPointMake(cx - 1.2, cy + 9 - ah)];
+        [down addLineToPoint:CGPointMake(cx - 1.2, cy + 1.2)];
+        [down addLineToPoint:CGPointMake(cx + 1.2, cy + 1.2)];
+        [down addLineToPoint:CGPointMake(cx + 1.2, cy + 9 - ah)];
+        [down addLineToPoint:CGPointMake(cx + aw/2, cy + 9 - ah)];
         [down closePath];
         UIBezierPath *left = [UIBezierPath bezierPath];
-        [left moveToPoint:CGPointMake(cx - 9.5, cy)];
-        [left addLineToPoint:CGPointMake(cx - 9.5 + ah, cy - aw/2)];
-        [left addLineToPoint:CGPointMake(cx - 9.5 + ah, cy - 1.4)];
-        [left addLineToPoint:CGPointMake(cx - 1.6, cy - 1.4)];
-        [left addLineToPoint:CGPointMake(cx - 1.6, cy + 1.4)];
-        [left addLineToPoint:CGPointMake(cx - 9.5 + ah, cy + 1.4)];
-        [left addLineToPoint:CGPointMake(cx - 9.5 + ah, cy + aw/2)];
+        [left moveToPoint:CGPointMake(cx - 9, cy)];
+        [left addLineToPoint:CGPointMake(cx - 9 + ah, cy - aw/2)];
+        [left addLineToPoint:CGPointMake(cx - 9 + ah, cy - 1.2)];
+        [left addLineToPoint:CGPointMake(cx - 1.2, cy - 1.2)];
+        [left addLineToPoint:CGPointMake(cx - 1.2, cy + 1.2)];
+        [left addLineToPoint:CGPointMake(cx - 9 + ah, cy + 1.2)];
+        [left addLineToPoint:CGPointMake(cx - 9 + ah, cy + aw/2)];
         [left closePath];
         UIBezierPath *right = [UIBezierPath bezierPath];
-        [right moveToPoint:CGPointMake(cx + 9.5, cy)];
-        [right addLineToPoint:CGPointMake(cx + 9.5 - ah, cy - aw/2)];
-        [right addLineToPoint:CGPointMake(cx + 9.5 - ah, cy - 1.4)];
-        [right addLineToPoint:CGPointMake(cx + 1.6, cy - 1.4)];
-        [right addLineToPoint:CGPointMake(cx + 1.6, cy + 1.4)];
-        [right addLineToPoint:CGPointMake(cx + 9.5 - ah, cy + 1.4)];
-        [right addLineToPoint:CGPointMake(cx + 9.5 - ah, cy + aw/2)];
+        [right moveToPoint:CGPointMake(cx + 9, cy)];
+        [right addLineToPoint:CGPointMake(cx + 9 - ah, cy - aw/2)];
+        [right addLineToPoint:CGPointMake(cx + 9 - ah, cy - 1.2)];
+        [right addLineToPoint:CGPointMake(cx + 1.2, cy - 1.2)];
+        [right addLineToPoint:CGPointMake(cx + 1.2, cy + 1.2)];
+        [right addLineToPoint:CGPointMake(cx + 9 - ah, cy + 1.2)];
+        [right addLineToPoint:CGPointMake(cx + 9 - ah, cy + aw/2)];
         [right closePath];
         UIBezierPath *all = [UIBezierPath bezierPath];
         [all appendPath:up]; [all appendPath:down]; [all appendPath:left]; [all appendPath:right];
-        [fill setFill]; [all fill]; [stroke setStroke]; all.lineWidth = 1.3; all.lineJoinStyle = kCGLineJoinRound; [all stroke];
+        [fill setFill]; [all fill]; [stroke setStroke]; all.lineWidth = 1.2; [all stroke];
     } else if ([typeId isEqualToString:@"help"]) {
-        // Arrow + question badge
+        // Windows Help - arrow + question mark badge (blue) - same Aero arrow as normal
         UIBezierPath *arrow = [UIBezierPath bezierPath];
-        [arrow moveToPoint:CGPointMake(7, 5)];
-        [arrow addLineToPoint:CGPointMake(7, 19)];
-        [arrow addLineToPoint:CGPointMake(11, 15)];
-        [arrow addLineToPoint:CGPointMake(14.5, 18.5)];
-        [arrow addLineToPoint:CGPointMake(19, 13.5)];
-        [arrow addLineToPoint:CGPointMake(14.5, 11)];
-        [arrow addLineToPoint:CGPointMake(11, 14.5)];
+        CGFloat s2=0.48; CGFloat tx2=7-0.75*s2; CGFloat ty2=5-1.81*s2;
+        [arrow moveToPoint:CGPointMake(18.64*s2+tx2, 55.17*s2+ty2)];
+        [arrow addLineToPoint:CGPointMake(11.5*s2+tx2, 38.49*s2+ty2)];
+        [arrow addLineToPoint:CGPointMake(0.75*s2+tx2, 49.08*s2+ty2)];
+        [arrow addLineToPoint:CGPointMake(0.75*s2+tx2, 1.81*s2+ty2)];
+        [arrow addLineToPoint:CGPointMake(34.88*s2+tx2, 35.94*s2+ty2)];
+        [arrow addLineToPoint:CGPointMake(18.57*s2+tx2, 36.14*s2+ty2)];
+        [arrow addLineToPoint:CGPointMake(25.83*s2+tx2, 51.91*s2+ty2)];
         [arrow closePath];
         [fill setFill]; [arrow fill]; [stroke setStroke]; arrow.lineWidth = strokeWidth; [arrow stroke];
-        CGRect badge = CGRectMake(17.5, 17.5, 11, 11);
+        CGRect badge = CGRectMake(17, 17, 11, 11);
         UIBezierPath *circle = [UIBezierPath bezierPathWithOvalInRect:badge];
-        [[UIColor colorWithRed:0.22 green:0.55 blue:0.98 alpha:1] setFill]; [circle fill];
-        [[UIColor whiteColor] setStroke]; circle.lineWidth = 1.1; [circle stroke];
-        // ?
+        [[UIColor colorWithRed:0.0 green:0.48 blue:1.0 alpha:1] setFill]; [circle fill];
+        [[UIColor whiteColor] setStroke]; circle.lineWidth = 1.0; [circle stroke];
         NSDictionary *attrs = @{NSFontAttributeName: [UIFont boldSystemFontOfSize:7.5], NSForegroundColorAttributeName: UIColor.whiteColor};
         NSString *q = @"?";
         CGSize qs = [q sizeWithAttributes:attrs];
-        [q drawAtPoint:CGPointMake(23 - qs.width/2, 19.2) withAttributes:attrs];
+        [q drawAtPoint:CGPointMake(22.5 - qs.width/2, 18.8) withAttributes:attrs];
     } else if ([typeId isEqualToString:@"hidden"]) {
         UIGraphicsEndImageContext();
         UIGraphicsBeginImageContextWithOptions(CGSizeMake(1,1), NO, scale);
