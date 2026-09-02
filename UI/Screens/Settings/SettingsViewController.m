@@ -1108,6 +1108,10 @@
             [[NSNotificationCenter defaultCenter] postNotificationName:@"ResolutionDidChangeNotification" object:nil];
         } else if ([item[@"key"] isEqualToString:@"video.framegen_target_fps"]) {
             fg_set_target_fps((int)val);
+        } else if ([item[@"key"] isEqualToString:@"control.mouse_scale"] || [item[@"key"] isEqualToString:@"control.button_scale"] || [item[@"key"] isEqualToString:@"control.mouse_speed"]) {
+            // Live update virtual mouse / button scale without relaunch
+            [[NSNotificationCenter defaultCenter] postNotificationName:@"ControlScaleDidChangeNotification" object:nil];
+            [[NSNotificationCenter defaultCenter] postNotificationName:@"MouseScaleDidChangeNotification" object:nil];
         }
         // Any *_blur slider drives realtime frosted surfaces; let them refresh.
         BOOL isBlurSlider = [item[@"key"] hasPrefix:@"amethyst_"] && [item[@"key"] hasSuffix:@"_blur"];

@@ -521,302 +521,319 @@ static NSMutableDictionary<NSString *, UIImage *> *_shapeImageCache;
 
 + (UIImage *)generateDefaultShapeForType:(NSString *)typeId {
     CGFloat scale = [UIScreen mainScreen].scale;
-    CGFloat baseSize = 32.0;
-    CGFloat size = baseSize * scale;
-    
-    UIGraphicsBeginImageContextWithOptions(CGSizeMake(size, size), NO, scale);
+    CGSize canvas = CGSizeMake(32, 32);
+    UIGraphicsBeginImageContextWithOptions(canvas, NO, scale);
     CGContextRef ctx = UIGraphicsGetCurrentContext();
-    
-    CGContextSetFillColorWithColor(ctx, [UIColor whiteColor].CGColor);
-    CGContextSetStrokeColorWithColor(ctx, [UIColor blackColor].CGColor);
-    CGContextSetLineWidth(ctx, 2.0 * scale);
-    CGContextSetLineCap(ctx, kCGLineCapRound);
-    CGContextSetLineJoin(ctx, kCGLineJoinRound);
-    
-    CGFloat center = size / 2.0;
-    CGFloat radius = size * 0.35;
-    
+    CGContextClearRect(ctx, CGRectMake(0, 0, 32, 32));
+    // Subtle drop shadow for visibility on any game background
+    CGContextSetShadowWithColor(ctx, CGSizeMake(0, 1.2), 2.0, [UIColor colorWithWhite:0 alpha:0.35].CGColor);
+
+    UIColor *fill = [UIColor whiteColor];
+    UIColor *stroke = [UIColor blackColor];
+    CGFloat strokeWidth = 1.5;
+
     if ([typeId isEqualToString:@"normal"] || [typeId isEqualToString:@"working"]) {
-        // Arrow cursor - standard pointer shape
-        CGFloat tipX = center - radius * 0.8;
-        CGFloat tipY = center - radius;
-        CGFloat leftY = center + radius * 0.7;
-        CGFloat rightX = center + radius * 0.3;
-        CGFloat rightY = center + radius * 0.7;
-        CGFloat topRightX = center + radius * 0.5;
-        CGFloat topRightY = center - radius * 0.1;
-        CGFloat notchX = center - radius * 0.1;
-        CGFloat notchY = center - radius * 0.1;
-
-        // Main arrow body
-        CGContextMoveToPoint(ctx, tipX, tipY);
-        CGContextAddLineToPoint(ctx, tipX, leftY);
-        CGContextAddLineToPoint(ctx, rightX, rightY);
-        CGContextAddLineToPoint(ctx, topRightX, topRightY);
-        CGContextAddLineToPoint(ctx, notchX, notchY);
-        CGContextClosePath(ctx);
-        CGContextDrawPath(ctx, kCGPathFillStroke);
-
-        // White outline highlight
-        CGContextSetStrokeColorWithColor(ctx, [UIColor colorWithWhite:1.0 alpha:0.8].CGColor);
-        CGContextSetLineWidth(ctx, 1.0 * scale);
-        CGContextMoveToPoint(ctx, tipX, tipY);
-        CGContextAddLineToPoint(ctx, tipX, leftY);
-        CGContextAddLineToPoint(ctx, rightX, rightY);
-        CGContextAddLineToPoint(ctx, topRightX, topRightY);
-        CGContextAddLineToPoint(ctx, notchX, notchY);
-        CGContextClosePath(ctx);
-        CGContextStrokePath(ctx);
-        
+        // Modern macOS-style arrow - crisp, with highlight and shadow
+        UIBezierPath *path = [UIBezierPath bezierPath];
+        // Tip at (7,5) matches hitbox (7,5) for 32x32
+        [path moveToPoint:CGPointMake(7, 5)];
+        [path addLineToPoint:CGPointMake(7, 22)];
+        [path addLineToPoint:CGPointMake(11.2, 17.8)];
+        [path addLineToPoint:CGPointMake(14.8, 21.4)];
+        [path addLineToPoint:CGPointMake(20.8, 15.2)];
+        [path addLineToPoint:CGPointMake(15.2, 11.8)];
+        [path addLineToPoint:CGPointMake(11.5, 15.2)];
+        [path closePath];
+        path.lineJoinStyle = kCGLineJoinRound;
+        path.lineCapStyle = kCGLineCapRound;
+        // Outer stroke
+        [stroke setStroke];
+        path.lineWidth = strokeWidth + 0.9;
+        [path stroke];
+        // Fill
+        [fill setFill];
+        [path fill];
+        // Inner highlight for 3D feel
+        UIBezierPath *hi = [UIBezierPath bezierPath];
+        [hi moveToPoint:CGPointMake(7.8, 6.2)];
+        [hi addLineToPoint:CGPointMake(7.8, 20.5)];
+        [hi addLineToPoint:CGPointMake(11.0, 17.0)];
+        hi.lineWidth = 0.7;
+        hi.lineCapStyle = kCGLineCapRound;
+        hi.lineJoinStyle = kCGLineJoinRound;
+        [[UIColor colorWithWhite:1 alpha:0.55] setStroke];
+        [hi stroke];
+        if ([typeId isEqualToString:@"working"]) {
+            // Small spinner badge at bottom-right
+            CGRect badge = CGRectMake(19.5, 19.5, 10, 10);
+            UIBezierPath *bg = [UIBezierPath bezierPathWithOvalInRect:badge];
+            [[UIColor whiteColor] setFill];
+            [bg fill];
+            [[UIColor blackColor] setStroke];
+            bg.lineWidth = 1.2;
+            [bg stroke];
+            UIBezierPath *arc = [UIBezierPath bezierPathWithArcCenter:CGPointMake(24.5, 24.5) radius:3.2 startAngle:-M_PI_2 endAngle:M_PI*0.85 clockwise:YES];
+            arc.lineWidth = 1.3;
+            arc.lineCapStyle = kCGLineCapRound;
+            [[UIColor blackColor] setStroke];
+            [arc stroke];
+        }
     } else if ([typeId isEqualToString:@"link"]) {
-        // Pointing hand cursor
-        CGFloat fingerRadius = radius * 0.4;
-        CGFloat palmRadius = radius * 0.5;
-        
+        // Hand pointer - modern with rounded fingers, smooth palm
         // Palm
-        CGContextAddArc(ctx, center, center + palmRadius * 0.3, palmRadius, M_PI, 0, NO);
-        // Fingers
-        for (int i = 0; i < 4; i++) {
-            CGFloat x = center - radius * 0.6 + i * radius * 0.4;
-            CGContextMoveToPoint(ctx, x, center + palmRadius * 0.3);
-            CGContextAddLineToPoint(ctx, x, center - fingerRadius);
+        UIBezierPath *palm = [UIBezierPath bezierPathWithRoundedRect:CGRectMake(8.5, 14.5, 13, 9) cornerRadius:3];
+        [fill setFill]; [palm fill]; [stroke setStroke]; palm.lineWidth = strokeWidth; [palm stroke];
+        // 4 fingers
+        for (int i=0;i<4;i++) {
+            CGFloat x = 9.2 + i*3.1;
+            CGFloat y = (i==1 ? 5.8 : 7.2);
+            CGFloat h = (i==1 ? 9.8 : 8.4);
+            UIBezierPath *finger = [UIBezierPath bezierPathWithRoundedRect:CGRectMake(x, y, 2.5, h) cornerRadius:1.25];
+            [fill setFill]; [finger fill]; [stroke setStroke]; finger.lineWidth = 1.1; [finger stroke];
         }
         // Thumb
-        CGContextMoveToPoint(ctx, center - radius * 0.7, center + palmRadius * 0.1);
-        CGContextAddLineToPoint(ctx, center - radius * 0.9, center - fingerRadius * 0.3);
-        CGContextMoveToPoint(ctx, center - radius * 0.9, center - fingerRadius * 0.3);
-        CGContextAddLineToPoint(ctx, center - radius * 0.7, center + palmRadius * 0.1);
-        CGContextClosePath(ctx);
-        CGContextDrawPath(ctx, kCGPathFillStroke);
-        
+        UIBezierPath *thumb = [UIBezierPath bezierPath];
+        [thumb moveToPoint:CGPointMake(8.5, 16.5)];
+        [thumb addQuadCurveToPoint:CGPointMake(5.2, 11.5) controlPoint:CGPointMake(5, 15)];
+        [thumb addLineToPoint:CGPointMake(6.8, 10.2)];
+        [thumb addQuadCurveToPoint:CGPointMake(9, 14) controlPoint:CGPointMake(7.8, 12)];
+        [thumb closePath];
+        [fill setFill]; [thumb fill]; [stroke setStroke]; thumb.lineWidth = 1.1; [thumb stroke];
     } else if ([typeId isEqualToString:@"text"]) {
-        // I-beam cursor (text selection)
-        CGFloat beamHeight = radius * 2.0;
-        CGFloat beamWidth = radius * 0.15;
-        CGFloat crossbarWidth = radius * 1.2;
-        CGFloat crossbarHeight = radius * 0.15;
-        
-        // Vertical beam
-        CGContextMoveToPoint(ctx, center - beamWidth/2, center - beamHeight/2);
-        CGContextAddLineToPoint(ctx, center + beamWidth/2, center - beamHeight/2);
-        CGContextAddLineToPoint(ctx, center + beamWidth/2, center + beamHeight/2);
-        CGContextAddLineToPoint(ctx, center - beamWidth/2, center + beamHeight/2);
-        CGContextClosePath(ctx);
-        CGContextDrawPath(ctx, kCGPathFillStroke);
-        
-        // Top crossbar
-        CGContextMoveToPoint(ctx, center - crossbarWidth/2, center - beamHeight/2);
-        CGContextAddLineToPoint(ctx, center + crossbarWidth/2, center - beamHeight/2);
-        CGContextAddLineToPoint(ctx, center + crossbarWidth/2, center - beamHeight/2 + crossbarHeight);
-        CGContextAddLineToPoint(ctx, center - crossbarWidth/2, center - beamHeight/2 + crossbarHeight);
-        CGContextClosePath(ctx);
-        CGContextDrawPath(ctx, kCGPathFillStroke);
-        
-        // Bottom crossbar
-        CGContextMoveToPoint(ctx, center - crossbarWidth/2, center + beamHeight/2 - crossbarHeight);
-        CGContextAddLineToPoint(ctx, center + crossbarWidth/2, center + beamHeight/2 - crossbarHeight);
-        CGContextAddLineToPoint(ctx, center + crossbarWidth/2, center + beamHeight/2);
-        CGContextAddLineToPoint(ctx, center - crossbarWidth/2, center + beamHeight/2);
-        CGContextClosePath(ctx);
-        CGContextDrawPath(ctx, kCGPathFillStroke);
-        
-    } else if ([typeId isEqualToString:@"precision"]) {
-        // Crosshair cursor
-        CGFloat crossSize = radius * 1.5;
-        CGFloat thickness = radius * 0.12;
-        
-        // Horizontal
-        CGContextMoveToPoint(ctx, center - crossSize, center - thickness/2);
-        CGContextAddLineToPoint(ctx, center + crossSize, center - thickness/2);
-        CGContextAddLineToPoint(ctx, center + crossSize, center + thickness/2);
-        CGContextAddLineToPoint(ctx, center - crossSize, center + thickness/2);
-        CGContextClosePath(ctx);
-        
-        // Vertical
-        CGContextMoveToPoint(ctx, center - thickness/2, center - crossSize);
-        CGContextAddLineToPoint(ctx, center + thickness/2, center - crossSize);
-        CGContextAddLineToPoint(ctx, center + thickness/2, center + crossSize);
-        CGContextAddLineToPoint(ctx, center - thickness/2, center + crossSize);
-        CGContextClosePath(ctx);
-        
-        CGContextDrawPath(ctx, kCGPathFillStroke);
-        
+        // I-beam - crisp with caps, like macOS text cursor
+        CGFloat cx=16, cy=16;
+        CGFloat h=15, w=1.8, capW=9, capH=1.6;
+        UIBezierPath *stem = [UIBezierPath bezierPathWithRoundedRect:CGRectMake(cx - w/2, cy - h/2, w, h) cornerRadius:0.9];
+        [fill setFill]; [stem fill]; [stroke setStroke]; stem.lineWidth = 1.3; [stem stroke];
+        UIBezierPath *top = [UIBezierPath bezierPathWithRoundedRect:CGRectMake(cx - capW/2, cy - h/2 - 0.6, capW, capH) cornerRadius:0.8];
+        [fill setFill]; [top fill]; [stroke setStroke]; top.lineWidth = 1.1; [top stroke];
+        UIBezierPath *bot = [UIBezierPath bezierPathWithRoundedRect:CGRectMake(cx - capW/2, cy + h/2 - 1.0, capW, capH) cornerRadius:0.8];
+        [fill setFill]; [bot fill]; [stroke setStroke]; bot.lineWidth = 1.1; [bot stroke];
+        // Inner bright line
+        UIBezierPath *inner = [UIBezierPath bezierPath];
+        [inner moveToPoint:CGPointMake(cx, cy - h/2 + 1)];
+        [inner addLineToPoint:CGPointMake(cx, cy + h/2 -1)];
+        inner.lineWidth = 0.5;
+        [[UIColor colorWithWhite:1 alpha:0.7] setStroke];
+        [inner stroke];
+    } else if ([typeId isEqualToString:@"precision"] || [typeId isEqualToString:@"crosshair"]) {
+        // Precision crosshair - thin, with gap, center dot
+        CGFloat cx=16, cy=16;
+        CGFloat len=11, thick=1.3, gap=3.2;
+        UIBezierPath *cross = [UIBezierPath bezierPath];
+        // Horizontal left
+        [cross appendPath:[UIBezierPath bezierPathWithRect:CGRectMake(cx - len, cy - thick/2, len - gap, thick)]];
+        // Horizontal right
+        [cross appendPath:[UIBezierPath bezierPathWithRect:CGRectMake(cx + gap, cy - thick/2, len - gap, thick)]];
+        // Vertical top
+        [cross appendPath:[UIBezierPath bezierPathWithRect:CGRectMake(cx - thick/2, cy - len, thick, len - gap)]];
+        // Vertical bottom
+        [cross appendPath:[UIBezierPath bezierPathWithRect:CGRectMake(cx - thick/2, cy + gap, thick, len - gap)]];
+        [fill setFill]; [cross fill]; [stroke setStroke]; cross.lineWidth = 0.7; [cross stroke];
         // Center dot
-        CGContextSetFillColorWithColor(ctx, [UIColor blackColor].CGColor);
-        CGContextAddArc(ctx, center, center, thickness * 1.5, 0, 2 * M_PI, YES);
-        CGContextFillPath(ctx);
-        
+        UIBezierPath *dot = [UIBezierPath bezierPathWithOvalInRect:CGRectMake(cx-1.7, cy-1.7, 3.4, 3.4)];
+        [[UIColor blackColor] setFill]; [dot fill];
+        UIBezierPath *dotInner = [UIBezierPath bezierPathWithOvalInRect:CGRectMake(cx-0.7, cy-0.7, 1.4, 1.4)];
+        [[UIColor whiteColor] setFill]; [dotInner fill];
     } else if ([typeId isEqualToString:@"busy"]) {
-        // Spinning circle (wait/busy)
-        CGFloat circleRadius = radius * 0.8;
-        CGFloat arcStart = 0;
-        CGFloat arcEnd = M_PI * 1.5; // 270 degrees
-        
-        CGContextAddArc(ctx, center, center, circleRadius, arcStart, arcEnd, NO);
-        CGContextAddLineToPoint(ctx, center + circleRadius * cosf(arcEnd), center + circleRadius * sinf(arcEnd));
-        CGContextAddLineToPoint(ctx, center + (circleRadius - radius * 0.2) * cosf(arcEnd), center + (circleRadius - radius * 0.2) * sinf(arcEnd));
-        CGContextAddArc(ctx, center, center, circleRadius - radius * 0.2, arcEnd, arcStart, YES);
-        CGContextClosePath(ctx);
-        CGContextDrawPath(ctx, kCGPathFillStroke);
-        
-        // Arrow head at end
-        CGFloat arrowX = center + circleRadius * cosf(arcEnd);
-        CGFloat arrowY = center + circleRadius * sinf(arcEnd);
-        CGContextMoveToPoint(ctx, arrowX, arrowY);
-        CGContextAddLineToPoint(ctx, arrowX - radius * 0.3 * cosf(arcEnd - M_PI/6), arrowY - radius * 0.3 * sinf(arcEnd - M_PI/6));
-        CGContextAddLineToPoint(ctx, arrowX - radius * 0.3 * cosf(arcEnd + M_PI/6), arrowY - radius * 0.3 * sinf(arcEnd + M_PI/6));
-        CGContextClosePath(ctx);
-        CGContextFillPath(ctx);
-        
+        // Busy - circular spinner 300°
+        CGFloat cx=16, cy=16, r=9;
+        UIBezierPath *circle = [UIBezierPath bezierPathWithArcCenter:CGPointMake(cx, cy) radius:r startAngle:-M_PI_2 endAngle:M_PI*1.33 clockwise:YES];
+        circle.lineWidth = 2.4;
+        circle.lineCapStyle = kCGLineCapRound;
+        [stroke setStroke]; [circle stroke];
+        UIBezierPath *inner = [UIBezierPath bezierPathWithArcCenter:CGPointMake(cx, cy) radius:r startAngle:-M_PI_2 endAngle:M_PI*1.33 clockwise:YES];
+        inner.lineWidth = 1.0;
+        inner.lineCapStyle = kCGLineCapRound;
+        [[UIColor colorWithWhite:1 alpha:0.92] setStroke];
+        [inner stroke];
+        CGFloat angle = M_PI*1.33;
+        CGPoint p = CGPointMake(cx + r*cos(angle), cy + r*sin(angle));
+        CGFloat ah = 3.6;
+        UIBezierPath *arrow = [UIBezierPath bezierPath];
+        [arrow moveToPoint:p];
+        [arrow addLineToPoint:CGPointMake(p.x - ah*cos(angle - M_PI/6), p.y - ah*sin(angle - M_PI/6))];
+        [arrow addLineToPoint:CGPointMake(p.x - ah*cos(angle + M_PI/6), p.y - ah*sin(angle + M_PI/6))];
+        [arrow closePath];
+        [fill setFill]; [arrow fill]; [stroke setStroke]; arrow.lineWidth = 1.0; [arrow stroke];
     } else if ([typeId isEqualToString:@"unavailable"]) {
-        // Circle with slash (not allowed)
-        CGFloat circleRadius = radius * 0.9;
-        
-        CGContextAddArc(ctx, center, center, circleRadius, 0, 2 * M_PI, YES);
-        CGContextStrokePath(ctx);
-        
-        // Diagonal slash
-        CGContextMoveToPoint(ctx, center - circleRadius * 0.7, center - circleRadius * 0.7);
-        CGContextAddLineToPoint(ctx, center + circleRadius * 0.7, center + circleRadius * 0.7);
-        CGContextStrokePath(ctx);
-        
+        // Circle slash - red slash for visibility
+        CGFloat cx=16, cy=16, r=10;
+        UIBezierPath *circle = [UIBezierPath bezierPathWithOvalInRect:CGRectMake(cx-r, cy-r, r*2, r*2)];
+        circle.lineWidth = 2.0;
+        [[UIColor colorWithWhite:1 alpha:0.94] setFill]; [circle fill];
+        [stroke setStroke]; [circle stroke];
+        // Slash - outer black then inner red
+        UIBezierPath *slashBack = [UIBezierPath bezierPath];
+        [slashBack moveToPoint:CGPointMake(cx - r*0.68, cy - r*0.68)];
+        [slashBack addLineToPoint:CGPointMake(cx + r*0.68, cy + r*0.68)];
+        slashBack.lineWidth = 3.4;
+        slashBack.lineCapStyle = kCGLineCapRound;
+        [[UIColor blackColor] setStroke];
+        [slashBack stroke];
+        UIBezierPath *slash = [UIBezierPath bezierPath];
+        [slash moveToPoint:CGPointMake(cx - r*0.68, cy - r*0.68)];
+        [slash addLineToPoint:CGPointMake(cx + r*0.68, cy + r*0.68)];
+        slash.lineWidth = 2.0;
+        slash.lineCapStyle = kCGLineCapRound;
+        [[UIColor colorWithRed:0.96 green:0.22 blue:0.22 alpha:1] setStroke];
+        [slash stroke];
     } else if ([typeId isEqualToString:@"vresize"]) {
-        // Vertical resize (double arrow up-down)
-        CGFloat arrowSize = radius * 0.8;
-        CGFloat spacing = radius * 0.3;
-        
-        // Top arrow (pointing up)
-        CGContextMoveToPoint(ctx, center, center - spacing - arrowSize);
-        CGContextAddLineToPoint(ctx, center - arrowSize * 0.6, center - spacing);
-        CGContextAddLineToPoint(ctx, center + arrowSize * 0.6, center - spacing);
-        CGContextClosePath(ctx);
-        CGContextFillPath(ctx);
-        
-        // Bottom arrow (pointing down)
-        CGContextMoveToPoint(ctx, center, center + spacing + arrowSize);
-        CGContextAddLineToPoint(ctx, center - arrowSize * 0.6, center + spacing);
-        CGContextAddLineToPoint(ctx, center + arrowSize * 0.6, center + spacing);
-        CGContextClosePath(ctx);
-        CGContextFillPath(ctx);
-        
+        CGFloat cx=16, cy=16, ah=6, aw=7;
+        UIBezierPath *up = [UIBezierPath bezierPath];
+        [up moveToPoint:CGPointMake(cx, cy - 9)];
+        [up addLineToPoint:CGPointMake(cx - aw/2, cy - 9 + ah)];
+        [up addLineToPoint:CGPointMake(cx - 1.8, cy - 9 + ah)];
+        [up addLineToPoint:CGPointMake(cx - 1.8, cy - 1.8)];
+        [up addLineToPoint:CGPointMake(cx + 1.8, cy - 1.8)];
+        [up addLineToPoint:CGPointMake(cx + 1.8, cy - 9 + ah)];
+        [up addLineToPoint:CGPointMake(cx + aw/2, cy - 9 + ah)];
+        [up closePath];
+        UIBezierPath *down = [UIBezierPath bezierPath];
+        [down moveToPoint:CGPointMake(cx, cy + 9)];
+        [down addLineToPoint:CGPointMake(cx - aw/2, cy + 9 - ah)];
+        [down addLineToPoint:CGPointMake(cx - 1.8, cy + 9 - ah)];
+        [down addLineToPoint:CGPointMake(cx - 1.8, cy + 1.8)];
+        [down addLineToPoint:CGPointMake(cx + 1.8, cy + 1.8)];
+        [down addLineToPoint:CGPointMake(cx + 1.8, cy + 9 - ah)];
+        [down addLineToPoint:CGPointMake(cx + aw/2, cy + 9 - ah)];
+        [down closePath];
+        UIBezierPath *all = [UIBezierPath bezierPath];
+        [all appendPath:up]; [all appendPath:down];
+        [fill setFill]; [all fill]; [stroke setStroke]; all.lineWidth = strokeWidth; all.lineJoinStyle = kCGLineJoinRound; [all stroke];
     } else if ([typeId isEqualToString:@"hresize"]) {
-        // Horizontal resize (double arrow left-right)
-        CGFloat arrowSize = radius * 0.8;
-        CGFloat spacing = radius * 0.3;
-        
-        // Left arrow
-        CGContextMoveToPoint(ctx, center - spacing - arrowSize, center);
-        CGContextAddLineToPoint(ctx, center - spacing, center - arrowSize * 0.6);
-        CGContextAddLineToPoint(ctx, center - spacing, center + arrowSize * 0.6);
-        CGContextClosePath(ctx);
-        CGContextFillPath(ctx);
-        
-        // Right arrow
-        CGContextMoveToPoint(ctx, center + spacing + arrowSize, center);
-        CGContextAddLineToPoint(ctx, center + spacing, center - arrowSize * 0.6);
-        CGContextAddLineToPoint(ctx, center + spacing, center + arrowSize * 0.6);
-        CGContextClosePath(ctx);
-        CGContextFillPath(ctx);
-        
+        CGFloat cx=16, cy=16, ah=6, aw=7;
+        UIBezierPath *left = [UIBezierPath bezierPath];
+        [left moveToPoint:CGPointMake(cx - 9, cy)];
+        [left addLineToPoint:CGPointMake(cx - 9 + ah, cy - aw/2)];
+        [left addLineToPoint:CGPointMake(cx - 9 + ah, cy - 1.8)];
+        [left addLineToPoint:CGPointMake(cx - 1.8, cy - 1.8)];
+        [left addLineToPoint:CGPointMake(cx - 1.8, cy + 1.8)];
+        [left addLineToPoint:CGPointMake(cx - 9 + ah, cy + 1.8)];
+        [left addLineToPoint:CGPointMake(cx - 9 + ah, cy + aw/2)];
+        [left closePath];
+        UIBezierPath *right = [UIBezierPath bezierPath];
+        [right moveToPoint:CGPointMake(cx + 9, cy)];
+        [right addLineToPoint:CGPointMake(cx + 9 - ah, cy - aw/2)];
+        [right addLineToPoint:CGPointMake(cx + 9 - ah, cy - 1.8)];
+        [right addLineToPoint:CGPointMake(cx + 1.8, cy - 1.8)];
+        [right addLineToPoint:CGPointMake(cx + 1.8, cy + 1.8)];
+        [right addLineToPoint:CGPointMake(cx + 9 - ah, cy + 1.8)];
+        [right addLineToPoint:CGPointMake(cx + 9 - ah, cy + aw/2)];
+        [right closePath];
+        UIBezierPath *all = [UIBezierPath bezierPath];
+        [all appendPath:left]; [all appendPath:right];
+        [fill setFill]; [all fill]; [stroke setStroke]; all.lineWidth = strokeWidth; [all stroke];
     } else if ([typeId isEqualToString:@"diagonal"]) {
-        // Diagonal resize (NW-SE or NE-SW)
-        CGFloat arrowSize = radius * 0.7;
-        
-        // NW arrow
-        CGContextMoveToPoint(ctx, center - radius * 0.8, center - radius * 0.8);
-        CGContextAddLineToPoint(ctx, center - radius * 0.8 + arrowSize, center - radius * 0.8);
-        CGContextAddLineToPoint(ctx, center - radius * 0.8, center - radius * 0.8 + arrowSize);
-        CGContextClosePath(ctx);
-        CGContextFillPath(ctx);
-        
-        // SE arrow
-        CGContextMoveToPoint(ctx, center + radius * 0.8, center + radius * 0.8);
-        CGContextAddLineToPoint(ctx, center + radius * 0.8 - arrowSize, center + radius * 0.8);
-        CGContextAddLineToPoint(ctx, center + radius * 0.8, center + radius * 0.8 - arrowSize);
-        CGContextClosePath(ctx);
-        CGContextFillPath(ctx);
-        
+        // Diagonal NW-SE
+        UIBezierPath *a1 = [UIBezierPath bezierPath];
+        [a1 moveToPoint:CGPointMake(8, 8)];
+        [a1 addLineToPoint:CGPointMake(14, 8)];
+        [a1 addLineToPoint:CGPointMake(14, 10)];
+        [a1 addLineToPoint:CGPointMake(11, 11)];
+        [a1 addLineToPoint:CGPointMake(10, 14)];
+        [a1 addLineToPoint:CGPointMake(8, 14)];
+        [a1 closePath];
+        UIBezierPath *a2 = [UIBezierPath bezierPath];
+        [a2 moveToPoint:CGPointMake(24, 24)];
+        [a2 addLineToPoint:CGPointMake(18, 24)];
+        [a2 addLineToPoint:CGPointMake(18, 22)];
+        [a2 addLineToPoint:CGPointMake(21, 21)];
+        [a2 addLineToPoint:CGPointMake(22, 18)];
+        [a2 addLineToPoint:CGPointMake(24, 18)];
+        [a2 closePath];
+        UIBezierPath *all = [UIBezierPath bezierPath];
+        [all appendPath:a1]; [all appendPath:a2];
+        [fill setFill]; [all fill]; [stroke setStroke]; all.lineWidth = strokeWidth; [all stroke];
+        // Center line with highlight
+        UIBezierPath *line = [UIBezierPath bezierPath];
+        [line moveToPoint:CGPointMake(10, 10)];
+        [line addLineToPoint:CGPointMake(22, 22)];
+        line.lineWidth = 1.7;
+        line.lineCapStyle = kCGLineCapRound;
+        [stroke setStroke]; [line stroke];
+        [[UIColor whiteColor] setStroke]; line.lineWidth = 0.8; [line stroke];
     } else if ([typeId isEqualToString:@"move"]) {
-        // Move cursor (four arrows)
-        CGFloat arrowSize = radius * 0.5;
-        CGFloat spacing = radius * 0.7;
-        
-        // Up
-        CGContextMoveToPoint(ctx, center, center - spacing - arrowSize);
-        CGContextAddLineToPoint(ctx, center - arrowSize * 0.6, center - spacing);
-        CGContextAddLineToPoint(ctx, center + arrowSize * 0.6, center - spacing);
-        CGContextClosePath(ctx);
-        
-        // Down
-        CGContextMoveToPoint(ctx, center, center + spacing + arrowSize);
-        CGContextAddLineToPoint(ctx, center - arrowSize * 0.6, center + spacing);
-        CGContextAddLineToPoint(ctx, center + arrowSize * 0.6, center + spacing);
-        CGContextClosePath(ctx);
-        
-        // Left
-        CGContextMoveToPoint(ctx, center - spacing - arrowSize, center);
-        CGContextAddLineToPoint(ctx, center - spacing, center - arrowSize * 0.6);
-        CGContextAddLineToPoint(ctx, center - spacing, center + arrowSize * 0.6);
-        CGContextClosePath(ctx);
-        
-        // Right
-        CGContextMoveToPoint(ctx, center + spacing + arrowSize, center);
-        CGContextAddLineToPoint(ctx, center + spacing, center - arrowSize * 0.6);
-        CGContextAddLineToPoint(ctx, center + spacing, center + arrowSize * 0.6);
-        CGContextClosePath(ctx);
-        
-        CGContextDrawPath(ctx, kCGPathFillStroke);
-        
+        CGFloat cx=16, cy=16;
+        CGFloat ah=5, aw=6;
+        UIBezierPath *up = [UIBezierPath bezierPath];
+        [up moveToPoint:CGPointMake(cx, cy - 9.5)];
+        [up addLineToPoint:CGPointMake(cx - aw/2, cy - 9.5 + ah)];
+        [up addLineToPoint:CGPointMake(cx - 1.4, cy - 9.5 + ah)];
+        [up addLineToPoint:CGPointMake(cx - 1.4, cy - 1.6)];
+        [up addLineToPoint:CGPointMake(cx + 1.4, cy - 1.6)];
+        [up addLineToPoint:CGPointMake(cx + 1.4, cy - 9.5 + ah)];
+        [up addLineToPoint:CGPointMake(cx + aw/2, cy - 9.5 + ah)];
+        [up closePath];
+        UIBezierPath *down = [UIBezierPath bezierPath];
+        [down moveToPoint:CGPointMake(cx, cy + 9.5)];
+        [down addLineToPoint:CGPointMake(cx - aw/2, cy + 9.5 - ah)];
+        [down addLineToPoint:CGPointMake(cx - 1.4, cy + 9.5 - ah)];
+        [down addLineToPoint:CGPointMake(cx - 1.4, cy + 1.6)];
+        [down addLineToPoint:CGPointMake(cx + 1.4, cy + 1.6)];
+        [down addLineToPoint:CGPointMake(cx + 1.4, cy + 9.5 - ah)];
+        [down addLineToPoint:CGPointMake(cx + aw/2, cy + 9.5 - ah)];
+        [down closePath];
+        UIBezierPath *left = [UIBezierPath bezierPath];
+        [left moveToPoint:CGPointMake(cx - 9.5, cy)];
+        [left addLineToPoint:CGPointMake(cx - 9.5 + ah, cy - aw/2)];
+        [left addLineToPoint:CGPointMake(cx - 9.5 + ah, cy - 1.4)];
+        [left addLineToPoint:CGPointMake(cx - 1.6, cy - 1.4)];
+        [left addLineToPoint:CGPointMake(cx - 1.6, cy + 1.4)];
+        [left addLineToPoint:CGPointMake(cx - 9.5 + ah, cy + 1.4)];
+        [left addLineToPoint:CGPointMake(cx - 9.5 + ah, cy + aw/2)];
+        [left closePath];
+        UIBezierPath *right = [UIBezierPath bezierPath];
+        [right moveToPoint:CGPointMake(cx + 9.5, cy)];
+        [right addLineToPoint:CGPointMake(cx + 9.5 - ah, cy - aw/2)];
+        [right addLineToPoint:CGPointMake(cx + 9.5 - ah, cy - 1.4)];
+        [right addLineToPoint:CGPointMake(cx + 1.6, cy - 1.4)];
+        [right addLineToPoint:CGPointMake(cx + 1.6, cy + 1.4)];
+        [right addLineToPoint:CGPointMake(cx + 9.5 - ah, cy + 1.4)];
+        [right addLineToPoint:CGPointMake(cx + 9.5 - ah, cy + aw/2)];
+        [right closePath];
+        UIBezierPath *all = [UIBezierPath bezierPath];
+        [all appendPath:up]; [all appendPath:down]; [all appendPath:left]; [all appendPath:right];
+        [fill setFill]; [all fill]; [stroke setStroke]; all.lineWidth = 1.3; all.lineJoinStyle = kCGLineJoinRound; [all stroke];
     } else if ([typeId isEqualToString:@"help"]) {
-        // Help cursor (arrow with question mark)
-        CGFloat tipX = center - radius * 0.8;
-        CGFloat tipY = center - radius;
-        CGFloat leftY = center + radius * 0.7;
-        CGFloat rightX = center + radius * 0.3;
-        CGFloat rightY = center + radius * 0.7;
-        CGFloat topRightX = center + radius * 0.5;
-        CGFloat topRightY = center - radius * 0.1;
-        CGFloat notchX = center - radius * 0.1;
-        CGFloat notchY = center - radius * 0.1;
-
-        // Arrow body
-        CGContextMoveToPoint(ctx, tipX, tipY);
-        CGContextAddLineToPoint(ctx, tipX, leftY);
-        CGContextAddLineToPoint(ctx, rightX, rightY);
-        CGContextAddLineToPoint(ctx, topRightX, topRightY);
-        CGContextAddLineToPoint(ctx, notchX, notchY);
-        CGContextClosePath(ctx);
-        CGContextDrawPath(ctx, kCGPathFillStroke);
-        
-        // Question mark
-        CGContextSetFontSize(ctx, radius * 1.2);
-        CGContextSelectFont(ctx, "Helvetica-Bold", radius * 1.2, kCGEncodingMacRoman);
-        CGContextSetTextDrawingMode(ctx, kCGTextFill);
-        CGContextShowTextAtPoint(ctx, center - radius * 0.2, center + radius * 0.1, "?", 1);
-        
+        // Arrow + question badge
+        UIBezierPath *arrow = [UIBezierPath bezierPath];
+        [arrow moveToPoint:CGPointMake(7, 5)];
+        [arrow addLineToPoint:CGPointMake(7, 19)];
+        [arrow addLineToPoint:CGPointMake(11, 15)];
+        [arrow addLineToPoint:CGPointMake(14.5, 18.5)];
+        [arrow addLineToPoint:CGPointMake(19, 13.5)];
+        [arrow addLineToPoint:CGPointMake(14.5, 11)];
+        [arrow addLineToPoint:CGPointMake(11, 14.5)];
+        [arrow closePath];
+        [fill setFill]; [arrow fill]; [stroke setStroke]; arrow.lineWidth = strokeWidth; [arrow stroke];
+        CGRect badge = CGRectMake(17.5, 17.5, 11, 11);
+        UIBezierPath *circle = [UIBezierPath bezierPathWithOvalInRect:badge];
+        [[UIColor colorWithRed:0.22 green:0.55 blue:0.98 alpha:1] setFill]; [circle fill];
+        [[UIColor whiteColor] setStroke]; circle.lineWidth = 1.1; [circle stroke];
+        // ?
+        NSDictionary *attrs = @{NSFontAttributeName: [UIFont boldSystemFontOfSize:7.5], NSForegroundColorAttributeName: UIColor.whiteColor};
+        NSString *q = @"?";
+        CGSize qs = [q sizeWithAttributes:attrs];
+        [q drawAtPoint:CGPointMake(23 - qs.width/2, 19.2) withAttributes:attrs];
     } else if ([typeId isEqualToString:@"hidden"]) {
-        // Hidden cursor - return transparent 1x1 image
         UIGraphicsEndImageContext();
-        UIGraphicsBeginImageContextWithOptions(CGSizeMake(1, 1), NO, scale);
-        CGContextRef hiddenCtx = UIGraphicsGetCurrentContext();
-        CGContextSetFillColorWithColor(hiddenCtx, [UIColor clearColor].CGColor);
-        CGContextFillRect(hiddenCtx, CGRectMake(0, 0, 1, 1));
-        UIImage *hiddenImg = UIGraphicsGetImageFromCurrentImageContext();
+        UIGraphicsBeginImageContextWithOptions(CGSizeMake(1,1), NO, scale);
+        CGContextRef c2 = UIGraphicsGetCurrentContext();
+        CGContextSetFillColorWithColor(c2, UIColor.clearColor.CGColor);
+        CGContextFillRect(c2, CGRectMake(0,0,1,1));
+        UIImage *hidden = UIGraphicsGetImageFromCurrentImageContext();
         UIGraphicsEndImageContext();
-        return hiddenImg;
-        
+        return hidden;
     } else {
-        // Fallback to arrow
+        UIGraphicsEndImageContext();
         return [self generateDefaultShapeForType:@"normal"];
     }
-    
+
     UIImage *img = UIGraphicsGetImageFromCurrentImageContext();
     UIGraphicsEndImageContext();
-    
     return img;
 }
-
-#pragma mark - Composite image (cursor decoration)
 
 + (UIImage *)compositeImageForType:(NSString *)typeId {
     // Hidden cursor always returns transparent image

@@ -305,6 +305,16 @@ static GameSurfaceView* pojavWindow;
         }
     }];
 
+    // Live update for mouse/button scale sliders (Settings -> Controls)
+    // Previous bug: slider saved pref but never refreshed virtualMouseFrame / mousePointerView until relaunch.
+    // Now observe and apply immediately, including hitbox-aware displayFrame recalculation.
+    [[NSNotificationCenter defaultCenter] addObserverForName:@"MouseScaleDidChangeNotification" object:nil queue:[NSOperationQueue mainQueue] usingBlock:^(NSNotification *note) {
+        [self handleControlScaleChange];
+    }];
+    [[NSNotificationCenter defaultCenter] addObserverForName:@"ControlScaleDidChangeNotification" object:nil queue:[NSOperationQueue mainQueue] usingBlock:^(NSNotification *note) {
+        [self handleControlScaleChange];
+    }];
+
     // TODO: deal with multiple controllers by letting users decide which one to use?
     self.controllerConnectCallback = [[NSNotificationCenter defaultCenter] addObserverForName:GCControllerDidConnectNotification object:nil queue:[NSOperationQueue mainQueue] usingBlock:^(NSNotification *note) {
         NSLog(@"Input: Controller connected!");
@@ -498,6 +508,42 @@ static GameSurfaceView* pojavWindow;
     }
     // Update pointer lock state
     [self setNeedsUpdateOfPrefersPointerLocked];
+}
+
+- (void)handleControlScaleChange {
+    // Live update for Settings sliders: mouse_scale, button_scale, mouse_speed
+    // Called via MouseScaleDidChangeNotification / ControlScaleDidChangeNotification
+    // Keeps virtualMouseFrame size in sync and re-applies hitbox-aware displayFrame.
+    CGFloat mouseScale = getPrefFloat(@"control.mouse_scale") / 100.0;
+    if (mouseScale < 0.3) mouseScale = 1.0;
+    // Preserve current center, update size to 18x27 * scale (same as updatePreferenceChanges)
+    CGPoint center = CGPointMake(CGRectGetMidX(virtualMouseFrame), CGRectGetMidY(virtualMouseFrame));
+    // Fallback if virtualMouseFrame was never initialized (zero rect at launch)
+    if (virtualMouseFrame.size.width == 0 || virtualMouseFrame.size.height == 0) {
+        center = CGPointMake(self.view.frame.size.width * 0.5, self.view.frame.size.height * 0.5);
+    }
+    CGFloat w = 18.0 * mouseScale;
+    CGFloat h = 27.0 * mouseScale;
+    virtualMouseFrame = CGRectMake(center.x - w*0.5, center.y - h*0.5, w, h);
+    virtualMouseFrame.origin.x = clamp(virtualMouseFrame.origin.x, 0, self.view.frame.size.width - w);
+    virtualMouseFrame.origin.y = clamp(virtualMouseFrame.origin.y, 0, self.view.frame.size.height - h);
+    NSString *activeTypeId = [CursorTypeManager currentActiveTypeId];
+    UIImage *img = [CursorTypeManager imageForType:activeTypeId];
+    self.mousePointerView.image = img;
+    self.mousePointerView.frame = [CursorManager displayFrameForMouseFrame:virtualMouseFrame typeId:activeTypeId];
+    self.mousePointerView.hidden = isGrabbing || !getPrefBool(@"control.virtmouse_enable");
+    self.mouseSpeed = getPrefFloat(@"control.mouse_speed") / 100.0;
+    // Button scale live update: refresh control layout (ControlButton reads control.button_scale)
+    for (UIView *v in self.ctrlView.subviews) {
+        if ([v respondsToSelector:@selector(update)]) {
+            [(id)v update];
+        }
+    }
+    [self.ctrlView setNeedsLayout];
+    [self.ctrlView layoutIfNeeded];
+    NSLog(@"[SurfaceViewController] handleControlScaleChange mouseScale=%.2f buttonScale=%.2f mouseSpeed=%.2f -> virtualMouseFrame %@ displayFrame %@",
+          mouseScale, getPrefFloat(@"control.button_scale")/100.0, self.mouseSpeed,
+          NSStringFromCGRect(virtualMouseFrame), NSStringFromCGRect(self.mousePointerView.frame));
 }
 
 - (void)updateSavedResolution {
