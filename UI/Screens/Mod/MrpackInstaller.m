@@ -48,13 +48,13 @@ static NSString *readInstallerVersionId(NSString *jarPath) {
 
 + (void)installMrpackAtPath:(NSString *)dlPath title:(NSString *)title hostVC:(UIViewController *)hostVC removeOnCompletion:(BOOL)removeOnCompletion {
     DownloadProgressOverlay *overlay = [DownloadProgressOverlay showInView:hostVC.view title:@"Installing Modpack"];
-    [overlay updateProgress:0.1 message:@"Parsing modpack..."];
+    [overlay updateProgress:0.1 message:localize(@"progress.msg.parsing", nil)];
 
     NSError *uzError;
     UZKArchive *archive = [[UZKArchive alloc] initWithPath:dlPath error:&uzError];
     if (uzError) {
         if (removeOnCompletion) [[NSFileManager defaultManager] removeItemAtPath:dlPath error:nil];
-        [overlay finishWithMessage:@"Invalid modpack"];
+        [overlay finishWithMessage:localize(@"modpack.invalid", nil)];
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 1.0 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{ [overlay dismiss]; });
         return;
     }
@@ -62,7 +62,7 @@ static NSString *readInstallerVersionId(NSString *jarPath) {
     NSData *indexData = [archive extractDataFromFile:@"modrinth.index.json" error:&uzError];
     if (uzError || !indexData) {
         if (removeOnCompletion) [[NSFileManager defaultManager] removeItemAtPath:dlPath error:nil];
-        [overlay finishWithMessage:@"Missing index"];
+        [overlay finishWithMessage:localize(@"modpack.missing_index", nil)];
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 1.0 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{ [overlay dismiss]; });
         return;
     }
@@ -70,7 +70,7 @@ static NSString *readInstallerVersionId(NSString *jarPath) {
     NSDictionary *indexDict = [NSJSONSerialization JSONObjectWithData:indexData options:0 error:&uzError];
     if (uzError || ![indexDict isKindOfClass:[NSDictionary class]]) {
         if (removeOnCompletion) [[NSFileManager defaultManager] removeItemAtPath:dlPath error:nil];
-        [overlay finishWithMessage:@"Corrupt index"];
+        [overlay finishWithMessage:localize(@"modpack.corrupt_index", nil)];
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 1.0 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{ [overlay dismiss]; });
         return;
     }
@@ -87,7 +87,7 @@ static NSString *readInstallerVersionId(NSString *jarPath) {
 
     NSArray *indexFiles = indexDict[@"files"];
     NSUInteger totalFiles = [indexFiles isKindOfClass:[NSArray class]] ? indexFiles.count : 0;
-    [overlay updateProgress:0.4 message:[NSString stringWithFormat:@"Downloading %lu files...", (unsigned long)totalFiles]];
+    [overlay updateProgress:0.4 message:[NSString stringWithFormat:localize(@"progress.msg.dl_nfiles", nil), (unsigned long)totalFiles]];
     __block NSUInteger completedFiles = 0;
     __block BOOL installFailed = NO;
     dispatch_group_t modGroup = dispatch_group_create();
@@ -102,7 +102,7 @@ static NSString *readInstallerVersionId(NSString *jarPath) {
                 if (!success) installFailed = YES;
                 completedFiles++;
                 dispatch_async(dispatch_get_main_queue(), ^{
-                    [overlay updateProgress:0.4 + (0.3 * completedFiles / totalFiles) message:[NSString stringWithFormat:@"Downloading files... (%lu/%lu)", (unsigned long)completedFiles, (unsigned long)totalFiles]];
+                    [overlay updateProgress:0.4 + (0.3 * completedFiles / totalFiles) message:[NSString stringWithFormat:localize(@"progress.msg.dl_files", nil), (unsigned long)completedFiles, (unsigned long)totalFiles]];
                 });
                 dispatch_group_leave(modGroup);
             }];
@@ -115,17 +115,17 @@ static NSString *readInstallerVersionId(NSString *jarPath) {
     dispatch_group_notify(modGroup, dispatch_get_main_queue(), ^{
         if (installFailed) {
             if (removeOnCompletion) [[NSFileManager defaultManager] removeItemAtPath:dlPath error:nil];
-            [overlay finishWithMessage:@"Some files failed"];
+            [overlay finishWithMessage:localize(@"modpack.files_failed", nil)];
             dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 1.0 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{ [overlay dismiss]; });
             return;
         }
 
-        [overlay updateProgress:0.7 message:@"Extracting overrides..."];
+        [overlay updateProgress:0.7 message:localize(@"progress.msg.extracting", nil)];
         [ModpackUtils archive:archive extractDirectory:@"overrides" toPath:versionDir error:nil];
         [ModpackUtils archive:archive extractDirectory:@"client-overrides" toPath:versionDir error:nil];
         if (removeOnCompletion) [[NSFileManager defaultManager] removeItemAtPath:dlPath error:nil];
 
-        [overlay updateProgress:0.8 message:@"Setting up version..."];
+        [overlay updateProgress:0.8 message:localize(@"progress.msg.setup_version", nil)];
         NSDictionary *deps = indexDict[@"dependencies"];
         NSString *currentMC = VersionDirectoryManager.shared.currentVersion.length > 0
             ? VersionDirectoryManager.shared.currentVersion : @"1.21.4";
@@ -174,7 +174,7 @@ static NSString *readInstallerVersionId(NSString *jarPath) {
             VersionDirectoryManager.shared.currentVersion = versionName;
 
             if (showAlert) {
-                [overlay finishWithMessage:@"Installed!"];
+                [overlay finishWithMessage:localize(@"common.installed_done", nil)];
                 dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 1.5 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
                     [overlay dismiss];
                     showDialog(@"Modpack Installed", [NSString stringWithFormat:@"%@ installed as profile.", profileName]);
@@ -201,7 +201,7 @@ static NSString *readInstallerVersionId(NSString *jarPath) {
                 } else {
                     profileUrl = [NSString stringWithFormat:@"https://meta.quiltmc.org/v3/versions/loader/%@/%@/profile/json", packMcVersion, loaderVer];
                 }
-                [overlay updateProgress:0.82 message:@"Downloading loader profile..."];
+                [overlay updateProgress:0.82 message:localize(@"progress.msg.dl_loader", nil)];
                 dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
                     NSData *profileData = [NSData dataWithContentsOfURL:[NSURL URLWithString:profileUrl]];
                     if (profileData && [loaderType isEqualToString:@"quilt"]) {
@@ -250,7 +250,7 @@ static NSString *readInstallerVersionId(NSString *jarPath) {
             NSString *installerUrl = isNeo
                 ? [NSString stringWithFormat:@"https://maven.neoforged.net/releases/net/neoforged/neoforge/%@/neoforge-%@-installer.jar", loaderVer2, loaderVer2]
                 : [NSString stringWithFormat:@"https://maven.minecraftforge.net/net/minecraftforge/forge/%@-%@/forge-%@-%@-installer.jar", packMcVersion, loaderVer2, packMcVersion, loaderVer2];
-            [overlay updateProgress:0.82 message:[NSString stringWithFormat:@"Downloading %@ installer...", isNeo ? @"NeoForge" : @"Forge"]];
+            [overlay updateProgress:0.82 message:[NSString stringWithFormat:localize(@"progress.msg.dl_installer", nil), isNeo ? @"NeoForge" : @"Forge"]];
             dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
                 NSData *jarData = [NSData dataWithContentsOfURL:[NSURL URLWithString:installerUrl]];
                 dispatch_async(dispatch_get_main_queue(), ^{
@@ -279,11 +279,11 @@ static NSString *readInstallerVersionId(NSString *jarPath) {
 
                     finalizeInstall(NO);
                     if (!installerPath) {
-                        [overlay updateProgress:0.9 message:@"Installer download failed"];
+                        [overlay updateProgress:0.9 message:localize(@"progress.msg.installer_fail", nil)];
                         showDialog(@"Installer Failed", [NSString stringWithFormat:@"Could not download the %@ installer. The modpack profile was still created.", isNeo ? @"NeoForge" : @"Forge"]);
                         return;
                     }
-                    [overlay updateProgress:0.9 message:[NSString stringWithFormat:@"Running %@ installer...", isNeo ? @"NeoForge" : @"Forge"]];
+                    [overlay updateProgress:0.9 message:[NSString stringWithFormat:localize(@"progress.msg.run_installer", nil), isNeo ? @"NeoForge" : @"Forge"]];
                     NSString *installDir = [NSString stringWithFormat:@"%s/instances/%@",
                         getenv("POJAV_HOME") ?: "", VersionDirectoryManager.shared.currentInstance ?: @"default"];
                     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 0.5 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{

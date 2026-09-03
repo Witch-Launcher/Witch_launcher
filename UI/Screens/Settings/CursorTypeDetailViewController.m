@@ -112,6 +112,7 @@
         [UTType typeWithFilenameExtension:@"gif"],
         [UTType typeWithFilenameExtension:@"webp"],
         [UTType typeWithFilenameExtension:@"cur"],
+        [UTType typeWithFilenameExtension:@"ani"],
         [UTType typeWithFilenameExtension:@"ico"],
         [UTType typeWithFilenameExtension:@"bmp"],
         [UTType typeWithFilenameExtension:@"tiff"],

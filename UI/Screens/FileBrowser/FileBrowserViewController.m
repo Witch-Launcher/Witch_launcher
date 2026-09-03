@@ -343,20 +343,20 @@
     UIAlertController *info = [UIAlertController alertControllerWithTitle:name
                                                                    message:message
                                                             preferredStyle:UIAlertControllerStyleAlert];
-    [info addAction:[UIAlertAction actionWithTitle:@"Copy Path" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
+    [info addAction:[UIAlertAction actionWithTitle:localize(@"common.copy_path", nil) style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
         [UIPasteboard generalPasteboard].string = fullPath;
     }]];
-    [info addAction:[UIAlertAction actionWithTitle:@"Copy" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
+    [info addAction:[UIAlertAction actionWithTitle:localize(@"Copy", nil) style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
         self.clipboardPath = fullPath;
         self.isCutOperation = NO;
         self.pasteBtn.hidden = NO;
     }]];
-    [info addAction:[UIAlertAction actionWithTitle:@"Cut" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
+    [info addAction:[UIAlertAction actionWithTitle:localize(@"common.cut", nil) style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
         self.clipboardPath = fullPath;
         self.isCutOperation = YES;
         self.pasteBtn.hidden = NO;
     }]];
-    [info addAction:[UIAlertAction actionWithTitle:@"Delete" style:UIAlertActionStyleDestructive handler:^(UIAlertAction *action) {
+    [info addAction:[UIAlertAction actionWithTitle:localize(@"Delete", nil) style:UIAlertActionStyleDestructive handler:^(UIAlertAction *action) {
         NSError *delError = nil;
         [[NSFileManager defaultManager] removeItemAtPath:fullPath error:&delError];
         if (delError) {
@@ -366,12 +366,12 @@
         }
     }]];
     if (isDir) {
-        [info addAction:[UIAlertAction actionWithTitle:@"Open" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
+        [info addAction:[UIAlertAction actionWithTitle:localize(@"common.open", nil) style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
             [_pathStack addObject:fullPath];
             [self loadItems];
         }]];
     }
-    [info addAction:[UIAlertAction actionWithTitle:@"Close" style:UIAlertActionStyleCancel handler:nil]];
+    [info addAction:[UIAlertAction actionWithTitle:localize(@"Close", nil) style:UIAlertActionStyleCancel handler:nil]];
     [self presentViewController:info animated:YES completion:nil];
 }
 

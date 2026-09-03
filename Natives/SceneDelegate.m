@@ -184,26 +184,26 @@ static NSString *const kMinecraftGPUBackgroundTaskPrefix = @"com.witch.zad626.mi
         if (content && ![content containsString:@"Game crashed!"] && !ipsPath) return;
     }
     // Hiện alert cho phép gửi log
-    UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Phát hiện crash trước đó" message:@"Launcher vừa crash ra màn hình chính. Bạn có muốn gửi log để AI phân tích hoặc gửi lên Discord không? (Sẽ gửi latestlog + crash-report/hs_err/.ips nếu có)" preferredStyle:UIAlertControllerStyleAlert];
-    [alert addAction:[UIAlertAction actionWithTitle:@"Gửi cho AI" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){
+    UIAlertController *alert = [UIAlertController alertControllerWithTitle:localize(@"crash.prev_title", nil) message:localize(@"crash.prev_message", nil) preferredStyle:UIAlertControllerStyleAlert];
+    [alert addAction:[UIAlertAction actionWithTitle:localize(@"crash.send_ai", nil) style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){
         CrashLogAnalyzerResult *analysis = [CrashLogAnalyzer analyzeWithExitCode:1];
         WitchAIChatViewController *vc = [[WitchAIChatViewController alloc] initWithAnalysis:analysis exitCode:1];
         UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:vc];
         nav.modalPresentationStyle = UIModalPresentationFormSheet;
         [self.window.rootViewController presentViewController:nav animated:YES completion:nil];
     }]];
-    [alert addAction:[UIAlertAction actionWithTitle:@"Gửi lên Discord" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){
+    [alert addAction:[UIAlertAction actionWithTitle:localize(@"crash.send_discord", nil) style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){
         CrashLogAnalyzerResult *analysis = [CrashLogAnalyzer analyzeWithExitCode:1];
         NSString *note = ipsPath ? [NSString stringWithFormat:@"Crash .ips: %@", ipsPath.lastPathComponent] : @"Launcher crash to home";
         [WitchLogReporter sendReportWithAnalysis:analysis exitCode:1 note:note completion:^(BOOL success, NSString *logId, NSError *error){
-            NSString *title = success ? @"Đã gửi" : @"Lỗi";
-            NSString *msg = success ? [NSString stringWithFormat:@"Đã gửi log lên Discord (logId: %@)", logId ?: @""] : error.localizedDescription;
+            NSString *title = success ? localize(@"crash.sent_title", nil) : localize(@"Error", nil);
+            NSString *msg = success ? [NSString stringWithFormat:localize(@"crash.sent_discord", nil), logId ?: @""] : error.localizedDescription;
             UIAlertController *res = [UIAlertController alertControllerWithTitle:title message:msg preferredStyle:UIAlertControllerStyleAlert];
-            [res addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
+            [res addAction:[UIAlertAction actionWithTitle:localize(@"OK", nil) style:UIAlertActionStyleDefault handler:nil]];
             [self.window.rootViewController presentViewController:res animated:YES completion:nil];
         }];
     }]];
-    [alert addAction:[UIAlertAction actionWithTitle:@"Để sau" style:UIAlertActionStyleCancel handler:nil]];
+    [alert addAction:[UIAlertAction actionWithTitle:localize(@"crash.later", nil) style:UIAlertActionStyleCancel handler:nil]];
     [self.window.rootViewController presentViewController:alert animated:YES completion:nil];
 }
 

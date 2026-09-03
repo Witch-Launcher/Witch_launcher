@@ -53,13 +53,14 @@
     NSArray *glVersions = @[@"0", @"3.0", @"3.1", @"3.2", @"3.3", @"4.0", @"4.1", @"4.2", @"4.3", @"4.4", @"4.5", @"4.6"];
     NSArray *zinkOptLevels = @[@"-1", @"0", @"1", @"2", @"3", @"4", @"5"];
 
-    
+    // Group header row (uses the plain "label" cell style).
+    NSDictionary *(^header)(NSString *) = ^NSDictionary *(NSString *titleKey) {
+        return @{@"type": @"label", @"label": localize(titleKey, nil)};
+    };
+
     _sections = @[
         @{@"title": localize(@"General", nil), @"items": @[
-            @{@"type": @"picker", @"label": localize(@"preference.title.language", nil), @"key": @"launcher.language", @"options": @[
-                @{@"key": @"en", @"name": @"English"},
-                @{@"key": @"vi", @"name": @"Tiếng Việt"},
-            ], @"default": @"en"},
+            @{@"type": @"picker", @"label": localize(@"preference.title.language", nil), @"key": @"launcher.language", @"options": [self languageOptions], @"default": @"auto"},
             @{@"type": @"picker", @"label": localize(@"preference.title.theme", nil), @"key": @"launcher.theme", @"options": @[
                 @{@"key": @"System", @"name": localize(@"theme.system", nil)},
                 @{@"key": @"Dark", @"name": localize(@"theme.dark", nil)},
@@ -77,20 +78,15 @@
             ], @"default": @"off"},
             @{@"type": @"navigate", @"label": localize(@"preference.title.game_directory", nil), @"vc": @"LauncherPrefGameDirViewController"},
             @{@"type": @"navigate", @"label": localize(@"preference.title.manage_runtime", nil) , @"vc": @"LauncherPrefManageJREViewController"},
-            @{@"type": @"switch", @"label": localize(@"preference.title.debug_logging", nil), @"key": @"general.debug_logging"},
-            @{@"type": @"switch", @"label": localize(@"preference.title.debug_ipad_ui", nil), @"key": @"debug.debug_ipad_ui"},
-            @{@"type": @"switch", @"label": localize(@"preference.title.debug_skip_wait_jit", nil), @"key": @"debug.debug_skip_wait_jit"},
-            @{@"type": @"switch", @"label": localize(@"preference.title.debug_always_attached_jit", nil), @"key": @"debug.debug_always_attached_jit"},
-            @{@"type": @"switch", @"label": localize(@"preference.title.debug_hide_home_indicator", nil), @"key": @"debug.debug_hide_home_indicator"},
-            @{@"type": @"switch", @"label": localize(@"preference.title.debug_auto_correction", nil), @"key": @"debug.debug_auto_correction"},
         ]},
         @{@"title": localize(@"Game", nil), @"items": @[
-            @{@"type": @"picker", @"label": localize(@"preference.title.lwjgl_version", nil), @"key": @"java.lwjgl_version", @"options": lwjglItems, @"default": @"(auto)"},
+            header(@"settings.group.display"),
             @{@"type": @"picker", @"label": localize(@"preference.title.renderer", nil), @"key": @"video.renderer", @"options": rendererOptions, @"default": @"auto"},
             @{@"type": @"slider", @"label": localize(@"preference.title.resolution", nil), @"key": @"video.resolution", @"min": @25, @"max": @150, @"suffix": @"%"},
             @{@"type": @"switch", @"label": localize(@"preference.title.max_framerate", nil), @"key": @"video.max_framerate"},
             @{@"type": @"switch", @"label": localize(@"preference.title.performance_hud", nil), @"key": @"video.performance_hud"},
             @{@"type": @"switch", @"label": localize(@"preference.title.fullscreen_airplay", nil), @"key": @"video.fullscreen_airplay"},
+            header(@"settings.group.framegen"),
             @{@"type": @"switch", @"label": localize(@"preference.title.frame_generation", nil), @"key": @"video.frame_generation"},
             @{@"type": @"slider", @"label": localize(@"preference.title.framegen_target_fps", nil), @"key": @"video.framegen_target_fps", @"min": @30, @"max": @120, @"suffix": @" FPS"},
             @{@"type": @"picker", @"label": localize(@"preference.title.framegen_mode", nil), @"key": @"video.framegen_mode", @"default": @"motion_adaptive", @"options": @[
@@ -101,33 +97,41 @@
                 @{@"key": @"interp", @"name": localize(@"preference.title.framegen_fg2_submode.interp", nil)},
                 @{@"key": @"predict", @"name": localize(@"preference.title.framegen_fg2_submode.predict", nil)}
             ]},
+            header(@"settings.group.java"),
+            @{@"type": @"picker", @"label": localize(@"preference.title.lwjgl_version", nil), @"key": @"java.lwjgl_version", @"options": lwjglItems, @"default": @"(auto)"},
             @{@"type": @"slider", @"label": localize(@"preference.title.allocated_memory", nil), @"key": @"java.allocated_memory", @"min": @256, @"max": @((NSProcessInfo.processInfo.physicalMemory / 1048576) * 0.85), @"suffix": @"MB"},
             @{@"type": @"switch", @"label": localize(@"preference.title.auto_ram", nil), @"key": @"java.auto_ram"},
             @{@"type": @"text", @"label": localize(@"preference.title.java_args", nil), @"key": @"java.java_args", @"placeholder": @"-Xmx2G -Xms512M"},
             @{@"type": @"text", @"label": localize(@"preference.title.env_variables", nil), @"key": @"java.env_variables", @"placeholder": @"VAR=value"},
+            header(@"settings.group.game_opts"),
             @{@"type": @"switch", @"label": localize(@"preference.title.check_sha", nil), @"key": @"general.check_sha"},
             @{@"type": @"switch", @"label": localize(@"preference.title.cosmetica", nil), @"key": @"general.cosmetica"},
         ]},
         @{@"title": localize(@"Controls", nil), @"items": @[
-            @{@"type": @"slider", @"label": localize(@"preference.title.button_scale", nil), @"key": @"control.button_scale", @"min": @30, @"max": @200, @"suffix": @"%"},
+            header(@"settings.group.mouse"),
+            @{@"type": @"switch", @"label": localize(@"preference.title.virtmouse_enable", nil), @"key": @"control.virtmouse_enable"},
             @{@"type": @"slider", @"label": localize(@"preference.title.mouse_scale", nil), @"key": @"control.mouse_scale", @"min": @30, @"max": @200, @"suffix": @"%"},
             @{@"type": @"slider", @"label": localize(@"preference.title.mouse_speed", nil), @"key": @"control.mouse_speed", @"min": @10, @"max": @300, @"suffix": @"%"},
-            @{@"type": @"switch", @"label": localize(@"preference.title.virtmouse_enable", nil), @"key": @"control.virtmouse_enable"},
-            @{@"type": @"switch", @"label": localize(@"preference.title.gyroscope_enable", nil), @"key": @"control.gyroscope_enable"},
-            @{@"type": @"switch", @"label": localize(@"preference.title.gyroscope_invert_x_axis", nil), @"key": @"control.gyroscope_invert_x_axis"},
-            @{@"type": @"slider", @"label": localize(@"preference.title.gyroscope_sensitivity", nil), @"key": @"control.gyroscope_sensitivity", @"min": @10, @"max": @300, @"suffix": @"%"},
+            header(@"settings.group.touch"),
+            @{@"type": @"slider", @"label": localize(@"preference.title.button_scale", nil), @"key": @"control.button_scale", @"min": @30, @"max": @200, @"suffix": @"%"},
             @{@"type": @"switch", @"label": localize(@"preference.title.slideable_hotbar", nil), @"key": @"control.slideable_hotbar"},
             @{@"type": @"switch", @"label": localize(@"preference.title.gesture_mouse", nil), @"key": @"control.gesture_mouse"},
             @{@"type": @"switch", @"label": localize(@"preference.title.gesture_hotbar", nil), @"key": @"control.gesture_hotbar"},
+            @{@"type": @"slider", @"label": localize(@"preference.title.press_duration", nil), @"key": @"control.press_duration", @"min": @100, @"max": @1000, @"suffix": @"ms"},
             @{@"type": @"switch", @"label": localize(@"preference.title.recording_hide", nil), @"key": @"control.recording_hide"},
             @{@"type": @"switch", @"label": localize(@"preference.title.disable_haptics", nil), @"key": @"control.disable_haptics"},
-            @{@"type": @"slider", @"label": localize(@"preference.title.press_duration", nil), @"key": @"control.press_duration", @"min": @100, @"max": @1000, @"suffix": @"ms"},
-            @{@"type": @"navigate", @"label": localize(@"Cursor Settings", nil), @"vc": @"CursorSettingsViewController"},
-            @{@"type": @"navigate", @"label": localize(@"Edit Controls Layout", nil), @"vc": @"CustomControlsViewController"},
+            header(@"settings.group.gyro"),
+            @{@"type": @"switch", @"label": localize(@"preference.title.gyroscope_enable", nil), @"key": @"control.gyroscope_enable"},
+            @{@"type": @"switch", @"label": localize(@"preference.title.gyroscope_invert_x_axis", nil), @"key": @"control.gyroscope_invert_x_axis"},
+            @{@"type": @"slider", @"label": localize(@"preference.title.gyroscope_sensitivity", nil), @"key": @"control.gyroscope_sensitivity", @"min": @10, @"max": @300, @"suffix": @"%"},
+            header(@"settings.group.gamepad"),
             @{@"type": @"picker", @"label": localize(@"preference.title.default_gamepad_ctrl", nil), @"key": @"control.controller_type", @"options": @[@"none", @"mfi", @"ps4", @"ps5", @"xbox"], @"default": @"none"},
             @{@"type": @"slider", @"label": localize(@"preference.title.gamepad_sensitivity", nil), @"key": @"control.gamepad_sensitivity", @"min": @10, @"max": @300, @"suffix": @"%"},
             @{@"type": @"switch", @"label": localize(@"preference.title.hardware_hide", nil), @"key": @"control.hardware_hide"},
             @{@"type": @"navigate", @"label": localize(@"Gamepad Layout", nil), @"vc": @"LauncherPrefContCfgViewController"},
+            header(@"settings.group.cursor"),
+            @{@"type": @"navigate", @"label": localize(@"Cursor Settings", nil), @"vc": @"CursorSettingsViewController"},
+            @{@"type": @"navigate", @"label": localize(@"Edit Controls Layout", nil), @"vc": @"CustomControlsViewController"},
         ]},
         @{@"title": localize(@"Widget", nil), @"items": @[
             @{@"type": @"switch", @"label": localize(@"preference.title.widget_menu", nil), @"key": @"general.widget_menu"},
@@ -157,8 +161,10 @@
             @{@"type": @"slider", @"label": localize(@"preference.title.widget_bg_opacity", nil), @"key": @"general.widget_bg_opacity", @"min": @0, @"max": @80, @"suffix": @"%"},
         ]},
         @{@"title": localize(@"Graphics", nil), @"items": @[
+            header(@"settings.group.graphics_hint"),
+            header(@"settings.group.mobileglues"),
             @{@"type": @"switch", @"label": localize(@"preference.title.enable_angle", nil), @"key": @"mobileglues.enable_angle"},
-            @{@"type": @"picker", @"label": localize(@"preference.title.enable_no_error", nil), @"key": @"mobileglues.enable_no_error", @"options": @[@"0", @"1", @"2"], @"default": @"0"},
+            @{@"type": @"picker", @"label": localize(@"preference.title.enable_no_error", nil), @"key": @"mobileglues.enable_no_error", @"options": @[@"0", @"1", @"2"], @"default": @"2"},
             @{@"type": @"switch", @"label": localize(@"preference.title.enable_ext_timer_query", nil), @"key": @"mobileglues.enable_ext_timer_query"},
             @{@"type": @"switch", @"label": localize(@"preference.title.enable_ext_compute_shader", nil), @"key": @"mobileglues.enable_ext_compute_shader"},
             @{@"type": @"switch", @"label": localize(@"preference.title.enable_ext_direct_state_access", nil), @"key": @"mobileglues.enable_ext_direct_state_access"},
@@ -167,6 +173,7 @@
             @{@"type": @"switch", @"label": localize(@"preference.title.angle_depth_clear_fix_mode", nil), @"key": @"mobileglues.angle_depth_clear_fix_mode"},
             @{@"type": @"picker", @"label": localize(@"preference.title.custom_gl_version", nil), @"key": @"mobileglues.custom_gl_version", @"options": glVersions, @"default": @"0"},
             @{@"type": @"picker", @"label": localize(@"preference.title.fsr1_setting", nil), @"key": @"mobileglues.fsr1_setting", @"options": @[@"0", @"1", @"2", @"3", @"4", @"5"], @"default": @"0"},
+            header(@"settings.group.zink"),
             @{@"type": @"picker", @"label": localize(@"preference.title.optimization_level", nil), @"key": @"zink.optimization_level", @"options": zinkOptLevels, @"default": @"-1"},
             @{@"type": @"picker", @"label": localize(@"preference.title.zink_gl_override", nil), @"key": @"zink.gl_override", @"options": @[@"0", @"3.3", @"4.0", @"4.1", @"4.3", @"4.6"], @"default": @"0"},
             @{@"type": @"switch", @"label": localize(@"preference.title.zink_enable_gl_thread", nil), @"key": @"zink.enable_gl_thread"},
@@ -174,15 +181,18 @@
             @{@"type": @"picker", @"label": localize(@"preference.title.zink_api_features", nil), @"key": @"zink.api_features", @"options": @[@"0", @"1", @"2", @"3"], @"default": @"3"},
         ]},
         @{@"title": localize(@"Network", nil), @"items": @[
+            header(@"settings.group.witch"),
             @{@"type": @"switch", @"label": localize(@"preference.title.witch_enabled", nil), @"key": @"witch.server_enabled", @"default": @YES},
             @{@"type": @"text", @"label": localize(@"preference.title.witch_base_url", nil), @"key": @"witch.proxy_base_url", @"placeholder": localize(@"preference.detail.witch_base_url", nil)},
             @{@"type": @"text", @"label": localize(@"preference.title.witch_token", nil), @"key": @"witch.proxy_token", @"placeholder": @"Bearer token"},
             @{@"type": @"text", @"label": localize(@"preference.title.witch_hmac", nil), @"key": @"witch.proxy_hmac", @"placeholder": @"HMAC secret"},
+            header(@"settings.group.curseforge"),
             @{@"type": @"picker", @"label": localize(@"preference.title.witch_cf_source", nil), @"key": @"witch.curseforge_source", @"options": @[
                 @{@"key": @"server", @"name": localize(@"preference.option.server", nil)},
                 @{@"key": @"own", @"name": localize(@"preference.option.own", nil)},
             ], @"default": @"server"},
             @{@"type": @"text", @"label": localize(@"preference.title.witch_cf_own_key", nil), @"key": @"witch.curseforge_own_key", @"placeholder": @"x-api-key (if own)"},
+            header(@"settings.group.ai"),
             @{@"type": @"switch", @"label": localize(@"preference.title.ai_enabled", nil), @"key": @"witch.ai_enabled", @"default": @YES},
             @{@"type": @"picker", @"label": localize(@"preference.title.ai_source", nil), @"key": @"witch.ai_source", @"options": @[
                 @{@"key": @"server", @"name": localize(@"preference.option.server", nil)},
@@ -196,13 +206,10 @@
                 @{@"key": @"vi", @"name": @"Tiếng Việt"},
                 @{@"key": @"en", @"name": @"English"},
             ], @"default": @"auto"},
+            header(@"settings.group.mic"),
             @{@"type": @"switch", @"label": localize(@"preference.title.allow_microphone", nil), @"key": @"video.allow_microphone"},
             @{@"type": @"picker", @"label": localize(@"preference.title.microphone_source", nil), @"key": @"video.microphone_source", @"options": @[@"auto", @"front", @"bottom", @"back"], @"default": @"auto"},
             @{@"type": @"switch", @"label": localize(@"preference.title.silence_other_audio", nil), @"key": @"video.silence_other_audio"},
-            @{@"type": @"switch", @"label": localize(@"preference.title.debug_server_enabled", nil), @"key": @"debug.debug_server_enabled"},
-            @{@"type": @"text", @"label": localize(@"preference.title.debug_server_port", nil), @"key": @"debug.debug_server_port", @"placeholder": @"9090"},
-            @{@"type": @"text", @"label": localize(@"preference.title.debug_server_token", nil), @"key": @"debug.debug_server_token", @"placeholder": @""},
-            @{@"type": @"switch", @"label": localize(@"preference.title.debug_server_localhost_only", nil), @"key": @"debug.debug_server_localhost_only"},
         ]},
         @{@"title": localize(@"Appearance", nil), @"items": @[
             @{@"type": @"color", @"label": localize(@"appearance.accent_color", nil), @"key": @"amethyst_accent_color"},
@@ -224,6 +231,20 @@
             @{@"type": @"export", @"label": localize(@"appearance.export_theme", nil)},
             @{@"type": @"import", @"label": localize(@"appearance.import_theme", nil)},
             @{@"type": @"color", @"label": localize(@"appearance.reset", nil), @"key": @"amethyst_reset_appearance"},
+        ]},
+        @{@"title": localize(@"Developer", nil), @"items": @[
+            header(@"settings.group.debug_opts"),
+            @{@"type": @"switch", @"label": localize(@"preference.title.debug_logging", nil), @"key": @"general.debug_logging"},
+            @{@"type": @"switch", @"label": localize(@"preference.title.debug_ipad_ui", nil), @"key": @"debug.debug_ipad_ui"},
+            @{@"type": @"switch", @"label": localize(@"preference.title.debug_skip_wait_jit", nil), @"key": @"debug.debug_skip_wait_jit"},
+            @{@"type": @"switch", @"label": localize(@"preference.title.debug_always_attached_jit", nil), @"key": @"debug.debug_always_attached_jit"},
+            @{@"type": @"switch", @"label": localize(@"preference.title.debug_hide_home_indicator", nil), @"key": @"debug.debug_hide_home_indicator"},
+            @{@"type": @"switch", @"label": localize(@"preference.title.debug_auto_correction", nil), @"key": @"debug.debug_auto_correction"},
+            header(@"settings.group.dev_server"),
+            @{@"type": @"switch", @"label": localize(@"preference.title.debug_server_enabled", nil), @"key": @"debug.debug_server_enabled"},
+            @{@"type": @"text", @"label": localize(@"preference.title.debug_server_port", nil), @"key": @"debug.debug_server_port", @"placeholder": @"9090"},
+            @{@"type": @"text", @"label": localize(@"preference.title.debug_server_token", nil), @"key": @"debug.debug_server_token", @"placeholder": @""},
+            @{@"type": @"switch", @"label": localize(@"preference.title.debug_server_localhost_only", nil), @"key": @"debug.debug_server_localhost_only"},
         ]},
         @{@"title": localize(@"credits.title", nil), @"items": [self creditsItems]},
     ];
@@ -298,6 +319,72 @@
         options = [@[@{@"key": @"auto", @"name": @"Auto"}] mutableCopy];
     }
     return options;
+}
+
+/// A directory counts as a language pack when its name looks like a language
+/// tag (e.g. vi, pt-BR, zh-Hans) and it ships a Localizable.strings table.
++ (BOOL)isLanguagePackCode:(NSString *)code bundlePath:(NSString *)packPath {
+    if (code.length == 0 || [code isEqualToString:@"Base"]) return NO;
+    static NSRegularExpression *tagExpr = nil;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        tagExpr = [NSRegularExpression regularExpressionWithPattern:@"^[A-Za-z]{2,3}(-[A-Za-z0-9]+)*$"
+                                                            options:0 error:nil];
+    });
+    if ([tagExpr numberOfMatchesInString:code options:0 range:NSMakeRange(0, code.length)] == 0) {
+        return NO;
+    }
+    return [[NSBundle bundleWithPath:packPath] pathForResource:@"Localizable" ofType:@"strings"] != nil;
+}
+
+/// All language packs shipped in the bundle (*.lproj with Localizable.strings),
+/// shown with the display name each pack declares in its own
+/// `"language.name"` entry (rename it in the .strings file — no code changes).
+/// Falls back to the system locale name when a pack isn't annotated yet.
+- (NSArray *)languageOptions {
+    static NSArray *cachedLocales = nil;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        NSBundle *main = NSBundle.mainBundle;
+        NSMutableArray *items = [NSMutableArray array];
+        for (NSString *p in [main pathsForResourcesOfType:@"lproj" inDirectory:nil]) {
+            NSString *code = [[p lastPathComponent] stringByDeletingPathExtension];
+            if (![[self class] isLanguagePackCode:code bundlePath:p]) continue;
+            NSBundle *pack = [NSBundle bundleWithPath:p];
+            NSString *name = [pack localizedStringForKey:@"language.name" value:nil table:nil];
+            if (name.length == 0 || [name isEqualToString:@"language.name"]) {
+                name = [[NSLocale localeWithLocaleIdentifier:code] displayNameForKey:NSLocaleIdentifier value:code];
+            }
+            if (name.length == 0) {
+                name = [[NSLocale localeWithLocaleIdentifier:@"en"] displayNameForKey:NSLocaleIdentifier value:code];
+            }
+            if (name.length == 0) name = code;
+            else name = [name stringByReplacingCharactersInRange:NSMakeRange(0, 1)
+                                                     withString:[[name substringToIndex:1] uppercaseString]];
+            [items addObject:@{@"key": code, @"name": name}];
+        }
+        [items sortUsingComparator:^NSComparisonResult(NSDictionary *a, NSDictionary *b) {
+            return [a[@"name"] localizedCaseInsensitiveCompare:b[@"name"]];
+        }];
+        cachedLocales = [items copy];
+    });
+    NSMutableArray *options = [NSMutableArray arrayWithObject:@{
+        @"key": @"auto", @"name": localize(@"settings.language.auto", nil)}];
+    [options addObjectsFromArray:cachedLocales];
+    return options;
+}
+
+/// Rebuild the whole settings UI in the newly selected language, instantly.
+- (void)applyLanguageChange {
+    [self buildSections];
+    for (UIButton *b in _tabButtons) [b removeFromSuperview];
+    [_tabButtons removeAllObjects];
+    [self setupTabBar];
+    self.navigationItem.title = localize(@"Settings", nil);
+    _settingsSearchBar.placeholder = localize(@"Search settings...", nil);
+    if (_currentPage >= (NSInteger)_pageTables.count) _currentPage = 0;
+    [self reloadTables];
+    [self setPage:_currentPage animated:NO];
 }
 
 - (void)setup {
@@ -1165,6 +1252,9 @@
                 setPrefObject(item[@"key"], key);
                 if ([item[@"key"] isEqualToString:@"general.orientation_lock"]) {
                     [self applyOrientationLock];
+                } else if ([item[@"key"] isEqualToString:@"launcher.language"]) {
+                    [self applyLanguageChange];
+                    return;
                 } else if ([item[@"key"] isEqualToString:@"launcher.logo_style"]) {
                     applyLauncherAppIcon();
                     [[NSNotificationCenter defaultCenter] postNotificationName:@"LauncherLogoDidChangeNotification" object:nil];

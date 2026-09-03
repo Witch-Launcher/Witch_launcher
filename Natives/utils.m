@@ -106,38 +106,83 @@ NSError* saveJSONToFile(NSDictionary *dict, NSString *path) {
     return nil;
 }
 
+/// Best-match device language against the .lproj packs shipped in the bundle.
+/// Cached for the lifetime of the process (device language needs relaunch anyway).
+static NSString *WitchBestMatchLanguage(void) {
+    static NSString *cached = nil;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        NSBundle *main = NSBundle.mainBundle;
+        NSRegularExpression *tagExpr = [NSRegularExpression regularExpressionWithPattern:@"^[A-Za-z]{2,3}(-[A-Za-z0-9]+)*$"
+                                                                                 options:0 error:nil];
+        NSMutableArray<NSString *> *available = [NSMutableArray array];
+        for (NSString *p in [main pathsForResourcesOfType:@"lproj" inDirectory:nil]) {
+            NSString *code = [[p lastPathComponent] stringByDeletingPathExtension];
+            if (code.length == 0 || [code isEqualToString:@"Base"]) continue;
+            // Only real language packs (same rule as the Settings language list).
+            if ([tagExpr numberOfMatchesInString:code options:0 range:NSMakeRange(0, code.length)] == 0) continue;
+            [available addObject:code];
+        }
+        if (available.count == 0) available = [@[@"en"] mutableCopy];
+        NSString *best = [NSBundle preferredLocalizationsFromArray:available
+                                                    forPreferences:NSLocale.preferredLanguages].firstObject;
+        if (!best || ![main pathForResource:best ofType:@"lproj"]) best = @"en";
+        cached = [best copy];
+    });
+    return cached;
+}
+
+/// One-time migration: the old default stored @"en" for launcher.language,
+/// which pinned everyone to English. Move it to @"auto" (device language).
+static void WitchMigrateLanguageDefaultOnce(void) {
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        @try {
+            NSUserDefaults *ud = NSUserDefaults.standardUserDefaults;
+            if (![ud boolForKey:@"witch.lang_migrated_auto_v1"]) {
+                [ud setBool:YES forKey:@"witch.lang_migrated_auto_v1"];
+                extern id getPrefObject(NSString *key);
+                extern void setPrefObject(NSString *key, id value);
+                id cur = getPrefObject(@"launcher.language");
+                if ([cur isKindOfClass:[NSString class]] && [cur isEqualToString:@"en"]) {
+                    setPrefObject(@"launcher.language", @"auto");
+                }
+            }
+        } @catch(...) {}
+    });
+}
+
 NSString* localize(NSString* key, NSString* comment) {
     if (!key) return @"";
-    // 1) Check launcher.language pref (en/vi) — default en
+    WitchMigrateLanguageDefaultOnce();
+    // 1) Explicit choice (anything except empty/"auto"), else device language.
     NSString *forcedLang = nil;
     @try {
         extern id getPrefObject(NSString *key);
         id val = getPrefObject(@"launcher.language");
-        if ([val isKindOfClass:[NSString class]] && [(NSString*)val length] > 0) {
+        if ([val isKindOfClass:[NSString class]] && [(NSString*)val length] > 0
+            && ![(NSString*)val isEqualToString:@"auto"]) {
             forcedLang = val;
         }
     } @catch(...) {}
-    if (forcedLang) {
-        NSString *path = [[NSBundle mainBundle] pathForResource:forcedLang ofType:@"lproj"];
+    NSString *lang = forcedLang ?: WitchBestMatchLanguage();
+    if (lang) {
+        NSString *path = [[NSBundle mainBundle] pathForResource:lang ofType:@"lproj"];
         if (path) {
             NSBundle *bundle = [NSBundle bundleWithPath:path];
             NSString *v = [bundle localizedStringForKey:key value:nil table:nil];
             if (v && ![v isEqualToString:key]) return v;
-            // fallback to en
+            // Fallback to English for untranslated keys.
             NSString *enPath = [[NSBundle mainBundle] pathForResource:@"en" ofType:@"lproj"];
             NSBundle *enBundle = [NSBundle bundleWithPath:enPath];
             NSString *enVal = [enBundle localizedStringForKey:key value:key table:nil];
             if (enVal && ![enVal isEqualToString:key]) return enVal;
+            return key;
         }
     }
     NSString *value = [[NSBundle mainBundle] localizedStringForKey:key value:key table:nil];
-    if (![NSLocale.preferredLanguages[0] isEqualToString:@"en"] && [value isEqualToString:key]) {
-        NSString* path = [NSBundle.mainBundle pathForResource:@"en" ofType:@"lproj"];
-        NSBundle* languageBundle = [NSBundle bundleWithPath:path];
-        value = [languageBundle localizedStringForKey:key value:key table:nil];
-        if (!value || [value isEqualToString:key]) {
-            value = [[NSBundle bundleWithIdentifier:@"com.apple.UIKit"] localizedStringForKey:key value:key table:nil];
-        }
+    if ([value isEqualToString:key]) {
+        value = [[NSBundle bundleWithIdentifier:@"com.apple.UIKit"] localizedStringForKey:key value:key table:nil];
     }
 
     return value ?: key;

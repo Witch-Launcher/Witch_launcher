@@ -10,6 +10,7 @@
 #import "AmethystBlurView.h"
 #import "utils.h"
 #import "CurseForgeService.h"
+#import "ModSourceService.h"
 #import "LauncherPreferences.h"
 
 @interface MapListViewController () <UITableViewDelegate, UITableViewDataSource, UISearchBarDelegate>
@@ -338,27 +339,44 @@
     [HapticManager.shared play:HapticTypeLight];
     NSDictionary *map = _maps[indexPath.row];
 
-    DownloadProgressOverlay *overlay = [DownloadProgressOverlay showInView:self.view title:@"Loading Versions"];
-    [overlay updateProgress:0 message:@"Fetching available versions..."];
+    DownloadProgressOverlay *overlay = [DownloadProgressOverlay showInView:self.view title:localize(@"progress.loading_versions", nil)];
+    [overlay updateProgress:0 message:localize(@"progress.msg.fetching", nil)];
 
-    [ModrinthService.shared loadProjectVersions:map[@"project_id"] completion:^(NSArray<NSDictionary *> *versions, NSError *error) {
+    [ModSourceService loadVersionsForMod:map completion:^(NSArray<NSDictionary *> *versions, NSError *error) {
         [overlay dismiss];
-        if (versions.count == 0) return;
+        if (error || versions.count == 0) {
+            showDialog(@"Error", error.localizedDescription ?: @"No versions found.");
+            return;
+        }
 
         UIAlertController *sheet = [UIAlertController alertControllerWithTitle:map[@"title"]
-                                                                       message:@"Select a version to download"
+                                                                       message:localize(@"mod.select_dl", nil)
                                                                 preferredStyle:UIAlertControllerStyleActionSheet];
         for (NSDictionary *ver in versions) {
             NSString *label = [NSString stringWithFormat:@"%@  [%@]", ver[@"name"], [ver[@"game_versions"] componentsJoinedByString:@", "]];
             [sheet addAction:[UIAlertAction actionWithTitle:label style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
-                NSString *url = ver[@"url"];
                 NSString *filename = ver[@"filename"] ?: @"world.zip";
+                NSString *url = ver[@"url"];
                 if (url.length > 0) {
                     [self installMap:url name:filename];
+                    return;
+                }
+                // CurseForge files sometimes hide the direct link: resolve it.
+                if ([ModSourceService isCurseForgeMod:map]) {
+                    DownloadProgressOverlay *resolving = [DownloadProgressOverlay showInView:self.view title:localize(@"progress.resolving", nil)];
+                    [resolving updateProgress:0 message:localize(@"progress.msg.contact_cf", nil)];
+                    [CurseForgeService.shared resolveDownloadURLForProject:map[@"project_id"] fileId:ver[@"_cfFileId"] completion:^(NSString *resolved, NSError *resolveError) {
+                        [resolving dismiss];
+                        if (resolved.length > 0) {
+                            [self installMap:resolved name:filename];
+                        } else {
+                            showDialog(@"Error", resolveError.localizedDescription ?: @"Could not resolve download URL");
+                        }
+                    }];
                 }
             }]];
         }
-        [sheet addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
+        [sheet addAction:[UIAlertAction actionWithTitle:localize(@"Cancel", nil) style:UIAlertActionStyleCancel handler:nil]];
         [self presentViewController:sheet animated:YES completion:nil];
     }];
 }
@@ -368,18 +386,18 @@
     NSString *labelSuffix = version.length > 0 ? [NSString stringWithFormat:@" to %@", version] : @" to Downloads";
 
     DownloadProgressOverlay *overlay = [DownloadProgressOverlay showInView:self.view title:[NSString stringWithFormat:@"Installing Map%@", labelSuffix]];
-    [overlay updateProgress:0 message:@"Downloading..."];
+    [overlay updateProgress:0 message:localize(@"progress.msg.downloading", nil)];
 
     [DownloadManager.shared downloadMap:urlString name:name version:version completion:^(BOOL success, NSError *error) {
         dispatch_async(dispatch_get_main_queue(), ^{
             if (success) {
-                [overlay finishWithMessage:@"Installed!"];
+                [overlay finishWithMessage:localize(@"common.installed_done", nil)];
                 dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 1.5 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
                     [overlay dismiss];
-                    showDialog(@"Installed", [NSString stringWithFormat:@"%@ installed to saves.", name]);
+                    showDialog(localize(@"Installed", nil), [NSString stringWithFormat:localize(@"map.installed_to_saves", nil), name]);
                 });
             } else {
-                [overlay finishWithMessage:@"Failed"];
+                [overlay finishWithMessage:localize(@"common.failed", nil)];
                 dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 1.0 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
                     [overlay dismiss];
                     showDialog(@"Error", error.localizedDescription ?: @"Download failed.");

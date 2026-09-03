@@ -436,7 +436,7 @@
         if (progress.finished) {
             [self safeRemoveProgressObserver];
             dispatch_async(dispatch_get_main_queue(), ^{
-                [self.progressOverlay finishWithMessage:@"Verifying..."];
+                [self.progressOverlay finishWithMessage:localize(@"progress.msg.verifying", nil)];
                 [self performJITCheckAndLaunch];
             });
             return;
@@ -633,10 +633,10 @@
         info = [NSString stringWithFormat:@"%@\n\nPlayers: %@/%@", desc, players[@"online"] ?: @"?", players[@"max"] ?: @"?"];
     }
     UIAlertController *alert = [UIAlertController alertControllerWithTitle:name message:info preferredStyle:UIAlertControllerStyleAlert];
-    [alert addAction:[UIAlertAction actionWithTitle:@"Connect" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
+    [alert addAction:[UIAlertAction actionWithTitle:localize(@"common.connect", nil) style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
         [self launchWithServer:serverData];
     }]];
-    [alert addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
+    [alert addAction:[UIAlertAction actionWithTitle:localize(@"Cancel", nil) style:UIAlertActionStyleCancel handler:nil]];
     [self.rootVC presentViewController:alert animated:YES completion:nil];
 }
 

@@ -65,7 +65,7 @@
 
         _editBtn = [UIButton buttonWithType:UIButtonTypeSystem];
         _editBtn.translatesAutoresizingMaskIntoConstraints = NO;
-        [_editBtn setTitle:@"Edit" forState:UIControlStateNormal];
+        [_editBtn setTitle:localize(@"Edit", nil) forState:UIControlStateNormal];
         _editBtn.titleLabel.font = [UIFont systemFontOfSize:13 weight:UIFontWeightMedium];
         [_editBtn setTitleColor:ThemeManager.shared.accentColor forState:UIControlStateNormal];
         _editBtn.hidden = YES;
@@ -73,7 +73,7 @@
 
         _deleteBtn = [UIButton buttonWithType:UIButtonTypeSystem];
         _deleteBtn.translatesAutoresizingMaskIntoConstraints = NO;
-        [_deleteBtn setTitle:@"Delete" forState:UIControlStateNormal];
+        [_deleteBtn setTitle:localize(@"Delete", nil) forState:UIControlStateNormal];
         _deleteBtn.titleLabel.font = [UIFont systemFontOfSize:13 weight:UIFontWeightMedium];
         [_deleteBtn setTitleColor:ThemeManager.shared.errorColor forState:UIControlStateNormal];
         [self.contentView addSubview:_deleteBtn];
@@ -298,7 +298,7 @@ extern NSString *ELY_OAUTH_REDIRECT_URI;
 
     _addActionBtn = [UIButton buttonWithType:UIButtonTypeSystem];
     _addActionBtn.translatesAutoresizingMaskIntoConstraints = NO;
-    [_addActionBtn setTitle:@"Login with Microsoft  →" forState:UIControlStateNormal];
+    [_addActionBtn setTitle:localize(@"account.login_ms", nil) forState:UIControlStateNormal];
     [_addActionBtn setTitleColor:UIColor.whiteColor forState:UIControlStateNormal];
     _addActionBtn.backgroundColor = ThemeManager.shared.accentColor;
     _addActionBtn.layer.cornerRadius = 8;
@@ -478,7 +478,7 @@ extern NSString *ELY_OAUTH_REDIRECT_URI;
 
     UIButton *closeBtn = [UIButton buttonWithType:UIButtonTypeSystem];
     closeBtn.frame = CGRectMake(8, 0, 60, 44);
-    [closeBtn setTitle:@"Cancel" forState:UIControlStateNormal];
+    [closeBtn setTitle:localize(@"Cancel", nil) forState:UIControlStateNormal];
     [closeBtn addTarget:self action:@selector(dismissWebView) forControlEvents:UIControlEventTouchUpInside];
     [topBar addSubview:closeBtn];
 
@@ -630,15 +630,15 @@ extern NSString *ELY_OAUTH_REDIRECT_URI;
 }
 
 - (void)promptElyTOTPWithLogin:(NSString *)login password:(NSString *)password {
-    UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Two-Factor Authentication"
-                                                                   message:@"Your account is protected with two factor auth. Enter the 6-digit code from your authenticator app."
-                                                            preferredStyle:UIAlertControllerStyleAlert];
+    UIAlertController *alert = [UIAlertController alertControllerWithTitle:localize(@"account.2fa_title", nil)
+                                                                    message:localize(@"account.2fa_message", nil)
+                                                             preferredStyle:UIAlertControllerStyleAlert];
     [alert addTextFieldWithConfigurationHandler:^(UITextField *textField) {
         textField.placeholder = @"123456";
         textField.keyboardType = UIKeyboardTypeNumberPad;
     }];
-    [alert addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
-    [alert addAction:[UIAlertAction actionWithTitle:@"Verify" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
+    [alert addAction:[UIAlertAction actionWithTitle:localize(@"Cancel", nil) style:UIAlertActionStyleCancel handler:nil]];
+    [alert addAction:[UIAlertAction actionWithTitle:localize(@"common.verify", nil) style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
         NSString *code = [alert.textFields.firstObject.text stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceCharacterSet];
         [self elyLoginWithLogin:login password:password totp:code];
     }]];
@@ -766,34 +766,34 @@ extern NSString *ELY_OAUTH_REDIRECT_URI;
 
     UIButton *copyBtn = [UIButton buttonWithType:UIButtonTypeSystem];
     copyBtn.translatesAutoresizingMaskIntoConstraints = NO;
-    [copyBtn setTitle:@"Copy" forState:UIControlStateNormal];
+    [copyBtn setTitle:localize(@"Copy", nil) forState:UIControlStateNormal];
     copyBtn.titleLabel.font = [UIFont systemFontOfSize:12];
     [copyBtn addTarget:self action:@selector(copyUUID) forControlEvents:UIControlEventTouchUpInside];
     [scroll addSubview:copyBtn];
 
     UIButton *changeSkinBtn = [UIButton buttonWithType:UIButtonTypeSystem];
     changeSkinBtn.translatesAutoresizingMaskIntoConstraints = NO;
-    [changeSkinBtn setTitle:@"Change Skin" forState:UIControlStateNormal];
+    [changeSkinBtn setTitle:localize(@"skin.change", nil) forState:UIControlStateNormal];
     [changeSkinBtn setTitleColor:UIColor.whiteColor forState:UIControlStateNormal];
     changeSkinBtn.backgroundColor = ThemeManager.shared.accentColor;
     changeSkinBtn.layer.cornerRadius = 8;
     changeSkinBtn.titleLabel.font = [UIFont systemFontOfSize:14 weight:UIFontWeightMedium];
     [changeSkinBtn addTarget:self action:@selector(changeSkinTapped:) forControlEvents:UIControlEventTouchUpInside];
     if (isEly) {
-        [changeSkinBtn setTitle:@"Manage Skin on ely.by  ↗" forState:UIControlStateNormal];
+        [changeSkinBtn setTitle:localize(@"account.ely_manage", nil) forState:UIControlStateNormal];
     }
     [scroll addSubview:changeSkinBtn];
 
     UIButton *changeCapeBtn = [UIButton buttonWithType:UIButtonTypeSystem];
     changeCapeBtn.translatesAutoresizingMaskIntoConstraints = NO;
-    [changeCapeBtn setTitle:@"Change Cape" forState:UIControlStateNormal];
+    [changeCapeBtn setTitle:localize(@"cape.change", nil) forState:UIControlStateNormal];
     [changeCapeBtn setTitleColor:UIColor.whiteColor forState:UIControlStateNormal];
     changeCapeBtn.backgroundColor = ThemeManager.shared.accentColor;
     changeCapeBtn.layer.cornerRadius = 8;
     changeCapeBtn.titleLabel.font = [UIFont systemFontOfSize:14 weight:UIFontWeightMedium];
     [changeCapeBtn addTarget:self action:@selector(changeCapeTapped:) forControlEvents:UIControlEventTouchUpInside];
     if (isEly) {
-        [changeCapeBtn setTitle:@"About Capes" forState:UIControlStateNormal];
+        [changeCapeBtn setTitle:localize(@"cape.about", nil) forState:UIControlStateNormal];
     }
     [scroll addSubview:changeCapeBtn];
 
@@ -928,11 +928,11 @@ extern NSString *ELY_OAUTH_REDIRECT_URI;
 - (void)confirmDelete:(UIButton *)sender {
     NSInteger index = sender.tag;
     NSDictionary *account = _accountsArray[index];
-    UIAlertController *confirm = [UIAlertController alertControllerWithTitle:@"Delete Account"
+    UIAlertController *confirm = [UIAlertController alertControllerWithTitle:localize(@"account.delete_title", nil)
                                                                      message:[NSString stringWithFormat:@"Delete '%@'?", account[@"username"]]
                                                               preferredStyle:UIAlertControllerStyleAlert];
-    [confirm addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
-    [confirm addAction:[UIAlertAction actionWithTitle:@"Delete" style:UIAlertActionStyleDestructive handler:^(UIAlertAction *action) {
+    [confirm addAction:[UIAlertAction actionWithTitle:localize(@"Cancel", nil) style:UIAlertActionStyleCancel handler:nil]];
+    [confirm addAction:[UIAlertAction actionWithTitle:localize(@"Delete", nil) style:UIAlertActionStyleDestructive handler:^(UIAlertAction *action) {
         [self deleteAccountAtIndex:index];
     }]];
     [self presentViewController:confirm animated:YES completion:nil];
@@ -982,18 +982,18 @@ extern NSString *ELY_OAUTH_REDIRECT_URI;
         return;
     }
 
-    UIAlertController *variantAlert = [UIAlertController alertControllerWithTitle:@"Skin Model"
-                                                                          message:@"Choose the model of your skin"
+    UIAlertController *variantAlert = [UIAlertController alertControllerWithTitle:localize(@"skin.model_title", nil)
+                                                                          message:localize(@"skin.choose_model_hint", nil)
                                                                    preferredStyle:UIAlertControllerStyleActionSheet];
-    [variantAlert addAction:[UIAlertAction actionWithTitle:@"Classic (Steve, 4px arms)" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
+    [variantAlert addAction:[UIAlertAction actionWithTitle:localize(@"skin.model_classic", nil) style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
         self.pendingSkinVariant = @"classic";
         [self presentImagePickerForCape:NO];
     }]];
-    [variantAlert addAction:[UIAlertAction actionWithTitle:@"Slim (Alex, 3px arms)" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
+    [variantAlert addAction:[UIAlertAction actionWithTitle:localize(@"skin.model_slim", nil) style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
         self.pendingSkinVariant = @"slim";
         [self presentImagePickerForCape:NO];
     }]];
-    [variantAlert addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
+    [variantAlert addAction:[UIAlertAction actionWithTitle:localize(@"Cancel", nil) style:UIAlertActionStyleCancel handler:nil]];
     variantAlert.popoverPresentationController.sourceView = sender;
     variantAlert.popoverPresentationController.sourceRect = sender.bounds;
     [self presentViewController:variantAlert animated:YES completion:nil];
@@ -1007,7 +1007,7 @@ extern NSString *ELY_OAUTH_REDIRECT_URI;
         return;
     }
 
-    DownloadProgressOverlay *overlay = [DownloadProgressOverlay showInView:self.view title:@"Loading Capes"];
+    DownloadProgressOverlay *overlay = [DownloadProgressOverlay showInView:self.view title:localize(@"progress.loading_capes", nil)];
     [self ensureFreshMSToken:^(NSString *accessToken) {
         if (accessToken.length == 0) {
             [overlay dismiss];
@@ -1040,8 +1040,8 @@ extern NSString *ELY_OAUTH_REDIRECT_URI;
         return;
     }
 
-    UIAlertController *sheet = [UIAlertController alertControllerWithTitle:@"Change Cape"
-                                                                   message:@"Select a cape to equip. Tapping the active cape unequips it."
+    UIAlertController *sheet = [UIAlertController alertControllerWithTitle:localize(@"cape.change", nil)
+                                                                   message:localize(@"cape.select_hint", nil)
                                                             preferredStyle:UIAlertControllerStyleActionSheet];
     for (NSDictionary *cape in capes) {
         NSString *capeId = cape[@"id"];
@@ -1052,7 +1052,7 @@ extern NSString *ELY_OAUTH_REDIRECT_URI;
             [self equipCapeWithId:capeId isActive:isActive accessToken:accessToken];
         }]];
     }
-    [sheet addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
+    [sheet addAction:[UIAlertAction actionWithTitle:localize(@"Cancel", nil) style:UIAlertActionStyleCancel handler:nil]];
     sheet.popoverPresentationController.sourceView = sourceView;
     sheet.popoverPresentationController.sourceRect = sourceView.bounds;
     [self presentViewController:sheet animated:YES completion:nil];
@@ -1064,7 +1064,7 @@ extern NSString *ELY_OAUTH_REDIRECT_URI;
     request.HTTPBody = [@"" dataUsingEncoding:NSUTF8StringEncoding];
     [request setValue:[NSString stringWithFormat:@"Bearer %@", accessToken] forHTTPHeaderField:@"Authorization"];
 
-    DownloadProgressOverlay *overlay = [DownloadProgressOverlay showInView:self.view title:@"Changing Cape"];
+    DownloadProgressOverlay *overlay = [DownloadProgressOverlay showInView:self.view title:localize(@"progress.changing_cape", nil)];
     NSURLSessionDataTask *task = [NSURLSession.sharedSession dataTaskWithRequest:request completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
         dispatch_async(dispatch_get_main_queue(), ^{
             NSHTTPURLResponse *httpResp = (NSHTTPURLResponse *)response;
@@ -1120,8 +1120,8 @@ extern NSString *ELY_OAUTH_REDIRECT_URI;
         return;
     }
 
-    DownloadProgressOverlay *overlay = [DownloadProgressOverlay showInView:self.view title:@"Uploading Skin"];
-    [overlay updateProgress:0 message:@"Refreshing session..."];
+    DownloadProgressOverlay *overlay = [DownloadProgressOverlay showInView:self.view title:localize(@"progress.uploading_skin", nil)];
+    [overlay updateProgress:0 message:localize(@"progress.msg.refreshing", nil)];
 
     __weak typeof(self) weakSelf = self;
     NSString *capturedVariant = variant;
@@ -1151,7 +1151,7 @@ extern NSString *ELY_OAUTH_REDIRECT_URI;
         [body appendData:[[NSString stringWithFormat:@"\r\n--%@--\r\n", boundary] dataUsingEncoding:NSUTF8StringEncoding]];
 
         request.HTTPBody = body;
-        [overlay updateProgress:0.5 message:@"Uploading..."];
+        [overlay updateProgress:0.5 message:localize(@"progress.msg.uploading", nil)];
 
         [[NSURLSession.sharedSession dataTaskWithRequest:request completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
             dispatch_async(dispatch_get_main_queue(), ^{
@@ -1163,7 +1163,7 @@ extern NSString *ELY_OAUTH_REDIRECT_URI;
                 }
                 NSHTTPURLResponse *httpResp = (NSHTTPURLResponse *)response;
                 if (httpResp.statusCode == 200 || httpResp.statusCode == 204) {
-                    [overlay finishWithMessage:@"Skin updated!"];
+                    [overlay finishWithMessage:localize(@"skin.updated", nil)];
                     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 1.5 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
                         [overlay dismiss];
                         showDialog(@"Success", @"Your skin has been updated. It may take a few minutes to appear in-game.");

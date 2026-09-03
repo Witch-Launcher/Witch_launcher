@@ -55,7 +55,7 @@
     if (_analysis) {
         ChatMessage *sys = [ChatMessage new];
         sys.isUser = NO;
-        sys.text = localize(@"AI sẽ phân tích log. Bấm 'Gửi log' để gửi 100 dòng cuối cho AI.", nil);
+        sys.text = localize(@"ai.welcome_log", nil);
         [_messages addObject:sys];
         [self.tableView reloadData];
     }
@@ -94,13 +94,13 @@
     [_sendButton addTarget:self action:@selector(actionSend) forControlEvents:UIControlEventTouchUpInside];
     [inputContainer addSubview:_sendButton];
 
-    _sendLogButton = [[CustomButton alloc] initWithStyle:CustomButtonStyleSecondary title:localize(@"Gửi log", nil)];
+    _sendLogButton = [[CustomButton alloc] initWithStyle:CustomButtonStyleSecondary title:localize(@"ai.send_log", nil)];
     _sendLogButton.translatesAutoresizingMaskIntoConstraints = NO;
     _sendLogButton.hidden = (_analysis == nil);
     [_sendLogButton addTarget:self action:@selector(actionSendLog) forControlEvents:UIControlEventTouchUpInside];
     [inputContainer addSubview:_sendLogButton];
 
-    _sendFileButton = [[CustomButton alloc] initWithStyle:CustomButtonStyleSecondary title:localize(@"Gửi cả file", nil)];
+    _sendFileButton = [[CustomButton alloc] initWithStyle:CustomButtonStyleSecondary title:localize(@"ai.send_full_file", nil)];
     _sendFileButton.translatesAutoresizingMaskIntoConstraints = NO;
     [_sendFileButton addTarget:self action:@selector(actionSendFile) forControlEvents:UIControlEventTouchUpInside];
     [inputContainer addSubview:_sendFileButton];
@@ -194,7 +194,7 @@
     if (excerpt.length == 0) excerpt = [_analysis.fullLog substringToIndex:MIN(_analysis.fullLog.length, 5000)] ?: @"";
     // Giới hạn 5000 chars cho lần gửi đầu, AI sẽ dùng tool read_log để lấy thêm
     if (excerpt.length > 5000) excerpt = [excerpt substringToIndex:5000];
-    ChatMessage *userMsg = [ChatMessage new]; userMsg.isUser = YES; userMsg.text = [NSString stringWithFormat:@"[Đã gửi đoạn log %lu chars, exit %d — AI có thể dùng tool để đọc thêm dòng hoặc lọc từ khóa]", (unsigned long)excerpt.length, _exitCode];
+    ChatMessage *userMsg = [ChatMessage new]; userMsg.isUser = YES; userMsg.text = [NSString stringWithFormat:localize(@"ai.sent_excerpt", nil), (unsigned long)excerpt.length, _exitCode];
     [_messages addObject:userMsg];
     [self.tableView reloadData];
     [self scrollToBottom];
@@ -215,7 +215,7 @@
         }
     }
     if (fullLog.length == 0) {
-        ChatMessage *bot = [ChatMessage new]; bot.isUser = NO; bot.text = @"Không tìm thấy file log để gửi. Hãy thử chạy game để tạo latestlog.";
+        ChatMessage *bot = [ChatMessage new]; bot.isUser = NO; bot.text = localize(@"ai.no_log_file", nil);
         [_messages addObject:bot];
         [self.tableView reloadData];
         [self scrollToBottom];
@@ -223,7 +223,7 @@
     }
     ChatMessage *userMsg = [ChatMessage new]; userMsg.isUser = YES;
     NSUInteger extra = (_analysis.crashReportPath?1:0) + (_analysis.hsErrPath?1:0);
-    userMsg.text = [NSString stringWithFormat:@"[Đã gửi cả file %lu chars + %lu file đính kèm (crash/hs_err/.ips) lên Discord và AI]", (unsigned long)fullLog.length, (unsigned long)extra];
+    userMsg.text = [NSString stringWithFormat:localize(@"ai.sent_full_file", nil), (unsigned long)fullLog.length, (unsigned long)extra];
     [_messages addObject:userMsg];
     [self.tableView reloadData];
     [self scrollToBottom];
@@ -232,10 +232,10 @@
     // Đồng thời gửi lên Discord dạng file đính kèm
     CrashLogAnalyzerResult *toSend = _analysis ?: [CrashLogAnalyzerResult new];
     if (!toSend.fullLog) toSend.fullLog = fullLog;
-    [WitchLogReporter sendReportWithAnalysis:toSend exitCode:_exitCode note:@"Gửi cả file từ AI chat" completion:^(BOOL success, NSString *logId, NSError *error){
+    [WitchLogReporter sendReportWithAnalysis:toSend exitCode:_exitCode note:localize(@"ai.note_send_full", nil) completion:^(BOOL success, NSString *logId, NSError *error){
         dispatch_async(dispatch_get_main_queue(), ^{
             ChatMessage *bot = [ChatMessage new]; bot.isUser = NO;
-            bot.text = success ? [NSString stringWithFormat:@"Đã gửi file lên Discord (logId: %@) — AI cũng đã nhận file.", logId ?: @""] : [NSString stringWithFormat:@"Gửi Discord lỗi: %@", error.localizedDescription];
+            bot.text = success ? [NSString stringWithFormat:localize(@"ai.sent_discord_ok", nil), logId ?: @""] : [NSString stringWithFormat:localize(@"ai.send_discord_fail", nil), error.localizedDescription];
             [self.messages addObject:bot];
             [self.tableView reloadData];
             [self scrollToBottom];
@@ -253,7 +253,7 @@
                 [self->_typingIndicator stopAnimating];
                 self->_sendButton.enabled = YES;
                 ChatMessage *bot = [ChatMessage new]; bot.isUser = NO;
-                bot.text = error ? [NSString stringWithFormat:@"Lỗi: %@", error.localizedDescription] : answer;
+                bot.text = error ? [NSString stringWithFormat:@"%@: %@", localize(@"Error", nil), error.localizedDescription] : answer;
                 [self.messages addObject:bot];
                 [self.tableView reloadData];
                 [self scrollToBottom];
@@ -265,7 +265,7 @@
                 [self->_typingIndicator stopAnimating];
                 self->_sendButton.enabled = YES;
                 ChatMessage *bot = [ChatMessage new]; bot.isUser = NO;
-                bot.text = error ? [NSString stringWithFormat:@"Lỗi: %@", error.localizedDescription] : answer;
+                bot.text = error ? [NSString stringWithFormat:@"%@: %@", localize(@"Error", nil), error.localizedDescription] : answer;
                 [self.messages addObject:bot];
                 [self.tableView reloadData];
                 [self scrollToBottom];

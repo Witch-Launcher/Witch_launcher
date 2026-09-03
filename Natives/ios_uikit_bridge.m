@@ -25,7 +25,9 @@ void internal_showDialog(NSString* title, NSString* message) {
     alertWindow.backgroundColor = UIColor.clearColor;
     [alertWindow makeKeyAndVisible];
     // Frosted realtime dialog (samples the app behind the window)
-    [BlurredDialog presentInWindow:alertWindow title:title message:message okTitle:localize(@"OK", nil)];
+    // Localize here so every caller gets the launcher language for free;
+    // dynamic messages (names, paths, versions) match no key and pass through.
+    [BlurredDialog presentInWindow:alertWindow title:localize(title, nil) message:(message ? localize(message, nil) : nil) okTitle:localize(@"OK", nil)];
 }
 
 void showDialog(NSString* title, NSString* message) {
@@ -60,7 +62,7 @@ dispatch_async(dispatch_get_main_queue(), ^{
 
     [alert setValue:atrStr forKey:@"attributedMessage"];
 
-    UIAlertAction* okAction = [UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault
+    UIAlertAction* okAction = [UIAlertAction actionWithTitle:localize(@"OK", nil) style:UIAlertActionStyleDefault
         handler:^(UIAlertAction * action) {
             if (exitIfOk == JNI_TRUE) {
                 exit(-1);
@@ -68,7 +70,7 @@ dispatch_async(dispatch_get_main_queue(), ^{
         }];
     [alert addAction:okAction];
     
-    UIAlertAction* copyAction = [UIAlertAction actionWithTitle:@"Copy" style:UIAlertActionStyleDefault
+    UIAlertAction* copyAction = [UIAlertAction actionWithTitle:localize(@"Copy", nil) style:UIAlertActionStyleDefault
         handler:^(UIAlertAction * action) {
             UIPasteboard.generalPasteboard.string = message_o;
             if (exitIfOk == JNI_TRUE) {

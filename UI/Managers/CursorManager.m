@@ -1,5 +1,6 @@
 #import "CursorManager.h"
 #import "LauncherPreferences.h"
+#import "WindowsCursorParser.h"
 #import <ImageIO/ImageIO.h>
 #import <string.h>
 
@@ -10,6 +11,15 @@ static NSString *const kHitboxFileName = @"hitbox.json";
 
 static NSString *const kImagePngName = @"image.png";
 static NSString *const kImageGifName = @"image.gif";
+
+@interface CursorManager ()
++ (nullable UIImage *)animatedImageIfGIFAtPath:(NSString *)path;
++ (nullable UIImage *)animatedImageWithGIFData:(NSData *)data;
++ (nullable UIImage *)bundledWindowsImageForType:(NSString *)typeId;
++ (nullable UIImage *)bundledAnimatedCursorWithPrefix:(NSString *)prefix
+                                          frameCount:(NSInteger)count
+                                      frameDurations:(nullable NSArray<NSNumber *> *)durations;
+@end
 
 @implementation CursorManager
 
@@ -85,12 +95,18 @@ static NSString *const kImageGifName = @"image.gif";
     }
     NSString *path = [self imagePathForCursor:name];
     if ([[NSFileManager defaultManager] fileExistsAtPath:path]) {
+        UIImage *anim = [self animatedImageIfGIFAtPath:path];
+        if (anim) return anim;
         return [UIImage imageWithContentsOfFile:path];
     }
     return [self defaultCursorImage];
 }
 
 + (UIImage *)defaultCursorImage {
+    // Default to the real Windows 10 Aero arrow (bundled from the
+    // windows-10 cursor set). Falls back to the legacy asset if missing.
+    UIImage *win = [UIImage imageNamed:@"CursorWinNormal"];
+    if (win && win.CGImage) return win;
     // Load asset catalog image at device screen scale for 1:1 native pixel rendering
     UIImage *baseImage = [UIImage imageNamed:@"MousePointer"];
     if (baseImage && baseImage.CGImage) {
@@ -120,9 +136,8 @@ static NSString *const kImageGifName = @"image.gif";
     NSData *data = [NSData dataWithContentsOfFile:path];
     if (!data) {
         if ([name isEqualToString:@"default"]) {
-            // Default arrow cursor: hotspot at tip of arrow (MousePointer asset coordinates)
-            CGFloat scale = [UIScreen mainScreen].scale;
-            return CGPointMake(80.0 / scale, 120.0 / scale);
+            // Bundled Windows arrow: hotspot at the tip (top-left corner).
+            return CGPointZero;
         }
         return CGPointZero;
     }
@@ -191,6 +206,39 @@ static NSString *const kImageGifName = @"image.gif";
 
 + (NSString *)importCursorFromData:(NSData *)data withName:(NSString *)name error:(NSError **)error {
     NSString *cursor = [self uniqueCursorNameFor:name];
+    // Windows cursor formats: decode to PNG/GIF and preserve the hotspot.
+    if ([WindowsCursorParser isAniData:data]) {
+        NSError *derr = nil;
+        NSDictionary *ani = [WindowsCursorParser decodeAnimatedCursorData:data error:&derr];
+        if (!ani) {
+            if (error) *error = derr;
+            return nil;
+        }
+        NSData *gif = [WindowsCursorParser gifDataFromImages:ani[@"images"] durations:ani[@"durations"]];
+        if (!gif) {
+            if (error) *error = [NSError errorWithDomain:@"CursorManager" code:-2 userInfo:@{NSLocalizedDescriptionKey: @"Could not encode animation"}];
+            return nil;
+        }
+        [self saveImageData:gif isGIF:YES forCursor:cursor];
+        [self setHitboxForCursor:cursor hitbox:[ani[@"hotspot"] CGPointValue]];
+        return cursor;
+    }
+    if ([WindowsCursorParser isCurData:data]) {
+        NSError *derr = nil;
+        NSDictionary *cur = [WindowsCursorParser decodeStaticCursorData:data error:&derr];
+        if (!cur) {
+            if (error) *error = derr;
+            return nil;
+        }
+        NSData *png = UIImagePNGRepresentation(cur[@"image"]);
+        if (!png) {
+            if (error) *error = [NSError errorWithDomain:@"CursorManager" code:-2 userInfo:@{NSLocalizedDescriptionKey: @"Could not encode cursor image"}];
+            return nil;
+        }
+        [self saveImageData:png isGIF:NO forCursor:cursor];
+        [self setHitboxForCursor:cursor hitbox:[cur[@"hotspot"] CGPointValue]];
+        return cursor;
+    }
     BOOL isGIF = [self isAnimatedGIFData:data];
     if (!isGIF) {
         UIImage *img = [UIImage imageWithData:data];
@@ -212,7 +260,67 @@ static NSString *const kImageGifName = @"image.gif";
 }
 
 + (BOOL)isAnimatedData:(NSData *)data {
+    if ([WindowsCursorParser isAniData:data]) return YES;
     return [self isAnimatedGIFData:data];
+}
+
+#pragma mark - GIF animation
+
+/// Decode GIF data into an animated UIImage so imported GIF/.ani cursors
+/// actually animate when assigned to the in-game UIImageView.
++ (nullable UIImage *)animatedImageIfGIFAtPath:(NSString *)path {
+    if (![[path.pathExtension lowercaseString] isEqualToString:@"gif"]) return nil;
+    // imageForCursor: is called on every mouse move (displayFrame math), so
+    // cache decoded animations keyed by file identity.
+    NSDictionary *attrs = [[NSFileManager defaultManager] attributesOfItemAtPath:path error:nil];
+    id mtime = attrs[NSFileModificationDate] ?: @0;
+    id fsize = attrs[NSFileSize] ?: @0;
+    NSDictionary *hit = gGIFImageCache[path];
+    if (hit && [hit[@"mtime"] isEqual:mtime] && [hit[@"size"] isEqual:fsize]) {
+        return hit[@"image"];
+    }
+    NSData *data = [NSData dataWithContentsOfFile:path];
+    if (!data) return nil;
+    UIImage *img = [self animatedImageWithGIFData:data];
+    if (img) {
+        if (gGIFImageCache.count > 16) [gGIFImageCache removeAllObjects];
+        gGIFImageCache[path] = @{@"mtime": mtime, @"size": fsize, @"image": img};
+    }
+    return img;
+}
+
++ (nullable UIImage *)animatedImageWithGIFData:(NSData *)data {
+    CGImageSourceRef src = CGImageSourceCreateWithData((__bridge CFDataRef)data, NULL);
+    if (!src) return nil;
+    size_t count = CGImageSourceGetCount(src);
+    if (count <= 1) { CFRelease(src); return nil; }
+    NSMutableArray<UIImage *> *frames = [NSMutableArray arrayWithCapacity:count];
+    NSTimeInterval total = 0;
+    for (size_t i = 0; i < count; i++) {
+        CGImageRef cg = CGImageSourceCreateImageAtIndex(src, i, NULL);
+        if (!cg) continue;
+        NSTimeInterval d = 0.1;
+        CFDictionaryRef props = CGImageSourceCopyPropertiesAtIndex(src, i, NULL);
+        if (props) {
+            CFDictionaryRef gif = CFDictionaryGetValue(props, kCGImagePropertyGIFDictionary);
+            if (gif) {
+                CFNumberRef delay = CFDictionaryGetValue(gif, kCGImagePropertyGIFUnclampedDelayTime);
+                if (!delay) delay = CFDictionaryGetValue(gif, kCGImagePropertyGIFDelayTime);
+                if (delay) {
+                    double v = 0;
+                    CFNumberGetValue(delay, kCFNumberDoubleType, &v);
+                    if (v >= 0.02) d = v;
+                }
+            }
+            CFRelease(props);
+        }
+        total += d;
+        [frames addObject:[UIImage imageWithCGImage:cg scale:1.0 orientation:UIImageOrientationUp]];
+        CGImageRelease(cg);
+    }
+    CFRelease(src);
+    if (frames.count <= 1) return frames.firstObject;
+    return [UIImage animatedImageWithImages:frames duration:total];
 }
 
 #pragma mark - Display
@@ -388,6 +496,8 @@ static NSString *const kCursorTypesDirName = @"cursor_types";
     }
     NSString *path = [self imagePathForCursor:name inType:typeId];
     if ([[NSFileManager defaultManager] fileExistsAtPath:path]) {
+        UIImage *anim = [self animatedImageIfGIFAtPath:path];
+        if (anim) return anim;
         return [UIImage imageWithContentsOfFile:path];
     }
     return [self defaultCursorImage];
@@ -398,25 +508,40 @@ static NSString *const kCursorTypesDirName = @"cursor_types";
     NSData *data = [NSData dataWithContentsOfFile:path];
     if (!data) {
         if ([name isEqualToString:@"default"]) {
-            // Hitbox defaults for the generated shape images (32×32 points)
-            // Arrow tip position matches the drawn arrow shape
-            if ([typeId isEqualToString:@"normal"] || [typeId isEqualToString:@"working"]) {
-                return CGPointMake(7, 5);
+            // Hotspots of the bundled Windows 10 cursors (32pt points).
+            // Decoded from the real .cur/.ani files (see HOTSPOTS manifest).
+            if ([typeId isEqualToString:@"normal"] || [typeId isEqualToString:@"help"]) {
+                return CGPointZero;
+            }
+            if ([typeId isEqualToString:@"working"]) {
+                return CGPointMake(0, 8);
             }
             if ([typeId isEqualToString:@"link"]) {
-                return CGPointMake(10, 12);
+                return CGPointMake(6, 0);
             }
             if ([typeId isEqualToString:@"text"]) {
-                return CGPointMake(16, 16);
+                return CGPointMake(15, 16);
             }
             if ([typeId isEqualToString:@"precision"] || [typeId isEqualToString:@"crosshair"]) {
-                return CGPointMake(16, 16);
+                return CGPointMake(14, 15);
             }
             if ([typeId isEqualToString:@"busy"]) {
                 return CGPointMake(16, 16);
             }
-            if ([typeId isEqualToString:@"help"]) {
-                return CGPointMake(7, 5);
+            if ([typeId isEqualToString:@"unavailable"]) {
+                return CGPointMake(8, 8);
+            }
+            if ([typeId isEqualToString:@"vresize"]) {
+                return CGPointMake(4, 11);
+            }
+            if ([typeId isEqualToString:@"hresize"]) {
+                return CGPointMake(11, 4);
+            }
+            if ([typeId isEqualToString:@"diagonal"]) {
+                return CGPointMake(8, 8);
+            }
+            if ([typeId isEqualToString:@"move"]) {
+                return CGPointMake(11, 11);
             }
             return CGPointMake(16, 16);
         }
@@ -471,6 +596,39 @@ static NSString *const kCursorTypesDirName = @"cursor_types";
 
 + (NSString *)importCursorFromData:(NSData *)data withName:(NSString *)name forType:(NSString *)typeId error:(NSError **)error {
     NSString *cursor = [self uniqueCursorName:name forType:typeId];
+    // Windows cursor formats: decode to PNG/GIF and preserve the hotspot.
+    if ([WindowsCursorParser isAniData:data]) {
+        NSError *derr = nil;
+        NSDictionary *ani = [WindowsCursorParser decodeAnimatedCursorData:data error:&derr];
+        if (!ani) {
+            if (error) *error = derr;
+            return nil;
+        }
+        NSData *gif = [WindowsCursorParser gifDataFromImages:ani[@"images"] durations:ani[@"durations"]];
+        if (!gif) {
+            if (error) *error = [NSError errorWithDomain:@"CursorManager" code:-2 userInfo:@{NSLocalizedDescriptionKey: @"Could not encode animation"}];
+            return nil;
+        }
+        [self saveImageData:gif isGIF:YES forCursor:cursor inType:typeId];
+        [self setHitboxForCursor:cursor hitbox:[ani[@"hotspot"] CGPointValue] inType:typeId];
+        return cursor;
+    }
+    if ([WindowsCursorParser isCurData:data]) {
+        NSError *derr = nil;
+        NSDictionary *cur = [WindowsCursorParser decodeStaticCursorData:data error:&derr];
+        if (!cur) {
+            if (error) *error = derr;
+            return nil;
+        }
+        NSData *png = UIImagePNGRepresentation(cur[@"image"]);
+        if (!png) {
+            if (error) *error = [NSError errorWithDomain:@"CursorManager" code:-2 userInfo:@{NSLocalizedDescriptionKey: @"Could not encode cursor image"}];
+            return nil;
+        }
+        [self saveImageData:png isGIF:NO forCursor:cursor inType:typeId];
+        [self setHitboxForCursor:cursor hitbox:[cur[@"hotspot"] CGPointValue] inType:typeId];
+        return cursor;
+    }
     BOOL isGIF = [self isAnimatedGIFData:data];
     if (!isGIF) {
         UIImage *img = [UIImage imageWithData:data];
@@ -503,19 +661,97 @@ static NSString *const kCursorTypesDirName = @"cursor_types";
 #pragma mark - Cursor shape images (drawn at high resolution with Core Graphics)
 
 static NSMutableDictionary<NSString *, UIImage *> *_shapeImageCache;
+static NSMutableDictionary<NSString *, NSDictionary *> *gGIFImageCache;
 
 + (void)initialize {
     if (self == [CursorManager class]) {
         _shapeImageCache = [NSMutableDictionary dictionary];
+        gGIFImageCache = [NSMutableDictionary dictionary];
     }
 }
 
+#pragma mark - Bundled Windows cursors
+
+static BOOL gDiagonalUsesNESW = NO;
+
++ (void)setDiagonalUsesNESW:(BOOL)useNESW {
+    gDiagonalUsesNESW = useNESW;
+}
+
++ (BOOL)diagonalUsesNESW {
+    return gDiagonalUsesNESW;
+}
+
+/// Real Windows 10 Aero cursors bundled from the windows-10 set
+/// (Natives/Assets.xcassets, CursorWin* imagesets).
++ (nullable UIImage *)bundledWindowsImageForType:(NSString *)typeId {
+    if ([typeId isEqualToString:@"busy"]) {
+        return [self bundledAnimatedCursorWithPrefix:@"CursorWinBusy"
+                                         frameCount:18
+                                     frameDurations:nil];
+    }
+    if ([typeId isEqualToString:@"working"]) {
+        return [self bundledAnimatedCursorWithPrefix:@"CursorWinWorking"
+                                         frameCount:18
+                                     frameDurations:nil];
+    }
+    static NSDictionary<NSString *, NSString *> *nameMap = nil;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        nameMap = @{
+            @"normal": @"CursorWinNormal",
+            @"link": @"CursorWinLink",
+            @"text": @"CursorWinText",
+            @"precision": @"CursorWinPrecision",
+            @"crosshair": @"CursorWinPrecision",
+            @"unavailable": @"CursorWinUnavailable",
+            @"vresize": @"CursorWinVResize",
+            @"hresize": @"CursorWinHResize",
+            @"move": @"CursorWinMove",
+            @"help": @"CursorWinHelp",
+        };
+    });
+    NSString *asset = nameMap[typeId];
+    if ([typeId isEqualToString:@"diagonal"]) {
+        asset = gDiagonalUsesNESW ? @"CursorWinDiagonalNESW" : @"CursorWinDiagonal";
+    }
+    if (!asset) return nil;
+    return [UIImage imageNamed:asset];
+}
+
+/// Build the animated busy/working cursor from bundled frame imagesets.
+/// Each .ani frame plays 3 jiffies (0.05s); 18 frames = 0.9s loop.
++ (nullable UIImage *)bundledAnimatedCursorWithPrefix:(NSString *)prefix
+                                          frameCount:(NSInteger)count
+                                      frameDurations:(nullable NSArray<NSNumber *> *)durations {
+    NSMutableArray<UIImage *> *frames = [NSMutableArray arrayWithCapacity:count];
+    for (NSInteger i = 0; i < count; i++) {
+        NSString *name = [NSString stringWithFormat:@"%@F%02ld", prefix, (long)i];
+        UIImage *img = [UIImage imageNamed:name];
+        if (img) [frames addObject:img];
+    }
+    if (frames.count == 0) return nil;
+    NSTimeInterval total = 0;
+    if (durations.count == frames.count) {
+        for (NSNumber *d in durations) total += [d doubleValue];
+    } else {
+        total = frames.count * 0.05;
+    }
+    if (frames.count == 1) return frames.firstObject;
+    return [UIImage animatedImageWithImages:frames duration:total];
+}
+
 + (UIImage *)defaultShapeImageForType:(NSString *)typeId {
-    UIImage *cached = _shapeImageCache[typeId];
+    NSString *cacheKey = typeId;
+    if ([typeId isEqualToString:@"diagonal"] && gDiagonalUsesNESW) {
+        cacheKey = @"diagonal-nesw";
+    }
+    UIImage *cached = _shapeImageCache[cacheKey];
     if (cached) return cached;
 
-    UIImage *img = [self generateDefaultShapeForType:typeId];
-    if (img) _shapeImageCache[typeId] = img;
+    UIImage *img = [self bundledWindowsImageForType:typeId];
+    if (!img) img = [self generateDefaultShapeForType:typeId];
+    if (img) _shapeImageCache[cacheKey] = img;
     return img;
 }
 

@@ -6,6 +6,7 @@
 #import "DownloadManager.h"
 #import "HapticManager.h"
 #import "ios_uikit_bridge.h"
+#import "utils.h"
 #import "UIImageView+AFNetworking.h"
 #import "AmethystBlurView.h"
 #import "LauncherPreferences.h"
@@ -432,8 +433,8 @@ static NSString * const kInstalledModsManifestName = @"installed_mods.json";
                 weakSelf.versionCheckResults[idx] = @{
                     @"status": @"incompatible",
                     @"latest_version": latestVersion[@"version_number"] ?: @"",
-                    @"reason": [NSString stringWithFormat:@"Yêu cầu MC %@ + %@", 
-                        [gameVersions componentsJoinedByString:@", "], 
+                    @"reason": [NSString stringWithFormat:localize(@"profiles.reason_incompatible", nil),
+                        [gameVersions componentsJoinedByString:@", "],
                         [loaders componentsJoinedByString:@", "]]
                 };
                 continue;
@@ -523,7 +524,7 @@ static NSString * const kInstalledModsManifestName = @"installed_mods.json";
 
     [HapticManager.shared play:HapticTypeMedium];
 
-    UIAlertController *loadingAlert = [UIAlertController alertControllerWithTitle:@"Đang phân tích dependencies..." message:nil preferredStyle:UIAlertControllerStyleAlert];
+    UIAlertController *loadingAlert = [UIAlertController alertControllerWithTitle:localize(@"profiles.deps_analyzing", nil) message:nil preferredStyle:UIAlertControllerStyleAlert];
     UIActivityIndicatorView *spinner = [[UIActivityIndicatorView alloc] initWithActivityIndicatorStyle:UIActivityIndicatorViewStyleLarge];
     spinner.translatesAutoresizingMaskIntoConstraints = NO;
     spinner.hidesWhenStopped = NO;
@@ -549,7 +550,7 @@ static NSString * const kInstalledModsManifestName = @"installed_mods.json";
     dispatch_async(dispatch_get_main_queue(), ^{
         [loadingAlert dismissViewControllerAnimated:YES completion:^{
             if (error) {
-                [weakSelf showAlert:@"Lỗi" message:[NSString stringWithFormat:@"Không thể tải dependencies: %@", error.localizedDescription]];
+                [weakSelf showAlert:localize(@"Error", nil) message:[NSString stringWithFormat:localize(@"profiles.deps_load_fail", nil), error.localizedDescription]];
                 return;
             }
 
@@ -609,7 +610,7 @@ static NSString * const kInstalledModsManifestName = @"installed_mods.json";
 
 - (void)showAlert:(NSString *)title message:(NSString *)message {
     UIAlertController *alert = [UIAlertController alertControllerWithTitle:title message:message preferredStyle:UIAlertControllerStyleAlert];
-    [alert addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
+    [alert addAction:[UIAlertAction actionWithTitle:localize(@"OK", nil) style:UIAlertActionStyleDefault handler:nil]];
     [self presentViewController:alert animated:YES completion:nil];
 }
 
@@ -708,7 +709,7 @@ static NSString * const kInstalledModsManifestName = @"installed_mods.json";
                 [weakSelf reinstallItem:itemData sender:sender];
             };
         } else if ([st isEqualToString:@"incompatible"]) {
-            [cell setActionTitle:@"⚠ Không tương thích" color:ThemeManager.shared.errorColor];
+            [cell setActionTitle:localize(@"profiles.incompatible", nil) color:ThemeManager.shared.errorColor];
             cell.onAction = nil;
         } else {
             [cell hideAction];
@@ -740,9 +741,9 @@ static NSString * const kInstalledModsManifestName = @"installed_mods.json";
 - (void)dependencyDownloadDidComplete:(DependencyDownloadViewController *)controller success:(BOOL)allSuccess {
     [controller dismissViewControllerAnimated:YES completion:nil];
     if (allSuccess) {
-        [self showAlert:@"Thành công" message:@"Đã cài đặt mod và tất cả dependencies"];
+        [self showAlert:localize(@"profiles.success", nil) message:localize(@"profiles.install_success", nil)];
     } else {
-        [self showAlert:@"Cảnh báo" message:@"Một số dependencies không tải được. Mod có thể không hoạt động đúng."];
+        [self showAlert:localize(@"Warning", nil) message:localize(@"profiles.install_partial", nil)];
     }
     [self loadItems];
 }

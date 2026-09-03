@@ -2,6 +2,7 @@
 
 #import "AmethystBlurView.h"
 #import "ThemeManager.h"
+#import "utils.h"
 
 @interface DownloadProgressOverlay ()
 @property (nonatomic) UIView *containerView;
@@ -127,7 +128,7 @@
         _cancelBtn = [UIButton buttonWithType:UIButtonTypeSystem];
         _cancelBtn.translatesAutoresizingMaskIntoConstraints = NO;
         _cancelBtn.hidden = YES;
-        [_cancelBtn setTitle:@"Cancel" forState:UIControlStateNormal];
+        [_cancelBtn setTitle:localize(@"Cancel", nil) forState:UIControlStateNormal];
         _cancelBtn.titleLabel.font = [UIFont systemFontOfSize:13 weight:UIFontWeightMedium];
         [_cancelBtn setTitleColor:ThemeManager.shared.errorColor forState:UIControlStateNormal];
         _cancelBtn.layer.cornerRadius = 6;

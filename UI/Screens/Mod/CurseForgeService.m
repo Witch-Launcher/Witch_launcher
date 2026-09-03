@@ -117,6 +117,42 @@ static NSString* HMACSHA256Hex(NSString *secret, NSString *message) {
     return hex;
 }
 
+// Map a CurseForge classId to the launcher's project_type string.
+static NSString* CFProjectTypeForClassId(NSInteger classId) {
+    if (classId == 6) return @"mod";
+    if (classId == 4471) return @"modpack";
+    if (classId == 6552) return @"shader";
+    if (classId == 12) return @"resourcepack";
+    if (classId == 17) return @"world";
+    return @"unknown";
+}
+
+// A game version token is a dotted number like 1.20.1 (optionally suffixed).
+static BOOL CFTokenIsMCVersion(NSString *token) {
+    if (![token isKindOfClass:[NSString class]] || token.length == 0) return NO;
+    if ([token rangeOfCharacterFromSet:NSCharacterSet.whitespaceCharacterSet].location != NSNotFound) return NO;
+    NSArray *parts = [[token componentsSeparatedByString:@"-"].firstObject componentsSeparatedByString:@"."];
+    if (parts.count < 2 || parts.count > 3) return NO;
+    NSCharacterSet *digits = NSCharacterSet.decimalDigitCharacterSet;
+    for (NSString *p in parts) {
+        if (p.length == 0) return NO;
+        if ([p rangeOfCharacterFromSet:[digits invertedSet]].location != NSNotFound) return NO;
+    }
+    return YES;
+}
+
+// Normalize a CurseForge gameVersions token to a launcher loader id, or nil.
+static NSString* CFLoaderForToken(NSString *token) {
+    static NSSet *known = nil;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        known = [NSSet setWithArray:@[@"forge", @"fabric", @"quilt", @"neoforge",
+                                      @"liteloader", @"rift", @"canvas", @"vanilla"]];
+    });
+    NSString *lower = token.lowercaseString;
+    return [known containsObject:lower] ? lower : nil;
+}
+
 @implementation CurseForgeService
 
 + (instancetype)shared {
@@ -345,7 +381,7 @@ static NSString* HMACSHA256Hex(NSString *secret, NSString *message) {
                     @"slug": mod[@"slug"] ?: @"",
                     @"title": mod[@"name"] ?: @"Unknown",
                     @"description": mod[@"summary"] ?: @"",
-                    @"project_type": classId == 6 ? @"mod" : classId == 4471 ? @"modpack" : classId == 6552 ? @"shader" : @"unknown",
+                    @"project_type": CFProjectTypeForClassId(classId),
                     @"icon_url": iconUrl,
                     @"downloads": mod[@"downloadCount"] ?: @0,
                     @"follows": mod[@"thumbsUpCount"] ?: @0,
@@ -401,6 +437,240 @@ static NSString* HMACSHA256Hex(NSString *secret, NSString *message) {
             if (completion) completion(json[@"data"], nil);
         });
     }] resume];
+}
+
+#pragma mark - Unified versions (Modrinth-compatible shape)
+
+- (NSMutableURLRequest *)filesRequestForProject:(NSString *)projectId
+                                          index:(NSInteger)index
+                                       pageSize:(NSInteger)pageSize {
+    BOOL useProxy = WitchShouldUseProxy();
+    NSString *base = useProxy
+        ? [NSString stringWithFormat:@"%@/v1/curseforge/mods/%@/files", WitchProxyBaseURL(), projectId]
+        : [NSString stringWithFormat:@"%@/mods/%@/files", kCurseForgeBaseURL, projectId];
+    NSURLComponents *components = [NSURLComponents componentsWithString:base];
+    components.queryItems = @[
+        [NSURLQueryItem queryItemWithName:@"index" value:[@(index) stringValue]],
+        [NSURLQueryItem queryItemWithName:@"pageSize" value:[@(pageSize) stringValue]],
+    ];
+    NSMutableURLRequest *req = [NSMutableURLRequest requestWithURL:components.URL];
+    if (useProxy) {
+        NSString *pq = [NSString stringWithFormat:@"/v1/curseforge/mods/%@/files?%@", projectId, components.query ?: @""];
+        [self addWitchAuthHeaders:req pathWithQuery:pq body:nil];
+        [req setValue:@"application/json" forHTTPHeaderField:@"Accept"];
+    } else {
+        [req setValue:[self effectiveAPIKey] forHTTPHeaderField:@"x-api-key"];
+        [req setValue:@"application/json" forHTTPHeaderField:@"Accept"];
+    }
+    return req;
+}
+
+- (void)fetchFilesPageForProject:(NSString *)projectId
+                           index:(NSInteger)index
+                        pageSize:(NSInteger)pageSize
+                     accumulated:(NSMutableArray *)acc
+                      completion:(void(^)(NSArray<NSDictionary *> *files, NSError *error))completion {
+    NSMutableURLRequest *req = [self filesRequestForProject:projectId index:index pageSize:pageSize];
+    [[NSURLSession.sharedSession dataTaskWithRequest:req completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
+        if (error || !data) {
+            dispatch_async(dispatch_get_main_queue(), ^{
+                if (completion) completion(nil, error ?: [NSError errorWithDomain:@"CurseForge" code:-1 userInfo:@{NSLocalizedDescriptionKey: @"No data received"}]);
+            });
+            return;
+        }
+        NSDictionary *json = [NSJSONSerialization JSONObjectWithData:data options:0 error:nil];
+        NSArray *page = json[@"data"];
+        if (![page isKindOfClass:[NSArray class]]) {
+            dispatch_async(dispatch_get_main_queue(), ^{
+                if (completion) completion([acc copy], nil);
+            });
+            return;
+        }
+        [acc addObjectsFromArray:page];
+        // Paginate until a short page or a sane cap (protects huge file lists).
+        if ((NSInteger)page.count >= pageSize && acc.count < 2000) {
+            [self fetchFilesPageForProject:projectId index:index + page.count pageSize:pageSize accumulated:acc completion:completion];
+        } else {
+            NSArray *all = [acc copy];
+            dispatch_async(dispatch_get_main_queue(), ^{
+                if (completion) completion(all, nil);
+            });
+        }
+    }] resume];
+}
+
+- (NSDictionary *)unifiedVersionFromCFFile:(NSDictionary *)file {
+    NSString *displayName = @"";
+    if ([file[@"displayName"] isKindOfClass:[NSString class]] && [file[@"displayName"] length] > 0) {
+        displayName = file[@"displayName"];
+    } else if ([file[@"fileName"] isKindOfClass:[NSString class]]) {
+        displayName = file[@"fileName"];
+    }
+    // Split gameVersions into MC versions + loaders.
+    NSMutableOrderedSet *mcVersions = [NSMutableOrderedSet orderedSet];
+    NSMutableOrderedSet *loaders = [NSMutableOrderedSet orderedSet];
+    NSArray *gameVersions = file[@"gameVersions"];
+    if ([gameVersions isKindOfClass:[NSArray class]]) {
+        for (id token in gameVersions) {
+            if (![token isKindOfClass:[NSString class]]) continue;
+            NSString *loader = CFLoaderForToken(token);
+            if (loader) { [loaders addObject:loader]; continue; }
+            if (CFTokenIsMCVersion(token)) [mcVersions addObject:token];
+        }
+    }
+    if ([file[@"gameVersion"] isKindOfClass:[NSString class]] && CFTokenIsMCVersion(file[@"gameVersion"])) {
+        [mcVersions addObject:file[@"gameVersion"]];
+    }
+    // Map CF file dependencies (relationType 3 = required, 2 = optional).
+    NSMutableArray *deps = [NSMutableArray array];
+    if ([file[@"dependencies"] isKindOfClass:[NSArray class]]) {
+        for (NSDictionary *dep in file[@"dependencies"]) {
+            if (![dep isKindOfClass:[NSDictionary class]]) continue;
+            NSNumber *modId = dep[@"modId"];
+            if (![modId isKindOfClass:[NSNumber class]]) continue;
+            NSString *rel = nil;
+            if ([dep[@"relationType"] isEqual:@3]) rel = @"required";
+            else if ([dep[@"relationType"] isEqual:@2]) rel = @"optional";
+            if (!rel) continue;
+            [deps addObject:@{@"project_id": [modId stringValue],
+                              @"dependency_type": rel}];
+        }
+    }
+    id fileId = file[@"id"];
+    if (![fileId isKindOfClass:[NSNumber class]]) fileId = @0;
+    id size = file[@"fileLength"];
+    if (![size isKindOfClass:[NSNumber class]]) size = @0;
+    return @{
+        @"name": displayName,
+        @"version_number": displayName,
+        @"game_versions": [mcVersions array],
+        @"loaders": [loaders array],
+        @"url": ([file[@"downloadUrl"] isKindOfClass:[NSString class]] ? file[@"downloadUrl"] : @""),
+        @"filename": ([file[@"fileName"] isKindOfClass:[NSString class]] ? file[@"fileName"] : @"file.jar"),
+        @"size": size,
+        @"fileDate": ([file[@"fileDate"] isKindOfClass:[NSString class]] ? file[@"fileDate"] : @""),
+        @"dependencies": deps,
+        @"_cfFileId": fileId,
+        @"_source": @"curseforge",
+    };
+}
+
+- (void)loadProjectVersions:(NSString *)projectId
+                 completion:(void(^)(NSArray<NSDictionary *> *versions, NSError *error))completion
+{
+    if (![self isConfigured]) {
+        if (completion) completion(nil, [NSError errorWithDomain:@"CurseForge" code:401 userInfo:@{NSLocalizedDescriptionKey: @"API key not configured"}]);
+        return;
+    }
+    NSMutableArray *acc = [NSMutableArray array];
+    [self fetchFilesPageForProject:projectId index:0 pageSize:200 accumulated:acc completion:^(NSArray<NSDictionary *> *files, NSError *error) {
+        if (error) {
+            if (completion) completion(nil, error);
+            return;
+        }
+        // Newest first.
+        NSArray *sorted = [files sortedArrayUsingComparator:^NSComparisonResult(NSDictionary *a, NSDictionary *b) {
+            NSString *da = [a[@"fileDate"] isKindOfClass:[NSString class]] ? a[@"fileDate"] : @"";
+            NSString *db = [b[@"fileDate"] isKindOfClass:[NSString class]] ? b[@"fileDate"] : @"";
+            return [db compare:da];
+        }];
+        NSMutableArray *versions = [NSMutableArray arrayWithCapacity:sorted.count];
+        for (NSDictionary *file in sorted) {
+            if (![file isKindOfClass:[NSDictionary class]]) continue;
+            [versions addObject:[self unifiedVersionFromCFFile:file]];
+        }
+        if (completion) completion(versions, nil);
+    }];
+}
+
+- (void)loadUnifiedProjectDetails:(NSString *)projectId
+                       completion:(void(^)(NSDictionary *project, NSError *error))completion
+{
+    [self loadProjectDetails:projectId completion:^(NSDictionary *raw, NSError *error) {
+        if (error || ![raw isKindOfClass:[NSDictionary class]]) {
+            if (completion) completion(nil, error ?: [NSError errorWithDomain:@"CurseForge" code:-1 userInfo:@{NSLocalizedDescriptionKey: @"Project not found"}]);
+            return;
+        }
+        NSString *icon = @"";
+        if ([raw[@"logo"] isKindOfClass:[NSDictionary class]]) {
+            id thumb = raw[@"logo"][@"thumbnailUrl"] ?: raw[@"logo"][@"url"];
+            if ([thumb isKindOfClass:[NSString class]]) icon = thumb;
+        }
+        id pid = raw[@"id"];
+        NSString *pidStr = [pid isKindOfClass:[NSNumber class]] ? [pid stringValue]
+            : ([projectId isKindOfClass:[NSString class]] ? projectId : @"");
+        if (completion) completion(@{
+            @"title": ([raw[@"name"] isKindOfClass:[NSString class]] ? raw[@"name"] : @"Unknown"),
+            @"icon_url": icon,
+            @"project_id": pidStr,
+            @"_source": @"curseforge",
+        }, nil);
+    }];
+}
+
+- (void)resolveDownloadURLForProject:(NSString *)projectId
+                              fileId:(NSNumber *)fileId
+                          completion:(void(^)(NSString * _Nullable url, NSError * _Nullable error))completion
+{
+    if (![self isConfigured]) {
+        if (completion) completion(nil, [NSError errorWithDomain:@"CurseForge" code:401 userInfo:@{NSLocalizedDescriptionKey: @"API key not configured"}]);
+        return;
+    }
+    NSString *path = [NSString stringWithFormat:@"/mods/%@/files/%@/download-url", projectId, fileId];
+    NSMutableURLRequest *req = [self requestForPath:path];
+    [[NSURLSession.sharedSession dataTaskWithRequest:req completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
+        dispatch_async(dispatch_get_main_queue(), ^{
+            if (error || !data) {
+                if (completion) completion(nil, error);
+                return;
+            }
+            NSDictionary *json = [NSJSONSerialization JSONObjectWithData:data options:0 error:nil];
+            id url = json[@"data"];
+            if ([url isKindOfClass:[NSString class]] && [url length] > 0) {
+                if (completion) completion(url, nil);
+            } else {
+                if (completion) completion(nil, [NSError errorWithDomain:@"CurseForge" code:-1 userInfo:@{NSLocalizedDescriptionKey: @"Could not resolve download URL"}]);
+            }
+        });
+    }] resume];
+}
+
+- (NSURLSessionDownloadTask *)downloadFile:(NSString *)urlString
+                                      name:(NSString *)name
+                             progressBlock:(void(^)(float progress))progress
+                                completion:(void(^)(NSString *path, NSError *error))completion
+{
+    NSURL *url = [NSURL URLWithString:urlString];
+    if (!url) {
+        if (completion) completion(nil, [NSError errorWithDomain:@"CurseForgeService" code:-1 userInfo:@{NSLocalizedDescriptionKey: @"Invalid URL"}]);
+        return nil;
+    }
+    NSString *destPath = [NSTemporaryDirectory() stringByAppendingPathComponent:name];
+    NSURLSessionDownloadTask *task = [[NSURLSession sharedSession] downloadTaskWithURL:url completionHandler:^(NSURL *location, NSURLResponse *response, NSError *error) {
+        if (error) {
+            if (completion) completion(nil, error);
+            return;
+        }
+        [[NSFileManager defaultManager] removeItemAtPath:destPath error:nil];
+        NSError *moveError = nil;
+        [[NSFileManager defaultManager] moveItemAtURL:location toURL:[NSURL fileURLWithPath:destPath] error:&moveError];
+        dispatch_async(dispatch_get_main_queue(), ^{
+            if (completion) completion(destPath, moveError);
+        });
+    }];
+    [task resume];
+    if (progress) {
+        dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
+            while (task.state == NSURLSessionTaskStateRunning) {
+                [NSThread sleepForTimeInterval:0.5];
+                float p = task.countOfBytesExpectedToReceive > 0 ? (float)task.countOfBytesReceived / task.countOfBytesExpectedToReceive : 0;
+                dispatch_async(dispatch_get_main_queue(), ^{
+                    progress(p);
+                });
+            }
+        });
+    }
+    return task;
 }
 
 @end

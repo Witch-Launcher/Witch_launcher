@@ -30,7 +30,7 @@
     _jitStatusLabel = [[UILabel alloc] init];
     _jitStatusLabel.translatesAutoresizingMaskIntoConstraints = NO;
     _jitStatusLabel.font = [UIFont systemFontOfSize:11 weight:UIFontWeightRegular];
-    _jitStatusLabel.text = @"JIT: ...";
+    _jitStatusLabel.text = localize(@"jit.status", nil);
     [self addSubview:_jitStatusLabel];
 
     _timeLabel = [[UILabel alloc] init];

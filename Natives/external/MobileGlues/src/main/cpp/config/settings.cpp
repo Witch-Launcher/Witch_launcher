@@ -21,17 +21,89 @@ static void parse_multidraw_orders();
 
 void init_settings() {
 #if defined(__APPLE__)
+    // iOS defaults. These apply when the user has not customized the matching
+    // Graphics setting; any key present in config.json (written by the
+    // launcher from Settings > Graphics > MobileGlues) overrides its default
+    // below. config_get_int returns -1 for an absent key, so absence is what
+    // selects the default -- never a stale or locked value.
     global_settings.angle = AngleMode::Disabled;
     global_settings.angle_config = AngleConfig::DisableIfPossible;
     global_settings.angle_supported = false;
     global_settings.ignore_error = IgnoreErrorLevel::Partial;
     global_settings.ext_compute_shader = false;
+    global_settings.ext_timer_query = false;
+    global_settings.ext_direct_state_access = true;
+    global_settings.buffer_coherent_as_flush = false;
     global_settings.max_glsl_cache_size = 30 * 1024 * 1024;
     global_settings.angle_depth_clear_fix_mode = AngleDepthClearFixMode::Disabled;
-    global_settings.ext_direct_state_access = true;
     global_settings.custom_gl_version = {0, 0, 0}; // will go default
     global_settings.fsr1_setting = FSR1_Quality_Preset::Disabled;
     global_settings.hide_mg_env_level = HideMGEnvLevel::Disabled;
+
+    do {
+        int loaded = initialized;
+        if (!loaded) {
+            loaded = config_refresh();
+            if (!loaded) {
+                LOG_V("Failed to load config. Use default config.")
+                break;
+            }
+        }
+        int angleCfg = config_get_int("enableANGLE");
+        if (angleCfg >= 0 && angleCfg <= 3) {
+            global_settings.angle_config = static_cast<AngleConfig>(angleCfg);
+            // No ANGLE/Vulkan stack on iOS: only an explicit force-enable can
+            // turn it on, everything else stays disabled.
+            global_settings.angle = (global_settings.angle_config == AngleConfig::ForceEnable)
+                                        ? AngleMode::Enabled
+                                        : AngleMode::Disabled;
+        }
+        int noErrorCfg = config_get_int("enableNoError");
+        if (noErrorCfg >= 0 && noErrorCfg <= 3) {
+            switch (static_cast<NoErrorConfig>(noErrorCfg)) {
+            case NoErrorConfig::Level1:
+                global_settings.ignore_error = IgnoreErrorLevel::Partial;
+                break;
+            case NoErrorConfig::Level2:
+                global_settings.ignore_error = IgnoreErrorLevel::Full;
+                break;
+            default:
+                global_settings.ignore_error = IgnoreErrorLevel::None;
+                break;
+            }
+        }
+        int v = 0;
+        v = config_get_int("enableExtComputeShader");
+        if (v >= 0) global_settings.ext_compute_shader = (v > 0);
+        v = config_get_int("enableExtTimerQuery");
+        if (v >= 0) global_settings.ext_timer_query = (v > 0);
+        v = config_get_int("enableExtDirectStateAccess");
+        if (v >= 0) global_settings.ext_direct_state_access = (v > 0);
+        v = config_get_int("maxGlslCacheSize");
+        if (v > 0) global_settings.max_glsl_cache_size = (size_t)v * 1024 * 1024;
+        v = config_get_int("angleDepthClearFixMode");
+        if (v >= 0 && v < static_cast<int>(AngleDepthClearFixMode::MaxValue)) {
+            global_settings.angle_depth_clear_fix_mode = static_cast<AngleDepthClearFixMode>(v);
+        }
+        // Same clamps as the generic path, except 0 keeps {0,0,0} ("will go
+        // default") instead of being rewritten to DEFAULT_GL_VERSION: the log
+        // below then prints "(default)", matching the requested default.
+        v = config_get_int("customGLVersion");
+        if (v > 0) {
+            if (v > 46) v = 46;
+            else if (v < 32) v = 32;
+            else if (v > 33 && v < 40) v = 33;
+            global_settings.custom_gl_version = Version(v);
+        }
+        v = config_get_int("fsr1Setting");
+        if (v >= 0 && v < static_cast<int>(FSR1_Quality_Preset::MaxValue)) {
+            global_settings.fsr1_setting = static_cast<FSR1_Quality_Preset>(v);
+        }
+        v = config_get_int("hideMGEnvLevel");
+        if (v >= 0 && v < static_cast<int>(HideMGEnvLevel::MaxValue)) {
+            global_settings.hide_mg_env_level = static_cast<HideMGEnvLevel>(v);
+        }
+    } while (0);
 
 #else
 

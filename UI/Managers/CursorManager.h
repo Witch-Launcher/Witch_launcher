@@ -60,6 +60,11 @@ NS_ASSUME_NONNULL_BEGIN
 /// Ảnh cursor shape mặc định cho từng type.
 + (nullable UIImage *)defaultShapeImageForType:(NSString *)typeId;
 
+/// Chọn biến thể diagonal (NW-SE mặc định của Windows, hoặc NE-SW khi game
+/// yêu cầu resize NESW). Gọi từ CursorTypeManager khi nhận shape từ game.
++ (void)setDiagonalUsesNESW:(BOOL)useNESW;
++ (BOOL)diagonalUsesNESW;
+
 /// Calculate display frame for a specific cursor type (uses per-type cursor pool).
 + (CGRect)displayFrameForMouseFrame:(CGRect)mouseFrame typeId:(NSString *)typeId;
 

@@ -166,7 +166,7 @@ static NSString * const kProfileCell = @"ProfileCell";
     if (isCurrent) {
         _badgeView.hidden = NO;
         _badgeView.backgroundColor = ThemeManager.shared.accentColor;
-        _badgeLabel.text = @"  Đang dùng  ";
+        _badgeLabel.text = localize(@"profiles.in_use", nil);
     } else {
         _badgeView.hidden = YES;
     }
@@ -459,7 +459,7 @@ static NSString * const kProfileCell = @"ProfileCell";
 }
 
 - (void)showAvatarPickerForProfile:(NSMutableDictionary *)profile fromButton:(UIButton *)sender {
-    UIAlertController *sheet = [UIAlertController alertControllerWithTitle:@"Chọn Avatar" message:nil preferredStyle:UIAlertControllerStyleActionSheet];
+    UIAlertController *sheet = [UIAlertController alertControllerWithTitle:localize(@"profiles.choose_avatar", nil) message:nil preferredStyle:UIAlertControllerStyleActionSheet];
     
     NSArray *avatars = @[
         @{@"key": @"fabric", @"name": @"Fabric", @"icon": @"cube.transparent"},
@@ -468,7 +468,7 @@ static NSString * const kProfileCell = @"ProfileCell";
         @{@"key": @"modpack", @"name": @"Modpack", @"icon": @"square.stack.3d.up"},
         @{@"key": @"vanilla", @"name": @"Vanilla", @"icon": @"cube.fill"},
         @{@"key": @"quilt", @"name": @"Quilt", @"icon": @"patchwork"},
-        @{@"key": @"custom", @"name": @"Tùy chỉnh...", @"icon": @"photo.fill"},
+        @{@"key": @"custom", @"name": localize(@"profiles.custom_avatar", nil), @"icon": @"photo.fill"},
     ];
     
     for (NSDictionary *av in avatars) {
@@ -483,7 +483,7 @@ static NSString * const kProfileCell = @"ProfileCell";
             }
         }]];
     }
-    [sheet addAction:[UIAlertAction actionWithTitle:@"Hủy" style:UIAlertActionStyleCancel handler:nil]];
+    [sheet addAction:[UIAlertAction actionWithTitle:localize(@"Cancel", nil) style:UIAlertActionStyleCancel handler:nil]];
     
     if (UIDevice.currentDevice.userInterfaceIdiom == UIUserInterfaceIdiomPad) {
         sheet.popoverPresentationController.sourceView = sender;

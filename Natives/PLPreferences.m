@@ -118,11 +118,11 @@
         }.mutableCopy,
         @"mobileglues": @{
             @"enable_angle": @NO,
-            @"enable_no_error": @(0),
+            @"enable_no_error": @(2),
             @"enable_ext_timer_query": @YES,
             @"enable_ext_compute_shader": @NO,
-            @"enable_ext_direct_state_access": @NO,
-            @"max_glsl_cache_size": @(32),
+            @"enable_ext_direct_state_access": @YES,
+            @"max_glsl_cache_size": @(30),
             @"multidraw_mode": @(0),
             @"angle_depth_clear_fix_mode": @(0),
             @"custom_gl_version": @(0),
@@ -176,7 +176,7 @@
             @"debug_server_localhost_only": @NO
         }.mutableCopy;
         defaults[@"launcher"] = @{
-            @"language": @"en",
+            @"language": @"auto",
             @"theme": @"System",
             @"logo_style": (CONFIG_RELEASE ? @"purple" : @"dev")
         }.mutableCopy;
@@ -282,6 +282,21 @@
             NSLog(@"[PLPreferences] Migrated allocated_memory from %.0f to %.0f", currentMem, correctMem);
             pref[@"java"][@"allocated_memory"] = @(correctMem);
         }
+    }
+
+    // One-time: Apple init_settings() now reads config.json (previously the
+    // native defaults were hardcoded), so move stored values that equal the
+    // old defaults to the matching native defaults. Those stored values never
+    // took effect on iOS, so nothing the user observed changes.
+    NSMutableDictionary *mg = pref[@"mobileglues"];
+    NSMutableDictionary *internal = pref[@"internal"];
+    if ([mg isKindOfClass:[NSMutableDictionary class]] &&
+        [internal isKindOfClass:[NSMutableDictionary class]] &&
+        ![internal[@"mg_apple_defaults_v1"] boolValue]) {
+        if ([mg[@"enable_no_error"] intValue] == 0) mg[@"enable_no_error"] = @(2); // Level1 = Partial
+        if ([mg[@"enable_ext_direct_state_access"] boolValue] == NO) mg[@"enable_ext_direct_state_access"] = @YES;
+        if ([mg[@"max_glsl_cache_size"] intValue] == 32) mg[@"max_glsl_cache_size"] = @(30);
+        internal[@"mg_apple_defaults_v1"] = @YES;
     }
 
     return pref;

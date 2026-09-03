@@ -220,6 +220,9 @@ static NSArray<NSDictionary *> *_cursorTypeDefinitions;
 #pragma mark - Shape Mapping
 
 + (nullable NSString *)typeIdForGLFWShape:(int)shape {
+    // GLFW has two diagonal constants but the launcher has one diagonal type;
+    // both resolve here and the exact variant is picked in handleCursorShapeChange.
+    if (shape == kGLFWResizeNESWCursor) return @"diagonal";
     for (NSDictionary *type in _cursorTypeDefinitions) {
         if ([type[kCursorTypeGLFWConstant] intValue] == shape) {
             return type[kCursorTypeId];
@@ -229,6 +232,8 @@ static NSArray<NSDictionary *> *_cursorTypeDefinitions;
 }
 
 + (nullable NSString *)typeIdForSDLShape:(int)shape {
+    // Same as above for SDL3 (NWSEResize/NESWResize share the diagonal type).
+    if (shape == kSDLNESWResize) return @"diagonal";
     for (NSDictionary *type in _cursorTypeDefinitions) {
         if ([type[kCursorTypeSDLConstant] intValue] == shape) {
             return type[kCursorTypeId];
@@ -259,6 +264,14 @@ static NSArray<NSDictionary *> *_cursorTypeDefinitions;
         } else {
             typeId = @"normal";
         }
+    }
+
+    // Windows ships distinct NW-SE and NE-SW diagonal cursors; remember which
+    // variant the game asked for so the bundled asset matches.
+    if ([typeId isEqualToString:@"diagonal"]) {
+        BOOL nesw = (!isSDL3 && shape == kGLFWResizeNESWCursor) ||
+                    (isSDL3 && shape == kSDLNESWResize);
+        [CursorManager setDiagonalUsesNESW:nesw];
     }
 
     if (![self isEnabledForType:typeId]) {

@@ -95,7 +95,7 @@
     _versionsLabel = [[UILabel alloc] init];
     _versionsLabel.translatesAutoresizingMaskIntoConstraints = NO;
     _versionsLabel.font = [UIFont systemFontOfSize:10 weight:UIFontWeightSemibold];
-    _versionsLabel.text = @"VERSIONS";
+    _versionsLabel.text = localize(@"versions.header", nil);
     [contentView addSubview:_versionsLabel];
 
     _versionsScroll = [[UIScrollView alloc] init];
@@ -112,7 +112,7 @@
     _addVersionButton = [UIButton buttonWithType:UIButtonTypeSystem];
     _addVersionButton.translatesAutoresizingMaskIntoConstraints = NO;
     _addVersionButton.titleLabel.font = [UIFont systemFontOfSize:12 weight:UIFontWeightSemibold];
-    [_addVersionButton setTitle:@"+ Add Version" forState:UIControlStateNormal];
+    [_addVersionButton setTitle:localize(@"version.add", nil) forState:UIControlStateNormal];
     _addVersionButton.layer.cornerRadius = 8;
     _addVersionButton.clipsToBounds = YES;
     [_addVersionButton addTarget:self action:@selector(didTapAddVersion) forControlEvents:UIControlEventTouchUpInside];
@@ -265,7 +265,7 @@
 
     if (_installedVersions.count == 0) {
         UILabel *empty = [[UILabel alloc] init];
-        empty.text = @"No versions installed";
+        empty.text = localize(@"versions.empty", nil);
         empty.font = [UIFont systemFontOfSize:10 weight:UIFontWeightRegular];
         empty.textColor = ThemeManager.shared.secondaryTextColor;
         empty.textAlignment = NSTextAlignmentCenter;

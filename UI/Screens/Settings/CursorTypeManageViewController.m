@@ -388,11 +388,11 @@ UIAlertController *picker = [UIAlertController alertControllerWithTitle:localize
 }
 
 - (void)confirmDeleteCursor:(NSString *)name {
-    UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Delete Cursor"
+    UIAlertController *alert = [UIAlertController alertControllerWithTitle:localize(@"cursor.detail.delete_title", nil)
                                                                   message:[NSString stringWithFormat:@"Delete cursor \"%@\"?", name]
                                                            preferredStyle:UIAlertControllerStyleAlert];
-    [alert addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
-    [alert addAction:[UIAlertAction actionWithTitle:@"Delete" style:UIAlertActionStyleDestructive handler:^(UIAlertAction *action) {
+    [alert addAction:[UIAlertAction actionWithTitle:localize(@"Cancel", nil) style:UIAlertActionStyleCancel handler:nil]];
+    [alert addAction:[UIAlertAction actionWithTitle:localize(@"Delete", nil) style:UIAlertActionStyleDestructive handler:^(UIAlertAction *action) {
         // Reset any type using this cursor to default
         for (NSDictionary *typeDef in self.cursorTypes) {
             if ([[CursorTypeManager cursorForType:typeDef[kCursorTypeId]] isEqualToString:name]) {

@@ -13,6 +13,7 @@
 #import "ios_uikit_bridge.h"
 #import "UIImageView+AFNetworking.h"
 #import "CurseForgeService.h"
+#import "ModSourceService.h"
 #import "AFImageDownloader.h"
 #import "AmethystBlurView.h"
 #import "utils.h"
@@ -892,26 +893,22 @@
     DownloadTask *hubTask = [[DownloadManager shared] beginTaskWithName:(_selectedMod[@"title"] ?: @"Mod") type:DownloadTypeMod];
     __weak typeof(self) weakSelf = self;
 
-    NSString *projectId = _selectedMod[@"project_id"];
-    [ModrinthService.shared loadProjectVersions:projectId completion:^(NSArray<NSDictionary *> *versions, NSError *error) {
+    [ModSourceService loadVersionsForMod:_selectedMod completion:^(NSArray<NSDictionary *> *versions, NSError *error) {
         if (error || versions.count == 0) {
             [[DownloadManager shared] completeTask:hubTask error:error];
-            showDialog(@"Error", @"No versions found for this mod.");
+            showDialog(@"Error", error.localizedDescription ?: @"No versions found for this mod.");
             return;
         }
 
         NSDictionary *best = [weakSelf bestVersionForSelected:versions];
         if (!best) best = versions.firstObject;
 
-        NSString *url = best[@"url"];
-        NSString *filename = best[@"filename"] ?: @"mod.jar";
-
         [hubTask setCancelBlock:^{
             [weakSelf.currentDownloadTask cancel];
             weakSelf.currentDownloadTask = nil;
         }];
 
-        weakSelf.currentDownloadTask = [ModrinthService.shared downloadFile:url name:filename progressBlock:^(float p) {
+        weakSelf.currentDownloadTask = [ModSourceService downloadVersion:best ofMod:weakSelf.selectedMod progress:^(float p) {
             [[DownloadManager shared] updateProgress:p forTask:hubTask];
         } completion:^(NSString *path, NSError *dlError) {
             weakSelf.currentDownloadTask = nil;
@@ -932,18 +929,16 @@
     DownloadTask *hubTask = [[DownloadManager shared] beginTaskWithName:(_selectedMod[@"title"] ?: @"Mod") type:DownloadTypeMod];
     __weak typeof(self) weakSelf = self;
 
-    NSString *projectId = _selectedMod[@"project_id"];
-    [ModrinthService.shared loadProjectVersions:projectId completion:^(NSArray<NSDictionary *> *versions, NSError *error) {
+    [ModSourceService loadVersionsForMod:_selectedMod completion:^(NSArray<NSDictionary *> *versions, NSError *error) {
         if (error || versions.count == 0) {
             [[DownloadManager shared] completeTask:hubTask error:error];
-            showDialog(@"Error", @"No versions found for this mod.");
+            showDialog(@"Error", error.localizedDescription ?: @"No versions found for this mod.");
             return;
         }
 
         NSDictionary *best = [weakSelf bestVersionForSelected:versions];
         if (!best) best = versions.firstObject;
 
-        NSString *url = best[@"url"];
         NSString *filename = best[@"filename"] ?: @"mod.jar";
         NSString *targetVersion = VersionDirectoryManager.shared.currentVersion ?: [weakSelf selectedVersion];
 
@@ -952,7 +947,7 @@
             weakSelf.currentDownloadTask = nil;
         }];
 
-        weakSelf.currentDownloadTask = [ModrinthService.shared downloadFile:url name:filename progressBlock:^(float p) {
+        weakSelf.currentDownloadTask = [ModSourceService downloadVersion:best ofMod:weakSelf.selectedMod progress:^(float p) {
             [[DownloadManager shared] updateProgress:p forTask:hubTask];
         } completion:^(NSString *path, NSError *dlError) {
             weakSelf.currentDownloadTask = nil;
@@ -1124,12 +1119,6 @@ static const NSInteger kModActionLoadingTag = 9001;
     [HapticManager.shared play:HapticTypeLight];
     _versionSelectionMod = mod;
 
-    NSString *projectId = mod[@"project_id"];
-    if (!projectId || projectId.length == 0) {
-        showDialog(@"Error", @"Mod project ID not found.");
-        return;
-    }
-
     [self setModActionButtonLoading:sender loading:YES];
 
     NSString *targetVersion = [self selectedVersion];
@@ -1137,7 +1126,7 @@ static const NSInteger kModActionLoadingTag = 9001;
     __weak typeof(self) weakSelf = self;
     __weak UIButton *weakSender = sender;
 
-    [ModrinthService.shared loadProjectVersions:projectId completion:^(NSArray<NSDictionary *> *versions, NSError *error) {
+    [ModSourceService loadVersionsForMod:mod completion:^(NSArray<NSDictionary *> *versions, NSError *error) {
         [weakSelf handleLoadedVersions:versions error:error targetVersion:targetVersion targetLoader:targetLoader sender:weakSender];
     }];
 }
@@ -1189,17 +1178,11 @@ static const NSInteger kModActionLoadingTag = 9001;
         return;
     }
 
-    NSString *projectId = mod[@"project_id"];
-    if (!projectId || projectId.length == 0) {
-        showDialog(@"Error", @"Mod project ID not found.");
-        return;
-    }
-
     __weak typeof(self) weakSelf = self;
-    [ModrinthService.shared loadProjectVersions:projectId completion:^(NSArray<NSDictionary *> *versions, NSError *error) {
+    [ModSourceService loadVersionsForMod:mod completion:^(NSArray<NSDictionary *> *versions, NSError *error) {
         dispatch_async(dispatch_get_main_queue(), ^{
             if (error || versions.count == 0) {
-                showDialog(@"Error", @"No versions found for this mod.");
+                showDialog(@"Error", error.localizedDescription ?: @"No versions found for this mod.");
                 return;
             }
 
@@ -1236,7 +1219,7 @@ static const NSInteger kModActionLoadingTag = 9001;
     
     // Check if mod is already installed
     BOOL isInstalled = [self isModInstalled:version];
-    NSString *installTitle = isInstalled ? @"Cài đặt lại" : @"Install to Profile";
+    NSString *installTitle = isInstalled ? localize(@"mod.reinstall", nil) : localize(@"mod.install_to_profile", nil);
     
     UIAlertController *alert = [UIAlertController alertControllerWithTitle:modTitle message:message preferredStyle:UIAlertControllerStyleAlert];
     
@@ -1244,11 +1227,11 @@ static const NSInteger kModActionLoadingTag = 9001;
         [weakSelf installModWithDependencies:version];
     }]];
     
-    [alert addAction:[UIAlertAction actionWithTitle:@"Download Only" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
+    [alert addAction:[UIAlertAction actionWithTitle:localize(@"mod.download_only", nil) style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
         [weakSelf downloadModOnly:version];
     }]];
     
-    [alert addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
+    [alert addAction:[UIAlertAction actionWithTitle:localize(@"Cancel", nil) style:UIAlertActionStyleCancel handler:nil]];
     
     [self presentViewController:alert animated:YES completion:nil];
 }
@@ -1285,8 +1268,8 @@ static const NSInteger kModActionLoadingTag = 9001;
     }
     
     if (requiredDeps.count > 0) {
-        _dependencyOverlay = [DownloadProgressOverlay showInView:self.view title:@"Installing Dependencies"];
-        [_dependencyOverlay updateProgress:0 message:@"Loading dependencies..."];
+        _dependencyOverlay = [DownloadProgressOverlay showInView:self.view title:localize(@"progress.installing_deps", nil)];
+        [_dependencyOverlay updateProgress:0 message:localize(@"progress.msg.loading_deps", nil)];
         
         __weak typeof(self) weakSelf = self;
         [self installDependencies:requiredDeps index:0 version:version completion:^(BOOL success) {
@@ -1315,13 +1298,15 @@ static const NSInteger kModActionLoadingTag = 9001;
     }
     
     __weak typeof(self) weakSelf = self;
-    [ModrinthService.shared loadProjectDetails:depProjectId completion:^(NSDictionary *project, NSError *error) {
+    NSString *depSource = [ModSourceService isCurseForgeMod:_downloadMod] ? @"curseforge" : @"modrinth";
+    [ModSourceService loadDetailsForProjectId:depProjectId source:depSource completion:^(NSDictionary *project, NSError *error) {
         if (error || !project) {
             [weakSelf installDependencies:deps index:index + 1 version:mainVersion completion:completion];
             return;
         }
-        
-        [ModrinthService.shared loadProjectVersions:depProjectId completion:^(NSArray<NSDictionary *> *depVersions, NSError *vError) {
+
+        NSDictionary *depMod = @{@"project_id": depProjectId, @"_source": depSource};
+        [ModSourceService loadVersionsForMod:depMod completion:^(NSArray<NSDictionary *> *depVersions, NSError *vError) {
             if (vError || depVersions.count == 0) {
                 [weakSelf installDependencies:deps index:index + 1 version:mainVersion completion:completion];
                 return;
@@ -1344,16 +1329,16 @@ static const NSInteger kModActionLoadingTag = 9001;
             
             dispatch_async(dispatch_get_main_queue(), ^{
                 NSString *depTitle = project[@"title"] ?: @"Unknown";
-                [_dependencyOverlay updateProgress:(float)index / deps.count message:[NSString stringWithFormat:@"Installing %@...", depTitle]];
-                
-                NSString *url = bestVer[@"url"];
+                [_dependencyOverlay updateProgress:(float)index / deps.count message:[NSString stringWithFormat:localize(@"progress.msg.installing_item", nil), depTitle]];
+
                 NSString *filename = bestVer[@"filename"] ?: @"mod.jar";
                 NSString *mcVersion = VersionDirectoryManager.shared.currentVersion;
                 if (mcVersion.length == 0) {
                     mcVersion = VersionDirectoryManager.shared.currentProfile.mcVersion ?: @"1.21.4";
                 }
-                
-                NSURLSessionDownloadTask *task = [ModrinthService.shared downloadFile:url name:filename progressBlock:^(float p) {
+
+                NSDictionary *depVerMod = @{@"project_id": depProjectId, @"_source": depSource};
+                NSURLSessionDownloadTask *task = [ModSourceService downloadVersion:bestVer ofMod:depVerMod progress:^(float p) {
                     // Progress handled by overlay
                 } completion:^(NSString *path, NSError *dlError) {
                     if (path) {
@@ -1370,14 +1355,13 @@ static const NSInteger kModActionLoadingTag = 9001;
                     }
                     [weakSelf installDependencies:deps index:index + 1 version:mainVersion completion:completion];
                 }];
-                [weakSelf.dependencyInstallTasks addObject:task];
+                if (task) [weakSelf.dependencyInstallTasks addObject:task];
             });
         }];
     }];
 }
 
 - (void)installMainMod:(NSDictionary *)version {
-    NSString *url = version[@"url"];
     NSString *filename = version[@"filename"] ?: @"mod.jar";
     NSString *mcVersion = VersionDirectoryManager.shared.currentVersion;
     if (mcVersion.length == 0) {
@@ -1397,7 +1381,7 @@ static const NSInteger kModActionLoadingTag = 9001;
         for (NSURLSessionDownloadTask *t in weakSelf.dependencyInstallTasks) [t cancel];
     }];
 
-    NSURLSessionDownloadTask *task = [ModrinthService.shared downloadFile:url name:filename progressBlock:^(float p) {
+    NSURLSessionDownloadTask *task = [ModSourceService downloadVersion:version ofMod:_downloadMod progress:^(float p) {
         [[DownloadManager shared] updateProgress:p forTask:hubTask];
     } completion:^(NSString *path, NSError *dlError) {
         [[DownloadManager shared] completeTask:hubTask error:dlError];
@@ -1416,38 +1400,37 @@ static const NSInteger kModActionLoadingTag = 9001;
                                                   filename:targetPath.lastPathComponent];
         }
     }];
-    [_dependencyInstallTasks addObject:task];
+    if (task) [_dependencyInstallTasks addObject:task];
 }
 
 - (void)downloadModOnly:(NSDictionary *)version {
-    NSString *url = version[@"url"];
     NSString *filename = version[@"filename"] ?: @"mod.jar";
-    
+
     NSString *downloadsPath = VersionDirectoryManager.shared.downloadsPath;
     [[NSFileManager defaultManager] createDirectoryAtPath:downloadsPath withIntermediateDirectories:YES attributes:nil error:nil];
     NSString *targetPath = [downloadsPath stringByAppendingPathComponent:filename];
-    
-    DownloadProgressOverlay *overlay = [DownloadProgressOverlay showInView:self.view title:@"Downloading Mod"];
-    [overlay updateProgress:0 message:@"Downloading..."];
-    
+
+    DownloadProgressOverlay *overlay = [DownloadProgressOverlay showInView:self.view title:localize(@"progress.downloading_mod", nil)];
+    [overlay updateProgress:0 message:localize(@"progress.msg.downloading", nil)];
+
     __weak typeof(self) weakSelf = self;
     [overlay setCancelBlock:^{
         [weakSelf.currentDownloadTask cancel];
         weakSelf.currentDownloadTask = nil;
     }];
-    weakSelf.currentDownloadTask = [ModrinthService.shared downloadFile:url name:filename progressBlock:^(float p) {
-        [overlay updateProgress:p message:[NSString stringWithFormat:@"Downloading %@", filename]];
+    weakSelf.currentDownloadTask = [ModSourceService downloadVersion:version ofMod:_downloadMod progress:^(float p) {
+        [overlay updateProgress:p message:[NSString stringWithFormat:localize(@"progress.msg.dl_name", nil), filename]];
     } completion:^(NSString *dlPath, NSError *error) {
         if (dlPath) {
             [[NSFileManager defaultManager] removeItemAtPath:targetPath error:nil];
             [[NSFileManager defaultManager] moveItemAtPath:dlPath toPath:targetPath error:nil];
-            [overlay finishWithMessage:@"Downloaded!"];
+            [overlay finishWithMessage:localize(@"common.downloaded_done", nil)];
             dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 1.5 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
                 [overlay dismiss];
-                showDialog(@"Downloaded", [NSString stringWithFormat:@"%@ saved to Downloads.", filename]);
+                showDialog(localize(@"Downloaded", nil), [NSString stringWithFormat:localize(@"common.saved_to_downloads", nil), filename]);
             });
         } else {
-            [overlay finishWithMessage:@"Failed"];
+            [overlay finishWithMessage:localize(@"common.failed", nil)];
             dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 1.0 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
                 [overlay dismiss];
             });

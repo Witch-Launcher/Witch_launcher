@@ -342,6 +342,7 @@ egl_bridge.m
    ../UI/Managers/DownloadManager.m
     ../UI/Managers/CursorManager.m
     ../UI/Managers/CursorTypeManager.m
+    ../UI/Managers/WindowsCursorParser.m
     ../UI/Managers/InstalledModsManager.m
     ../UI/Screens/MainMenu/MainMenuViewController.m
      WitchAIService.m
@@ -357,6 +358,7 @@ egl_bridge.m
    ../UI/Screens/Mod/MrpackInstaller.m
    ../UI/Screens/Mod/ModrinthService.m
    ../UI/Screens/Mod/CurseForgeService.m
+   ../UI/Screens/Mod/ModSourceService.m
    ../UI/Screens/Modpack/ModpackListViewController.m
    ../UI/Screens/Shader/ShaderListViewController.m
    ../UI/Screens/Server/ServerListViewController.m

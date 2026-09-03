@@ -48,7 +48,7 @@ static NSArray *kLoaders;
 
 - (void)setup {
     self.navigationItem.title = @"Game Versions";
-    self.navigationItem.rightBarButtonItem = [[UIBarButtonItem alloc] initWithTitle:@"Execute .jar" style:UIBarButtonItemStylePlain target:self action:@selector(importJar)];
+    self.navigationItem.rightBarButtonItem = [[UIBarButtonItem alloc] initWithTitle:localize(@"jar.execute", nil) style:UIBarButtonItemStylePlain target:self action:@selector(importJar)];
 
     _typeFilter = [[UISegmentedControl alloc] initWithItems:@[@"Release", @"Snapshot", @"Old"]];
     _typeFilter.translatesAutoresizingMaskIntoConstraints = NO;
@@ -172,8 +172,8 @@ static NSArray *kLoaders;
 #pragma mark - Loader Picker
 
 - (void)pickLoader {
-    UIAlertController *sheet = [UIAlertController alertControllerWithTitle:@"Select Mod Loader"
-                                                                   message:@"Choose a mod loader to combine with Minecraft version"
+    UIAlertController *sheet = [UIAlertController alertControllerWithTitle:localize(@"version.select_loader", nil)
+                                                                   message:localize(@"version.choose_loader_hint", nil)
                                                             preferredStyle:UIAlertControllerStyleActionSheet];
     for (NSString *loader in kLoaders) {
         BOOL isSelected = [loader isEqualToString:_selectedLoader];
@@ -184,7 +184,7 @@ static NSArray *kLoaders;
             [self filterChanged];
         }]];
     }
-    [sheet addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
+    [sheet addAction:[UIAlertAction actionWithTitle:localize(@"Cancel", nil) style:UIAlertActionStyleCancel handler:nil]];
 
     sheet.popoverPresentationController.sourceView = _loaderButton;
     sheet.popoverPresentationController.sourceRect = _loaderButton.bounds;
@@ -592,10 +592,10 @@ static NSArray *kLoaders;
     if ([[NSFileManager defaultManager] copyItemAtURL:url toURL:[NSURL fileURLWithPath:destPath] error:&error]) {
         [url stopAccessingSecurityScopedResource];
         UIView *topView = self.view.window.rootViewController.view;
-        UIAlertController *confirm = [UIAlertController alertControllerWithTitle:@"Launch JAR"
+        UIAlertController *confirm = [UIAlertController alertControllerWithTitle:localize(@"jar.launch_title", nil)
                                                                         message:[NSString stringWithFormat:@"Launch %@?", url.lastPathComponent]
                                                                  preferredStyle:UIAlertControllerStyleAlert];
-        [confirm addAction:[UIAlertAction actionWithTitle:@"Launch" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
+        [confirm addAction:[UIAlertAction actionWithTitle:localize(@"common.launch", nil) style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
             JavaGUIViewController *vc = [[JavaGUIViewController alloc] init];
             vc.filepath = destPath;
             [vc setHitEnterAfterWindowShown:YES];
@@ -616,7 +616,7 @@ static NSArray *kLoaders;
             }
         }
         if (isInstaller) {
-            [confirm addAction:[UIAlertAction actionWithTitle:@"Install (headless)" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
+            [confirm addAction:[UIAlertAction actionWithTitle:localize(@"jar.install_headless", nil) style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
                 NSString *installDir = [NSString stringWithFormat:@"%s/instances/%@",
                     getenv("POJAV_HOME") ?: "", VersionDirectoryManager.shared.currentInstance ?: @"default"];
                 [InstallerProgressViewController presentInstallerFrom:self
@@ -632,7 +632,7 @@ static NSArray *kLoaders;
             }]];
         }
 
-        [confirm addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
+        [confirm addAction:[UIAlertAction actionWithTitle:localize(@"Cancel", nil) style:UIAlertActionStyleCancel handler:nil]];
         [self presentViewController:confirm animated:YES completion:nil];
     } else {
         [url stopAccessingSecurityScopedResource];

@@ -267,7 +267,7 @@ static NSString *categoryLocalizedKey(CrashLogCategory category) {
     // Mặc định hiện 100 dòng cuối (đã fix trong analyzer)
     self.logTextView.text = analysis.excerpt;
     self.originalLogText = analysis.excerpt;
-    self.matchLabel.text = [NSString stringWithFormat:@"%lu dòng", (unsigned long)[analysis.excerpt componentsSeparatedByString:@"\n"].count];
+    self.matchLabel.text = [NSString stringWithFormat:localize(@"crash.lines", nil), (unsigned long)[analysis.excerpt componentsSeparatedByString:@"\n"].count];
     if (analysis.excerpt.length > 0) {
         [self.logTextView scrollRangeToVisible:NSMakeRange(0, 0)];
     }
@@ -280,7 +280,7 @@ static NSString *categoryLocalizedKey(CrashLogCategory category) {
     self.logTextView.text = newText;
     self.originalLogText = newText;
     self.logSearchBar.text = @"";
-    self.matchLabel.text = [NSString stringWithFormat:@"%lu dòng", (unsigned long)[newText componentsSeparatedByString:@"\n"].count];
+    self.matchLabel.text = [NSString stringWithFormat:localize(@"crash.lines", nil), (unsigned long)[newText componentsSeparatedByString:@"\n"].count];
     [self.toggleButton setTitle:localize(self.showingFullLog ? @"crash.screen.toggle_excerpt" : @"crash.screen.toggle_full", nil)
                        forState:UIControlStateNormal];
     [self.logTextView scrollRangeToVisible:NSMakeRange(0, 0)];
@@ -299,7 +299,7 @@ static NSString *categoryLocalizedKey(CrashLogCategory category) {
     if (!self.originalLogText) return;
     if (searchText.length == 0) {
         self.logTextView.text = self.originalLogText;
-        self.matchLabel.text = [NSString stringWithFormat:@"%lu dòng", (unsigned long)[self.originalLogText componentsSeparatedByString:@"\n"].count];
+        self.matchLabel.text = [NSString stringWithFormat:localize(@"crash.lines", nil), (unsigned long)[self.originalLogText componentsSeparatedByString:@"\n"].count];
         return;
     }
     NSString *lowerQuery = searchText.lowercaseString;
@@ -359,7 +359,7 @@ static NSString *categoryLocalizedKey(CrashLogCategory category) {
                 NSString *title = success ? localize(@"crash.screen.send_ok", nil) : localize(@"Error", nil);
                 NSString *msg = success ? [NSString stringWithFormat:localize(@"crash.screen.send_ok_msg", nil), logId ?: @""] : error.localizedDescription;
                 UIAlertController *res = [UIAlertController alertControllerWithTitle:title message:msg preferredStyle:UIAlertControllerStyleAlert];
-                [res addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
+                [res addAction:[UIAlertAction actionWithTitle:localize(@"OK", nil) style:UIAlertActionStyleDefault handler:nil]];
                 [self presentViewController:res animated:YES completion:nil];
             });
         }];

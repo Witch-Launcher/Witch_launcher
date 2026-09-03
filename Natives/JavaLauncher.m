@@ -228,18 +228,22 @@ void init_loadMobileGluesConfig() {
 
     id customGlVersion = getPrefObject(@"mobileglues.custom_gl_version");
     if (customGlVersion) {
+        // Small int codes matching MobileGlues Version(int) digit parsing
+        // (33 = 3.3.0, 40 = 4.0.0, ...). "0"/unknown means default: write 0
+        // so native keeps custom_gl_version empty ("will go default").
         NSString *verStr = [customGlVersion description];
-        if ([verStr isEqualToString:@"3.0"]) config[@"customGLVersion"] = @0x030000;
-        else if ([verStr isEqualToString:@"3.1"]) config[@"customGLVersion"] = @0x030100;
-        else if ([verStr isEqualToString:@"3.2"]) config[@"customGLVersion"] = @0x030200;
-        else if ([verStr isEqualToString:@"3.3"]) config[@"customGLVersion"] = @0x030300;
-        else if ([verStr isEqualToString:@"4.0"]) config[@"customGLVersion"] = @0x040000;
-        else if ([verStr isEqualToString:@"4.1"]) config[@"customGLVersion"] = @0x040100;
-        else if ([verStr isEqualToString:@"4.2"]) config[@"customGLVersion"] = @0x040200;
-        else if ([verStr isEqualToString:@"4.3"]) config[@"customGLVersion"] = @0x040300;
-        else if ([verStr isEqualToString:@"4.4"]) config[@"customGLVersion"] = @0x040400;
-        else if ([verStr isEqualToString:@"4.5"]) config[@"customGLVersion"] = @0x040500;
-        else if ([verStr isEqualToString:@"4.6"]) config[@"customGLVersion"] = @0x040600;
+        if ([verStr isEqualToString:@"0"]) config[@"customGLVersion"] = @0;
+        else if ([verStr isEqualToString:@"3.0"]) config[@"customGLVersion"] = @30;
+        else if ([verStr isEqualToString:@"3.1"]) config[@"customGLVersion"] = @31;
+        else if ([verStr isEqualToString:@"3.2"]) config[@"customGLVersion"] = @32;
+        else if ([verStr isEqualToString:@"3.3"]) config[@"customGLVersion"] = @33;
+        else if ([verStr isEqualToString:@"4.0"]) config[@"customGLVersion"] = @40;
+        else if ([verStr isEqualToString:@"4.1"]) config[@"customGLVersion"] = @41;
+        else if ([verStr isEqualToString:@"4.2"]) config[@"customGLVersion"] = @42;
+        else if ([verStr isEqualToString:@"4.3"]) config[@"customGLVersion"] = @43;
+        else if ([verStr isEqualToString:@"4.4"]) config[@"customGLVersion"] = @44;
+        else if ([verStr isEqualToString:@"4.5"]) config[@"customGLVersion"] = @45;
+        else if ([verStr isEqualToString:@"4.6"]) config[@"customGLVersion"] = @46;
     }
 
     id fsr1Setting = getPrefObject(@"mobileglues.fsr1_setting");

@@ -7,6 +7,7 @@
 #import "LauncherPreferences.h"
 #import "HapticManager.h"
 #import "AmethystBlurView.h"
+#import "utils.h"
 #import "VersionDirectoryManager.h"
 #import "ProfileAvatarManager.h"
 
@@ -41,7 +42,7 @@
 }
 
 - (void)setupNavigationBar {
-    self.navigationItem.title = @"Cài đặt Profile";
+    self.navigationItem.title = localize(@"profiles.settings_title", nil);
     self.navigationItem.leftBarButtonItem = [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemCancel target:self action:@selector(cancelTapped)];
     self.navigationItem.rightBarButtonItem = [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemSave target:self action:@selector(saveTapped)];
 }
@@ -65,28 +66,28 @@
     _profileListVC = [[ProfileListViewController alloc] initWithProfile:_profile];
     _profileListVC.delegate = self;
     UINavigationController *profileNav = [[UINavigationController alloc] initWithRootViewController:_profileListVC];
-    profileNav.tabBarItem = [[UITabBarItem alloc] initWithTitle:@"Profile" image:[UIImage systemImageNamed:@"person.crop.circle"] selectedImage:[UIImage systemImageNamed:@"person.crop.circle.fill"]];
+    profileNav.tabBarItem = [[UITabBarItem alloc] initWithTitle:localize(@"profiles.tab_profile", nil) image:[UIImage systemImageNamed:@"person.crop.circle"] selectedImage:[UIImage systemImageNamed:@"person.crop.circle.fill"]];
     
     // Tab 2: Mods
     _modsVC = [[ProfileInstalledItemsViewController alloc] init];
     _modsVC.profile = _profile;
     _modsVC.category = InstalledItemCategoryMod;
     UINavigationController *modsNav = [[UINavigationController alloc] initWithRootViewController:_modsVC];
-    modsNav.tabBarItem = [[UITabBarItem alloc] initWithTitle:@"Mods" image:[UIImage systemImageNamed:@"puzzlepiece.extension"] selectedImage:[UIImage systemImageNamed:@"puzzlepiece.extension.fill"]];
+    modsNav.tabBarItem = [[UITabBarItem alloc] initWithTitle:localize(@"profiles.tab_mods", nil) image:[UIImage systemImageNamed:@"puzzlepiece.extension"] selectedImage:[UIImage systemImageNamed:@"puzzlepiece.extension.fill"]];
     
     // Tab 3: Shader Packs
     _shaderVC = [[ProfileInstalledItemsViewController alloc] init];
     _shaderVC.profile = _profile;
     _shaderVC.category = InstalledItemCategoryShaderPack;
     UINavigationController *shaderNav = [[UINavigationController alloc] initWithRootViewController:_shaderVC];
-    shaderNav.tabBarItem = [[UITabBarItem alloc] initWithTitle:@"Shader" image:[UIImage systemImageNamed:@"paintbrush.pointed"] selectedImage:[UIImage systemImageNamed:@"paintbrush.pointed.fill"]];
+    shaderNav.tabBarItem = [[UITabBarItem alloc] initWithTitle:localize(@"profiles.tab_shader", nil) image:[UIImage systemImageNamed:@"paintbrush.pointed"] selectedImage:[UIImage systemImageNamed:@"paintbrush.pointed.fill"]];
     
     // Tab 4: Resource Packs
     _resourcePackVC = [[ProfileInstalledItemsViewController alloc] init];
     _resourcePackVC.profile = _profile;
     _resourcePackVC.category = InstalledItemCategoryResourcePack;
     UINavigationController *rpNav = [[UINavigationController alloc] initWithRootViewController:_resourcePackVC];
-    rpNav.tabBarItem = [[UITabBarItem alloc] initWithTitle:@"Resource Pack" image:[UIImage systemImageNamed:@"paintpalette"] selectedImage:[UIImage systemImageNamed:@"paintpalette.fill"]];
+    rpNav.tabBarItem = [[UITabBarItem alloc] initWithTitle:localize(@"profiles.tab_resourcepack", nil) image:[UIImage systemImageNamed:@"paintpalette"] selectedImage:[UIImage systemImageNamed:@"paintpalette.fill"]];
     
     _tabBarController.viewControllers = @[profileNav, modsNav, shaderNav, rpNav];
     
@@ -111,19 +112,19 @@
     // Validate profile name
     NSString *name = _profile[@"name"] ?: @"";
     if (name.length == 0) {
-        [self showAlert:@"Tên profile không được để trống"];
+        [self showAlert:localize(@"profiles.name_empty", nil)];
         return;
     }
-    
+
     // Check duplicate name
     NSMutableDictionary *profiles = PLProfiles.current.profiles;
     if (!_isNewProfile && ![name isEqualToString:_originalProfile[@"name"]]) {
         if (profiles[name]) {
-            [self showAlert:@"Tên profile đã tồn tại"];
+            [self showAlert:localize(@"profile.error.name_exists", nil)];
             return;
         }
     } else if (_isNewProfile && profiles[name]) {
-        [self showAlert:@"Tên profile đã tồn tại"];
+        [self showAlert:localize(@"profile.error.name_exists", nil)];
         return;
     }
     
@@ -147,8 +148,8 @@
 }
 
 - (void)showAlert:(NSString *)message {
-    UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Thông báo" message:message preferredStyle:UIAlertControllerStyleAlert];
-    [alert addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
+    UIAlertController *alert = [UIAlertController alertControllerWithTitle:localize(@"profiles.notice", nil) message:message preferredStyle:UIAlertControllerStyleAlert];
+    [alert addAction:[UIAlertAction actionWithTitle:localize(@"OK", nil) style:UIAlertActionStyleDefault handler:nil]];
     [self presentViewController:alert animated:YES completion:nil];
 }
 

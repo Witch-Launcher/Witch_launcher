@@ -232,7 +232,7 @@
         return;
     }
     self.cancelBtn.enabled = NO;
-    self.statusLabel.text = @"Cancelling... (installer will exit shortly)";
+    self.statusLabel.text = localize(@"installer.status_cancelling", nil);
     NSString *marker = [self cancelMarkerPath];
     [[NSFileManager defaultManager] createDirectoryAtPath:[marker stringByDeletingLastPathComponent]
         withIntermediateDirectories:YES attributes:nil error:nil];
@@ -256,16 +256,16 @@
     self.progressView.progress = 1.0;
     if (fatal) {
         self.percentLabel.text = @"-";
-        self.statusLabel.text = @"Failed to start installer";
+        self.statusLabel.text = localize(@"installer.status_failed_start", nil);
     } else if (cancelled) {
         self.percentLabel.text = @"-";
-        self.statusLabel.text = @"Install cancelled";
+        self.statusLabel.text = localize(@"installer.status_cancelled", nil);
     } else if (code != 0) {
         self.percentLabel.text = @"-";
         self.statusLabel.text = [NSString stringWithFormat:@"Install failed (exit code %d)", code];
     } else {
         self.percentLabel.text = @"100%";
-        self.statusLabel.text = @"Installed successfully!";
+        self.statusLabel.text = localize(@"installer.status_success", nil);
     }
     self.cancelBtn.hidden = YES;
 

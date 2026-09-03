@@ -1,6 +1,8 @@
 #import "ModDetailViewController.h"
 #import "ThemeManager.h"
 #import "ModrinthService.h"
+#import "CurseForgeService.h"
+#import "ModSourceService.h"
 #import "DownloadProgressOverlay.h"
 #import "DownloadManager.h"
 #import "InstalledModsManager.h"
@@ -385,8 +387,23 @@ static NSString *const kVerCell = @"VerCell";
 #pragma mark - Version Loading
 
 - (void)loadVersions {
-    [ModrinthService.shared loadProjectVersions:_mod[@"project_id"] completion:^(NSArray<NSDictionary *> *versions, NSError *error) {
-        if (error || versions.count == 0) return;
+    // Route by source: CurseForge hits carry _source = @"curseforge" from the
+    // search mapping. Previously this always called Modrinth, so CurseForge
+    // items silently got zero versions (no list, no buttons, no feedback).
+    [ModSourceService loadVersionsForMod:_mod completion:^(NSArray<NSDictionary *> *versions, NSError *error) {
+        [self processLoadedVersions:versions error:error];
+    }];
+}
+
+- (void)processLoadedVersions:(NSArray<NSDictionary *> *)versions error:(NSError *)error {
+    if (error || versions.count == 0) {
+        if (error) {
+            dispatch_async(dispatch_get_main_queue(), ^{
+                showDialog(@"Error", error.localizedDescription ?: @"Could not load versions.");
+            });
+        }
+        return;
+    }
 
         if (_isModpack) {
             NSMutableOrderedSet *mcVersions = [NSMutableOrderedSet orderedSet];
@@ -400,7 +417,7 @@ static NSString *const kVerCell = @"VerCell";
                 self.availableMcVersions = [mcVersions array];
                 self.hasLoadedVersions = YES;
                 self.selectedMcVersion = nil;
-                [self.mcVersionBtn setTitle:@"  Select MC Version" forState:UIControlStateNormal];
+                [self.mcVersionBtn setTitle:[@"  " stringByAppendingString:localize(@"Select MC Version", nil)] forState:UIControlStateNormal];
                 self.versionTable.hidden = YES;
                 [self updateVersionTableHeight];
                 [self.versionTable reloadData];
@@ -440,12 +457,11 @@ static NSString *const kVerCell = @"VerCell";
             [self updateVersionTableHeight];
             [self.versionTable reloadData];
         });
-    }];
 }
 
 - (void)pickMcVersion {
     if (_availableMcVersions.count == 0) return;
-    UIAlertController *sheet = [UIAlertController alertControllerWithTitle:@"Select Minecraft Version" message:nil preferredStyle:UIAlertControllerStyleActionSheet];
+    UIAlertController *sheet = [UIAlertController alertControllerWithTitle:localize(@"common.select_mc_version", nil) message:nil preferredStyle:UIAlertControllerStyleActionSheet];
     for (NSString *mcVer in _availableMcVersions) {
         NSString *label = mcVer;
         if ([mcVer isEqualToString:_selectedMcVersion]) {
@@ -470,7 +486,7 @@ static NSString *const kVerCell = @"VerCell";
             [self.versionTable reloadData];
         }]];
     }
-    [sheet addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
+    [sheet addAction:[UIAlertAction actionWithTitle:localize(@"Cancel", nil) style:UIAlertActionStyleCancel handler:nil]];
     [self presentViewController:sheet animated:YES completion:nil];
 }
 
@@ -561,7 +577,6 @@ static NSString *const kVerCell = @"VerCell";
     NSDictionary *ver = [self selectedVersionDict];
     if (!ver) return;
 
-    NSString *url = ver[@"url"];
     NSString *filename = ver[@"filename"] ?: @"mod.jar";
 
     NSString *downloadsPath = VersionDirectoryManager.shared.downloadsPath;
@@ -574,7 +589,7 @@ static NSString *const kVerCell = @"VerCell";
         [weakSelf.currentDownloadTask cancel];
         weakSelf.currentDownloadTask = nil;
     }];
-    weakSelf.currentDownloadTask = [ModrinthService.shared downloadFile:url name:filename progressBlock:^(float p) {
+    weakSelf.currentDownloadTask = [ModSourceService downloadVersion:ver ofMod:_mod progress:^(float p) {
         [[DownloadManager shared] updateProgress:p forTask:hubTask];
     } completion:^(NSString *dlPath, NSError *error) {
         [[DownloadManager shared] completeTask:hubTask error:error];
@@ -605,9 +620,9 @@ static NSString *const kVerCell = @"VerCell";
         if (!loaderCompatible)
             [issues addObject:[NSString stringWithFormat:@"Mod doesn't support %@ loader", currentLoader]];
 
-        UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Compatibility Warning" message:[issues componentsJoinedByString:@"\n"] preferredStyle:UIAlertControllerStyleAlert];
-        [alert addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
-        [alert addAction:[UIAlertAction actionWithTitle:@"Download Anyway" style:UIAlertActionStyleDestructive handler:^(UIAlertAction *action) {
+        UIAlertController *alert = [UIAlertController alertControllerWithTitle:localize(@"mod.compat_warning", nil) message:[issues componentsJoinedByString:@"\n"] preferredStyle:UIAlertControllerStyleAlert];
+        [alert addAction:[UIAlertAction actionWithTitle:localize(@"Cancel", nil) style:UIAlertActionStyleCancel handler:nil]];
+        [alert addAction:[UIAlertAction actionWithTitle:localize(@"mod.download_anyway", nil) style:UIAlertActionStyleDestructive handler:^(UIAlertAction *action) {
             [self doInstallToProfile:ver];
         }]];
         [self presentViewController:alert animated:YES completion:nil];
@@ -618,7 +633,6 @@ static NSString *const kVerCell = @"VerCell";
 }
 
 - (void)doInstallToProfile:(NSDictionary *)ver {
-    NSString *url = ver[@"url"];
     NSString *filename = ver[@"filename"] ?: @"mod.jar";
     NSString *mcVersion = VersionDirectoryManager.shared.currentVersion;
     if (mcVersion.length == 0) {
@@ -636,7 +650,7 @@ static NSString *const kVerCell = @"VerCell";
         [weakSelf.currentDownloadTask cancel];
         weakSelf.currentDownloadTask = nil;
     }];
-    weakSelf.currentDownloadTask = [ModrinthService.shared downloadFile:url name:filename progressBlock:^(float p) {
+    weakSelf.currentDownloadTask = [ModSourceService downloadVersion:ver ofMod:_mod progress:^(float p) {
         [[DownloadManager shared] updateProgress:p forTask:hubTask];
     } completion:^(NSString *path, NSError *dlError) {
         [[DownloadManager shared] completeTask:hubTask error:dlError];
@@ -658,10 +672,15 @@ static NSString *const kVerCell = @"VerCell";
 }
 
 - (void)installModpack:(NSDictionary *)ver mcVersion:(NSString *)mcVersion {
-    DownloadProgressOverlay *overlay = [DownloadProgressOverlay showInView:self.view title:@"Installing Modpack"];
-    [overlay updateProgress:0 message:@"Downloading modpack..."];
+    // CurseForge packs are manifest.json zips, not Modrinth .mrpack files, so
+    // they can't go through MrpackInstaller — save to Downloads instead.
+    if ([ModSourceService isCurseForgeMod:_mod]) {
+        [self downloadCurseForgeModpack:ver];
+        return;
+    }
+    DownloadProgressOverlay *overlay = [DownloadProgressOverlay showInView:self.view title:localize(@"progress.installing_modpack", nil)];
+    [overlay updateProgress:0 message:localize(@"progress.msg.dl_modpack", nil)];
 
-    NSString *url = ver[@"url"];
     NSString *filename = ver[@"filename"] ?: @"modpack.mrpack";
 
     __weak typeof(self) weakSelf = self;
@@ -669,16 +688,53 @@ static NSString *const kVerCell = @"VerCell";
         [weakSelf.currentDownloadTask cancel];
         weakSelf.currentDownloadTask = nil;
     }];
-    weakSelf.currentDownloadTask = [ModrinthService.shared downloadFile:url name:filename progressBlock:^(float p) {
-        [overlay updateProgress:p message:@"Downloading modpack..."];
+    weakSelf.currentDownloadTask = [ModSourceService downloadVersion:ver ofMod:_mod progress:^(float p) {
+        [overlay updateProgress:p message:localize(@"progress.msg.dl_modpack", nil)];
     } completion:^(NSString *dlPath, NSError *dlError) {
         if (!dlPath) {
-            [overlay finishWithMessage:@"Download failed"];
+            [overlay finishWithMessage:localize(@"common.download_failed", nil)];
             dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 1.0 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{ [overlay dismiss]; });
             return;
         }
 
         [MrpackInstaller installMrpackAtPath:dlPath title:_mod[@"title"] hostVC:self removeOnCompletion:YES];
+    }];
+}
+
+- (void)downloadCurseForgeModpack:(NSDictionary *)ver {
+    DownloadProgressOverlay *overlay = [DownloadProgressOverlay showInView:self.view title:localize(@"progress.downloading_modpack", nil)];
+    [overlay updateProgress:0 message:localize(@"progress.msg.dl_modpack", nil)];
+
+    NSString *filename = ver[@"filename"] ?: @"modpack.zip";
+    if (![[filename.pathExtension lowercaseString] isEqualToString:@"zip"]) {
+        filename = [[filename stringByDeletingPathExtension] stringByAppendingPathExtension:@"zip"];
+    }
+
+    __weak typeof(self) weakSelf = self;
+    [overlay setCancelBlock:^{
+        [weakSelf.currentDownloadTask cancel];
+        weakSelf.currentDownloadTask = nil;
+    }];
+    weakSelf.currentDownloadTask = [ModSourceService downloadVersion:ver ofMod:_mod progress:^(float p) {
+        [overlay updateProgress:p message:localize(@"progress.msg.dl_modpack", nil)];
+    } completion:^(NSString *dlPath, NSError *dlError) {
+        if (!dlPath) {
+            [overlay finishWithMessage:localize(@"common.download_failed", nil)];
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 1.0 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{ [overlay dismiss]; });
+            return;
+        }
+        NSString *downloadsPath = VersionDirectoryManager.shared.downloadsPath;
+        [[NSFileManager defaultManager] createDirectoryAtPath:downloadsPath withIntermediateDirectories:YES attributes:nil error:nil];
+        NSString *targetPath = [downloadsPath stringByAppendingPathComponent:filename];
+        [[NSFileManager defaultManager] removeItemAtPath:targetPath error:nil];
+        NSError *moveError = nil;
+        [[NSFileManager defaultManager] moveItemAtPath:dlPath toPath:targetPath error:&moveError];
+        [overlay dismiss];
+        if (moveError) {
+            showDialog(@"Error", moveError.localizedDescription ?: @"Could not save modpack.");
+        } else {
+            showDialog(localize(@"Downloaded", nil), [NSString stringWithFormat:localize(@"modpack.cf_saved_downloads", nil), filename]);
+        }
     }];
 }
 
@@ -702,13 +758,15 @@ static NSString *const kVerCell = @"VerCell";
     [_dependencyMods removeAllObjects];
     _depsContainer.hidden = NO;
 
+    NSString *source = [ModSourceService isCurseForgeMod:_mod] ? @"curseforge" : @"modrinth";
     for (NSDictionary *dep in requiredDeps) {
         NSString *depProjectId = dep[@"project_id"];
         if (!depProjectId) continue;
 
-        [ModrinthService.shared loadProjectDetails:depProjectId completion:^(NSDictionary *project, NSError *error) {
+        [ModSourceService loadDetailsForProjectId:depProjectId source:source completion:^(NSDictionary *project, NSError *error) {
             if (error || !project) return;
-            [ModrinthService.shared loadProjectVersions:depProjectId completion:^(NSArray<NSDictionary *> *depVersions, NSError *vError) {
+            NSDictionary *depMod = @{@"project_id": depProjectId, @"_source": source};
+            [ModSourceService loadVersionsForMod:depMod completion:^(NSArray<NSDictionary *> *depVersions, NSError *vError) {
                 if (vError || depVersions.count == 0) return;
 
                 VersionProfile *profile = VersionDirectoryManager.shared.currentProfile;
@@ -736,6 +794,8 @@ static NSString *const kVerCell = @"VerCell";
                         @"filename": bestVer[@"filename"] ?: @"mod.jar",
                         @"game_versions": bestVer[@"game_versions"] ?: @[],
                         @"loaders": bestVer[@"loaders"] ?: @[],
+                        @"_cfFileId": bestVer[@"_cfFileId"] ?: @0,
+                        @"_source": source,
                     }];
                     [self rebuildDependencyViews];
                 });
@@ -790,7 +850,7 @@ static NSString *const kVerCell = @"VerCell";
 
         UIButton *dlBtn = [UIButton buttonWithType:UIButtonTypeSystem];
         dlBtn.translatesAutoresizingMaskIntoConstraints = NO;
-        [dlBtn setTitle:@"Download" forState:UIControlStateNormal];
+        [dlBtn setTitle:localize(@"Download", nil) forState:UIControlStateNormal];
         [dlBtn setTitleColor:UIColor.whiteColor forState:UIControlStateNormal];
         dlBtn.backgroundColor = ThemeManager.shared.accentColor;
         dlBtn.layer.cornerRadius = 6;
@@ -851,7 +911,6 @@ static NSString *const kVerCell = @"VerCell";
     if (!dep) return;
 
     [HapticManager.shared play:HapticTypeMedium];
-    NSString *url = dep[@"url"];
     NSString *filename = dep[@"filename"] ?: @"mod.jar";
     NSString *mcVersion = VersionDirectoryManager.shared.currentVersion;
     if (mcVersion.length == 0) {
@@ -864,7 +923,7 @@ static NSString *const kVerCell = @"VerCell";
         [weakSelf.currentDownloadTask cancel];
         weakSelf.currentDownloadTask = nil;
     }];
-    weakSelf.currentDownloadTask = [ModrinthService.shared downloadFile:url name:filename progressBlock:^(float p) {
+    weakSelf.currentDownloadTask = [ModSourceService downloadVersion:dep ofMod:dep progress:^(float p) {
         [[DownloadManager shared] updateProgress:p forTask:hubTask];
     } completion:^(NSString *path, NSError *dlError) {
         [[DownloadManager shared] completeTask:hubTask error:dlError];
