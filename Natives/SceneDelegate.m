@@ -9,10 +9,13 @@
 #import "CrashLogAnalyzer.h"
 #import "WitchLogReporter.h"
 #import "WitchAIChatViewController.h"
+#import "WitchLogSnapshot.h"
 
 extern UIWindow *mainWindow;
 
 @interface SceneDelegate ()
+
+- (void)presentPreviousCrashAlertWithIpsPath:(NSString *)ipsPath;
 
 @end
 
@@ -178,30 +181,60 @@ static NSString *const kMinecraftGPUBackgroundTaskPrefix = @"com.witch.zad626.mi
     // Tạo lại flag cho lần chạy hiện tại
     [[NSFileManager defaultManager] createFileAtPath:flagPath contents:[@"1" dataUsingEncoding:NSUTF8StringEncoding] attributes:nil];
     if (!shouldPrompt) return;
-    // Kiểm tra latestlog có chỉ crash không thì mới hiện (tránh hiện mỗi lần mở)
-    if (hasLatestLog) {
-        NSString *content = [NSString stringWithContentsOfFile:latestLog encoding:NSUTF8StringEncoding error:nil];
-        if (content && ![content containsString:@"Game crashed!"] && !ipsPath) return;
-    }
+    // Kiểm tra latestlog có crash không — đọc TAIL bounded trên background
+    // (tuyệt đối không load toàn file trên main thread).
+    NSString *ipsCopy = ipsPath;
+    dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
+        BOOL crashed = (ipsCopy != nil);
+        if (!crashed && hasLatestLog) {
+            NSArray<NSString *> *tail = [WitchLogSnapshotter tailLinesOfFile:latestLog maxLines:200];
+            for (NSString *line in tail) {
+                if ([line rangeOfString:@"Game crashed!" options:NSCaseInsensitiveSearch].location != NSNotFound) {
+                    crashed = YES;
+                    break;
+                }
+            }
+        }
+        if (!crashed) return;
+        dispatch_async(dispatch_get_main_queue(), ^{
+            [self presentPreviousCrashAlertWithIpsPath:ipsCopy];
+        });
+    });
+}
+
+- (void)presentPreviousCrashAlertWithIpsPath:(NSString *)ipsPath {
     // Hiện alert cho phép gửi log
     UIAlertController *alert = [UIAlertController alertControllerWithTitle:localize(@"crash.prev_title", nil) message:localize(@"crash.prev_message", nil) preferredStyle:UIAlertControllerStyleAlert];
     [alert addAction:[UIAlertAction actionWithTitle:localize(@"crash.send_ai", nil) style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){
-        CrashLogAnalyzerResult *analysis = [CrashLogAnalyzer analyzeWithExitCode:1];
-        WitchAIChatViewController *vc = [[WitchAIChatViewController alloc] initWithAnalysis:analysis exitCode:1];
-        UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:vc];
-        nav.modalPresentationStyle = UIModalPresentationFormSheet;
-        [self.window.rootViewController presentViewController:nav animated:YES completion:nil];
+        UIAlertController *wait = [UIAlertController alertControllerWithTitle:localize(@"crash.screen.loading", nil) message:nil preferredStyle:UIAlertControllerStyleAlert];
+        [self.window.rootViewController presentViewController:wait animated:YES completion:nil];
+        dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
+            CrashLogAnalyzerResult *analysis = [CrashLogAnalyzer analyzeWithExitCode:1];
+            dispatch_async(dispatch_get_main_queue(), ^{
+                [wait dismissViewControllerAnimated:YES completion:^{
+                    WitchAIChatViewController *vc = [[WitchAIChatViewController alloc] initWithAnalysis:analysis exitCode:1];
+                    UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:vc];
+                    nav.modalPresentationStyle = UIModalPresentationFormSheet;
+                    [self.window.rootViewController presentViewController:nav animated:YES completion:nil];
+                }];
+            });
+        });
     }]];
     [alert addAction:[UIAlertAction actionWithTitle:localize(@"crash.send_discord", nil) style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){
-        CrashLogAnalyzerResult *analysis = [CrashLogAnalyzer analyzeWithExitCode:1];
-        NSString *note = ipsPath ? [NSString stringWithFormat:@"Crash .ips: %@", ipsPath.lastPathComponent] : @"Launcher crash to home";
-        [WitchLogReporter sendReportWithAnalysis:analysis exitCode:1 note:note completion:^(BOOL success, NSString *logId, NSError *error){
-            NSString *title = success ? localize(@"crash.sent_title", nil) : localize(@"Error", nil);
-            NSString *msg = success ? [NSString stringWithFormat:localize(@"crash.sent_discord", nil), logId ?: @""] : error.localizedDescription;
-            UIAlertController *res = [UIAlertController alertControllerWithTitle:title message:msg preferredStyle:UIAlertControllerStyleAlert];
-            [res addAction:[UIAlertAction actionWithTitle:localize(@"OK", nil) style:UIAlertActionStyleDefault handler:nil]];
-            [self.window.rootViewController presentViewController:res animated:YES completion:nil];
-        }];
+        dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
+            CrashLogAnalyzerResult *analysis = [CrashLogAnalyzer analyzeWithExitCode:1];
+            NSString *note = ipsPath ? [NSString stringWithFormat:@"Crash .ips: %@", ipsPath.lastPathComponent] : @"Launcher crash to home";
+            dispatch_async(dispatch_get_main_queue(), ^{
+                // sendReport streams from disk on background queues internally.
+                [WitchLogReporter sendReportWithAnalysis:analysis exitCode:1 note:note completion:^(BOOL success, NSString *logId, NSError *error){
+                    NSString *title = success ? localize(@"crash.sent_title", nil) : localize(@"Error", nil);
+                    NSString *msg = success ? [NSString stringWithFormat:localize(@"crash.sent_discord", nil), logId ?: @""] : error.localizedDescription;
+                    UIAlertController *res = [UIAlertController alertControllerWithTitle:title message:msg preferredStyle:UIAlertControllerStyleAlert];
+                    [res addAction:[UIAlertAction actionWithTitle:localize(@"OK", nil) style:UIAlertActionStyleDefault handler:nil]];
+                    [self.window.rootViewController presentViewController:res animated:YES completion:nil];
+                }];
+            });
+        });
     }]];
     [alert addAction:[UIAlertAction actionWithTitle:localize(@"crash.later", nil) style:UIAlertActionStyleCancel handler:nil]];
     [self.window.rootViewController presentViewController:alert animated:YES completion:nil];

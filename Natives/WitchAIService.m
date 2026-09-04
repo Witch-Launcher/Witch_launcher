@@ -79,10 +79,10 @@ static NSString* SHA256Hex(NSString *input) {
     return hex;
 }
 static NSString* HMACSHA256Hex(NSString *secret, NSString *message) {
-    const char *cKey = [secret cStringUsingEncoding:NSUTF8StringEncoding];
-    const char *cData = [message cStringUsingEncoding:NSUTF8StringEncoding];
+    NSData *keyData = [secret dataUsingEncoding:NSUTF8StringEncoding] ?: [NSData data];
+    NSData *msgData = [message dataUsingEncoding:NSUTF8StringEncoding] ?: [NSData data];
     unsigned char cHMAC[CC_SHA256_DIGEST_LENGTH];
-    CCHmac(kCCHmacAlgSHA256, cKey, strlen(cKey), cData, strlen(cData), cHMAC);
+    CCHmac(kCCHmacAlgSHA256, keyData.bytes, keyData.length, msgData.bytes, msgData.length, cHMAC);
     NSMutableString *hex = [NSMutableString stringWithCapacity:CC_SHA256_DIGEST_LENGTH*2];
     for (int i=0;i<CC_SHA256_DIGEST_LENGTH;i++) [hex appendFormat:@"%02x", cHMAC[i]];
     return hex;
@@ -122,6 +122,122 @@ static void AddWitchAuthHeaders(NSMutableURLRequest *req, NSString *pathWithQuer
 }
 
 @implementation WitchAIService
+
+/// Shared completion parser: handles transport error, HTTP status, non-JSON
+/// bodies and both server (`answer`) and OpenAI (`choices[0].message.content`)
+/// shapes. Always invokes `completion` exactly once on the main queue.
++ (void)completeAIDataTaskWithData:(NSData *)data
+                          response:(NSURLResponse *)response
+                             error:(NSError *)error
+                        completion:(void(^)(NSString *, NSError*))completion {
+    if (error) {
+        dispatch_async(dispatch_get_main_queue(), ^{
+            if (completion) completion(nil, error);
+        });
+        return;
+    }
+    NSInteger status = [response isKindOfClass:[NSHTTPURLResponse class]]
+        ? [(NSHTTPURLResponse *)response statusCode] : 200;
+    NSDictionary *json = nil;
+    NSString *rawText = nil;
+    if (data.length > 0) {
+        json = [NSJSONSerialization JSONObjectWithData:data options:0 error:nil];
+        if (!json) {
+            rawText = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
+            if (rawText.length > 2000) rawText = [[rawText substringToIndex:2000] stringByAppendingString:@"…"];
+        } else if (![json isKindOfClass:[NSDictionary class]]) {
+            json = nil;
+        }
+    }
+    // Success shape: server `answer` or OpenAI `choices`.
+    NSString *ans = nil;
+    if ([json isKindOfClass:[NSDictionary class]]) {
+        id a = json[@"answer"];
+        if ([a isKindOfClass:[NSString class]] && [(NSString*)a length] > 0) ans = a;
+        else {
+            @try {
+                id choices = json[@"choices"];
+                if ([choices isKindOfClass:[NSArray class]] && [(NSArray*)choices count] > 0) {
+                    id msg = [(NSArray*)choices firstObject][@"message"][@"content"];
+                    if ([msg isKindOfClass:[NSString class]] && [(NSString*)msg length] > 0) ans = msg;
+                }
+            } @catch (...) {}
+        }
+    }
+    if (ans.length > 0 && status >= 200 && status < 300) {
+        // Bound answer size so a huge model reply can't freeze the chat table.
+        if (ans.length > 20000) ans = [[ans substringToIndex:20000] stringByAppendingString:@"\n…"];
+        dispatch_async(dispatch_get_main_queue(), ^{
+            if (completion) completion(ans, nil);
+        });
+        return;
+    }
+    // Error path: prefer server's message + nested upstream detail, then raw
+    // body, then HTTP status. Worker wraps upstream failures as
+    // {"error":"AI upstream error","status":400,"data":[{error:{message,...}}]}
+    // so dig one level into `data` to surface the real cause (e.g. Google
+    // "User location is not supported") instead of a generic string.
+    NSString *errMsg = nil;
+    NSString *upstreamDetail = nil;
+    if ([json isKindOfClass:[NSDictionary class]]) {
+        id e = json[@"error"];
+        if ([e isKindOfClass:[NSString class]] && [(NSString*)e length] > 0) errMsg = e;
+        else if ([e isKindOfClass:[NSDictionary class]] && [e[@"message"] isKindOfClass:[NSString class]]) errMsg = e[@"message"];
+        id d = json[@"data"];
+        NSArray *arr = nil;
+        if ([d isKindOfClass:[NSArray class]]) arr = d;
+        else if ([d isKindOfClass:[NSDictionary class]]) arr = @[d];
+        for (id item in arr) {
+            NSString *found = nil;
+            @try {
+                if ([item isKindOfClass:[NSDictionary class]]) {
+                    id inner = item[@"error"];
+                    if ([inner isKindOfClass:[NSDictionary class]] && [inner[@"message"] isKindOfClass:[NSString class]]) found = inner[@"message"];
+                    else if ([inner isKindOfClass:[NSString class]]) found = inner;
+                    else if ([item[@"message"] isKindOfClass:[NSString class]]) found = item[@"message"];
+                } else if ([item isKindOfClass:[NSString class]]) found = item;
+            } @catch (...) {}
+            found = [found stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+            if (found.length > 0) { upstreamDetail = found; break; }
+        }
+        // Worker may also embed its own HTTP status in the body (HTTP 200 with
+        // {"status":400}); honor it when the transport status looks fine.
+        id bodyStatus = json[@"status"];
+        if ((status < 400 || status >= 600) && [bodyStatus respondsToSelector:@selector(integerValue)]) {
+            NSInteger bs = [bodyStatus integerValue];
+            if (bs >= 400 && bs < 600) status = bs;
+        }
+    }
+    if (!errMsg.length) errMsg = rawText.length > 0 ? rawText : [NSString stringWithFormat:@"Server %ld", (long)status];
+    errMsg = [errMsg stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+    if (errMsg.length == 0) errMsg = @"Unknown error";
+    if (upstreamDetail.length > 0 && [errMsg rangeOfString:upstreamDetail options:NSCaseInsensitiveSearch].location == NSNotFound) {
+        NSString *combined = [NSString stringWithFormat:@"%@: %@", errMsg, upstreamDetail];
+        errMsg = combined;
+    }
+    // Actionable hint for the common Google region block (VN egress IPs).
+    // Worker fix needed server-side (fallback model); client points to own-key
+    // workaround so users are not stuck with a cryptic string.
+    NSString *lower = [errMsg lowercaseString];
+    if ([lower rangeOfString:@"location"].location != NSNotFound &&
+        [lower rangeOfString:@"not supported"].location != NSNotFound) {
+        errMsg = [errMsg stringByAppendingString:@" (Region blocked by upstream. Workaround: Settings > AI source > own key, or retry with VPN. Worker owner should add a fallback model.)"];
+    }
+    if (errMsg.length > 2000) errMsg = [[errMsg substringToIndex:2000] stringByAppendingString:@"…"];
+    NSInteger code = (status >= 400 && status < 600) ? status : 500;
+    dispatch_async(dispatch_get_main_queue(), ^{
+        if (completion) completion(nil, [NSError errorWithDomain:@"WitchAI" code:code userInfo:@{NSLocalizedDescriptionKey: errMsg}]);
+    });
+}
+
++ (NSMutableURLRequest *)aiRequestWithURL:(NSURL *)url {
+    NSMutableURLRequest *req = [NSMutableURLRequest requestWithURL:url];
+    req.HTTPMethod = @"POST";
+    req.timeoutInterval = 45;
+    [req setValue:@"application/json" forHTTPHeaderField:@"Content-Type"];
+    [req setValue:@"no-cache" forHTTPHeaderField:@"Cache-Control"];
+    return req;
+}
 
 + (BOOL)isEnabled {
     id v = getPrefObject(@"witch.ai_enabled");
@@ -175,9 +291,13 @@ static void AddWitchAuthHeaders(NSMutableURLRequest *req, NSString *pathWithQuer
     NSString *base = [self ownBaseURL];
     if ([base hasSuffix:@"/"]) base = [base substringToIndex:base.length-1];
     NSURL *url = [NSURL URLWithString:[NSString stringWithFormat:@"%@/chat/completions", base]];
-    NSMutableURLRequest *req = [NSMutableURLRequest requestWithURL:url];
-    req.HTTPMethod = @"POST";
-    [req setValue:@"application/json" forHTTPHeaderField:@"Content-Type"];
+    if (!url) {
+        if (completion) dispatch_async(dispatch_get_main_queue(), ^{
+            completion(nil, [NSError errorWithDomain:@"WitchAI" code:400 userInfo:@{NSLocalizedDescriptionKey: @"Invalid AI base URL"}]);
+        });
+        return;
+    }
+    NSMutableURLRequest *req = [self aiRequestWithURL:url];
     [req setValue:[NSString stringWithFormat:@"Bearer %@", [self ownKey]] forHTTPHeaderField:@"Authorization"];
 
     NSString *system = lang && [lang isEqualToString:@"vi"] ? @"Bạn là trợ lý Witch Launcher. Trả lời bằng tiếng Việt." : @"You are Witch Launcher assistant. Respond in English.";
@@ -187,13 +307,7 @@ static void AddWitchAuthHeaders(NSMutableURLRequest *req, NSString *pathWithQuer
     req.HTTPBody = jsonData;
 
     [[NSURLSession.sharedSession dataTaskWithRequest:req completionHandler:^(NSData *data, NSURLResponse *response, NSError *error){
-        dispatch_async(dispatch_get_main_queue(), ^{
-            if (error || !data) { if (completion) completion(nil, error); return; }
-            NSDictionary *json = [NSJSONSerialization JSONObjectWithData:data options:0 error:nil];
-            NSString *content = json[@"choices"][0][@"message"][@"content"];
-            if (content.length > 0) { if (completion) completion(content, nil); }
-            else { if (completion) completion(nil, [NSError errorWithDomain:@"WitchAI" code:500 userInfo:@{NSLocalizedDescriptionKey: @"No response"}]); }
-        });
+        [self completeAIDataTaskWithData:data response:response error:error completion:completion];
     }] resume];
 }
 
@@ -204,9 +318,13 @@ static void AddWitchAuthHeaders(NSMutableURLRequest *req, NSString *pathWithQuer
         return;
     }
     NSURL *url = [NSURL URLWithString:[NSString stringWithFormat:@"%@/v1/ai/ask", base]];
-    NSMutableURLRequest *req = [NSMutableURLRequest requestWithURL:url];
-    req.HTTPMethod = @"POST";
-    [req setValue:@"application/json" forHTTPHeaderField:@"Content-Type"];
+    if (!url) {
+        if (completion) dispatch_async(dispatch_get_main_queue(), ^{
+            completion(nil, [NSError errorWithDomain:@"WitchAI" code:400 userInfo:@{NSLocalizedDescriptionKey: @"Invalid server URL"}]);
+        });
+        return;
+    }
+    NSMutableURLRequest *req = [self aiRequestWithURL:url];
     NSMutableDictionary *body = [@{@"prompt": prompt, @"source": @"launcher"} mutableCopy];
     if (lang) body[@"lang"] = lang;
     NSData *jsonData = [NSJSONSerialization dataWithJSONObject:body options:0 error:nil];
@@ -215,16 +333,7 @@ static void AddWitchAuthHeaders(NSMutableURLRequest *req, NSString *pathWithQuer
     AddWitchAuthHeaders(req, @"/v1/ai/ask", bodyStr);
 
     [[NSURLSession.sharedSession dataTaskWithRequest:req completionHandler:^(NSData *data, NSURLResponse *response, NSError *error){
-        dispatch_async(dispatch_get_main_queue(), ^{
-            if (error || !data) { if (completion) completion(nil, error); return; }
-            NSDictionary *json = [NSJSONSerialization JSONObjectWithData:data options:0 error:nil];
-            NSString *ans = json[@"answer"];
-            if (ans.length > 0) { if (completion) completion(ans, nil); }
-            else {
-                NSString *err = json[@"error"] ?: @"Unknown error";
-                if (completion) completion(nil, [NSError errorWithDomain:@"WitchAI" code:500 userInfo:@{NSLocalizedDescriptionKey: err}]);
-            }
-        });
+        [self completeAIDataTaskWithData:data response:response error:error completion:completion];
     }] resume];
 }
 
@@ -241,9 +350,13 @@ static void AddWitchAuthHeaders(NSMutableURLRequest *req, NSString *pathWithQuer
         NSString *base = [self ownBaseURL];
         if ([base hasSuffix:@"/"]) base = [base substringToIndex:base.length-1];
         NSURL *url = [NSURL URLWithString:[NSString stringWithFormat:@"%@/chat/completions", base]];
-        NSMutableURLRequest *req = [NSMutableURLRequest requestWithURL:url];
-        req.HTTPMethod = @"POST";
-        [req setValue:@"application/json" forHTTPHeaderField:@"Content-Type"];
+        if (!url) {
+            if (completion) dispatch_async(dispatch_get_main_queue(), ^{
+                completion(nil, [NSError errorWithDomain:@"WitchAI" code:400 userInfo:@{NSLocalizedDescriptionKey: @"Invalid AI base URL"}]);
+            });
+            return;
+        }
+        NSMutableURLRequest *req = [self aiRequestWithURL:url];
         [req setValue:[NSString stringWithFormat:@"Bearer %@", [self ownKey]] forHTTPHeaderField:@"Authorization"];
         NSString *system = lang && [lang isEqualToString:@"vi"] ? @"Bạn là chuyên gia phân tích log Minecraft. Phân tích và đưa ra gợi ý ngắn gọn bằng tiếng Việt." : @"You are a Minecraft log analyzer. Analyze and suggest fixes in English.";
         NSString *logContent = excerpt ?: fullLog ?: @"";
@@ -254,13 +367,7 @@ static void AddWitchAuthHeaders(NSMutableURLRequest *req, NSString *pathWithQuer
         NSData *jsonData = [NSJSONSerialization dataWithJSONObject:body options:0 error:nil];
         req.HTTPBody = jsonData;
         [[NSURLSession.sharedSession dataTaskWithRequest:req completionHandler:^(NSData *data, NSURLResponse *response, NSError *error){
-            dispatch_async(dispatch_get_main_queue(), ^{
-                if (error || !data) { if (completion) completion(nil, error); return; }
-                NSDictionary *json = [NSJSONSerialization JSONObjectWithData:data options:0 error:nil];
-                NSString *content = json[@"choices"][0][@"message"][@"content"];
-                if (content.length > 0) { if (completion) completion(content, nil); }
-                else { if (completion) completion(nil, [NSError errorWithDomain:@"WitchAI" code:500 userInfo:@{NSLocalizedDescriptionKey: @"No response"}]); }
-            });
+            [self completeAIDataTaskWithData:data response:response error:error completion:completion];
         }] resume];
     } else {
         NSString *base = WitchProxyBaseURL();
@@ -269,9 +376,13 @@ static void AddWitchAuthHeaders(NSMutableURLRequest *req, NSString *pathWithQuer
             return;
         }
         NSURL *url = [NSURL URLWithString:[NSString stringWithFormat:@"%@/v1/ai/analyze-log", base]];
-        NSMutableURLRequest *req = [NSMutableURLRequest requestWithURL:url];
-        req.HTTPMethod = @"POST";
-        [req setValue:@"application/json" forHTTPHeaderField:@"Content-Type"];
+        if (!url) {
+            if (completion) dispatch_async(dispatch_get_main_queue(), ^{
+                completion(nil, [NSError errorWithDomain:@"WitchAI" code:400 userInfo:@{NSLocalizedDescriptionKey: @"Invalid server URL"}]);
+            });
+            return;
+        }
+        NSMutableURLRequest *req = [self aiRequestWithURL:url];
         NSMutableDictionary *body = [NSMutableDictionary dictionary];
         if (excerpt) body[@"excerpt"] = [excerpt substringToIndex:MIN(excerpt.length, 20000)];
         if (fullLog) body[@"fullLog"] = [fullLog substringToIndex:MIN(fullLog.length, 50000)];
@@ -283,16 +394,7 @@ static void AddWitchAuthHeaders(NSMutableURLRequest *req, NSString *pathWithQuer
         req.HTTPBody = jsonData;
         AddWitchAuthHeaders(req, @"/v1/ai/analyze-log", bodyStr);
         [[NSURLSession.sharedSession dataTaskWithRequest:req completionHandler:^(NSData *data, NSURLResponse *response, NSError *error){
-            dispatch_async(dispatch_get_main_queue(), ^{
-                if (error || !data) { if (completion) completion(nil, error); return; }
-                NSDictionary *json = [NSJSONSerialization JSONObjectWithData:data options:0 error:nil];
-                NSString *ans = json[@"answer"];
-                if (ans.length > 0) { if (completion) completion(ans, nil); }
-                else {
-                    NSString *err = json[@"error"] ?: @"Unknown error";
-                    if (completion) completion(nil, [NSError errorWithDomain:@"WitchAI" code:500 userInfo:@{NSLocalizedDescriptionKey: err}]);
-                }
-            });
+            [self completeAIDataTaskWithData:data response:response error:error completion:completion];
         }] resume];
     }
 }

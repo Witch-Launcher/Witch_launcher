@@ -4,6 +4,7 @@
 #import <CommonCrypto/CommonDigest.h>
 #import <UIKit/UIKit.h>
 #import "WitchCrypto.h"
+#import "WitchLogSnapshot.h"
 #if __has_include("Config/WitchConfig.h")
 #import "Config/WitchConfig.h"
 #else
@@ -12,6 +13,10 @@
 #define WITCH_DEFAULT_PROXY_TOKEN @""
 #define WITCH_DEFAULT_CURSEFORGE_API_KEY @""
 #endif
+
+// Raw log attachments cap: files stream from disk, so this bounds bandwidth
+// and server/Discord-side size, not RAM. Oversized logs send their tail.
+static const unsigned long long kMaxAttachBytes = 24ULL * 1024ULL * 1024ULL;
 
 static NSString* WitchProxyBaseURL2(void) {
     NSString *url = getPrefObject(@"witch.proxy_base_url");
@@ -67,7 +72,7 @@ static NSString* WitchDeviceId2(void) {
     [[NSUserDefaults standardUserDefaults] setObject:did forKey:@"witch.device_id"];
     return did;
 }
-static NSString* SHA256Hex2(NSString *input) {
+static NSString* SHA256HexOfString(NSString *input) {
     if (!input) input = @"";
     NSData *data = [input dataUsingEncoding:NSUTF8StringEncoding];
     unsigned char hash[CC_SHA256_DIGEST_LENGTH];
@@ -76,83 +81,178 @@ static NSString* SHA256Hex2(NSString *input) {
     for (int i=0;i<CC_SHA256_DIGEST_LENGTH;i++) [hex appendFormat:@"%02x", hash[i]];
     return hex;
 }
-static NSString* HMACSHA256Hex2(NSString *secret, NSString *message) {
-    const char *cKey = [secret cStringUsingEncoding:NSUTF8StringEncoding];
-    const char *cData = [message cStringUsingEncoding:NSUTF8StringEncoding];
+static NSString* HMACSHA256HexOfStrings(NSString *secret, NSString *message) {
+    NSData *keyData = [secret dataUsingEncoding:NSUTF8StringEncoding] ?: [NSData data];
+    NSData *msgData = [message dataUsingEncoding:NSUTF8StringEncoding] ?: [NSData data];
     unsigned char cHMAC[CC_SHA256_DIGEST_LENGTH];
-    CCHmac(kCCHmacAlgSHA256, cKey, strlen(cKey), cData, strlen(cData), cHMAC);
+    CCHmac(kCCHmacAlgSHA256, keyData.bytes, keyData.length, msgData.bytes, msgData.length, cHMAC);
     NSMutableString *hex = [NSMutableString stringWithCapacity:CC_SHA256_DIGEST_LENGTH*2];
     for (int i=0;i<CC_SHA256_DIGEST_LENGTH;i++) [hex appendFormat:@"%02x", cHMAC[i]];
     return hex;
 }
 
+/// Cut a (small) string at a line boundary under maxChars.
+static NSString *TruncateAtLine(NSString *s, NSUInteger maxChars) {
+    if (!s || s.length <= maxChars) return s ?: @"";
+    NSRange r = [s rangeOfString:@"\n" options:NSBackwardsSearch range:NSMakeRange(0, maxChars)];
+    NSUInteger cut = (r.location != NSNotFound) ? r.location : maxChars;
+    return [[s substringToIndex:cut] stringByAppendingString:@"\n..."];
+}
+
 @implementation WitchLogReporter
 
-+ (NSDictionary*)collectLogPayloadWithAnalysis:(CrashLogAnalyzerResult*)analysis {
-    NSString *fullLog = analysis.fullLog ?: @"";
-    NSString *excerpt = analysis.excerpt ?: @"";
-    // Check last 20 lines of latestlog for references to other logs
-    NSArray *lines = [fullLog componentsSeparatedByString:@"\n"];
-    NSInteger start = lines.count > 20 ? lines.count - 20 : 0;
-    NSArray *last20 = [lines subarrayWithRange:NSMakeRange(start, lines.count - start)];
-    NSMutableArray *detectedExtra = [NSMutableArray array];
-    for (NSString *line in last20) {
-        NSString *lower = line.lowercaseString;
-        if ([lower containsString:@"hs_err_pid"] || [lower containsString:@"replay_pid"]) {
-            // Already captured by hsErrPath, but note
-            if (analysis.hsErrPath) [detectedExtra addObject:analysis.hsErrPath];
-        }
-        if ([lower containsString:@"crash-"] && [lower containsString:@".txt"]) {
-            // Extract path-like substring
-            // naive: search for "/" then ".txt"
-            NSRange r = [line rangeOfString:@"/"];
-            if (r.location != NSNotFound) {
-                // keep whole line as hint
-                [detectedExtra addObject:line];
++ (WitchLogUploader *)sharedUploader {
+    NSString *base = WitchProxyBaseURL2();
+    if (!base.length) return nil;
+    return [[WitchLogUploader alloc] initWithBaseURL:base authHandler:^(NSMutableURLRequest *req, NSString *bodyHint) {
+        NSString *token = WitchProxyToken2();
+        if (token.length > 0) {
+            NSString *transport = token;
+            if ([WitchCrypto isEnabled]) {
+                NSString *enc = [WitchCrypto encryptForTransport:token];
+                if (enc.length > 0) { transport = enc; [req setValue:@"1" forHTTPHeaderField:@"X-Witch-Enc"]; }
             }
-            if (analysis.crashReportPath) [detectedExtra addObject:analysis.crashReportPath];
+            [req setValue:[NSString stringWithFormat:@"Bearer %@", transport] forHTTPHeaderField:@"Authorization"];
+        } else if ([WitchCrypto isEnabled]) {
+            [req setValue:@"1" forHTTPHeaderField:@"X-Witch-Enc"];
         }
-    }
+        NSString *secret = WitchProxyHMACSecret2();
+        // apiPath is unknown here; derive from URL for the HMAC message.
+        NSString *path = req.URL.path.length ? req.URL.path : @"/v1/logs/report";
+        if (secret.length > 0) {
+            NSString *timestamp = [NSString stringWithFormat:@"%.0f", [[NSDate date] timeIntervalSince1970]*1000];
+            NSString *bodyHash = SHA256HexOfString(bodyHint);
+            NSString *message = [NSString stringWithFormat:@"%@.%@.%@.%@", timestamp, req.HTTPMethod ?: @"POST", path, bodyHash];
+            NSString *sig = HMACSHA256HexOfStrings(secret, message);
+            [req setValue:timestamp forHTTPHeaderField:@"X-Witch-Timestamp"];
+            [req setValue:sig forHTTPHeaderField:@"X-Witch-Signature"];
+            [req setValue:WitchDeviceId2() forHTTPHeaderField:@"X-Witch-DeviceId"];
+        } else if (token.length > 0) {
+            [req setValue:WitchDeviceId2() forHTTPHeaderField:@"X-Witch-DeviceId"];
+        }
+        NSString *attest = [[NSUserDefaults standardUserDefaults] stringForKey:@"witch.appattest.assertion"];
+        if (attest.length > 20) {
+            [req setValue:attest forHTTPHeaderField:@"X-Witch-AppAttest"];
+            NSString *keyId = [[NSUserDefaults standardUserDefaults] stringForKey:@"witch.appattest.keyId"];
+            if (keyId.length > 0) [req setValue:keyId forHTTPHeaderField:@"X-Witch-AppAttest-KeyId"];
+        }
+    }];
+}
 
+/// Read a whole small file as text (for crash/hs_err full embed). Returns nil
+/// when the file is missing, empty, or larger than maxBytes (caller then uses
+/// the capped preview instead). Never called on the main thread with big files
+/// — call sites gate on fileSize first.
+static NSString * _Nullable FullTextOfSmallFile(NSString * _Nullable path, unsigned long long maxBytes) {
+    if (!path.length) return nil;
+    NSDictionary *attrs = [[NSFileManager defaultManager] attributesOfItemAtPath:path error:nil];
+    unsigned long long sz = attrs ? [attrs fileSize] : 0;
+    if (sz == 0 || sz > maxBytes) return nil;
+    NSString *s = [NSString stringWithContentsOfFile:path encoding:NSUTF8StringEncoding error:nil];
+    if (!s) {
+        NSData *d = [NSData dataWithContentsOfFile:path];
+        if (d) s = [[NSString alloc] initWithData:d encoding:NSISOLatin1StringEncoding];
+    }
+    return s.length > 0 ? s : nil;
+}
+
++ (NSDictionary*)collectLogPayloadWithAnalysis:(CrashLogAnalyzerResult*)analysis {
+    // Bounded by construction: snapshot (~tens of KB) instead of fullLog.
+    NSString *excerpt = analysis.excerpt ?: @"";
+    NSString *snapshot = analysis.snapshot ?: analysis.fullLog ?: @"";
     NSMutableDictionary *payload = [NSMutableDictionary dictionary];
-    if (excerpt.length > 0) payload[@"excerpt"] = [excerpt substringToIndex:MIN(excerpt.length, 20000)];
-    if (fullLog.length > 0) payload[@"fullLog"] = [fullLog substringToIndex:MIN(fullLog.length, 50000)];
-    // Read crash report content if exists and not already in payload
+    if (excerpt.length > 0) {
+        NSString *t = TruncateAtLine(excerpt, 20000);
+        payload[@"excerpt"] = t;
+        payload[@"excerpt_truncated"] = @(t.length < excerpt.length);
+    }
+    if (snapshot.length > 0) {
+        NSString *t = TruncateAtLine(snapshot, 100000);
+        payload[@"snapshot"] = t;
+        payload[@"snapshot_truncated"] = @(t.length < snapshot.length);
+    }
+    // Crash/hs_err: preview (capped head for Discord message) + FULL text when
+    // small so the bot can forward complete files instead of "mỗi một khúc".
+    // Server contract (back-compat): old servers read crashReport/hsErr as the
+    // message preview; new servers prefer crashReportFull/hsErrFull (+ _isFull)
+    // as file attachments with proper filenames.
+    static const unsigned long long kFullEmbedMax = 512 * 1024;
     if (analysis.crashReportPath) {
-        NSString *crash = [NSString stringWithContentsOfFile:analysis.crashReportPath encoding:NSUTF8StringEncoding error:nil];
-        if (crash.length > 0) payload[@"crashReport"] = [crash substringToIndex:MIN(crash.length, 100000)];
+        NSString *crash = [WitchLogSnapshotter cappedHeadOfFile:analysis.crashReportPath maxBytes:100 * 1024];
+        if (crash.length > 0) payload[@"crashReport"] = TruncateAtLine(crash, 100000);
         payload[@"crashReportPath"] = analysis.crashReportPath;
+        payload[@"crashReportName"] = analysis.crashReportPath.lastPathComponent ?: @"crash-report.txt";
+        NSString *full = FullTextOfSmallFile(analysis.crashReportPath, kFullEmbedMax);
+        if (full.length > 0) {
+            payload[@"crashReportFull"] = full;
+            payload[@"crashReportFull_isFull"] = @YES;
+        } else if (crash.length > 0) {
+            payload[@"crashReportFull_isFull"] = @NO;
+            NSDictionary *a = [[NSFileManager defaultManager] attributesOfItemAtPath:analysis.crashReportPath error:nil];
+            if (a) payload[@"crashReportSize"] = @([a fileSize]);
+        }
     }
     if (analysis.hsErrPath) {
-        NSString *hs = [NSString stringWithContentsOfFile:analysis.hsErrPath encoding:NSUTF8StringEncoding error:nil];
-        if (hs.length > 0) payload[@"hsErr"] = [hs substringToIndex:MIN(hs.length, 100000)];
+        NSString *hs = [WitchLogSnapshotter cappedHeadOfFile:analysis.hsErrPath maxBytes:100 * 1024];
+        if (hs.length > 0) payload[@"hsErr"] = TruncateAtLine(hs, 100000);
         payload[@"hsErrPath"] = analysis.hsErrPath;
+        payload[@"hsErrName"] = analysis.hsErrPath.lastPathComponent ?: @"hs_err.log";
+        NSString *full = FullTextOfSmallFile(analysis.hsErrPath, kFullEmbedMax);
+        if (full.length > 0) {
+            payload[@"hsErrFull"] = full;
+            payload[@"hsErrFull_isFull"] = @YES;
+        } else if (hs.length > 0) {
+            payload[@"hsErrFull_isFull"] = @NO;
+            NSDictionary *a = [[NSFileManager defaultManager] attributesOfItemAtPath:analysis.hsErrPath error:nil];
+            if (a) payload[@"hsErrSize"] = @([a fileSize]);
+        }
     }
-    if (detectedExtra.count > 0) payload[@"detectedExtra"] = [detectedExtra copy];
-    payload[@"category"] = @(analysis.category).stringValue ?: @"0";
-    // Map category enum to string
+    if (analysis.latestLogPath) {
+        payload[@"latestLogPath"] = analysis.latestLogPath;
+        payload[@"latestLogName"] = @"latestlog.txt";
+    }
+    payload[@"totalBytes"] = @(analysis.totalBytes);
     NSString *catStr = @"raw";
     if (analysis.category == CrashLogCategoryModConflict) catStr = @"mod_conflict";
     else if (analysis.category == CrashLogCategoryError) catStr = @"error";
     payload[@"category"] = catStr;
     payload[@"deviceId"] = WitchDeviceId2();
     payload[@"appVersion"] = [[NSBundle mainBundle] objectForInfoDictionaryKey:@"CFBundleShortVersionString"] ?: @"unknown";
-    // mcVersion and exitCode will be added by caller
+    // Explicit Discord message body so the bot always posts a real message
+    // (not just file previews). Server may use `message` verbatim as content
+    // with files attached; old servers ignore unknown keys.
+    // Built fully in sendReport (needs exitCode/note) — placeholder here.
     return [payload copy];
 }
 
-+ (void)sendReportWithAnalysis:(CrashLogAnalyzerResult*)analysis exitCode:(int)code completion:(void(^)(BOOL, NSString*, NSError*))completion {
-    [self sendReportWithAnalysis:analysis exitCode:code note:nil completion:completion];
+/// Discord-friendly message text for the report. Always short (<1500 chars)
+/// so it fits in one Discord message even with attachments.
++ (NSString *)discordMessageForAnalysis:(CrashLogAnalyzerResult *)analysis
+                              exitCode:(int)code
+                                  note:(nullable NSString *)note {
+    NSString *catStr = @"raw";
+    if (analysis.category == CrashLogCategoryModConflict) catStr = @"mod_conflict";
+    else if (analysis.category == CrashLogCategoryError) catStr = @"error";
+    NSMutableArray<NSString *> *files = [NSMutableArray array];
+    if (analysis.latestLogPath.length) [files addObject:@"latestlog.txt"];
+    if (analysis.crashReportPath.length) [files addObject:analysis.crashReportPath.lastPathComponent ?: @"crash-report.txt"];
+    if (analysis.hsErrPath.length) [files addObject:analysis.hsErrPath.lastPathComponent ?: @"hs_err.log"];
+    NSString *appVer = [[NSBundle mainBundle] objectForInfoDictionaryKey:@"CFBundleShortVersionString"] ?: @"unknown";
+    NSString *mcVer = [self currentMcVersion];
+    NSMutableString *m = [NSMutableString string];
+    [m appendFormat:@"Witch crash report - exit %d - %@ - MC %@ - Witch v%@", code, catStr, mcVer, appVer];
+    if (files.count) [m appendFormat:@"\nFiles: %@", [files componentsJoinedByString:@", "]];
+    if (note.length) {
+        NSString *n = note.length > 500 ? [[note substringToIndex:500] stringByAppendingString:@"..."] : note;
+        [m appendFormat:@"\nNote: %@", n];
+    }
+    // Snapshot/excerpt travel as JSON + file attachments; the message itself
+    // stays short so Discord never truncates it to "một khúc".
+    return [m copy];
 }
 
-+ (void)sendReportWithAnalysis:(CrashLogAnalyzerResult*)analysis exitCode:(int)code note:(NSString*)note completion:(void(^)(BOOL, NSString*, NSError*))completion {
-    NSDictionary *payloadBase = [self collectLogPayloadWithAnalysis:analysis];
-    NSMutableDictionary *payload = [payloadBase mutableCopy];
-    payload[@"exitCode"] = @(code);
-    if (note.length > 0) payload[@"note"] = [note substringToIndex:MIN(note.length, 2000)];
-    // Add mcVersion
-    NSString *mcVer = getPrefObject(@"internal.mc_version") ?: getPrefObject(@"general.game_directory") ?: @"unknown";
-    // Try VersionDirectoryManager if available
++ (NSString*)currentMcVersion {
+    NSString *mcVer = getPrefObject(@"internal.mc_version") ?: @"unknown";
     @try {
         Class mgrClass = NSClassFromString(@"VersionDirectoryManager");
         if (mgrClass) {
@@ -161,157 +261,138 @@ static NSString* HMACSHA256Hex2(NSString *secret, NSString *message) {
             if ([curVer isKindOfClass:[NSString class]] && curVer.length > 0) mcVer = curVer;
         }
     } @catch(...) {}
-    payload[@"mcVersion"] = mcVer;
+    return mcVer;
+}
 
-    // Thu thập file để gửi kèm (latestlog, crash-report, hs_err, .ips) dạng multipart nếu có
-    NSMutableArray *filesToSend = [NSMutableArray array];
-    // latestlog file
-    if (analysis.latestLogPath) {
-        NSData *data = [NSData dataWithContentsOfFile:analysis.latestLogPath];
-        if (data.length > 0) [filesToSend addObject:@{@"name": @"latestlog.txt", @"data": data, @"path": analysis.latestLogPath}];
+/// File entries as PATHS (never NSData): latestlog, crash, hs_err, recent .ips.
++ (NSArray<WitchUploadFile *> *)attachmentFilesForAnalysis:(CrashLogAnalyzerResult *)analysis {
+    NSMutableArray<WitchUploadFile *> *files = [NSMutableArray array];
+    if (analysis.latestLogPath && [[NSFileManager defaultManager] fileExistsAtPath:analysis.latestLogPath]) {
+        [files addObject:[WitchUploadFile fileWithName:@"latestlog.txt" path:analysis.latestLogPath]];
     }
-    if (analysis.crashReportPath) {
-        NSData *data = [NSData dataWithContentsOfFile:analysis.crashReportPath];
-        if (data.length > 0) [filesToSend addObject:@{@"name": [analysis.crashReportPath lastPathComponent] ?: @"crash-report.txt", @"data": data, @"path": analysis.crashReportPath}];
+    if (analysis.crashReportPath && [[NSFileManager defaultManager] fileExistsAtPath:analysis.crashReportPath]) {
+        [files addObject:[WitchUploadFile fileWithName:analysis.crashReportPath.lastPathComponent ?: @"crash-report.txt"
+                                                  path:analysis.crashReportPath]];
     }
-    if (analysis.hsErrPath) {
-        NSData *data = [NSData dataWithContentsOfFile:analysis.hsErrPath];
-        if (data.length > 0) [filesToSend addObject:@{@"name": [analysis.hsErrPath lastPathComponent] ?: @"hs_err.log", @"data": data, @"path": analysis.hsErrPath}];
+    if (analysis.hsErrPath && [[NSFileManager defaultManager] fileExistsAtPath:analysis.hsErrPath]) {
+        [files addObject:[WitchUploadFile fileWithName:analysis.hsErrPath.lastPathComponent ?: @"hs_err.log"
+                                                  path:analysis.hsErrPath]];
     }
-    // Tìm .ips mới nhất trong 24h (khi launcher crash ra home)
+    // Newest Witch .ips within 24h (launcher crash to home).
     {
+        const char *home = getenv("POJAV_HOME");
         NSArray *searchDirs = @[
             [NSHomeDirectory() stringByAppendingPathComponent:@"Library/Logs/CrashReporter"],
-            @(getenv("POJAV_HOME") ?: "")
+            home ? @(home) : @""
         ];
         for (NSString *dir in searchDirs) {
-            if (dir.length==0) continue;
-            NSArray *files = [[NSFileManager defaultManager] contentsOfDirectoryAtPath:dir error:nil];
-            for (NSString *f in files) {
+            if (dir.length == 0) continue;
+            NSArray *dirFiles = [[NSFileManager defaultManager] contentsOfDirectoryAtPath:dir error:nil];
+            for (NSString *f in dirFiles) {
                 if ([f.pathExtension isEqualToString:@"ips"] && [f containsString:@"Witch"]) {
                     NSString *full = [dir stringByAppendingPathComponent:f];
                     NSDictionary *attr = [[NSFileManager defaultManager] attributesOfItemAtPath:full error:nil];
                     NSDate *mod = attr[NSFileModificationDate];
                     if (mod && [[NSDate date] timeIntervalSinceDate:mod] < 86400) {
-                        NSData *data = [NSData dataWithContentsOfFile:full];
-                        if (data.length>0 && data.length < 5*1024*1024) [filesToSend addObject:@{@"name": f, @"data": data, @"path": full}];
+                        [files addObject:[WitchUploadFile fileWithName:f path:full]];
                         break;
                     }
                 }
             }
         }
     }
-    // Thêm các file được nhắc trong log (detectedExtra) nếu là đường dẫn file thật
-    for (NSString *extra in payload[@"detectedExtra"] ?: @[]) {
-        if ([extra hasPrefix:@"/"] && [[NSFileManager defaultManager] fileExistsAtPath:extra]) {
-            NSData *data = [NSData dataWithContentsOfFile:extra];
-            if (data.length>0 && data.length < 5*1024*1024) [filesToSend addObject:@{@"name": [extra lastPathComponent], @"data": data, @"path": extra}];
-        }
-    }
+    return files;
+}
 
-    NSString *base = WitchProxyBaseURL2();
-    if (!base.length) {
-        if (completion) completion(NO, nil, [NSError errorWithDomain:@"WitchLog" code:401 userInfo:@{NSLocalizedDescriptionKey: @"Witch server not configured"}]);
-        return;
-    }
-    NSURL *url = [NSURL URLWithString:[NSString stringWithFormat:@"%@/v1/logs/report", base]];
-    NSMutableURLRequest *req = [NSMutableURLRequest requestWithURL:url];
-    req.HTTPMethod = @"POST";
-    // Nếu có file >20k hoặc có .ips/crash thì dùng multipart để Discord nhận file đính kèm, ngược lại vẫn JSON cho nhẹ
-    BOOL useMultipart = filesToSend.count > 0;
-    NSData *bodyData = nil;
-    NSString *bodyStr = nil;
-    if (useMultipart) {
-        NSString *boundary = [NSString stringWithFormat:@"Boundary-%@", [[NSUUID UUID] UUIDString]];
-        [req setValue:[NSString stringWithFormat:@"multipart/form-data; boundary=%@", boundary] forHTTPHeaderField:@"Content-Type"];
-        NSMutableData *body = [NSMutableData data];
-        // payload_json
-        NSData *jsonDataTmp = [NSJSONSerialization dataWithJSONObject:payload options:0 error:nil];
-        if (!jsonDataTmp) {
-            if (completion) completion(NO, nil, [NSError errorWithDomain:@"WitchLog" code:400 userInfo:@{NSLocalizedDescriptionKey: @"Failed to serialize payload"}]);
-            return;
-        }
-        [body appendData:[[NSString stringWithFormat:@"--%@\r\n", boundary] dataUsingEncoding:NSUTF8StringEncoding]];
-        [body appendData:[@"Content-Disposition: form-data; name=\"payload_json\"\r\nContent-Type: application/json\r\n\r\n" dataUsingEncoding:NSUTF8StringEncoding]];
-        [body appendData:jsonDataTmp];
-        [body appendData:[@"\r\n" dataUsingEncoding:NSUTF8StringEncoding]];
-        // files
-        for (int i=0;i<filesToSend.count;i++) {
-            NSDictionary *f = filesToSend[i];
-            NSString *name = f[@"name"] ?: [NSString stringWithFormat:@"file%d.txt", i];
-            NSData *data = f[@"data"];
-            [body appendData:[[NSString stringWithFormat:@"--%@\r\n", boundary] dataUsingEncoding:NSUTF8StringEncoding]];
-            [body appendData:[[NSString stringWithFormat:@"Content-Disposition: form-data; name=\"files[%d]\"; filename=\"%@\"\r\nContent-Type: text/plain\r\n\r\n", i, name] dataUsingEncoding:NSUTF8StringEncoding]];
-            [body appendData:data];
-            [body appendData:[@"\r\n" dataUsingEncoding:NSUTF8StringEncoding]];
-        }
-        [body appendData:[[NSString stringWithFormat:@"--%@--\r\n", boundary] dataUsingEncoding:NSUTF8StringEncoding]];
-        bodyData = body;
-        bodyStr = [[NSString alloc] initWithData:jsonDataTmp encoding:NSUTF8StringEncoding]; // dùng json để ký HMAC
-    } else {
-        [req setValue:@"application/json" forHTTPHeaderField:@"Content-Type"];
-        NSData *jsonData = [NSJSONSerialization dataWithJSONObject:payload options:0 error:nil];
-        if (!jsonData) {
-            if (completion) completion(NO, nil, [NSError errorWithDomain:@"WitchLog" code:400 userInfo:@{NSLocalizedDescriptionKey: @"Failed to serialize payload"}]);
-            return;
-        }
-        if (jsonData.length > 600 * 1024) {
-            NSMutableDictionary *small = [payload mutableCopy];
-            NSString *fl = small[@"fullLog"];
-            if ([fl isKindOfClass:[NSString class]] && fl.length > 20000) small[@"fullLog"] = [fl substringToIndex:20000];
-            jsonData = [NSJSONSerialization dataWithJSONObject:small options:0 error:nil];
-            payload = small;
-        }
-        bodyData = jsonData;
-        bodyStr = [[NSString alloc] initWithData:jsonData encoding:NSUTF8StringEncoding];
-    }
-    req.HTTPBody = bodyData;
-    // Auth headers (with transport encryption)
-    NSString *token = WitchProxyToken2();
-    if (token.length > 0) {
-        NSString *transport = token;
-        if ([WitchCrypto isEnabled]) {
-            NSString *enc = [WitchCrypto encryptForTransport:token];
-            if (enc.length>0) { transport = enc; [req setValue:@"1" forHTTPHeaderField:@"X-Witch-Enc"]; }
-        }
-        [req setValue:[NSString stringWithFormat:@"Bearer %@", transport] forHTTPHeaderField:@"Authorization"];
-    } else if ([WitchCrypto isEnabled]) {
-        [req setValue:@"1" forHTTPHeaderField:@"X-Witch-Enc"];
-    }
-    NSString *secret = WitchProxyHMACSecret2();
-    if (secret.length > 0) {
-        NSString *timestamp = [NSString stringWithFormat:@"%.0f", [[NSDate date] timeIntervalSince1970]*1000];
-        NSString *bodyHash = SHA256Hex2(bodyStr);
-        NSString *path = @"/v1/logs/report";
-        NSString *message = [NSString stringWithFormat:@"%@.%@.%@.%@", timestamp, @"POST", path, bodyHash];
-        NSString *sig = HMACSHA256Hex2(secret, message);
-        [req setValue:timestamp forHTTPHeaderField:@"X-Witch-Timestamp"];
-        [req setValue:sig forHTTPHeaderField:@"X-Witch-Signature"];
-        [req setValue:WitchDeviceId2() forHTTPHeaderField:@"X-Witch-DeviceId"];
-    } else if (token.length > 0) {
-        [req setValue:WitchDeviceId2() forHTTPHeaderField:@"X-Witch-DeviceId"];
-    }
-    NSString *attest = [[NSUserDefaults standardUserDefaults] stringForKey:@"witch.appattest.assertion"];
-    if (attest.length > 20) {
-        [req setValue:attest forHTTPHeaderField:@"X-Witch-AppAttest"];
-        NSString *keyId = [[NSUserDefaults standardUserDefaults] stringForKey:@"witch.appattest.keyId"];
-        if (keyId.length > 0) [req setValue:keyId forHTTPHeaderField:@"X-Witch-AppAttest-KeyId"];
-    }
++ (void)sendReportWithAnalysis:(CrashLogAnalyzerResult*)analysis exitCode:(int)code completion:(void(^)(BOOL, NSString*, NSError*))completion {
+    [self sendReportWithAnalysis:analysis exitCode:code note:nil progress:nil completion:completion];
+}
 
-    [[NSURLSession.sharedSession dataTaskWithRequest:req completionHandler:^(NSData *data, NSURLResponse *response, NSError *error){
-        dispatch_async(dispatch_get_main_queue(), ^{
-            if (error) { if (completion) completion(NO, nil, error); return; }
-            NSInteger status = [(NSHTTPURLResponse*)response statusCode];
-            NSDictionary *json = data ? [NSJSONSerialization JSONObjectWithData:data options:0 error:nil] : nil;
-            if (status >= 200 && status < 300) {
-                NSString *logId = [json[@"logId"] description] ?: nil;
-                if (completion) completion(YES, logId, nil);
-            } else {
-                NSString *msg = json[@"error"] ?: [NSString stringWithFormat:@"Server %ld", (long)status];
-                if (completion) completion(NO, nil, [NSError errorWithDomain:@"WitchLog" code:status userInfo:@{NSLocalizedDescriptionKey: msg}]);
-            }
-        });
-    }] resume];
++ (void)sendReportWithAnalysis:(CrashLogAnalyzerResult*)analysis exitCode:(int)code note:(NSString*)note completion:(void(^)(BOOL, NSString*, NSError*))completion {
+    [self sendReportWithAnalysis:analysis exitCode:code note:note progress:nil completion:completion];
+}
+
++ (WitchLogUploadJob *)sendReportWithAnalysis:(CrashLogAnalyzerResult*)analysis
+                                     exitCode:(int)code
+                                     progress:(void(^)(double))progress
+                                   completion:(void(^)(BOOL, NSString*, NSError*))completion {
+    return [self sendReportWithAnalysis:analysis exitCode:code note:nil progress:progress completion:completion];
+}
+
++ (WitchLogUploadJob *)sendReportWithAnalysis:(CrashLogAnalyzerResult*)analysis
+                                      exitCode:(int)code
+                                          note:(nullable NSString*)note
+                                      progress:(void(^)(double))progress
+                                    completion:(void(^)(BOOL, NSString*, NSError*))completion {
+    WitchLogUploadJob *earlyJob = [WitchLogUploadJob new];
+    WitchLogUploader *uploader = [self sharedUploader];
+    if (!uploader) {
+        NSError *e = [NSError errorWithDomain:@"WitchLog" code:401
+                                     userInfo:@{NSLocalizedDescriptionKey: @"Witch server not configured"}];
+        earlyJob.state = WitchUploadStateFailed;
+        earlyJob.error = e;
+        if (completion) dispatch_async(dispatch_get_main_queue(), ^{ completion(NO, nil, e); });
+        return earlyJob;
+    }
+    // Payload assembly here is bounded (snapshot + capped heads + small full
+    // embeds ≤512KB each + directory scans — no whole-log reads), so calling
+    // the uploader directly is safe on any thread. All heavy IO streams on
+    // background queues inside.
+    NSMutableDictionary *payload = [[self collectLogPayloadWithAnalysis:analysis] mutableCopy];
+    payload[@"exitCode"] = @(code);
+    if (note.length > 0) payload[@"note"] = [note substringToIndex:MIN(note.length, 2000)];
+    payload[@"mcVersion"] = [self currentMcVersion];
+    // Explicit Discord message: guarantees the bot posts a real message with
+    // file list (not just truncated previews).
+    payload[@"message"] = [self discordMessageForAnalysis:analysis exitCode:code note:note];
+    NSArray<WitchUploadFile *> *files = [self attachmentFilesForAnalysis:analysis];
+    return [uploader uploadPayload:payload files:files toPath:@"/v1/logs/report"
+                      maxFileBytes:kMaxAttachBytes progress:progress ?: ^(double f){ (void)f; }
+                        completion:completion ?: ^(BOOL ok, NSString *sid, NSError *e){ (void)ok; (void)sid; (void)e; }];
+}
+
++ (WitchLogUploadJob *)sendDeepReportWithAnalysis:(CrashLogAnalyzerResult*)analysis
+                                          exitCode:(int)code
+                                              note:(nullable NSString*)note
+                                          progress:(void(^)(double))progress
+                                    completion:(void(^)(BOOL, NSString*, NSError*))completion {
+    WitchLogUploader *uploader = [self sharedUploader];
+    if (!uploader) {
+        WitchLogUploadJob *earlyJob = [WitchLogUploadJob new];
+        NSError *e = [NSError errorWithDomain:@"WitchLog" code:401
+                                     userInfo:@{NSLocalizedDescriptionKey: @"Witch server not configured"}];
+        earlyJob.state = WitchUploadStateFailed;
+        earlyJob.error = e;
+        if (completion) dispatch_async(dispatch_get_main_queue(), ^{ completion(NO, nil, e); });
+        return earlyJob;
+    }
+    if (!analysis.latestLogPath) {
+        WitchLogUploadJob *noFileJob = [WitchLogUploadJob new];
+        NSError *e = [NSError errorWithDomain:@"WitchLog" code:404
+                                     userInfo:@{NSLocalizedDescriptionKey: @"No log file found"}];
+        noFileJob.state = WitchUploadStateFailed;
+        noFileJob.error = e;
+        if (completion) dispatch_async(dispatch_get_main_queue(), ^{ completion(NO, nil, e); });
+        return noFileJob;
+    }
+    // Deep used to upload ONLY latestlog — crash/hs_err arrived as 100KB
+    // snippets ("mỗi một khúc, không phải tin nhắn"). Now the payload carries
+    // their FULL text when small (≤512KB, the 99% case) plus a real `message`,
+    // and the old-server fallback attaches them as FILES too.
+    NSMutableDictionary *payload = [[self collectLogPayloadWithAnalysis:analysis] mutableCopy];
+    payload[@"exitCode"] = @(code);
+    payload[@"mode"] = @"deep";
+    if (note.length > 0) payload[@"note"] = [note substringToIndex:MIN(note.length, 2000)];
+    payload[@"mcVersion"] = [self currentMcVersion];
+    payload[@"message"] = [self discordMessageForAnalysis:analysis exitCode:code note:note];
+    // Chunked `complete` JSON already contains crash/hs_err FULL text when small
+    // (see collectLogPayload). Old-server fallback rebuilds file attachments
+    // from crashReportPath/hsErrPath inside the uploader.
+    return [uploader uploadFileChunked:analysis.latestLogPath
+                              fileName:@"latestlog.txt"
+                               payload:payload
+                              progress:progress ?: ^(double f){ (void)f; }
+                            completion:completion ?: ^(BOOL ok, NSString *sid, NSError *e){ (void)ok; (void)sid; (void)e; }];
 }
 
 @end

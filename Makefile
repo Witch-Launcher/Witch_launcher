@@ -560,10 +560,18 @@ payload: native dep_mg lwgjl java jre assets
 	$(call METHOD_MACHO_JRE,$(OUTPUTDIR)/Payload/Witch.app,$(call METHOD_CHANGE_PLAT,$(PLATFORM),$$file)); \
 	$(call METHOD_MACHO_JRE,$(OUTPUTDIR)/java_runtimes,$(call METHOD_CHANGE_PLAT,$(PLATFORM),$$file));
 	chmod -R 755 $(OUTPUTDIR)/Payload
+	# Sideload (SideStore/AltStore/ESign/Feather): entitlements.sideload.xml is
+	# intentionally MINIMAL (no com.apple.private.*, no disable-library-validation,
+	# no background-gpu, no jb.pmap_cs.*). Private keys live only in
+	# entitlements.trollstore.xml — adding them here breaks free-Apple-ID signing
+	# with 0xe8008016. Use TROLLSTORE_JIT_ENT=1 only for TrollStore.
+	# Optional override: SIDESTORE_ENT=/path/to/entitlements.xml
 	if [ '$(TROLLSTORE_JIT_ENT)' == '1' ]; then \
 		ldid -S$(SOURCEDIR)/entitlements.trollstore.xml $(OUTPUTDIR)/Payload/Witch.app/Witch; \
 	elif [ '$(PLATFORM)' == '6' ]; then \
 		ldid -S$(SOURCEDIR)/entitlements.codesign.xml $(OUTPUTDIR)/Payload/Witch.app/Witch; \
+	elif [ -n '$(SIDESTORE_ENT)' ] && [ -f '$(SIDESTORE_ENT)' ]; then \
+		ldid -S$(SIDESTORE_ENT) $(OUTPUTDIR)/Payload/Witch.app/Witch; \
 	else \
 		ldid -S$(SOURCEDIR)/entitlements.sideload.xml $(OUTPUTDIR)/Payload/Witch.app/Witch; \
 	fi

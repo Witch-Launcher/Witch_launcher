@@ -14,6 +14,8 @@ endif()
 
 include_directories(
   "."
+  "LogEngine"
+  "LogUpload"
   "external/AFNetworking/AFNetworking"
   "external/AFNetworking/UIKit+AFNetworking"
   "external/DBNumberedSlider/Classes"
@@ -347,6 +349,9 @@ egl_bridge.m
     ../UI/Screens/MainMenu/MainMenuViewController.m
      WitchAIService.m
      WitchLogReporter.m
+     LogEngine/WitchLogIndex.m
+     LogEngine/WitchLogSnapshot.m
+     LogUpload/WitchLogUpload.m
      WitchAppAttest.m
      WitchCrypto.m
    ../UI/Screens/CrashLog/CrashLogAnalyzer.m
@@ -384,6 +389,7 @@ target_link_libraries(Witch
   PUBLIC AFNetworking
   TouchControllerBridge
   lzma
+  z
   "-F'${CMAKE_CURRENT_LIST_DIR}/build'"
   "-F'${CMAKE_CURRENT_LIST_DIR}/resources/Frameworks'"
   "-framework AltKit"
