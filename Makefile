@@ -239,7 +239,7 @@ ifndef SDKPATH
 $(error You need to specify SDKPATH to the path of iPhoneOS.sdk. The SDK version should be 14.0 or newer.)
 endif
 
-all: clean lwgjl native java jre assets payload package dsym
+all: clean lwgjl native dep_moltenvk dep_mesa_zink dep_angle java jre assets payload package dsym
 
 help:
 	echo 'Makefile to compile Witch'
@@ -393,7 +393,6 @@ verify-jres:
 	echo '[Witch v$(VERSION)] dep_mg - start'
 	mkdir -p $(WORKINGDIR)/mobileglues
 	cd $(WORKINGDIR)/mobileglues && cmake \
-		-DMACOS="1" \
 		-DCMAKE_CROSSCOMPILING=true \
 		-DCMAKE_SYSTEM_NAME=Darwin \
 		-DCMAKE_SYSTEM_PROCESSOR=aarch64 \
@@ -403,12 +402,223 @@ verify-jres:
 		-DCMAKE_C_FLAGS="-arch arm64" \
 		-DCMAKE_MAKE_PROGRAM=/usr/bin/make \
 		-DSPIRV_CROSS_SHARED="ON" \
-$(SOURCEDIR)/Natives/external/MobileGlues/src/main/cpp/
+		$(SOURCEDIR)/Natives/external/MobileGlues/src/main/cpp/
 
 	cmake --build $(WORKINGDIR)/mobileglues --config RelWithDebInfo -j$(JOBS) --target mobileglues
 	cp $(WORKINGDIR)/mobileglues/libmobileglues*.dylib $(WORKINGDIR)/
 	cp $(WORKINGDIR)/mobileglues/libspirv-cross*.dylib $(WORKINGDIR)/ 2>/dev/null || true
 	echo '[Witch v$(VERSION)] dep_mg - end'
+
+dep_mobilegl:
+	echo '[Witch v$(VERSION)] dep_mobilegl - start'
+	@# Two-level namespace build: drop -flat_namespace/-undefined,dynamic_lookup so
+	@# MobileGL's internal (void*)gl* references bind to its OWN symbols, making
+	@# eglGetProcAddress return MobileGL's functions (not interposed ones).
+	@# Requires prebuilt LLVM libc++ (libc++_cxx23.dylib) in Frameworks.
+	rm -rf $(WORKINGDIR)/mobilegl
+	mkdir -p $(WORKINGDIR)/mobilegl
+	cd $(WORKINGDIR)/mobilegl && cmake \
+		-DCMAKE_CROSSCOMPILING=true \
+		-DCMAKE_SYSTEM_NAME=iOS \
+		-DCMAKE_OSX_SYSROOT="$(SDKPATH)" \
+		-DCMAKE_OSX_ARCHITECTURES=arm64 \
+		-DCMAKE_OSX_DEPLOYMENT_TARGET=14.0 \
+		-DCMAKE_C_FLAGS="-arch arm64" \
+		-DCMAKE_MAKE_PROGRAM=/usr/bin/make \
+		-DMOBILEGL_IOS=ON \
+		-DMOBILEGL_BACKEND_TYPE=DirectVulkan \
+		-DMOBILEGL_BUILD_TEST=OFF \
+		-DMOBILEGL_BUILD_BENCHMARK=OFF \
+		-DMOBILEGL_VULKAN_LIBRARY="$(SOURCEDIR)/Natives/resources/Frameworks/libMoltenVK.dylib" \
+		-DSPIRV_CROSS_SHARED="ON" \
+		-DCMAKE_SHARED_LINKER_FLAGS="-L$(SOURCEDIR)/Natives/resources/Frameworks -lc++_cxx23 -lc++abi_cxx23 -Wl,-undefined,error" \
+		$(SOURCEDIR)/Natives/external/MobileGL/
+	cmake --build $(WORKINGDIR)/mobilegl --config Release -j$(JOBS) --target MobileGL
+	cp $(WORKINGDIR)/mobilegl/libMobileGL*.dylib $(WORKINGDIR)/ 2>/dev/null || true
+	cp $(WORKINGDIR)/mobilegl/libMobileGL_s.a $(WORKINGDIR)/ 2>/dev/null || true
+	cp $(WORKINGDIR)/libMobileGL.dylib $(SOURCEDIR)/Natives/resources/Frameworks/libMobileGL.dylib
+	@# libMoltenVK.dylib's LC_ID is @rpath/libMoltenVK.1.dylib but the shipped file
+	@# is libMoltenVK.dylib; normalize the recorded name so dyld finds it.
+	install_name_tool -change @rpath/libMoltenVK.1.dylib @rpath/libMoltenVK.dylib $(WORKINGDIR)/libMobileGL.dylib
+	install_name_tool -change @rpath/libMoltenVK.1.dylib @rpath/libMoltenVK.dylib $(SOURCEDIR)/Natives/resources/Frameworks/libMobileGL.dylib
+	echo '[Witch v$(VERSION)] dep_mobilegl - end'
+
+dep_moltenvk12:
+	echo '[Witch v$(VERSION)] dep_moltenvk12 - start'
+	mkdir -p $(WORKINGDIR)/moltenvk12
+	cd "$(SOURCEDIR)/Natives/external/MoltenVK" && \
+		git stash 2>/dev/null || true && \
+		git checkout v1.2.11 2>/dev/null || git checkout v1.2.10 2>/dev/null || true
+	cd $(WORKINGDIR)/moltenvk12 && cmake \
+		-DCMAKE_CROSSCOMPILING=true \
+		-DCMAKE_SYSTEM_NAME=iOS \
+		-DCMAKE_OSX_SYSROOT="$(SDKPATH)" \
+		-DCMAKE_OSX_ARCHITECTURES=arm64 \
+		-DCMAKE_OSX_DEPLOYMENT_TARGET=14.0 \
+		-DCMAKE_C_FLAGS="-arch arm64" \
+		-DCMAKE_CXX_FLAGS="-arch arm64 -stdlib=libc++" \
+		-DCMAKE_MAKE_PROGRAM=/usr/bin/make \
+		-DMVK_STATIC_LIBRARY_ONLY=ON \
+		$(SOURCEDIR)/Natives/external/MoltenVK/
+	cmake --build $(WORKINGDIR)/moltenvk12 --config Release -j$(JOBS)
+	cd "$(SOURCEDIR)/Natives/external/MoltenVK" && \
+		git checkout - 2>/dev/null || true
+	echo '[Witch v$(VERSION)] dep_moltenvk12 - end'
+
+dep_moltenvk:
+	echo '[Witch v$(VERSION)] dep_moltenvk - start'
+	MOLTENVK_SRC="$(SOURCEDIR)/Natives/external/MoltenVK"
+	MOLTENVK_BUILD="$(WORKINGDIR)/moltenvk14"
+	mkdir -p "$$MOLTENVK_BUILD"
+	cd "$$MOLTENVK_SRC/Common" && cmake \
+		-DCMAKE_CROSSCOMPILING=true \
+		-DCMAKE_SYSTEM_NAME=iOS \
+		-DCMAKE_OSX_SYSROOT="$(SDKPATH)" \
+		-DCMAKE_OSX_ARCHITECTURES=arm64 \
+		-DCMAKE_OSX_DEPLOYMENT_TARGET=14.0 \
+		-DCMAKE_C_FLAGS="-arch arm64" \
+		-DCMAKE_CXX_FLAGS="-arch arm64 -stdlib=libc++" \
+		-DMVK_STATIC_LIBRARY_ONLY=OFF \
+		-DCMAKE_INSTALL_PREFIX="$(SOURCEDIR)/Natives/resources/Frameworks" \
+		-B "$$MOLTENVK_BUILD" \
+		.
+	cmake --build "$$MOLTENVK_BUILD" --config Release -j$(JOBS)
+	cp "$$MOLTENVK_BUILD/MoltenVK/libMoltenVK.dylib" "$(SOURCEDIR)/Natives/resources/Frameworks/"
+	echo '[Witch v$(VERSION)] dep_moltenvk - end'
+
+dep_mesa_zink:
+	echo '[Witch v$(VERSION)] dep_mesa_zink - start'
+	# Build Mesa 25.0.7 (OSMesa+Zink)
+	MESA_SRC="$(SOURCEDIR)/source/mesa-25.0.7"
+	MESA_BUILD="$(SOURCEDIR)/source/mesa-build-25.0.7"
+	MVK_DIR="$(SOURCEDIR)/Natives/external/MoltenVK/MoltenVK"
+	rm -rf "$$MESA_BUILD"; mkdir -p "$$MESA_BUILD"
+	cd "$$MESA_SRC" && meson setup "$$MESA_BUILD" . \
+		--cross-file cross-ios-arm64.txt \
+		-Dplatforms= \
+		-Dosmesa=true \
+		-Degl=disabled \
+		-Dglx=disabled \
+		-Dglx-direct=false \
+		-Dgallium-drivers=zink,softpipe \
+		-Dvulkan-drivers= \
+		-Dgbm=disabled \
+		-Dshader-cache=disabled \
+		-Dmoltenvk-dir="$$MVK_DIR" \
+		-Dprefix="$(SOURCEDIR)/Natives/resources/Frameworks" \
+		-Dlibdir=lib \
+		-Dbindir=bin
+	ninja -C "$$MESA_BUILD" -j$(JOBS)
+	cp "$$MESA_BUILD/src/gallium/targets/osmesa/libOSMesa.8.dylib" "$(SOURCEDIR)/Natives/resources/Frameworks/"
+	# Build Mesa 26.2.2 (EGL)
+	MESA26_SRC="$(SOURCEDIR)/source/mesa-26.2.2"
+	MESA26_BUILD="$(SOURCEDIR)/source/mesa26-build"
+	rm -rf "$$MESA26_BUILD"; mkdir -p "$$MESA26_BUILD"
+	export PATH="/usr/local/opt/bison/bin:$$PATH"
+	cd "$$MESA26_SRC" && meson setup "$$MESA26_BUILD" . \
+		--cross-file ../mesa-25.0.7/cross-ios-arm64.txt \
+		-Dplatforms= \
+		-Degl=enabled \
+		-Dglx=disabled \
+		-Dglx-direct=false \
+		-Dgallium-drivers=zink,softpipe \
+		-Dvulkan-drivers= \
+		-Dgbm=disabled \
+		-Ddisplay-info=disabled \
+		-Dzstd=disabled \
+		-Dshader-cache=disabled \
+		-Dllvm=disabled \
+		-Dvalgrind=disabled \
+		-Dlibunwind=disabled \
+		-Dexpat=disabled \
+		-Dvideo-codecs=av1dec \
+		-Dmoltenvk-dir="$$MVK_DIR" \
+		-Dprefix="$(SOURCEDIR)/Natives/resources/Frameworks" \
+		-Dlibdir=lib \
+		-Dbindir=bin
+	ninja -C "$$MESA26_BUILD" -j$(JOBS)
+	cp "$$MESA26_BUILD/src/egl/libEGL.1.dylib" "$(SOURCEDIR)/Natives/resources/Frameworks/libEGL_Mesa26.dylib"
+	cp "$$MESA26_BUILD/src/gallium/targets/dri/libgallium-26.2.2.dylib" "$(SOURCEDIR)/Natives/resources/Frameworks/"
+	echo '[Witch v$(VERSION)] dep_mesa_zink - end'
+
+dep_kkosmic:
+	echo '[Witch v$(VERSION)] dep_kkosmic - start'
+	# Build KosmicKrisp Vulkan driver for iOS (A13+)
+	# Requires Mesa mainline source at source/mesa-kosmickrisp/
+	KK_SRC="$(SOURCEDIR)/source/mesa-kosmickrisp"
+	KK_BUILD="$(SOURCEDIR)/source/mesa-kk-build"
+	KK_CROSS="$$KK_SRC/cross-ios-arm64-kkosmic.txt"
+	PREFIX="$(SOURCEDIR)/Natives/resources/Frameworks"
+	if [ ! -d "$$KK_SRC/src/kosmickrisp" ]; then \
+		echo "ERROR: Mesa source not found. Run: git clone https://gitlab.freedesktop.org/mesa/mesa.git $$KK_SRC"; \
+		exit 1; \
+	fi
+	rm -rf "$$KK_BUILD"; mkdir -p "$$KK_BUILD"
+	cd "$$KK_SRC" && meson setup "$$KK_BUILD" . \
+		--cross-file "$$KK_CROSS" \
+		-Dplatforms= \
+		-Dvulkan-drivers=kosmickrisp \
+		-Dgallium-drivers= \
+		-Dopengl=false \
+		-Dgles1=disabled \
+		-Dgles2=disabled \
+		-Dglx=disabled \
+		-Dglx-direct=false \
+		-Dgbm=disabled \
+		-Dllvm=disabled \
+		-Dvalgrind=disabled \
+		-Dlibunwind=disabled \
+		-Dzstd=disabled \
+		-Dshader-cache=disabled \
+		-Dexpat=disabled \
+		-Dbuildtype=release \
+		-Dprefix="$$PREFIX" \
+		-Dlibdir=lib \
+		-Dbindir=bin
+	ninja -C "$$KK_BUILD" -j$(JOBS)
+	# Copy KosmicKrisp driver (try multiple possible output paths)
+	cp "$$KK_BUILD/src/vulkan/libvulkan_kosmickrisp.dylib" "$$PREFIX/" 2>/dev/null || \
+	cp "$$KK_BUILD/src/vulkan/libvulkan_kosmickrisp.so" "$$PREFIX/" 2>/dev/null || \
+	echo "WARNING: KosmicKrisp driver not found in build output"
+	echo '[Witch v$(VERSION)] dep_kkosmic - end'
+
+dep_angle:
+	echo '[Witch v$(VERSION)] dep_angle - start'
+	ANGLE_SRC="$(SOURCEDIR)/source/angle-build/angle"
+	cd "$$ANGLE_SRC" && \
+	mkdir -p out/ios-vulkan-arm64 out/ios-metal-arm64 && \
+	"$$(pwd)/buildtools/mac/gn" gen out/ios-vulkan-arm64 --args=' \
+		target_os="ios" target_cpu="arm64" target_environment="device" \
+		is_debug=false is_official_build=true chrome_pgo_phase=0 \
+		ios_enable_code_signing=false is_component_build=false symbol_level=0 \
+		angle_standalone=true angle_build_tests=false \
+		angle_enable_vulkan=true angle_shared_libvulkan=true angle_use_custom_libvulkan=true \
+		angle_enable_metal=false angle_enable_gl=false angle_enable_null=false \
+		angle_enable_wgpu=false angle_enable_swiftshader=false \
+		angle_enable_essl=false angle_enable_glsl=true \
+		treat_warnings_as_errors=false use_custom_libcxx=true \
+		clang_base_path="//third_party/llvm-build/Release+Asserts" \
+		enable_rust=false use_system_xcode=true' && \
+	"$$(pwd)/third_party/ninja/ninja" -C out/ios-vulkan-arm64 -j4 libEGL libGLESv2 && \
+	"$$(pwd)/buildtools/mac/gn" gen out/ios-metal-arm64 --args=' \
+		target_os="ios" target_cpu="arm64" target_environment="device" \
+		is_debug=false is_official_build=true chrome_pgo_phase=0 \
+		ios_enable_code_signing=false is_component_build=false symbol_level=0 \
+		angle_standalone=true angle_build_tests=false \
+		angle_enable_vulkan=false angle_enable_metal=true \
+		angle_enable_gl=false angle_enable_null=false \
+		angle_enable_wgpu=false angle_enable_swiftshader=false \
+		angle_enable_essl=false angle_enable_glsl=true \
+		treat_warnings_as_errors=false use_custom_libcxx=true \
+		clang_base_path="//third_party/llvm-build/Release+Asserts" \
+		enable_rust=false use_system_xcode=true metal_preferred_client="native"' && \
+	"$$(pwd)/third_party/ninja/ninja" -C out/ios-metal-arm64 -j4 libEGL libGLESv2 && \
+	cp out/ios-vulkan-arm64/libEGL.framework/libEGL "$(SOURCEDIR)/Natives/resources/Frameworks/libEGL_angle_vulkan" && \
+	cp out/ios-vulkan-arm64/libGLESv2.framework/libGLESv2 "$(SOURCEDIR)/Natives/resources/Frameworks/libGLESv2_angle_vulkan" && \
+	cp out/ios-vulkan-arm64/libvulkan.dylib "$(SOURCEDIR)/Natives/resources/Frameworks/" && \
+	cp out/ios-metal-arm64/libEGL.framework/libEGL "$(SOURCEDIR)/Natives/resources/Frameworks/libEGL_angle_metal" && \
+	cp out/ios-metal-arm64/libGLESv2.framework/libGLESv2 "$(SOURCEDIR)/Natives/resources/Frameworks/libGLESv2_angle_metal"
+	echo '[Witch v$(VERSION)] dep_angle - end'
 
 assets: logos
 	echo '[Witch v$(VERSION)] assets - start'
@@ -486,7 +696,7 @@ lwgjl:
 	find "$$LWJGL41_DIR/bin/RELEASE" -name '*.jar' ! -name '*-natives-*' ! -name '*-sources.jar' -exec cp {} "$(SOURCEDIR)/JavaApp/libs/lwjgl41/" \; 2>/dev/null || true; \
 	echo '[Witch v$(VERSION)] lwgjl - end'
 
-payload: native dep_mg lwgjl java jre assets
+payload: native dep_mg dep_mobilegl lwgjl java jre assets
 	echo '[Witch v$(VERSION)] payload - start'
 	rm -f $(WORKINGDIR)/Witch.app/*.png
 	$(call METHOD_DIRCHECK,$(WORKINGDIR)/Witch.app/libs)
@@ -496,7 +706,7 @@ payload: native dep_mg lwgjl java jre assets
 	cp -R $(SOURCEDIR)/Natives/resources/* $(WORKINGDIR)/Witch.app/ || exit 1
 	cp $(WORKINGDIR)/*.dylib $(WORKINGDIR)/Witch.app/Frameworks/ || exit 1
 	cp -R $(SOURCEDIR)/JavaApp/libs/others/* $(WORKINGDIR)/Witch.app/libs/ || exit 1
-	cp $(SOURCEDIR)/JavaApp/build/launcher.jar $(SOURCEDIR)/JavaApp/build/patchjna_agent.jar $(SOURCEDIR)/JavaApp/build/cacio-init-agent.jar $(SOURCEDIR)/JavaApp/build/framegen-agent.jar $(WORKINGDIR)/Witch.app/libs/ || exit 1
+	cp $(SOURCEDIR)/JavaApp/build/launcher.jar $(SOURCEDIR)/JavaApp/build/patchjna_agent.jar $(SOURCEDIR)/JavaApp/build/cacio-init-agent.jar $(WORKINGDIR)/Witch.app/libs/ || exit 1
 	mkdir -p $(WORKINGDIR)/Witch.app/libs/lwjgl33 $(WORKINGDIR)/Witch.app/libs/lwjgl36 $(WORKINGDIR)/Witch.app/libs/lwjgl41
 	cp $(SOURCEDIR)/JavaApp/build/lwjgl-3.3.3.jar $(WORKINGDIR)/Witch.app/libs/lwjgl33/lwjgl.jar || exit 1
 	cp $(SOURCEDIR)/JavaApp/build/lwjgl-3.3.6.jar $(WORKINGDIR)/Witch.app/libs/lwjgl36/lwjgl.jar || exit 1
@@ -642,4 +852,4 @@ clean:
 
 		
 
-.PHONY: all clean check native java jre lwgjl dep_mg assets payload package dsym deploy help codesign
+.PHONY: all clean check native java jre lwgjl dep_mg dep_mobilegl dep_moltenvk dep_moltenvk12 dep_mesa_zink dep_kkosmic dep_angle assets payload package dsym deploy help codesign

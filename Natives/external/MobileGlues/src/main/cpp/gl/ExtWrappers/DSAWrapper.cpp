@@ -146,7 +146,7 @@ void temporarilyBindBuffer(GLuint bufferID, GLenum target = GL_ARRAY_BUFFER) {
     LOG_D("[DSA] [TempBind] target=0x%X, prev=%u -> bind=%u", target, prev, bufferID);
     CHECK_GL_ERROR;
     glBindBuffer(target, bufferID);
-    CHECK_GL_ERROR;
+    CHECK_GL_ERROR_NO_INIT;
 }
 void restoreTemporaryBufferBinding(GLenum target = GL_ARRAY_BUFFER) {
     auto it = bufferBindingStack.find(target);
@@ -169,7 +169,7 @@ void restoreTemporaryBufferBinding(GLenum target = GL_ARRAY_BUFFER) {
     LOG_D("[DSA] [Restore] target=0x%X, bind back to %u", target, toRestore);
     CHECK_GL_ERROR;
     glBindBuffer(target, toRestore);
-    CHECK_GL_ERROR;
+    CHECK_GL_ERROR_NO_INIT;
 
     // The emptied entry stays. Erasing it destroys the vector, so the next
     // temporary bind on this target pays a fresh allocation and a hash insert to
@@ -466,7 +466,7 @@ void temporarilyBindFramebuffer(GLuint framebufferID, GLenum target = GL_DRAW_FR
     LOG_D("[DSA] [TempBind] target=0x%X, prev=%u -> bind=%u", target, prev, framebufferID);
     CHECK_GL_ERROR;
     glBindFramebuffer(target, framebufferID);
-    CHECK_GL_ERROR;
+    CHECK_GL_ERROR_NO_INIT;
 }
 void restoreTemporaryFramebufferBinding(GLenum target = GL_DRAW_FRAMEBUFFER) {
     auto it = framebufferBindingStack.find(target);
@@ -486,7 +486,7 @@ void restoreTemporaryFramebufferBinding(GLenum target = GL_DRAW_FRAMEBUFFER) {
     LOG_D("[DSA] [Restore] target=0x%X, bind back to %u", target, toRestore);
     CHECK_GL_ERROR;
     glBindFramebuffer(target, toRestore);
-    CHECK_GL_ERROR;
+    CHECK_GL_ERROR_NO_INIT;
     // Emptied entries are kept, for the reason spelled out in
     // restoreTemporaryBufferBinding: the vector's capacity is what makes the next
     // call free, and there are only ever three keys here.
@@ -510,7 +510,6 @@ void glCreateFramebuffers(GLsizei n, GLuint* framebuffers) {
         temporarilyBindFramebuffer(fboID); // after binding, the framebuffer object should be created
         restoreTemporaryFramebufferBinding();
         framebuffers[i] = fboID;
-        printf("[MG-CREATE-FB] id=%u isFB=%d\n", fboID, GLES.glIsFramebuffer(fboID));
     }
     CHECK_GL_ERROR;
 
@@ -798,7 +797,7 @@ void temporarilyBindRenderbuffer(GLuint renderbufferID) {
     LOG_D("[DSA] [TempBind] prev=%u -> bind=%u", prev, renderbufferID);
     CHECK_GL_ERROR;
     glBindRenderbuffer(GL_RENDERBUFFER, renderbufferID);
-    CHECK_GL_ERROR;
+    CHECK_GL_ERROR_NO_INIT;
 }
 void restoreTemporaryRenderbufferBinding() {
     auto it = renderbufferBindingStack.find(GL_RENDERBUFFER);
@@ -818,7 +817,7 @@ void restoreTemporaryRenderbufferBinding() {
     LOG_D("[DSA] [Restore] bind back to %u", toRestore);
     CHECK_GL_ERROR;
     glBindRenderbuffer(GL_RENDERBUFFER, toRestore);
-    CHECK_GL_ERROR;
+    CHECK_GL_ERROR_NO_INIT;
     // Kept for the reason restoreTemporaryBufferBinding gives. There is exactly one
     // key in this map.
 }
@@ -961,7 +960,7 @@ void temporarilyBindTexture(GLuint textureID, GLenum possibleTarget = 0) {
     LOG_D("[DSA] [TempBind] target=0x%X, prev=%u -> bind=%u", target, prev, textureID);
     CHECK_GL_ERROR;
     glBindTexture(target, textureID);
-    CHECK_GL_ERROR;
+    CHECK_GL_ERROR_NO_INIT;
 }
 
 void restoreTemporaryTextureBinding(GLuint textureID, GLenum possibleTarget = 0) {
@@ -991,7 +990,7 @@ void restoreTemporaryTextureBinding(GLuint textureID, GLenum possibleTarget = 0)
     LOG_D("[DSA] [Restore] target=0x%X, bind back to %u", target, toRestore);
     CHECK_GL_ERROR;
     glBindTexture(target, toRestore);
-    CHECK_GL_ERROR;
+    CHECK_GL_ERROR_NO_INIT;
 
     // Kept for the reason restoreTemporaryBufferBinding gives, and it matters most
     // here: the texture entry points are the ones a frame actually repeats, and the
@@ -1017,7 +1016,6 @@ void glCreateTextures(GLenum target, GLsizei n, GLuint* textures) {
         temporarilyBindTexture(texID, target);
         restoreTemporaryTextureBinding(texID, target);
         textures[i] = texID;
-        printf("[MG-CREATE-TEX] id=%u target=%s\n", texID, glEnumToString(target));
     }
     CHECK_GL_ERROR;
 
@@ -1712,7 +1710,7 @@ void temporarilyBindVertexArray(GLint vaoID) {
     CHECK_GL_ERROR;
     glGetIntegerv(GL_VERTEX_ARRAY_BINDING, &prevVAO);
     glBindVertexArray(vaoID);
-    CHECK_GL_ERROR;
+    CHECK_GL_ERROR_NO_INIT;
 }
 void restoreTemporaryVertexArrayBinding() {
     if (prevVAO == -1) {
@@ -1721,7 +1719,7 @@ void restoreTemporaryVertexArrayBinding() {
     LOG_D("[DSA] [Restore] VAO: bind back to %u", prevVAO);
     CHECK_GL_ERROR;
     glBindVertexArray(prevVAO);
-    CHECK_GL_ERROR;
+    CHECK_GL_ERROR_NO_INIT;
     prevVAO = -1;
 }
 
@@ -2027,7 +2025,7 @@ void glCreateProgramPipelines(GLsizei n, GLuint* pipelines) {
         glBindProgramPipeline(pipelineID);
         CHECK_GL_ERROR;
         glBindProgramPipeline(prevPipeline);
-        CHECK_GL_ERROR;
+        CHECK_GL_ERROR_NO_INIT;
         pipelines[i] = pipelineID;
     }
 

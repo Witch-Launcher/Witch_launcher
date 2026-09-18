@@ -4,22 +4,19 @@
  * For use under LGPL-3.0
  */
 #include "egl.h"
-#include "proc.h"
 #include "unordered_map/int_hash.h"
-#include "unordered_map/unordered_map.h"
 #include "string_utils.h"
 #include "env.h"
 #include <string.h>
 
-__thread context_t *internal_current_context = NULL;
+thread_local context_t *current_context;
 unordered_map* context_map;
 
 EGLContext (*host_eglCreateContext)(EGLDisplay dpy, EGLConfig config, EGLContext share_context, const EGLint *attrib_list);
 EGLBoolean (*host_eglDestroyContext)(EGLDisplay dpy, EGLContext ctx);
 EGLBoolean (*host_eglMakeCurrent) (EGLDisplay dpy, EGLSurface draw, EGLSurface read, EGLContext ctx);
-EGLContext (*host_eglGetCurrentContext)(void);
 
-__attribute__((used, visibility("default"))) void init_egl() {
+void init_egl() {
     context_map = alloc_intmap();
     host_eglCreateContext = (EGLContext (*)(EGLDisplay, EGLConfig, EGLContext,
                                             const EGLint *)) host_eglGetProcAddress("eglCreateContext");
@@ -27,7 +24,6 @@ __attribute__((used, visibility("default"))) void init_egl() {
             "eglDestroyContext");
     host_eglMakeCurrent = (EGLBoolean (*)(EGLDisplay, EGLSurface, EGLSurface,
                                           EGLContext)) host_eglGetProcAddress("eglMakeCurrent");
-    host_eglGetCurrentContext = (EGLContext (*)(void)) host_eglGetProcAddress("eglGetCurrentContext");
 }
 
 static bool init_context(context_t* tw_context) {
@@ -128,6 +124,25 @@ void build_extension_string(context_t* context) {
         add_extra_extension(context, &length, "GL_ARB_draw_buffers_blend");
     // Used by Minecraft for the GPU usage counter (see Blaze3D TimerQuery)
     add_extra_extension(context, &length, "GL_ARB_timer_query");
+    if(context->multidraw_indirect) {
+        add_extra_extension(context, &length, "GL_ARB_draw_indirect"); // Well, duh, we already should support it
+        add_extra_extension(context, &length, "GL_ARB_multi_draw_indirect");
+    }
+    // Additionally required by Minecraft for multidraw indirect rendering path
+    // Only ANGLE exposes this extension from what I know
+    if(context->base_instance) {
+        add_extra_extension(context, &length, "GL_ARB_base_instance");
+    }
+    // Used by Minecraft for the GPU usage counter
+    if(context->timer_query)
+        add_extra_extension(context, &length, "GL_ARB_timer_query");
+    // Compute shaders are ES3.1+. No reason to support older devices
+    if(context->es31) {
+        add_extra_extension(context, &length, "GL_ARB_shader_image_load_store");
+        // Do we even implement enough features for it?
+        add_extra_extension(context, &length, "GL_ARB_shader_storage_buffer_object");
+        add_extra_extension(context, &length, "GL_ARB_compute_shader");
+    }
     // More extensions are possible, but will need way more wraps and tracking.
     fin_extra_extensions(context, length);
 }
@@ -157,6 +172,7 @@ static void find_esversion(context_t* context) {
     if(strstr(extensions, "GL_EXT_buffer_storage")) context->buffer_storage = true;
     if(strstr(extensions, "GL_EXT_texture_buffer")) context->buffer_texture_ext = true;
     if(strstr(extensions, "GL_EXT_multi_draw_indirect")) context->multidraw_indirect = true;
+    if(strstr(extensions, "GL_EXT_base_instance")) context->base_instance = true;
 
     // EXT_disjoint_timer_query provides accurate int64 timer queries
     // on Core Profile it's ARB_timer_query instead
@@ -218,7 +234,7 @@ static void init_incontext(context_t* tw_context) {
     es3_functions.glGenBuffers(1, &tw_context->multidraw_element_buffer);
 }
 
-__attribute__((used, visibility("default"))) EGLContext eglCreateContext(EGLDisplay dpy, EGLConfig config, EGLContext share_context, const EGLint *attrib_list) {
+EGLContext eglCreateContext(EGLDisplay dpy, EGLConfig config, EGLContext share_context, const EGLint *attrib_list) {
     EGLContext phys_context = host_eglCreateContext(dpy, config, share_context, attrib_list);
     if(phys_context == EGL_NO_CONTEXT) return phys_context;
     context_t* tw_context = calloc(1, sizeof(context_t));
@@ -227,12 +243,11 @@ __attribute__((used, visibility("default"))) EGLContext eglCreateContext(EGLDisp
         host_eglDestroyContext(dpy, phys_context);
         return EGL_NO_CONTEXT;
     }
-    tw_context->phys_context = phys_context;
     unordered_map_put(context_map, phys_context, tw_context);
     return phys_context;
 }
 
-__attribute__((used, visibility("default"))) EGLBoolean eglDestroyContext (EGLDisplay dpy, EGLContext ctx) {
+EGLBoolean eglDestroyContext (EGLDisplay dpy, EGLContext ctx) {
     if(!host_eglDestroyContext(dpy, ctx)) return EGL_FALSE;
     context_t* old_ctx = unordered_map_remove(context_map, ctx);
     free_context(old_ctx);
@@ -240,10 +255,10 @@ __attribute__((used, visibility("default"))) EGLBoolean eglDestroyContext (EGLDi
     return EGL_TRUE;
 }
 
-__attribute__((used, visibility("default"))) EGLBoolean eglMakeCurrent (EGLDisplay dpy, EGLSurface draw, EGLSurface read, EGLContext ctx) {
+EGLBoolean eglMakeCurrent (EGLDisplay dpy, EGLSurface draw, EGLSurface read, EGLContext ctx) {
     if(!host_eglMakeCurrent(dpy, draw, read, ctx)) return EGL_FALSE;
     if(ctx == EGL_NO_CONTEXT) {
-        internal_current_context = NULL;
+        current_context = NULL;
         return EGL_TRUE;
     }
     context_t* tw_context = unordered_map_get(context_map, ctx);
@@ -255,39 +270,6 @@ __attribute__((used, visibility("default"))) EGLBoolean eglMakeCurrent (EGLDispl
         init_incontext(tw_context);
         tw_context->context_rdy = true;
     }
-    internal_current_context = tw_context;
+    current_context = tw_context;
     return EGL_TRUE;
-}
-
-context_t* ltw_get_current_context(void) {
-    if (!host_eglGetCurrentContext) return internal_current_context;
-
-    EGLContext phys_context = host_eglGetCurrentContext();
-    if (phys_context == EGL_NO_CONTEXT) {
-        internal_current_context = NULL;
-        return NULL;
-    }
-
-    if (internal_current_context && internal_current_context->phys_context == phys_context) {
-        return internal_current_context;
-    }
-
-    context_t* tw_context = unordered_map_get(context_map, phys_context);
-    if (!tw_context) {
-        tw_context = calloc(1, sizeof(context_t));
-        if (!tw_context || !init_context(tw_context)) {
-            if (tw_context) free(tw_context);
-            return NULL;
-        }
-        tw_context->phys_context = phys_context;
-        unordered_map_put(context_map, phys_context, tw_context);
-    }
-
-    if (!tw_context->context_rdy) {
-        init_incontext(tw_context);
-        tw_context->context_rdy = true;
-    }
-
-    internal_current_context = tw_context;
-    return tw_context;
 }

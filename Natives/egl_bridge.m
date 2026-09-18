@@ -1,5 +1,4 @@
 #import "SurfaceViewController.h"
-#import "framegen/framegen.h"
 #import "LauncherPreferences.h"
 
 #include "jni.h"
@@ -10,6 +9,7 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <sys/types.h>
 
 #include "EGL/egl.h"
@@ -19,8 +19,11 @@
 #include "glfw_keycodes.h"
 #include "ctxbridges/bridge_tbl.h"
 #include "ctxbridges/osmesa_internal.h"
+#include "ctxbridges/mesa_egl_bridge.h"
 #include "utils.h"
 #include "ZinkConfig.h"
+#include "MobileGLConfig.h"
+#include "PLProfiles.h"
 
 void aasdl_setMainReady(NSString *nativesDir);
 
@@ -44,80 +47,27 @@ __thread basic_render_window_t* currentBundle;
 static atomic_uint_fast64_t widgetSwapCountOwn;
 static atomic_uint_fast64_t widgetMetalFrameCount;
 
-static IMP origNextDrawable;
-static IMP origNextDrawableWithSize;
-
-static id widgetSwizzledNextDrawable(id self, SEL _cmd) {
-    atomic_fetch_add_explicit(&widgetMetalFrameCount, 1, memory_order_relaxed);
-    id drawable = ((id (*)(id, SEL))origNextDrawable)(self, _cmd);
-    if (fg_is_enabled() && fg_is_supported()) {
-        fg_on_next_drawable(drawable, (CAMetalLayer*)self);
+static NSString* getMoltenVKDylibPath(void) {
+    id ver = getPrefObject(@"video.moltenvk_version");
+    NSString *version = (ver && [ver isKindOfClass:[NSString class]]) ? (NSString *)ver : @"1.4";
+    NSString *frameworks = NSBundle.mainBundle.privateFrameworksPath;
+    if ([version isEqualToString:@"1.2"]) {
+        return [frameworks stringByAppendingPathComponent:@"libMoltenVK12.dylib"];
     }
-    return drawable;
+    return [frameworks stringByAppendingPathComponent:@"libMoltenVK.dylib"];
 }
 
-static id widgetSwizzledNextDrawableWithSize(id self, SEL _cmd, CGSize size) {
-    atomic_fetch_add_explicit(&widgetMetalFrameCount, 1, memory_order_relaxed);
-    id drawable = ((id (*)(id, SEL, CGSize))origNextDrawableWithSize)(self, _cmd, size);
-    if (fg_is_enabled() && fg_is_supported()) {
-        fg_on_next_drawable(drawable, (CAMetalLayer*)self);
+static NSString* getANGLEHostEGLDylibPath(void) {
+    id ver = getPrefObject(@"video.ltw_angle_backend");
+    NSString *backend = (ver && [ver isKindOfClass:[NSString class]]) ? (NSString *)ver : @"metal";
+    NSString *frameworks = NSBundle.mainBundle.privateFrameworksPath;
+    if ([backend isEqualToString:@"vulkan"]) {
+        return [frameworks stringByAppendingPathComponent:@"libEGL_angle_vulkan"];
     }
-    return drawable;
-}
-
-static void widgetHookMetalOnce(void) {
-    static dispatch_once_t once;
-    dispatch_once(&once, ^{
-        // Only install the CAMetalLayer swizzle when Frame Generation is ON.
-        // The swizzle intercepts MoltenVK's nextDrawable globally — even as a
-        // passthrough it can interfere with the rendering pipeline, causing
-        // black screens when FG is OFF.
-        if (getPrefBool(@"video.frame_generation")) {
-            Class cls = CAMetalLayer.class;
-            Method m = class_getInstanceMethod(cls, @selector(nextDrawable));
-            if (m) {
-                origNextDrawable = method_getImplementation(m);
-                method_setImplementation(m, (IMP)widgetSwizzledNextDrawable);
-            }
-            SEL sizeSel = NSSelectorFromString(@"nextDrawableWithSize:");
-            Method m2 = class_getInstanceMethod(cls, sizeSel);
-            if (m2) {
-                origNextDrawableWithSize = method_getImplementation(m2);
-                method_setImplementation(m2, (IMP)widgetSwizzledNextDrawableWithSize);
-            }
-            fg_hook_metal_layer((CAMetalLayer*)SurfaceViewController.surface.layer);
-            NSLog(@"[FrameGen] widgetHookMetalOnce: swizzle+hooks installed, FG ON");
-        } else {
-            NSLog(@"[FrameGen] widgetHookMetalOnce: skipped (FG OFF, no swizzle)");
-        }
-    });
-}
-
-// Called from fg_hook_metal_layer when FG is enabled at runtime
-// (e.g. user toggles FG ON from Settings after launching with FG OFF).
-// Installs the class-level CAMetalLayer swizzle if not already installed.
-void widgetEnsureMetalSwizzle(void) {
-    static BOOL installed = NO;
-    if (installed) return;
-    installed = YES;
-
-    Class cls = CAMetalLayer.class;
-    Method m = class_getInstanceMethod(cls, @selector(nextDrawable));
-    if (m) {
-        origNextDrawable = method_getImplementation(m);
-        method_setImplementation(m, (IMP)widgetSwizzledNextDrawable);
-    }
-    SEL sizeSel = NSSelectorFromString(@"nextDrawableWithSize:");
-    Method m2 = class_getInstanceMethod(cls, sizeSel);
-    if (m2) {
-        origNextDrawableWithSize = method_getImplementation(m2);
-        method_setImplementation(m2, (IMP)widgetSwizzledNextDrawableWithSize);
-    }
-    NSLog(@"[FrameGen] widgetEnsureMetalSwizzle: swizzle installed at runtime");
+    return [frameworks stringByAppendingPathComponent:@"libEGL_angle_metal"];
 }
 
 uint64_t pojavSwapCount(void) {
-    widgetHookMetalOnce();
     static uint64_t (*mobilegluesSwapCountFn)(void);
     if (!mobilegluesSwapCountFn) {
         mobilegluesSwapCountFn = (uint64_t (*)(void))dlsym(RTLD_DEFAULT, "mobileglues_swap_count");
@@ -172,30 +122,142 @@ int pojavInitOpenGL() {
     } else if ([renderer isEqualToString:@ RENDERER_NAME_MOBILEGLUES]) {
         renderer = @ RENDERER_NAME_MOBILEGLUES;
         setenv("AMETHYST_RENDERER", renderer.UTF8String, 1);
+        // Pre-load ANGLE backend before MobileGlues so its static init
+        // (init_target_egl) can find EGL symbols via RTLD_DEFAULT.
+        NSString *anglePath = [NSBundle.mainBundle.privateFrameworksPath stringByAppendingPathComponent:@"libtinygl4angle.dylib"];
+        dlopen(anglePath.UTF8String, RTLD_LAZY | RTLD_GLOBAL);
         set_gl_bridge_tbl();
     } else if ([renderer isEqualToString:@ RENDERER_NAME_MTL_ANGLE]) {
         set_gl_bridge_tbl();
     } else if ([renderer isEqualToString:@ RENDERER_NAME_LTW]) {
         // Pre-load ANGLE as host EGL before LTW, so LTW's constructor
         // finds eglGetProcAddress via RTLD_DEFAULT.
-        dlopen("@rpath/libtinygl4angle.dylib", RTLD_GLOBAL);
+        NSString *anglePath = getANGLEHostEGLDylibPath();
+        dlopen(anglePath.UTF8String, RTLD_GLOBAL);
         set_gl_bridge_tbl();
     } else if ([renderer hasPrefix:@"libOSMesa"]) {
-        setenv("GALLIUM_DRIVER","zink",1);
+        NSLog(@"[EGLBridge] Zink renderer detected, checking Mesa version...");
         [ZinkConfig applyZinkEnvironmentFromPreferences];
-        // Pre-load Vulkan loader for Zink before Mesa initializes
-        NSString *vkPath = [NSBundle.mainBundle.privateFrameworksPath stringByAppendingPathComponent:@"libvulkan.1.dylib"];
-        dlopen(vkPath.UTF8String, RTLD_LAZY | RTLD_GLOBAL);
-        set_osm_bridge_tbl();
+
+        NSString *mesaVersion = [ZinkConfig selectedMesaVersion];
+        ZinkVulkanBackend backend = [ZinkConfig selectedVulkanBackend];
+        BOOL kosmicSupported = [ZinkConfig deviceSupportsKosmicKrisp];
+
+        NSLog(@"[EGLBridge] Mesa %@, backend=%@, KosmicKrisp=%@",
+              mesaVersion, [ZinkConfig vulkanBackendName],
+              kosmicSupported ? @"YES" : @"NO");
+
+        if ([ZinkConfig isZinkUsingEGL]) {
+            // ── Mesa 26.2.2 (EGL) — KosmicKrisp ONLY ──
+            if (!kosmicSupported) {
+                NSLog(@"[EGLBridge] ✗ Mesa 26.2.2 REQUIRES KosmicKrisp (A13+). "
+                      @"This device does NOT support KosmicKrisp. "
+                      @"Attempting to continue — expect crash.");
+            }
+
+            // Load Vulkan loader for Zink → KosmicKrisp
+            NSString *vkPath = [NSBundle.mainBundle.privateFrameworksPath
+                                   stringByAppendingPathComponent:@"libvulkan.1.dylib"];
+            dlopen(vkPath.UTF8String, RTLD_LAZY | RTLD_GLOBAL);
+            setenv("GALLIUM_DRIVER", "zink", 1);
+
+            if (kosmicSupported && [ZinkConfig deviceSupportsKosmicKrispFull]) {
+                NSLog(@"[EGLBridge] → KosmicKrisp Full (VK 1.4, A14+)");
+            } else if (kosmicSupported) {
+                NSLog(@"[EGLBridge] → KosmicKrisp Reduced (VK 1.2, A13)");
+            }
+
+            NSLog(@"[EGLBridge] → Mesa 26.2.2: loading libEGL_Mesa26.dylib");
+            NSString *mesaPath = [NSBundle.mainBundle.privateFrameworksPath
+                                     stringByAppendingPathComponent:@"libEGL_Mesa26.dylib"];
+            dlopen(mesaPath.UTF8String, RTLD_LAZY | RTLD_GLOBAL);
+            set_mesa_egl_bridge_tbl();
+            NSLog(@"[EGLBridge] → mesa_egl_bridge_tbl installed");
+        } else {
+            // ── Mesa 25.0.7 (OSMesa) — choose between MoltenVK and KosmicKrisp ──
+            if (backend == ZinkVulkanBackendKosmicKrisp ||
+                (backend == ZinkVulkanBackendAuto && kosmicSupported)) {
+                // KosmicKrisp path: load Vulkan loader + libOSMesa
+                NSLog(@"[EGLBridge] → Mesa 25.0.7 + KosmicKrisp");
+                NSString *vkPath = [NSBundle.mainBundle.privateFrameworksPath
+                                       stringByAppendingPathComponent:@"libvulkan.1.dylib"];
+                dlopen(vkPath.UTF8String, RTLD_LAZY | RTLD_GLOBAL);
+                setenv("GALLIUM_DRIVER", "zink", 1);
+                NSLog(@"[EGLBridge] → GALLIUM_DRIVER=zink (KosmicKrisp backend)");
+            } else if (backend == ZinkVulkanBackendMoltenVK ||
+                       (backend == ZinkVulkanBackendAuto && !kosmicSupported)) {
+                // MoltenVK path: load Vulkan loader + libOSMesa
+                NSLog(@"[EGLBridge] → Mesa 25.0.7 + MoltenVK");
+                NSString *vkPath = [NSBundle.mainBundle.privateFrameworksPath
+                                       stringByAppendingPathComponent:@"libvulkan.1.dylib"];
+                dlopen(vkPath.UTF8String, RTLD_LAZY | RTLD_GLOBAL);
+                setenv("GALLIUM_DRIVER", "zink", 1);
+                NSLog(@"[EGLBridge] → GALLIUM_DRIVER=zink (MoltenVK backend)");
+            } else {
+                // Fallback: softpipe (CPU-only, no Vulkan)
+                NSLog(@"[EGLBridge] → Mesa 25.0.7: softpipe fallback (CPU-only)");
+                setenv("GALLIUM_DRIVER", "softpipe", 1);
+            }
+
+            NSString *mesaLib = [ZinkConfig zinkLibraryName];
+            NSString *mesaPath = [NSBundle.mainBundle.privateFrameworksPath
+                                     stringByAppendingPathComponent:mesaLib];
+            dlopen(mesaPath.UTF8String, RTLD_LAZY | RTLD_GLOBAL);
+            NSLog(@"[EGLBridge] → %@ loaded, installing osm_bridge_tbl", mesaLib);
+            set_osm_bridge_tbl();
+            NSLog(@"[EGLBridge] → osm_bridge_tbl installed");
+        }
     } else if ([renderer isEqualToString:@ RENDERER_NAME_MOLTENVK]) {
+        // Pre-load MoltenVK version-specific dylib
+        NSString *mvkPath = getMoltenVKDylibPath();
+        dlopen(mvkPath.UTF8String, RTLD_LAZY | RTLD_GLOBAL);
         set_vk_bridge_tbl();
+        } else if ([renderer isEqualToString:@ RENDERER_NAME_MOBILEGL]) {
+        [MobileGLConfig applyEnvironmentFromPreferences];
+        MobileGLBackendType backendType = [MobileGLConfig selectedBackendType];
+        if (backendType == MobileGLBackendTypeDirectVulkan) {
+            // DirectVulkan: Vulkan-backed GL via MobileGL. Load Vulkan + MoltenVK.
+            NSString *vkPath = [NSBundle.mainBundle.privateFrameworksPath stringByAppendingPathComponent:@"libvulkan.1.dylib"];
+            dlopen(vkPath.UTF8String, RTLD_LAZY | RTLD_GLOBAL);
+            NSString *mvkPath = getMoltenVKDylibPath();
+            dlopen(mvkPath.UTF8String, RTLD_LAZY | RTLD_GLOBAL);
+        } else {
+            // DirectGLES: ANGLE-backed GLES via MobileGL. Load the ANGLE backend.
+            MobileGLAngleBackend angleBackend = [MobileGLConfig selectedAngleBackend];
+            if (angleBackend == MobileGLAngleBackendVulkan) {
+                // VulkanANGLE: ANGLE translates GLES → Vulkan → MoltenVK → Metal
+                NSString *vkPath = [NSBundle.mainBundle.privateFrameworksPath stringByAppendingPathComponent:@"libvulkan.dylib"];
+                dlopen(vkPath.UTF8String, RTLD_LAZY | RTLD_GLOBAL);
+                NSString *eglPath = [NSBundle.mainBundle.privateFrameworksPath stringByAppendingPathComponent:@"libEGL_angle_vulkan"];
+                dlopen(eglPath.UTF8String, RTLD_LAZY | RTLD_GLOBAL);
+            } else {
+                // MetalANGLE: ANGLE translates GLES → Metal directly
+                NSString *eglPath = [NSBundle.mainBundle.privateFrameworksPath stringByAppendingPathComponent:@"libEGL_angle_metal"];
+                dlopen(eglPath.UTF8String, RTLD_LAZY | RTLD_GLOBAL);
+            }
+        }
+        set_gl_bridge_tbl();
     }
     JNI_LWJGL_changeRenderer(renderer.UTF8String);
-    // Preload renderer library
-    dlopen([NSString stringWithFormat:@"@rpath/%@", renderer].UTF8String, RTLD_GLOBAL);
+    // Preload renderer library.
+    // Skip for Mesa 26.2.2 EGL — its library (libEGL.1.dylib) was already
+    // loaded above and loading the old libOSMesa.8.dylib would clash symbols
+    // under -flat_namespace.  MobileGL is always preloaded (its dlsym_EGL
+    // handle is separate from the preload RTLD_GLOBAL handle).
+    if ([renderer isEqualToString:@ RENDERER_NAME_MOBILEGL] ||
+        [renderer isEqualToString:@ RENDERER_NAME_MOBILEGLUES] ||
+        ![ZinkConfig isZinkUsingEGL]) {
+        NSLog(@"[EGLBridge] Preloading renderer library: @rpath/%@", renderer);
+        dlopen([NSString stringWithFormat:@"@rpath/%@", renderer].UTF8String, RTLD_GLOBAL);
+    } else {
+        NSLog(@"[EGLBridge] Skipping renderer preload (Mesa EGL mode)");
+    }
 
-    return !br_init();
-    //return 0;
+    if (!br_init) {
+        NSLog(@"[EGLBridge] FATAL br_init is NULL for renderer: %@", renderer);
+        return JNI_FALSE;
+    }
+    return br_init();
 }
 
 void pojavSetWindowHint(int hint, int value) {
@@ -237,9 +299,16 @@ void* pojavCreateContext(basic_render_window_t* contextSrc) {
     static BOOL inited = NO;
     if (!inited) {
         inited = YES;
-        pojavInitOpenGL();
+        if (!pojavInitOpenGL()) {
+            NSLog(@"[EGLBridge] pojavInitOpenGL failed, cannot create GL context");
+            return NULL;
+        }
     }
 
+    if (!br_init_context) {
+        NSLog(@"[EGLBridge] br_init_context is NULL");
+        return NULL;
+    }
     basic_render_window_t* ctx = br_init_context(contextSrc);
     if (ctx) {
         pojavMakeCurrent(ctx);

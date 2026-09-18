@@ -8,6 +8,7 @@
 #include <unistd.h>
 #include <dirent.h>
 #include <sys/sysctl.h>
+#include <sys/proc.h>
 
 #include "utils.h"
 #import "LauncherPreferences.h"
@@ -26,22 +27,128 @@ BOOL getEntitlementValue(NSString *key) {
     return ![(__bridge id)value isKindOfClass:NSNumber.class] || [(__bridge id)value boolValue];
 }
 
+BOOL processIsCurrentlyDebugged(void) {
+    // SideStore / StikDebug attach to an already-running process via debugserver.
+    // Parent stays launchd (pid 1); P_TRACED is the reliable attached-debugger bit.
+    struct kinfo_proc info = {0};
+    size_t size = sizeof(info);
+    int mib[4] = {CTL_KERN, KERN_PROC, KERN_PROC_PID, getpid()};
+    if (sysctl(mib, 4, &info, &size, NULL, 0) != 0) {
+        return NO;
+    }
+    return (info.kp_proc.p_flag & P_TRACED) != 0;
+}
+
 BOOL isJITEnabled(BOOL checkCSFlags) {
     if (!checkCSFlags && (getEntitlementValue(@"dynamic-codesigning") || isJailbroken)) {
         return YES;
     }
 
-    int flags;
+    int flags = 0;
     csops(getpid(), 0, &flags, sizeof(flags));
-    if ((flags & CS_DEBUGGED) == 0) {
+    BOOL csDebugged = (flags & CS_DEBUGGED) != 0;
+    BOOL traced = processIsCurrentlyDebugged();
+    if (!csDebugged && !traced) {
         return NO;
     }
-    if (!DeviceHasJITFlags(JIT_FLAG_FORCE_MIRRORED | JIT_FLAG_HAS_TXM)) {
-        // Device below iOS 26 or without TXM is sufficient at this point
-        return YES;
+
+    // iOS 26+/27 patched JRE services RX mappings through brk #0xf00d while the
+    // debugger stays attached. CS_DEBUGGED after a SideStore detach is not enough.
+    if (DeviceNeedsDebugJITMapping()) {
+        return traced;
     }
-    // Device with iOS 26+ and TXM requires a debugger attached for JIT script to bypass TXM restrictions
-    return JIT26IsLikelyDebuggerKeepAttached();
+    // iOS 18 and other classic JIT: CS_DEBUGGED survives detach; P_TRACED covers
+    // the window where StikDebug is attached but csops has not yet reported it.
+    return YES;
+}
+
+void requestExternalJITEnable(void) {
+    NSString *bundleID = NSBundle.mainBundle.bundleIdentifier ?: @"";
+    NSString *pidString = [NSString stringWithFormat:@"%d", getpid()];
+
+    void (^openURL)(NSURL *) = ^(NSURL *url) {
+        if (!url) return;
+        dispatch_async(dispatch_get_main_queue(), ^{
+            [UIApplication.sharedApplication openURL:url options:@{} completionHandler:nil];
+        });
+    };
+
+    if (getEntitlementValue(@"com.apple.private.local.sandboxed-jit")) {
+        NSString *urlString = [NSString stringWithFormat:@"apple-magnifier://enable-jit?bundle-id=%@", bundleID];
+        NSLog(@"[JIT] Requesting TrollStore JIT");
+        openURL([NSURL URLWithString:urlString]);
+        return;
+    }
+
+    NSURLComponents *components = [NSURLComponents new];
+    components.scheme = @"stikdebug";
+    components.host = @"enable-jit";
+    NSMutableArray<NSURLQueryItem *> *items = [NSMutableArray array];
+    [items addObject:[NSURLQueryItem queryItemWithName:@"bundle-id" value:bundleID]];
+    [items addObject:[NSURLQueryItem queryItemWithName:@"pid" value:pidString]];
+
+    // Custom UniversalJIT26.js (brk 0xf00d / 0x6a) must be sent as script-data on
+    // iOS 26+ so StikDebug does not need a pre-installed matching file.
+    if (DeviceNeedsDebugJITMapping() || DeviceHasJITFlags(JIT_FLAG_IS_IOS_26)) {
+        NSString *scriptPath = [NSBundle.mainBundle pathForResource:@"UniversalJIT26" ofType:@"js"];
+        NSData *scriptData = scriptPath ? [NSData dataWithContentsOfFile:scriptPath] : nil;
+        if (scriptData.length > 0) {
+            [items addObject:[NSURLQueryItem queryItemWithName:@"script-data"
+                                                        value:[scriptData base64EncodedStringWithOptions:0]]];
+        } else {
+            [items addObject:[NSURLQueryItem queryItemWithName:@"script-name" value:@"universal.js"]];
+        }
+    }
+    components.queryItems = items;
+    NSURL *stikURL = components.URL;
+    NSURL *sideURL = [NSURL URLWithString:
+        [NSString stringWithFormat:@"sidestore://enable-jit?bundle-id=%@", bundleID]];
+
+    dispatch_async(dispatch_get_main_queue(), ^{
+        if (!stikURL) {
+            NSLog(@"[JIT] Could not build StikDebug URL");
+            return;
+        }
+        NSLog(@"[JIT] Requesting StikDebug JIT (pid %@, iOS26=%d)", pidString,
+              DeviceHasJITFlags(JIT_FLAG_IS_IOS_26));
+        void (^trySideStore)(void) = ^{
+            if (!sideURL) {
+                return;
+            }
+            [UIApplication.sharedApplication openURL:sideURL options:@{} completionHandler:^(BOOL sideSuccess) {
+                if (!sideSuccess) {
+                    NSLog(@"[JIT] SideStore URL failed; wait for manual enable");
+                }
+            }];
+        };
+
+        [UIApplication.sharedApplication openURL:stikURL options:@{} completionHandler:^(BOOL success) {
+            if (success) {
+                return;
+            }
+            // Long script-data URLs can fail; retry with pid/bundle-id only.
+            NSURLComponents *retry = [NSURLComponents new];
+            retry.scheme = @"stikdebug";
+            retry.host = @"enable-jit";
+            retry.queryItems = @[
+                [NSURLQueryItem queryItemWithName:@"bundle-id" value:bundleID],
+                [NSURLQueryItem queryItemWithName:@"pid" value:pidString]
+            ];
+            NSURL *retryURL = retry.URL;
+            if (!retryURL || [retryURL isEqual:stikURL]) {
+                NSLog(@"[JIT] StikDebug URL failed; trying SideStore");
+                trySideStore();
+                return;
+            }
+            NSLog(@"[JIT] StikDebug script-data URL failed; retrying without script");
+            [UIApplication.sharedApplication openURL:retryURL options:@{} completionHandler:^(BOOL retrySuccess) {
+                if (!retrySuccess) {
+                    NSLog(@"[JIT] StikDebug retry failed; trying SideStore");
+                    trySideStore();
+                }
+            }];
+        }];
+    });
 }
 
 void openLink(UIViewController* sender, NSURL* link) {
@@ -468,6 +575,5 @@ BOOL DeviceNeedsDebugJITMapping(void) {
 }
 
 BOOL JIT26IsLikelyDebuggerKeepAttached(void) {
-    // getppid() always returns launchd PID (1) unless debugger is actively attached
-    return getppid() != 1;
+    return processIsCurrentlyDebugged();
 }

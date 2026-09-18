@@ -122,7 +122,8 @@
 "launcher.menu.execute_jar" = "Execute .jar";
 
 "launcher.wait_jit.title" = "Waiting for JIT";
-"launcher.wait_jit.message" = "Amethyst relies on Just-in-time compilation for Java to work at maximum performance.";
+"launcher.wait_jit.message" = "Enable JIT from StikDebug or SideStore, then return here. Keep LocalDevVPN connected. The app detects an attached debugger (StikDebug) or CS_DEBUGGED (SideStore).";
+"launcher.wait_jit_stikdebug.message" = "iOS 26/27 needs StikDebug to stay attached.\n\n1. Open StikDebug (this screen tries to open it automatically)\n2. Enable JIT for this app and leave the toggle ON\n3. Return here — do not detach the debugger.\n\nUniversalJIT26.js is copied to the clipboard if you need to assign the script.";
 "launcher.wait_jit_trollstore.message" = "If you still see this message, please enable URL Scheme in TrollStore.";
 
 "login.error.username.outOfRange" = "Username must be at least 3 characters and a maximum of 16 characters";
@@ -239,6 +240,8 @@
 "preference.detail.enable_ext_compute_shader" = "Enable GL_ARB_compute_shader for GPU compute operations. Required by some shader packs.";
 "preference.title.enable_ext_direct_state_access" = "Direct State Access";
 "preference.detail.enable_ext_direct_state_access" = "Enable GL_ARB_direct_state_access for modern OpenGL object management. Improves performance.";
+"preference.title.enable_ext_gl43" = "OpenGL 4.3 Extensions";
+"preference.detail.enable_ext_gl43" = "Enable OpenGL 4.3 extension set in MobileGlues. May improve compatibility with some shader packs.";
 "preference.title.max_glsl_cache_size" = "GLSL Cache Size (MB)";
 "preference.detail.max_glsl_cache_size" = "Maximum size of the GLSL shader cache in megabytes. Larger cache speeds up shader reloads. Set to 0 to disable caching.";
 "preference.title.multidraw_mode" = "Multidraw Mode";
@@ -277,10 +280,13 @@
 "preference.title.renderer.debug.auto" = "Auto: gl4es or ANGLE";
 "preference.title.renderer.debug.gl4es" = "holy gl4es - exports OpenGL 2.1";
 "preference.title.renderer.debug.angle" = "ANGLE (1.17+) - exports OpenGL 3.2 (Core Profile, limited)";
+"preference.title.renderer.debug.angle_vulkan" = "ANGLE Vulkan (ES 3.1) - OpenGL ES via Vulkan";
+"preference.title.renderer.debug.angle_metal" = "ANGLE Metal (ES 3.2) - OpenGL ES via Metal";
 "preference.title.renderer.debug.mg" = "MobileGlues (1.17+) - exports OpenGL 4.0, EXPERIMENTAL";
 "preference.title.renderer.debug.zink" = "Zink (Mesa 25) - exports OpenGL 4.1 via MoltenVK";
 "preference.title.renderer.debug.vulkan" = "MoltenVK (Vulkan -> Metal direct)";
 "preference.title.renderer.debug.ltw" = "LTW (1.17+) - OpenGL 3.3 via OpenGL ES/Metal, EXPERIMENTAL";
+"preference.title.renderer.debug.mobilegl" = "MobileGL (Vulkan) - exports OpenGL 4.2 via MoltenVK";
 
 "Device Info" = "Device Info";
 
@@ -301,6 +307,28 @@
 "preference.title.zink_api_features-1" = "Basic (core GL only)";
 "preference.title.zink_api_features-2" = "Standard (common extensions)";
 "preference.title.zink_api_features-3" = "Full (all supported extensions)";
+
+"settings.group.mobilegl" = "MobileGL Settings";
+"preference.title.mobilegl_backend_type" = "Backend Type";
+"preference.detail.mobilegl_backend_type" = "Select the graphics backend. DirectVulkan uses Vulkan/MoltenVK for best performance. DirectGLES uses OpenGL ES fallback.";
+"preference.title.mobilegl_angle_backend" = "ANGLE Backend (when using DirectGLES)";
+"preference.detail.mobilegl_angle_backend" = "Select the ANGLE backend when using OpenGL ES. VulkanANGLE: GLES → Vulkan → MoltenVK → Metal (supports ES 3.2). MetalANGLE: GLES → Metal directly (supports ES 3.0).";
+"preference.title.mobilegl_disable_timer_query" = "Disable Timer Query";
+"preference.detail.mobilegl_disable_timer_query" = "Disable GPU timer queries. Can improve performance on some devices but disables FPS measurement.";
+"preference.title.mobilegl_disable_subgroup" = "Disable Subgroup";
+"preference.detail.mobilegl_disable_subgroup" = "Disable Vulkan shader subgroup operations. May help on older GPUs with limited subgroup support.";
+"preference.title.mobilegl_advertise_fp64" = "Advertise FP64";
+"preference.detail.mobilegl_advertise_fp64" = "Advertise GL_ARB_gpu_shader_fp64 support. Double precision is emulated as 32-bit. Enable only if required by mods.";
+"preference.title.mobilegl_frames_in_flight" = "Frames in Flight";
+"preference.detail.mobilegl_frames_in_flight" = "Number of frames being processed simultaneously. Higher values improve throughput but increase latency and memory usage.";
+"preference.title.mobilegl_coherent_as_flush" = "Coherent as Flush";
+"preference.detail.mobilegl_coherent_as_flush" = "Treat persistent GL_MAP_FLUSH_EXPLICIT_BIT maps as coherent. Enable for compatibility with engines that never flush (e.g. Flywheel).";
+"preference.title.mobilegl_async_shader_compile" = "Async Shader Compile";
+"preference.detail.mobilegl_async_shader_compile" = "Enable asynchronous shader compilation. Auto uses background threads when available.";
+"preference.title.mobilegl_shader_cache" = "Shader Cache";
+"preference.detail.mobilegl_shader_cache" = "Enable shader translation cache. Caches compiled SPIR-V to reduce shader compilation stutter.";
+"preference.title.mobilegl_r11g11b10f_fallback" = "R11G11B10F Fallback";
+"preference.detail.mobilegl_r11g11b10f_fallback" = "Use format fallback for R11G11B10F textures. May improve compatibility with some mods.";
 
 "preference.title.debug_server_enabled" = "Debug HTTP server";
 "preference.detail.debug_server_enabled" = "Exposes a web panel on port 9090 for log tail, file browser, and game control. Token-protected. Toggle on to see the URL.";
@@ -403,6 +431,8 @@
 "preference.detail.debug_ipad_ui" = "Unlock iPad-exclusive UI (alert, keyboard, etc.) if enabled or iPhone UI if disabled.";
 "preference.title.debug_auto_correction" = "Auto correction";
 "preference.detail.debug_auto_correction" = "Enable auto correction when typing text in game.";
+"preference.title.debug_render_log" = "Render error logging";
+"preference.detail.debug_render_log" = "When ON, all render error logs are recorded (LTW wrapper + EGL diagnostics). Keep OFF (default) to fully disable render logging and avoid CPU/GPU overhead.";
 "preference.title.debug_hide_home_indicator" = "Hide home indicator";
 "preference.detail.debug_hide_home_indicator" = "This will disable home indicator locking. You will need to use Guided Access to hide and lock home indicator at the same time.";
 
@@ -826,12 +856,18 @@
 "settings.group.graphics_hint" = "Only the active renderer settings take effect.";
 "settings.group.mobileglues" = "MobileGlues";
 "settings.group.zink" = "Zink";
+"settings.group.moltenvk" = "MoltenVK";
+"settings.group.ltw" = "LTW";
 "settings.group.witch" = "Witch Server";
 "settings.group.curseforge" = "CurseForge";
 "settings.group.ai" = "AI";
 "settings.group.mic" = "Microphone";
 "settings.group.debug_opts" = "Debugging";
 "settings.group.dev_server" = "Debug Server";
+"preference.title.moltenvk_version" = "MoltenVK Version";
+"preference.title.angle_backend" = "ANGLE Backend";
+"preference.title.zink_mesa_version" = "Mesa Version";
+"preference.title.ltw_angle_backend" = "LTW ANGLE Backend";
 "settings.language.auto" = "Auto (device language)";
 
 /* Supplement: UI coverage (auto-added, keep sorted-ish by area) */

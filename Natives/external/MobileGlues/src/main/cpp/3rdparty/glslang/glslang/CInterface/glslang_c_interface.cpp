@@ -352,6 +352,10 @@ GLSLANG_EXPORT void glslang_shader_set_preamble(glslang_shader_t* shader, const 
     shader->shader->setPreamble(s);
 }
 
+GLSLANG_EXPORT void glslang_shader_set_source_entry_point(glslang_shader_t* shader, const char* s) {
+    shader->shader->setSourceEntryPoint(s);
+}
+
 GLSLANG_EXPORT void glslang_shader_set_entry_point(glslang_shader_t* shader, const char* s) {
     shader->shader->setEntryPoint(s);
 }

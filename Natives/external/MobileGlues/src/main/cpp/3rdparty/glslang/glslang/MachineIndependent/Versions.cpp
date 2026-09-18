@@ -4,6 +4,7 @@
 // Copyright (C) 2017, 2022-2024 Arm Limited.
 // Copyright (C) 2015-2020 Google, Inc.
 // Modifications Copyright (C) 2020 Advanced Micro Devices, Inc. All rights reserved.
+// Modifications Copyright (C) 2026 Valve Corporation.
 //
 // All rights reserved.
 //
@@ -169,7 +170,8 @@ void TParseVersions::initializeExtensionBehavior()
                                    {E_GL_NV_ray_tracing_motion_blur, EShTargetSpv_1_4},
                                    {E_GL_EXT_mesh_shader, EShTargetSpv_1_4},
                                    {E_GL_NV_cooperative_matrix2, EShTargetSpv_1_6},
-                                   {E_GL_NV_cooperative_matrix_decode_vector, EShTargetSpv_1_6}
+                                   {E_GL_NV_cooperative_matrix_decode_vector, EShTargetSpv_1_6},
+                                   {E_GL_EXT_cooperative_matrix_maintenance1, EShTargetSpv_1_3},
                                  };
 
     for (size_t ii = 0; ii < sizeof(exts) / sizeof(exts[0]); ii++) {
@@ -271,8 +273,10 @@ void TParseVersions::initializeExtensionBehavior()
     extensionBehavior[E_GL_EXT_expect_assume]                           = EBhDisable;
 
     extensionBehavior[E_GL_EXT_control_flow_attributes2]                = EBhDisable;
+    extensionBehavior[E_GL_EXT_function_control_attributes]             = EBhDisable;
     extensionBehavior[E_GL_EXT_spec_constant_composites]                = EBhDisable;
     extensionBehavior[E_GL_EXT_abort]                                   = EBhDisable;
+    extensionBehavior[E_GL_EXT_split_barrier]                           = EBhDisable;
 
     extensionBehavior[E_GL_KHR_cooperative_matrix]                      = EBhDisable;
     extensionBehavior[E_GL_NV_cooperative_vector]                       = EBhDisable;
@@ -337,8 +341,10 @@ void TParseVersions::initializeExtensionBehavior()
     // QCOM
     extensionBehavior[E_GL_QCOM_image_processing]                    = EBhDisable;
     extensionBehavior[E_GL_QCOM_image_processing2]                   = EBhDisable;
+    extensionBehavior[E_GL_QCOM_image_processing3]                   = EBhDisable;
     extensionBehavior[E_GL_QCOM_tile_shading]                        = EBhDisable;
     extensionBehavior[E_GL_QCOM_cooperative_matrix_conversion]       = EBhDisable;
+    extensionBehavior[E_GL_QCOM_multiple_wait_queues]                = EBhDisable;
 
     // AEP
     extensionBehavior[E_GL_ANDROID_extension_pack_es31a]             = EBhDisable;
@@ -410,6 +416,8 @@ void TParseVersions::initializeExtensionBehavior()
     extensionBehavior[E_GL_EXT_float_e2m3]                  = EBhDisable;
     extensionBehavior[E_GL_EXT_float_ue8m0]                 = EBhDisable;
     extensionBehavior[E_GL_EXT_float_mxint8]                = EBhDisable;
+    extensionBehavior[E_GL_EXT_optional_input_attachment_index] = EBhDisable;
+    extensionBehavior[E_GL_EXT_cooperative_matrix_maintenance1] = EBhDisable;
 
     // OVR extensions
     extensionBehavior[E_GL_OVR_multiview]                = EBhDisable;
@@ -480,6 +488,7 @@ void TParseVersions::getPreamble(std::string& preamble)
             "#define GL_EXT_blend_func_extended 1\n"
             "#define GL_EXT_descriptor_heap 1\n"
             "#define GL_EXT_structured_descriptor_heap 1\n"
+            "#define GL_EXT_split_barrier 1\n"
 
             // OES matching AEP
             "#define GL_OES_geometry_shader 1\n"
@@ -495,8 +504,10 @@ void TParseVersions::getPreamble(std::string& preamble)
 
             "#define GL_QCOM_image_processing 1\n"
             "#define GL_QCOM_image_processing2 1\n"
+            "#define GL_QCOM_image_processing3 1\n"
             "#define GL_QCOM_tile_shading 1\n"
             "#define GL_QCOM_cooperative_matrix_conversion 1\n"
+            "#define GL_QCOM_multiple_wait_queues 1\n"
             ;
 
             if (version >= 300) {
@@ -572,6 +583,8 @@ void TParseVersions::getPreamble(std::string& preamble)
             "#define GL_EXT_shader_integer_mix 1\n"
             "#define GL_EXT_spec_constant_composites 1\n"
             "#define GL_EXT_abort 1\n"
+            "#define GL_EXT_split_barrier 1\n"
+            "#define GL_EXT_cooperative_matrix_maintenance1 1\n"
 
             // GL_KHR_shader_subgroup
             "#define GL_KHR_shader_subgroup_basic 1\n"
@@ -633,8 +646,10 @@ void TParseVersions::getPreamble(std::string& preamble)
 
             "#define GL_QCOM_image_processing 1\n"
             "#define GL_QCOM_image_processing2 1\n"
+            "#define GL_QCOM_image_processing3 1\n"
             "#define GL_QCOM_tile_shading 1\n"
             "#define GL_QCOM_cooperative_matrix_conversion 1\n"
+            "#define GL_QCOM_multiple_wait_queues 1\n"
 
             "#define GL_EXT_shader_explicit_arithmetic_types 1\n"
             "#define GL_EXT_shader_explicit_arithmetic_types_int8 1\n"
@@ -658,6 +673,7 @@ void TParseVersions::getPreamble(std::string& preamble)
             "#define GL_EXT_texture_array 1\n"
 
             "#define GL_EXT_control_flow_attributes2 1\n"
+            "#define GL_EXT_function_control_attributes 1\n"
 
             "#define GL_EXT_integer_dot_product 1\n"
             "#define GL_EXT_bfloat16 1\n"
@@ -730,6 +746,11 @@ void TParseVersions::getPreamble(std::string& preamble)
             "#define GL_OVR_multiview 1\n"
             "#define GL_OVR_multiview2 1\n"
             ;
+    }
+
+    if ((!isEsProfile() && version >= 140) ||
+        (isEsProfile() && version >= 300)) {
+        preamble += "#define GL_EXT_optional_input_attachment_index 1\n";
     }
 
     // #line and #include
@@ -906,7 +927,7 @@ void TParseVersions::checkDeprecated(const TSourceLoc& loc, int profileMask, int
                 error(loc, "deprecated, may be removed in future release", featureDesc, "");
             else if (! suppressWarnings())
                 infoSink.info.message(EPrefixWarning, (TString(featureDesc) + " deprecated in version " +
-                                                       String(depVersion) + "; may be removed in future release").c_str(), 
+                                                       String(depVersion) + "; may be removed in future release").c_str(),
                                                        loc, messages & EShMsgAbsolutePath, messages & EShMsgDisplayErrorColumn);
         }
     }

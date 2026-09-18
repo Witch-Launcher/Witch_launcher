@@ -123,19 +123,6 @@ void glGetIntegerv(GLenum pname, GLint* params) {
         (*params) = g_current_ctx ? g_current_ctx->context_flags : 0;
         break;
     }
-    case GL_UNIFORM_BUFFER_OFFSET_ALIGNMENT: {
-        // Minecraft 1.21.6+ divides by this value at renderer init
-        // (DynamicUniformStorage/GlDevice). The ES backend reports 0 for this
-        // desktop query on some devices (e.g. iPhone 6s / A9 through ANGLE),
-        // which crashes the game with ArithmeticException (/ by zero). Promise a
-        // valid power-of-two alignment (16 is Apple's Metal/GLES3 minimum) when
-        // the backend has no answer.
-        GLint es_params = 0;
-        GLES.glGetIntegerv(pname, &es_params);
-        (*params) = es_params > 0 ? es_params : 16;
-        LOG_D("  -> %d", *params)
-        break;
-    }
     case GL_ARRAY_BUFFER_BINDING:
     case GL_ATOMIC_COUNTER_BUFFER_BINDING:
     case GL_COPY_READ_BUFFER_BINDING:
@@ -201,9 +188,6 @@ GLenum glGetError() {
     const GLenum frontend = g_frontend_error;
     g_frontend_error = GL_NO_ERROR;
 
-    printf("[MG-GETERR] returning NO_ERROR (backend=%s frontend=%s)\n", glEnumToString(backend),
-           glEnumToString(frontend));
-
     // GL_NO_ERROR, always, in every configuration and whatever ignoreError says.
     //
     // Deliberate, and not the same thing as not knowing. This layer emulates
@@ -219,8 +203,6 @@ GLenum glGetError() {
     // logcat even though the application will never be told.
     const GLenum swallowed = frontend != GL_NO_ERROR ? frontend : backend;
     if (swallowed != GL_NO_ERROR) {
-        printf("[MG-ERROR] glGetError delivering %s (backend=%s frontend=%s)\n", glEnumToString(swallowed),
-               glEnumToString(backend), glEnumToString(frontend));
         LOG_W("glGetError -> %s, reported to the application as GL_NO_ERROR", glEnumToString(swallowed))
     }
     return GL_NO_ERROR;
@@ -301,11 +283,7 @@ std::string getBeforeThirdSpace(const std::string& str) {
 }
 
 std::string getGpuName() {
-    const char* glRenderer = (const char*)GLES.glGetString(GL_RENDERER);
-    if (glRenderer == nullptr) {
-        return "<unknown>";
-    }
-    std::string gpuName = std::string(glRenderer);
+    std::string gpuName = std::string((char*)GLES.glGetString(GL_RENDERER));
 
     if (gpuName.empty()) {
         return "<unknown>";
@@ -343,8 +321,7 @@ std::string getGpuName() {
 }
 
 void set_es_version() {
-    const char* glVersion = (const char*)GLES.glGetString(GL_VERSION);
-    std::string ESVersionStr = glVersion ? getBeforeThirdSpace(std::string(glVersion)) : std::string();
+    std::string ESVersionStr = getBeforeThirdSpace(std::string((const char*)GLES.glGetString(GL_VERSION)));
     int major, minor;
 
     if (sscanf(ESVersionStr.c_str(), "OpenGL ES %d.%d", &major, &minor) == 2) {
@@ -359,8 +336,7 @@ void set_es_version() {
 }
 
 std::string getGLESName() {
-    const char* glVersion = (const char*)GLES.glGetString(GL_VERSION);
-    return glVersion ? getBeforeThirdSpace(std::string(glVersion)) : std::string();
+    return getBeforeThirdSpace(std::string((char*)GLES.glGetString(GL_VERSION)));
 }
 
 static std::string rendererString;

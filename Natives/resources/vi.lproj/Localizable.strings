@@ -112,7 +112,8 @@
 "launcher.menu.install_jar" = "Cài đặt tệp .jar";
 
 "launcher.wait_jit.title" = "Đang đợi JIT";
-"launcher.wait_jit.message" = "Amethyst phụ thuộc vào JIT để Java hoạt động ở mức tối đa hiệu năng.";
+"launcher.wait_jit.message" = "Bật JIT từ StikDebug hoặc SideStore rồi quay lại. Giữ LocalDevVPN kết nối. App nhận debugger đang attach (StikDebug) hoặc cờ CS_DEBUGGED (SideStore).";
+"launcher.wait_jit_stikdebug.message" = "iOS 26/27 cần StikDebug giữ debugger attached.\n\n1. Mở StikDebug (màn hình này sẽ cố mở tự động)\n2. Bật JIT cho app này và để toggle ON\n3. Quay lại đây — đừng detach debugger.\n\nUniversalJIT26.js đã được copy clipboard nếu bạn cần gán script.";
 
 "login.error.username.outOfRange" = "Tên người dùng phải có từ 3 đến 16 kí tự";
 
@@ -293,6 +294,8 @@
 "preference.detail.debug_ipad_ui" = "Mở khóa giao diện người dùng mở rộng cho iPad (thông báo, bàn phím,..) nếu được bật hoặc giao diện iPhone bị tắt.";
 "preference.title.debug_auto_correction" = "Tự động sửa";
 "preference.detail.debug_auto_correction" = "Cho phép tự động sửa khi nhập văn bản trong game.";
+"preference.title.debug_render_log" = "Ghi nhật kí lỗi Render";
+"preference.detail.debug_render_log" = "Khi BẬT, toàn bộ nhật kí lỗi của Render sẽ được ghi lại (LTW + chẩn đoán EGL). Giữ TẮT (mặc định) để tắt hoàn toàn, tránh gây giới hạn cho CPU/GPU khi render dòng log.";
 "preference.title.debug_hide_home_indicator" = "Ẩn thanh home";
 "preference.detail.debug_hide_home_indicator" = "Tùy chọn này sẽ tắt khoá thanh điều hướng. Sử dụng tính năng \"Truy cập được hướng dẫn\" để ẩn và khoá thanh điều hướng cùng lúc.";
 "preference.title.debug_show_layout_bounds" = "Hiển thị đường viền bố cục";
@@ -703,12 +706,18 @@
 "settings.group.graphics_hint" = "Chỉ cài đặt của renderer đang dùng mới có hiệu lực.";
 "settings.group.mobileglues" = "MobileGlues";
 "settings.group.zink" = "Zink";
+"settings.group.moltenvk" = "MoltenVK";
+"settings.group.ltw" = "LTW";
 "settings.group.witch" = "Máy chủ Witch";
 "settings.group.curseforge" = "CurseForge";
 "settings.group.ai" = "AI";
 "settings.group.mic" = "Micrô";
 "settings.group.debug_opts" = "Gỡ lỗi";
 "settings.group.dev_server" = "Máy chủ gỡ lỗi";
+"preference.title.moltenvk_version" = "Phiên bản MoltenVK";
+"preference.title.angle_backend" = "Backend ANGLE";
+"preference.title.zink_mesa_version" = "Phiên bản Mesa";
+"preference.title.ltw_angle_backend" = "Backend ANGLE LTW";
 "settings.language.auto" = "Tự động (theo máy)";
 
 /* Supplement: UI coverage (auto-added, keep sorted-ish by area) */
@@ -897,6 +906,7 @@
 "preference.title.enable_angle" = "Driver ANGLE ES";
 "preference.title.enable_ext_compute_shader" = "Mở rộng Compute Shader";
 "preference.title.enable_ext_direct_state_access" = "Direct State Access";
+"preference.title.enable_ext_gl43" = "Mở rộng OpenGL 4.3";
 "preference.title.enable_ext_timer_query" = "Mở rộng Timer Query";
 "preference.title.enable_no_error" = "Bỏ qua lỗi Shader";
 "preference.title.env_variables" = "Biến môi trường";
@@ -910,10 +920,33 @@
 "preference.title.renderer.debug.ltw" = "LTW (1.17+) - OpenGL 3.3 qua OpenGL ES/Metal, THỬ NGHIỆM";
 "preference.title.renderer.debug.mg" = "MobileGlues (1.17+) - xuất OpenGL 4.0, THỬ NGHIỆM";
 "preference.title.renderer.debug.vulkan" = "MoltenVK (Vulkan -> Metal trực tiếp)";
+"preference.title.renderer.debug.mobilegl" = "MobileGL (Vulkan) - xuất OpenGL 4.2 qua MoltenVK";
 "preference.title.zink_api_features" = "Bộ tính năng API";
 "preference.title.zink_enable_gl_thread" = "Luồng GL";
 "preference.title.zink_gl_override" = "Ghi đè phiên bản GL";
 "preference.title.zink_glsl_cache_size" = "Kích thước Cache GLSL (MB)";
+
+"settings.group.mobilegl" = "Cài đặt MobileGL";
+"preference.title.mobilegl_backend_type" = "Loại Backend";
+"preference.detail.mobilegl_backend_type" = "Chọn backend đồ họa. DirectVulkan dùng Vulkan/MoltenVK cho hiệu suất tốt nhất. DirectGLES dùng OpenGL ES dự phòng.";
+"preference.title.mobilegl_angle_backend" = "Backend ANGLE (khi dùng DirectGLES)";
+"preference.detail.mobilegl_angle_backend" = "Chọn backend ANGLE khi dùng OpenGL ES. VulkanANGLE: GLES → Vulkan → MoltenVK → Metal (hỗ trợ ES 3.2). MetalANGLE: GLES → Metal trực tiếp (hỗ trợ ES 3.0).";
+"preference.title.mobilegl_disable_timer_query" = "Tắt Timer Query";
+"preference.detail.mobilegl_disable_timer_query" = "Tắt truy vấn timer GPU. Có thể cải thiện hiệu suất trên một số thiết bị nhưng tắt đo FPS.";
+"preference.title.mobilegl_disable_subgroup" = "Tắt Subgroup";
+"preference.detail.mobilegl_disable_subgroup" = "Tắt thao tác subgroup shader Vulkan. Có thể giúp trên GPU cũ với subgroup giới hạn.";
+"preference.title.mobilegl_advertise_fp64" = "Thông báo FP64";
+"preference.detail.mobilegl_advertise_fp64" = "Thông báo hỗ trợ GL_ARB_gpu_shader_fp64. Double precision được giả lập thành 32-bit. Bật chỉ khi mod yêu cầu.";
+"preference.title.mobilegl_frames_in_flight" = "Frames đang xử lý";
+"preference.detail.mobilegl_frames_in_flight" = "Số frame đang xử lý đồng thời. Giá trị cao cải thiện thông lượng nhưng tăng độ trễ và bộ nhớ.";
+"preference.title.mobilegl_coherent_as_flush" = "Coherent = Flush";
+"preference.detail.mobilegl_coherent_as_flush" = "Coi map GL_MAP_FLUSH_EXPLICIT_BIT là coherent. Bật để tương thích với engine không bao giờ flush (vd: Flywheel).";
+"preference.title.mobilegl_async_shader_compile" = "Biên dịch Shader bất đồng bộ";
+"preference.detail.mobilegl_async_shader_compile" = "Bật biên dịch shader bất đồng bộ. Tự động dùng thread nền khi có sẵn.";
+"preference.title.mobilegl_shader_cache" = "Cache Shader";
+"preference.detail.mobilegl_shader_cache" = "Bật cache dịch shader. Cache SPIR-V đã biên dịch để giảm giật biên dịch shader.";
+"preference.title.mobilegl_r11g11b10f_fallback" = "Dự phòng R11G11B10F";
+"preference.detail.mobilegl_r11g11b10f_fallback" = "Dùng dự phòng định dạng cho texture R11G11B10F. Cải thiện tương thích với một số mod.";
 "profile.error.name_exists" = "Đã có profile trùng tên. Vui lòng dùng tên khác.";
 
 /* Supplement: progress/status coverage */
@@ -970,3 +1003,5 @@
 "jit.status" = "JIT: ...";
 "versions.header" = "PHIÊN BẢN";
 "versions.empty" = "Chưa cài phiên bản nào";
+"preference.title.renderer.debug.angle_vulkan" = "ANGLE Vulkan (ES 3.1) - OpenGL ES qua Vulkan";
+"preference.title.renderer.debug.angle_metal" = "ANGLE Metal (ES 3.2) - OpenGL ES qua Metal";

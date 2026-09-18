@@ -43,6 +43,8 @@
 // Vulkan → MoltenVK → Metal direct renderer. The on-disk value is kept as the
 // historical "libMoltenVK.dylib" so existing profiles/settings stay valid.
 #define RENDERER_NAME_MOLTENVK "libMoltenVK.dylib"
+// MobileGL: desktop OpenGL 4.2+ implementation via Vulkan/MoltenVK backend
+#define RENDERER_NAME_MOBILEGL "libMobileGL.dylib"
 
 #define SPECIALBTN_KEYBOARD -1
 #define SPECIALBTN_TOGGLECTRL -2
@@ -62,6 +64,8 @@ BOOL debugLogEnabled, isJailbroken;
 #define CS_DEBUGGED 0x10000000
 int csops(pid_t pid, unsigned int ops, void *useraddr, size_t usersize);
 BOOL isJITEnabled(BOOL checkCSOps);
+BOOL processIsCurrentlyDebugged(void);
+void requestExternalJITEnable(void);
 // legacy method used to check if we're using universal script
 void* JIT26CreateRegionLegacy(size_t len);
 // used for large memory regions

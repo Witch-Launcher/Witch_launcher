@@ -507,13 +507,20 @@
         [self finishLaunch];
         return;
     }
+
+    requestExternalJITEnable();
+
+    NSString *waitMessage;
     if (hasTrollStoreJIT) {
-        NSURL *jitURL = [NSURL URLWithString:[NSString stringWithFormat:@"apple-magnifier://enable-jit?bundle-id=%@", NSBundle.mainBundle.bundleIdentifier]];
-        [UIApplication.sharedApplication openURL:jitURL options:@{} completionHandler:nil];
+        waitMessage = localize(@"launcher.wait_jit_trollstore.message", nil);
+    } else if (DeviceNeedsDebugJITMapping()) {
+        waitMessage = localize(@"launcher.wait_jit_stikdebug.message", nil);
+    } else {
+        waitMessage = localize(@"launcher.wait_jit.message", nil);
     }
 
     self.jitAlert = [UIAlertController alertControllerWithTitle:localize(@"launcher.wait_jit.title", nil)
-        message:hasTrollStoreJIT ? localize(@"launcher.wait_jit_trollstore.message", nil) : localize(@"launcher.wait_jit.message", nil)
+        message:waitMessage
         preferredStyle:UIAlertControllerStyleAlert];
     [self.rootVC presentViewController:self.jitAlert animated:YES completion:nil];
 

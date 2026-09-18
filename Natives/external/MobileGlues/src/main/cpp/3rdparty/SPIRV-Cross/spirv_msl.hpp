@@ -286,7 +286,8 @@ static const uint32_t kBufferSizeBufferBinding = ~(2u);
 // will start at max(kArgumentBufferBinding) + 1.
 static const uint32_t kArgumentBufferBinding = ~(3u);
 
-static const uint32_t kMaxArgumentBuffers = 8;
+// Somewhat arbitrary. Can't be too large or it starts eating into builtin magic buffers, etc.
+static const uint32_t kMaxArgumentBuffers = 16;
 
 // Decompiles SPIR-V to Metal Shading Language
 class CompilerMSL : public CompilerGLSL
@@ -901,6 +902,7 @@ protected:
 		SPVFuncImplReduceAdd,
 		SPVFuncImplImageFence,
 		SPVFuncImplTextureCast,
+		SPVFuncImplDepthCast,
 		SPVFuncImplMulExtended,
 		SPVFuncImplSetMeshOutputsEXT,
 		SPVFuncImplAssume,
@@ -985,7 +987,7 @@ protected:
 
 	bool is_patch_block(const SPIRType &type);
 	bool is_non_native_row_major_matrix(uint32_t id) override;
-	bool member_is_non_native_row_major_matrix(const SPIRType &type, uint32_t index) override;
+	bool member_is_non_native_row_major_matrix(const SPIRType &type, uint32_t index, bool is_layout_disabled = false) override;
 	std::string convert_row_major_matrix(std::string exp_str, const SPIRType &exp_type, uint32_t physical_type_id,
 	                                     bool is_packed, bool relaxed) override;
 

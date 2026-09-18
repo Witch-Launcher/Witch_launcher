@@ -46,6 +46,13 @@ typedef NS_ENUM(NSInteger, AppleGPUGeneration) {
     AppleGPUGenerationM5  = 105
 };
 
+// Vulkan backend selection for Zink renderer
+typedef NS_ENUM(NSInteger, ZinkVulkanBackend) {
+    ZinkVulkanBackendAuto = 0,       // Auto-select based on GPU capability
+    ZinkVulkanBackendMoltenVK = 1,   // Use MoltenVK (all chips A9+)
+    ZinkVulkanBackendKosmicKrisp = 2 // Use KosmicKrisp Mesa driver (A13+ only)
+};
+
 @interface ZinkConfig : NSObject
 
 + (AppleGPUGeneration)deviceGPUGeneration;
@@ -54,6 +61,17 @@ typedef NS_ENUM(NSInteger, AppleGPUGeneration) {
 + (ZinkAPIFeatures)supportedAPIFeaturesForGPUGeneration:(AppleGPUGeneration)gen;
 + (ZinkAPIFeatures)supportedAPIFeatures;
 + (BOOL)isZinkRenderSelected;
+
++ (NSString *)selectedMesaVersion;
++ (NSString *)zinkLibraryName;
++ (BOOL)isZinkUsingEGL;
+
+// KosmicKrisp support detection (runtime MTLGPUFamily check)
++ (BOOL)deviceSupportsKosmicKrisp;
++ (BOOL)deviceSupportsKosmicKrispFull;  // A14+ = Vulkan 1.4
++ (BOOL)deviceSupportsKosmicKrispReduced; // A13 = Vulkan 1.2
++ (ZinkVulkanBackend)selectedVulkanBackend;
++ (NSString *)vulkanBackendName;
 
 + (void)applyZinkEnvironmentForOptimizationLevel:(ZinkOptimizationLevel)level;
 + (void)applyZinkEnvironmentFromPreferences;

@@ -6,8 +6,8 @@
 #include <EGL/egl.h>
 #include <GLES3/gl31.h>
 #include <dlfcn.h>
-#include <stdio.h>
 #include <stdlib.h>
+#include <stdio.h>
 #include <string.h>
 #include "proc.h"
 #include "egl.h"
@@ -20,12 +20,12 @@ INTERNAL eglMustCastToProperFunctionPointerType (*host_eglGetProcAddress)(const 
 INTERNAL es3_functions_t es3_functions;
 
 static void error_sysegl() {
-    fprintf(stderr, "LTWInit: Failed to load system EGL: %s\n", dlerror());
+    printf("LTWInit: Failed to load system EGL: %s\n", dlerror());
     abort();
 }
 
 static void error_init(const char* functionName) {
-    fprintf(stderr, "LTWInit: Failed to load function \"%s\"\n", functionName);
+    printf("LTWInit: Failed to load function \"%s\"\n", functionName);
     abort();
 }
 
@@ -39,7 +39,7 @@ static void init_es3_proc() {
 }
 
 __attribute__((constructor, used)) void proc_init(){
-    const char* systemEglPath = "@rpath/libtinygl4angle.dylib";
+    const char* systemEglPath = "libEGL.so";
     const char* eglPath = getenv("LIBGL_EGL") != NULL ? getenv("LIBGL_EGL") : systemEglPath;
     int flags = RTLD_LAZY | RTLD_LOCAL;
     void* eglHandle = dlopen(eglPath, flags);
@@ -56,13 +56,13 @@ __attribute__((constructor, used)) void proc_init(){
 }
 
 // This is exported for it to be automatically picked up by LWJGL's symbol resolver.
-__attribute__((used, visibility("default"))) eglMustCastToProperFunctionPointerType glXGetProcAddress(const char *procname) {
+__attribute__((used)) eglMustCastToProperFunctionPointerType glXGetProcAddress(const char *procname) {
     return eglGetProcAddress(procname);
 }
 
 extern void* resolve_stub(const char* procname);
 
-__attribute__((used, visibility("default"))) eglMustCastToProperFunctionPointerType eglGetProcAddress(const char *procname) {
+eglMustCastToProperFunctionPointerType eglGetProcAddress(const char *procname) {
     // EGL functions that we implement.
     // All of the other platform EGL functions will be redirected into Android's default EGL implementation.
     if(!strncmp(procname, "egl", 3)) {

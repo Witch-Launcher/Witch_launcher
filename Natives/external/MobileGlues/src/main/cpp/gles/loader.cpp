@@ -126,7 +126,14 @@ void* open_lib(const char** names, const char* override, bool* used_override) {
 }
 
 void load_libs() {
-#ifndef __APPLE__
+#if defined(__APPLE__)
+    // On iOS the launcher pre-loads the ANGLE/Metal backend with RTLD_GLOBAL
+    // before dlopen'ing this library. Using RTLD_DEFAULT lets dlsym find those
+    // pre-loaded symbols regardless of load order. RTLD_NEXT (the old value) only
+    // searches libraries loaded AFTER this one, which misses the pre-loaded ANGLE.
+    gles = RTLD_DEFAULT;
+    egl = RTLD_DEFAULT;
+#else
     const bool want_angle = global_settings.angle == AngleMode::Enabled;
     std::string gles_angle, egl_angle;
     const char* gles_override = want_angle ? angle_override(GLES_ANGLE, gles_angle) : nullptr;
@@ -143,72 +150,17 @@ void load_libs() {
     if (want_angle && !g_angle_in_use) {
         LOG_E("ANGLE was requested but was not loaded; running on the system driver\n")
     }
-#else
-    // Apple has no system EGL/GLES the way Android does; the process gets its
-    // GL exclusively from the ANGLE frameworks shipped with the launcher. MG's
-    // static init (proc_init) runs the moment the app dlopens this library, at
-    // an arbitrary point in the app's own dlopen sequence, so a relative lookup
-    // like dlsym(RTLD_NEXT, ...) has no reliable target. dlopen ANGLE right
-    // here and resolve every backend entry point from these handles instead.
-    g_angle_in_use = true;
-    gles = dlopen("@rpath/libGLESv2.framework/libGLESv2", RTLD_LAZY | RTLD_GLOBAL);
-    egl = dlopen("@rpath/libEGL.framework/libEGL", RTLD_LAZY | RTLD_GLOBAL);
-    if (gles == nullptr || egl == nullptr) {
-        LOG_E("LIBGL:failed to dlopen ANGLE frameworks: %s", dlerror())
-    }
 #endif
 }
-
-#ifdef __APPLE__
-static void* angle_proc_address(const char* name) {
-    static void* (*angle_ega)(const char*) = nullptr;
-    static void* angle_handle = nullptr;
-    if (angle_ega == nullptr) {
-        if (angle_handle == nullptr) {
-            angle_handle = dlopen("@rpath/libEGL.framework/libEGL", RTLD_LAZY | RTLD_GLOBAL);
-        }
-        if (angle_handle != nullptr) {
-            angle_ega = (void*(*)(const char*))dlsym(angle_handle, "eglGetProcAddress");
-        }
-    }
-    return angle_ega != nullptr ? angle_ega(name) : nullptr;
-}
-#endif
 
 void* proc_address(void* lib, const char* name) {
-    void* p = dlsym(lib, name);
-    if (p) return p;
-    // Some names ANGLE only answers through its own eglGetProcAddress magic
-    // (extension aliases, desktop compat entry points).
-#ifdef __APPLE__
-    if (lib == gles || lib == egl) {
-        void* q = angle_proc_address(name);
-        if (q) return q;
-    }
-#endif
-    return nullptr;
-}
-
-static bool gles_has_extension(const char* name) {
-    if (!GLES.glGetStringi)
-        return false;
-    GLint num_es_extensions = 0;
-    GLES.glGetIntegerv(GL_NUM_EXTENSIONS, &num_es_extensions);
-    for (GLint i = 0; i < num_es_extensions; ++i) {
-        const char* extension = (const char*)GLES.glGetStringi(GL_EXTENSIONS, i);
-        if (extension && strcmp(extension, name) == 0)
-            return true;
-    }
-    return false;
+    return dlsym(lib, name);
 }
 
 void set_hardware() {
     hardware = new hardware_s;
     set_es_version();
-    // Texture buffer emulation only when the backend lacks GL_EXT_texture_buffer;
-    // on ANGLE-Vulkan the EXT exists and the emulation's regex rewrite mangles
-    // desktop GLSL with nested texelFetch arguments.
-    if (hardware->es_version <= 310 && !gles_has_extension("GL_EXT_texture_buffer"))
+    if (hardware->es_version <= 310)
         hardware->emulate_texture_buffer = true;
     else
         hardware->emulate_texture_buffer = false;

@@ -39,15 +39,13 @@
             @"resolution": @(100),
             @"max_framerate": @YES,
             @"performance_hud": @NO,
-            @"frame_generation": @NO,
-            @"framegen_mode": @"motion_adaptive",
-            @"framegen_target_fps": @(60),
-            @"framegen_fg2_submode": @"interp",
             @"fullscreen_airplay": @YES,
             @"silence_other_audio": @NO,
             @"silence_with_switch": @NO,
             @"allow_microphone": @NO,
-            @"microphone_source": @"auto"
+            @"microphone_source": @"auto",
+            @"moltenvk_version": @"1.4",
+            @"ltw_angle_backend": @"metal"
         }.mutableCopy,
         @"control": @{
             @"default_ctrl": @"default.json",
@@ -118,10 +116,12 @@
         }.mutableCopy,
         @"mobileglues": @{
             @"enable_angle": @NO,
+            @"angle_backend": @"metal",
             @"enable_no_error": @(2),
             @"enable_ext_timer_query": @YES,
             @"enable_ext_compute_shader": @NO,
             @"enable_ext_direct_state_access": @YES,
+            @"enable_ext_gl43": @NO,
             @"max_glsl_cache_size": @(30),
             @"multidraw_mode": @(0),
             @"angle_depth_clear_fix_mode": @(0),
@@ -133,7 +133,19 @@
             @"gl_override": @(0),
             @"enable_gl_thread": @YES,
             @"glsl_cache_size": @(32),
-            @"api_features": @(0xFFFFFFFF)
+            @"api_features": @(0xFFFFFFFF),
+            @"mesa_version": @"26.2.2"
+        }.mutableCopy,
+        @"mobilegl": @{
+            @"backend_type": @"DirectVulkan",
+            @"disable_timer_query": @NO,
+            @"disable_subgroup": @NO,
+            @"advertise_fp64": @NO,
+            @"frames_in_flight": @(3),
+            @"coherent_as_flush": @NO,
+            @"async_shader_compile": @(0),
+            @"shader_cache": @(0),
+            @"r11g11b10f_fallback": @NO
         }.mutableCopy,
         @"witch": @{
             @"server_enabled": @YES,
@@ -170,6 +182,7 @@
             @"debug_hide_home_indicator": @NO,
             @"debug_ipad_ui": @(realUIIdiom == UIUserInterfaceIdiomPad),
             @"debug_auto_correction": @YES,
+            @"debug_render_log": @NO,
             @"debug_server_enabled": @NO,
             @"debug_server_port": @(9090),
             @"debug_server_token": @"",
@@ -284,18 +297,11 @@
         }
     }
 
-    // One-time: Apple init_settings() now reads config.json (previously the
-    // native defaults were hardcoded), so move stored values that equal the
-    // old defaults to the matching native defaults. Those stored values never
-    // took effect on iOS, so nothing the user observed changes.
-    NSMutableDictionary *mg = pref[@"mobileglues"];
+    // One-time migration: mark as done so this block never runs again.
+    // Previously forced-overwrote user values; now respects stored preferences.
     NSMutableDictionary *internal = pref[@"internal"];
-    if ([mg isKindOfClass:[NSMutableDictionary class]] &&
-        [internal isKindOfClass:[NSMutableDictionary class]] &&
+    if ([internal isKindOfClass:[NSMutableDictionary class]] &&
         ![internal[@"mg_apple_defaults_v1"] boolValue]) {
-        if ([mg[@"enable_no_error"] intValue] == 0) mg[@"enable_no_error"] = @(2); // Level1 = Partial
-        if ([mg[@"enable_ext_direct_state_access"] boolValue] == NO) mg[@"enable_ext_direct_state_access"] = @YES;
-        if ([mg[@"max_glsl_cache_size"] intValue] == 32) mg[@"max_glsl_cache_size"] = @(30);
         internal[@"mg_apple_defaults_v1"] = @YES;
     }
 
@@ -356,7 +362,7 @@
         return YES;
     }
     // Key doesn't exist yet — create it in the correct section
-    // Key path format: "section.keyname" (e.g. "video.framegen_mode")
+    // Key path format: "section.keyname" (e.g. "video.renderer")
     NSRange dotRange = [key rangeOfString:@"."];
     if (dotRange.location != NSNotFound) {
         NSString *section = [key substringToIndex:dotRange.location];

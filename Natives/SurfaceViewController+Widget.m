@@ -3,7 +3,6 @@
 #import "ThemeManager.h"
 #import "utils.h"
 #import "system_monitor.h"
-#import "framegen/framegen.h"
 
 #import <mach/mach.h>
 #import <QuartzCore/QuartzCore.h>
@@ -644,19 +643,8 @@ static NSString *widgetShortBytes(uint64_t bytes) {
         widgetLastFpsTime = 0;
     }
 
-    // FG FPS: show interpolated display FPS when frame generation is active
-    BOOL fgFpsOn = getPrefBool(@"general.widget_show_fgfps");
-    if (fgFpsOn) {
-        FGStats fg = fg_get_stats();
-        if (fg.isSupported && fg.isActive) {
-            self.widgetFgFpsLabel.text = [NSString stringWithFormat:@"FG: %.0f", fg.displayFPS];
-            self.widgetFgFpsLabel.hidden = NO;
-        } else {
-            self.widgetFgFpsLabel.hidden = YES;
-        }
-    } else {
-        self.widgetFgFpsLabel.hidden = YES;
-    }
+    // FG FPS removed - always hide the label
+    self.widgetFgFpsLabel.hidden = YES;
 
     // CPU/GPU/temperature/battery: sample at ~1Hz when any unit is enabled
     BOOL cpuOn = getPrefBool(@"general.widget_show_cpu");
@@ -835,12 +823,6 @@ static NSString *widgetShortBytes(uint64_t bytes) {
     if (fpsOn) {
         contentW = MAX(contentW, ceil([self.widgetFpsLabel sizeThatFits:CGSizeMake(CGFLOAT_MAX, 15)].width));
     }
-    if (fgFpsOn) {
-        FGStats fg = fg_get_stats();
-        if (fg.isSupported && fg.isActive) {
-            contentW = MAX(contentW, ceil([self.widgetFgFpsLabel sizeThatFits:CGSizeMake(CGFLOAT_MAX, 12)].width));
-        }
-    }
     if (ramTextOn) {
         contentW = MAX(contentW, ceil([self.widgetRamLabel sizeThatFits:CGSizeMake(CGFLOAT_MAX, 14)].width));
     }
@@ -890,13 +872,6 @@ static NSString *widgetShortBytes(uint64_t bytes) {
     if (fpsOn) {
         self.widgetFpsLabel.frame = CGRectMake(xPad, y, barW, 15);
         y += 17;
-    }
-    if (fgFpsOn) {
-        FGStats fg = fg_get_stats();
-        if (fg.isSupported && fg.isActive) {
-            self.widgetFgFpsLabel.frame = CGRectMake(xPad, y, barW, 12);
-            y += 14;
-        }
     }
     if (ramBarOn) {
         self.widgetBarView.frame = CGRectMake(xPad, y, barW, barH);
@@ -976,7 +951,7 @@ static NSString *widgetShortBytes(uint64_t bytes) {
     }
     CGFloat height = y + yPad - 5;
 
-    BOOL anyContentOn = fpsOn || fgFpsOn || ramTextOn || ramBarOn || tempOn || battOn || clockOn || cpuOn || gpuOn;
+    BOOL anyContentOn = fpsOn || ramTextOn || ramBarOn || tempOn || battOn || clockOn || cpuOn || gpuOn;
     if (!anyContentOn) {
         // Nothing enabled yet: keep a visible tile instead of an invisible sliver
         self.widgetEmptyIcon.hidden = NO;

@@ -78,8 +78,6 @@ extern "C"
     GLAPI GLAPIENTRY void glReadBuffer(GLenum src);
     GLAPI GLAPIENTRY GLenum glCheckFramebufferStatus(GLenum target);
 
-    GLuint mg_current_draw_fbo();
-
 #ifdef __cplusplus
 }
 #endif

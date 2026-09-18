@@ -8,7 +8,6 @@
 #import "CreditsService.h"
 #import "config.h"
 #import "CustomControlsViewController.h"
-#import "framegen/framegen.h"
 #import "AmethystBlurView.h"
 #import <PhotosUI/PhotosUI.h>
 #import <UniformTypeIdentifiers/UniformTypeIdentifiers.h>
@@ -86,17 +85,6 @@
             @{@"type": @"switch", @"label": localize(@"preference.title.max_framerate", nil), @"key": @"video.max_framerate"},
             @{@"type": @"switch", @"label": localize(@"preference.title.performance_hud", nil), @"key": @"video.performance_hud"},
             @{@"type": @"switch", @"label": localize(@"preference.title.fullscreen_airplay", nil), @"key": @"video.fullscreen_airplay"},
-            header(@"settings.group.framegen"),
-            @{@"type": @"switch", @"label": localize(@"preference.title.frame_generation", nil), @"key": @"video.frame_generation"},
-            @{@"type": @"slider", @"label": localize(@"preference.title.framegen_target_fps", nil), @"key": @"video.framegen_target_fps", @"min": @30, @"max": @120, @"suffix": @" FPS"},
-            @{@"type": @"picker", @"label": localize(@"preference.title.framegen_mode", nil), @"key": @"video.framegen_mode", @"default": @"motion_adaptive", @"options": @[
-                @{@"key": @"motion_adaptive", @"name": localize(@"preference.title.framegen_mode.motion_adaptive", nil)},
-                @{@"key": @"camera_reproject", @"name": localize(@"preference.title.framegen_mode.camera_reproject", nil)}
-            ]},
-            @{@"type": @"picker", @"label": localize(@"preference.title.framegen_fg2_submode", nil), @"key": @"video.framegen_fg2_submode", @"default": @"interp", @"options": @[
-                @{@"key": @"interp", @"name": localize(@"preference.title.framegen_fg2_submode.interp", nil)},
-                @{@"key": @"predict", @"name": localize(@"preference.title.framegen_fg2_submode.predict", nil)}
-            ]},
             header(@"settings.group.java"),
             @{@"type": @"picker", @"label": localize(@"preference.title.lwjgl_version", nil), @"key": @"java.lwjgl_version", @"options": lwjglItems, @"default": @"(auto)"},
             @{@"type": @"slider", @"label": localize(@"preference.title.allocated_memory", nil), @"key": @"java.allocated_memory", @"min": @256, @"max": @((NSProcessInfo.processInfo.physicalMemory / 1048576) * 0.85), @"suffix": @"MB"},
@@ -162,23 +150,41 @@
         ]},
         @{@"title": localize(@"Graphics", nil), @"items": @[
             header(@"settings.group.graphics_hint"),
+            header(@"settings.group.moltenvk"),
+            @{@"type": @"picker", @"label": localize(@"preference.title.moltenvk_version", nil), @"key": @"video.moltenvk_version", @"options": @[@"1.2", @"1.4"], @"default": @"1.4"},
             header(@"settings.group.mobileglues"),
             @{@"type": @"switch", @"label": localize(@"preference.title.enable_angle", nil), @"key": @"mobileglues.enable_angle"},
+            @{@"type": @"picker", @"label": localize(@"preference.title.angle_backend", nil), @"key": @"mobileglues.angle_backend", @"options": @[@"metal", @"vulkan"], @"default": @"metal"},
             @{@"type": @"picker", @"label": localize(@"preference.title.enable_no_error", nil), @"key": @"mobileglues.enable_no_error", @"options": @[@"0", @"1", @"2"], @"default": @"2"},
             @{@"type": @"switch", @"label": localize(@"preference.title.enable_ext_timer_query", nil), @"key": @"mobileglues.enable_ext_timer_query"},
             @{@"type": @"switch", @"label": localize(@"preference.title.enable_ext_compute_shader", nil), @"key": @"mobileglues.enable_ext_compute_shader"},
             @{@"type": @"switch", @"label": localize(@"preference.title.enable_ext_direct_state_access", nil), @"key": @"mobileglues.enable_ext_direct_state_access"},
+            @{@"type": @"switch", @"label": localize(@"preference.title.enable_ext_gl43", nil), @"key": @"mobileglues.enable_ext_gl43"},
             @{@"type": @"slider", @"label": localize(@"preference.title.max_glsl_cache_size", nil), @"key": @"mobileglues.max_glsl_cache_size", @"min": @8, @"max": @512, @"suffix": @"MB"},
             @{@"type": @"picker", @"label": localize(@"preference.title.multidraw_mode", nil), @"key": @"mobileglues.multidraw_mode", @"options": @[@"0", @"1", @"2", @"3"], @"default": @"0"},
             @{@"type": @"switch", @"label": localize(@"preference.title.angle_depth_clear_fix_mode", nil), @"key": @"mobileglues.angle_depth_clear_fix_mode"},
             @{@"type": @"picker", @"label": localize(@"preference.title.custom_gl_version", nil), @"key": @"mobileglues.custom_gl_version", @"options": glVersions, @"default": @"0"},
             @{@"type": @"picker", @"label": localize(@"preference.title.fsr1_setting", nil), @"key": @"mobileglues.fsr1_setting", @"options": @[@"0", @"1", @"2", @"3", @"4", @"5"], @"default": @"0"},
+            header(@"settings.group.ltw"),
+            @{@"type": @"picker", @"label": localize(@"preference.title.ltw_angle_backend", nil), @"key": @"video.ltw_angle_backend", @"options": @[@"metal", @"vulkan"], @"default": @"metal"},
             header(@"settings.group.zink"),
+            @{@"type": @"picker", @"label": localize(@"preference.title.zink_mesa_version", nil), @"key": @"zink.mesa_version", @"options": @[@"25.0.7", @"26.2.2"], @"default": @"26.2.2"},
             @{@"type": @"picker", @"label": localize(@"preference.title.optimization_level", nil), @"key": @"zink.optimization_level", @"options": zinkOptLevels, @"default": @"-1"},
             @{@"type": @"picker", @"label": localize(@"preference.title.zink_gl_override", nil), @"key": @"zink.gl_override", @"options": @[@"0", @"3.3", @"4.0", @"4.1", @"4.3", @"4.6"], @"default": @"0"},
             @{@"type": @"switch", @"label": localize(@"preference.title.zink_enable_gl_thread", nil), @"key": @"zink.enable_gl_thread"},
             @{@"type": @"slider", @"label": localize(@"preference.title.zink_glsl_cache_size", nil), @"key": @"zink.glsl_cache_size", @"min": @8, @"max": @512, @"suffix": @"MB"},
             @{@"type": @"picker", @"label": localize(@"preference.title.zink_api_features", nil), @"key": @"zink.api_features", @"options": @[@"0", @"1", @"2", @"3"], @"default": @"3"},
+            header(@"settings.group.mobilegl"),
+            @{@"type": @"picker", @"label": localize(@"preference.title.mobilegl_backend_type", nil), @"key": @"mobilegl.backend_type", @"options": @[@"DirectVulkan", @"DirectGLES"], @"default": @"DirectVulkan"},
+            @{@"type": @"picker", @"label": localize(@"preference.title.mobilegl_angle_backend", nil), @"key": @"mobilegl.angle_backend", @"options": @[@"vulkan", @"metal"], @"default": @"vulkan"},
+            @{@"type": @"switch", @"label": localize(@"preference.title.mobilegl_disable_timer_query", nil), @"key": @"mobilegl.disable_timer_query"},
+            @{@"type": @"switch", @"label": localize(@"preference.title.mobilegl_disable_subgroup", nil), @"key": @"mobilegl.disable_subgroup"},
+            @{@"type": @"switch", @"label": localize(@"preference.title.mobilegl_advertise_fp64", nil), @"key": @"mobilegl.advertise_fp64"},
+            @{@"type": @"slider", @"label": localize(@"preference.title.mobilegl_frames_in_flight", nil), @"key": @"mobilegl.frames_in_flight", @"min": @1, @"max": @8, @"suffix": @""},
+            @{@"type": @"switch", @"label": localize(@"preference.title.mobilegl_coherent_as_flush", nil), @"key": @"mobilegl.coherent_as_flush"},
+            @{@"type": @"picker", @"label": localize(@"preference.title.mobilegl_async_shader_compile", nil), @"key": @"mobilegl.async_shader_compile", @"options": @[@"0", @"1", @"2"], @"default": @"0"},
+            @{@"type": @"picker", @"label": localize(@"preference.title.mobilegl_shader_cache", nil), @"key": @"mobilegl.shader_cache", @"options": @[@"0", @"1", @"2"], @"default": @"0"},
+            @{@"type": @"switch", @"label": localize(@"preference.title.mobilegl_r11g11b10f_fallback", nil), @"key": @"mobilegl.r11g11b10f_fallback"},
         ]},
         @{@"title": localize(@"Network", nil), @"items": @[
             header(@"settings.group.witch"),
@@ -240,6 +246,7 @@
             @{@"type": @"switch", @"label": localize(@"preference.title.debug_always_attached_jit", nil), @"key": @"debug.debug_always_attached_jit"},
             @{@"type": @"switch", @"label": localize(@"preference.title.debug_hide_home_indicator", nil), @"key": @"debug.debug_hide_home_indicator"},
             @{@"type": @"switch", @"label": localize(@"preference.title.debug_auto_correction", nil), @"key": @"debug.debug_auto_correction"},
+            @{@"type": @"switch", @"label": localize(@"preference.title.debug_render_log", nil), @"key": @"debug.debug_render_log"},
             header(@"settings.group.dev_server"),
             @{@"type": @"switch", @"label": localize(@"preference.title.debug_server_enabled", nil), @"key": @"debug.debug_server_enabled"},
             @{@"type": @"text", @"label": localize(@"preference.title.debug_server_port", nil), @"key": @"debug.debug_server_port", @"placeholder": @"9090"},
@@ -1146,11 +1153,6 @@
         [self reloadTables];
     } else if ([item[@"key"] isEqualToString:@"general.liquid_glass"]) {
         [[NSNotificationCenter defaultCenter] postNotificationName:@"LiquidGlassDidChangeNotification" object:nil];
-    } else if ([item[@"key"] isEqualToString:@"video.frame_generation"]) {
-        [[NSUserDefaults standardUserDefaults] setBool:sender.on forKey:@"video.frame_generation"];
-        [[NSUserDefaults standardUserDefaults] synchronize];
-        fg_set_enabled(sender.on);
-        NSLog(@"[Settings] Frame Generation toggled: %d", sender.on);
     }
 }
 
@@ -1193,8 +1195,6 @@
         setPrefFloat(item[@"key"], val);
         if ([item[@"key"] isEqualToString:@"video.resolution"]) {
             [[NSNotificationCenter defaultCenter] postNotificationName:@"ResolutionDidChangeNotification" object:nil];
-        } else if ([item[@"key"] isEqualToString:@"video.framegen_target_fps"]) {
-            fg_set_target_fps((int)val);
         } else if ([item[@"key"] isEqualToString:@"control.mouse_scale"] || [item[@"key"] isEqualToString:@"control.button_scale"] || [item[@"key"] isEqualToString:@"control.mouse_speed"]) {
             // Live update virtual mouse / button scale without relaunch
             [[NSNotificationCenter defaultCenter] postNotificationName:@"ControlScaleDidChangeNotification" object:nil];
@@ -1258,12 +1258,6 @@
                 } else if ([item[@"key"] isEqualToString:@"launcher.logo_style"]) {
                     applyLauncherAppIcon();
                     [[NSNotificationCenter defaultCenter] postNotificationName:@"LauncherLogoDidChangeNotification" object:nil];
-                } else if ([item[@"key"] isEqualToString:@"video.framegen_mode"]) {
-                    BOOL isCamera = [key isEqualToString:@"camera_reproject"];
-                    fg_set_mode(isCamera ? FG_MODE_CAMERA_REPROJECT : FG_MODE_MOTION_ADAPTIVE);
-                } else if ([item[@"key"] isEqualToString:@"video.framegen_fg2_submode"]) {
-                    BOOL isPredict = [key isEqualToString:@"predict"];
-                    fg_set_fg2_submode(isPredict ? FG2_SUBMODE_PREDICT : FG2_SUBMODE_INTERP);
                 }
                 [self reloadTables];
             }]];

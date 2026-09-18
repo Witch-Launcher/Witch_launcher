@@ -3,6 +3,8 @@
 #import <QuartzCore/QuartzCore.h>
 
 #include <dlfcn.h>
+#include <stdlib.h>
+#include <string.h>
 #include "bridge_tbl.h"
 #include "environ.h"
 #include "gl_bridge.h"
@@ -11,33 +13,94 @@
 static EGLDisplay g_EglDisplay;
 static egl_library handle;
 static void* ltw_handle;
+static void* g_mgl_handle = NULL;  // MobileGL handle for direct GL resolution
+
+// Render-log gate (Developer option "Render error logging", default OFF).
+// When OFF, all per-frame diagnostics (glReadPixels readbacks, swap logs,
+// layer/window dumps) are skipped so logging can never throttle the
+// CPU/GPU or pollute the GL error state mid-frame.
+static BOOL EGLRenderLogEnabled(void) {
+    static BOOL checked = NO;
+    static BOOL enabled = NO;
+    if (!checked) {
+        checked = YES;
+        const char *v = getenv("AMETHYST_RENDER_LOG");
+        enabled = (v && v[0] == '1');
+    }
+    return enabled;
+}
 
 static void* resolve_egl(void* from, void* fallback, const char* name) {
     void* fn = from ? dlsym(from, name) : NULL;
     if (!fn && fallback && fallback != from) fn = dlsym(fallback, name);
+    if (!fn) fn = dlsym(RTLD_DEFAULT, name);
     return fn;
+}
+
+// Resolve a GL function, preferring MobileGL's own symbol to avoid
+// flat_namespace collision with MobileGlues/libtinygl4angle.
+static void* resolve_gl(const char* name) {
+    if (g_mgl_handle) {
+        void* fn = dlsym(g_mgl_handle, name);
+        if (fn) return fn;
+    }
+    return handle.eglGetProcAddress ? handle.eglGetProcAddress(name) : NULL;
 }
 
 void dlsym_EGL() {
     NSString *renderer = NSProcessInfo.processInfo.environment[@"AMETHYST_RENDERER"];
     BOOL useLTW = [@ RENDERER_NAME_LTW isEqualToString: renderer];
     BOOL useMG = [@ RENDERER_NAME_MOBILEGLUES isEqualToString: renderer];
+    BOOL useMGL = [@ RENDERER_NAME_MOBILEGL isEqualToString: renderer];
 
     void* dl_handle = NULL;   // ANGLE backend
     void* mg_handle = NULL;   // MobileGlues layer (MG renderer only)
+    void* mgl_handle = NULL;  // MobileGL layer (MGL renderer only)
+    NSString *fwPath = NSBundle.mainBundle.privateFrameworksPath;
 
-    if (useMG) {
+    if (useMGL) {
+        // MobileGL links Vulkan symbols (vkCreateInstance etc.) at build time
+        // but does NOT link a Vulkan library on iOS (MOBILEGL_VULKAN_LIBRARY was empty).
+        // We must load MoltenVK FIRST with RTLD_GLOBAL so its Vulkan symbols are
+        // in the global symbol table when MobileGL's VulkanRenderer resolves them.
+        void* mvk = dlopen("@rpath/libMoltenVK.dylib", RTLD_LAZY | RTLD_GLOBAL);
+        if (!mvk) mvk = dlopen([fwPath stringByAppendingPathComponent:@"libMoltenVK.dylib"].UTF8String, RTLD_LAZY | RTLD_GLOBAL);
+        if (!mvk) {
+            // Fallback: libvulkan.dylib is a thin loader wrapper
+            mvk = dlopen("@rpath/libvulkan.dylib", RTLD_LAZY | RTLD_GLOBAL);
+            if (!mvk) mvk = dlopen([fwPath stringByAppendingPathComponent:@"libvulkan.dylib"].UTF8String, RTLD_LAZY | RTLD_GLOBAL);
+        }
+        NSLog(@"[EGLBridge] MoltenVK preload: %s", mvk ? "OK" : dlerror());
+
+        // MobileGL implements the whole EGL/GL layer on top of Vulkan/MoltenVK.
+        // dlopen it and resolve every EGL entry point from its own handle.
+        mgl_handle = dlopen("@rpath/libMobileGL.dylib", RTLD_LAZY | RTLD_GLOBAL);
+        if (!mgl_handle) mgl_handle = dlopen([fwPath stringByAppendingPathComponent:@"libMobileGL.dylib"].UTF8String, RTLD_LAZY | RTLD_GLOBAL);
+        if (!mgl_handle) {
+            NSLog(@"EGLBridge: Failed to load libMobileGL.dylib: %s", dlerror());
+        }
+        g_mgl_handle = mgl_handle;
+        // Only load ANGLE wrapper for DirectGLES backend (fallback).
+        // DirectVulkan renders through Vulkan/MoltenVK directly.
+        const char *backendType = getenv("MOBILEGL_BACKEND_TYPE");
+        if (backendType && strcmp(backendType, "DirectGLES") == 0) {
+            dl_handle = dlopen("@rpath/libtinygl4angle.dylib", RTLD_GLOBAL);
+            if (!dl_handle) dl_handle = dlopen([fwPath stringByAppendingPathComponent:@"libtinygl4angle.dylib"].UTF8String, RTLD_LAZY | RTLD_GLOBAL);
+        }
+    } else if (useMG) {
         // MobileGlues implements the whole EGL/GL layer on top of the ANGLE
         // frameworks. dlopen it first — its static init loads and binds the
         // ANGLE backend (libGLESv2/libEGL) itself, so load order does not
         // matter — then resolve every EGL entry point from MG's own handle so
         // the whole context/surface lifecycle runs through MG's wrappers.
         mg_handle = dlopen("@rpath/libmobileglues.dylib", RTLD_LAZY | RTLD_GLOBAL);
+        if (!mg_handle) mg_handle = dlopen([fwPath stringByAppendingPathComponent:@"libmobileglues.dylib"].UTF8String, RTLD_LAZY | RTLD_GLOBAL);
         if (!mg_handle) {
             NSLog(@"EGLBridge: Failed to load libmobileglues.dylib: %s", dlerror());
         }
         // Make sure the ANGLE backend is present for fallback resolution.
         dl_handle = dlopen("@rpath/libtinygl4angle.dylib", RTLD_GLOBAL);
+        if (!dl_handle) dl_handle = dlopen([fwPath stringByAppendingPathComponent:@"libtinygl4angle.dylib"].UTF8String, RTLD_LAZY | RTLD_GLOBAL);
         if (!dl_handle) {
             dl_handle = dlopen("@rpath/libEGL.framework/libEGL", RTLD_GLOBAL);
         }
@@ -46,6 +109,7 @@ void dlsym_EGL() {
         }
     } else {
         dl_handle = dlopen("@rpath/libtinygl4angle.dylib", RTLD_GLOBAL);
+        if (!dl_handle) dl_handle = dlopen([fwPath stringByAppendingPathComponent:@"libtinygl4angle.dylib"].UTF8String, RTLD_LAZY | RTLD_GLOBAL);
         if (!dl_handle) {
             dl_handle = dlopen("@rpath/libEGL.framework/libEGL", RTLD_LOCAL);
         }
@@ -55,29 +119,30 @@ void dlsym_EGL() {
         }
     }
 
-    handle.eglBindAPI = resolve_egl(useMG ? mg_handle : NULL, dl_handle, "eglBindAPI");
-    handle.eglChooseConfig = resolve_egl(useMG ? mg_handle : NULL, dl_handle, "eglChooseConfig");
-    handle.eglCreateContext = resolve_egl(useMG ? mg_handle : NULL, dl_handle, "eglCreateContext");
-    handle.eglDestroyContext = resolve_egl(useMG ? mg_handle : NULL, dl_handle, "eglDestroyContext");
-    handle.eglMakeCurrent = resolve_egl(useMG ? mg_handle : NULL, dl_handle, "eglMakeCurrent");
-    handle.eglGetProcAddress = resolve_egl(useMG ? mg_handle : NULL, dl_handle, "eglGetProcAddress");
-    handle.eglCreateWindowSurface = resolve_egl(useMG ? mg_handle : NULL, dl_handle, "eglCreateWindowSurface");
-    handle.eglDestroySurface = resolve_egl(useMG ? mg_handle : NULL, dl_handle, "eglDestroySurface");
-    handle.eglGetConfigAttrib = resolve_egl(useMG ? mg_handle : NULL, dl_handle, "eglGetConfigAttrib");
-    handle.eglGetCurrentContext = resolve_egl(useMG ? mg_handle : NULL, dl_handle, "eglGetCurrentContext");
-    handle.eglGetDisplay = resolve_egl(useMG ? mg_handle : NULL, dl_handle, "eglGetDisplay");
-    handle.eglGetError = resolve_egl(useMG ? mg_handle : NULL, dl_handle, "eglGetError");
-    handle.eglGetPlatformDisplay = resolve_egl(useMG ? mg_handle : NULL, dl_handle, "eglGetPlatformDisplay");
-    handle.eglInitialize = resolve_egl(useMG ? mg_handle : NULL, dl_handle, "eglInitialize");
-    handle.eglSwapBuffers = resolve_egl(useMG ? mg_handle : NULL, dl_handle, "eglSwapBuffers");
-    handle.eglReleaseThread = resolve_egl(useMG ? mg_handle : NULL, dl_handle, "eglReleaseThread");
-    handle.eglSwapInterval = resolve_egl(useMG ? mg_handle : NULL, dl_handle, "eglSwapInterval");
-    handle.eglTerminate = resolve_egl(useMG ? mg_handle : NULL, dl_handle, "eglTerminate");
-    handle.eglGetCurrentSurface = resolve_egl(useMG ? mg_handle : NULL, dl_handle, "eglGetCurrentSurface");
-    handle.eglGetConfigs = resolve_egl(useMG ? mg_handle : NULL, dl_handle, "eglGetConfigs");
-    handle.eglQueryString = resolve_egl(useMG ? mg_handle : NULL, dl_handle, "eglQueryString");
-    handle.eglQuerySurface = resolve_egl(useMG ? mg_handle : NULL, dl_handle, "eglQuerySurface");
-    handle.eglCreatePbufferSurface = resolve_egl(useMG ? mg_handle : NULL, dl_handle, "eglCreatePbufferSurface");
+    void* primary_handle = useMGL ? mgl_handle : (useMG ? mg_handle : NULL);
+    handle.eglBindAPI = resolve_egl(primary_handle, dl_handle, "eglBindAPI");
+    handle.eglChooseConfig = resolve_egl(primary_handle, dl_handle, "eglChooseConfig");
+    handle.eglCreateContext = resolve_egl(primary_handle, dl_handle, "eglCreateContext");
+    handle.eglDestroyContext = resolve_egl(primary_handle, dl_handle, "eglDestroyContext");
+    handle.eglMakeCurrent = resolve_egl(primary_handle, dl_handle, "eglMakeCurrent");
+    handle.eglGetProcAddress = resolve_egl(primary_handle, dl_handle, "eglGetProcAddress");
+    handle.eglCreateWindowSurface = resolve_egl(primary_handle, dl_handle, "eglCreateWindowSurface");
+    handle.eglDestroySurface = resolve_egl(primary_handle, dl_handle, "eglDestroySurface");
+    handle.eglGetConfigAttrib = resolve_egl(primary_handle, dl_handle, "eglGetConfigAttrib");
+    handle.eglGetCurrentContext = resolve_egl(primary_handle, dl_handle, "eglGetCurrentContext");
+    handle.eglGetDisplay = resolve_egl(primary_handle, dl_handle, "eglGetDisplay");
+    handle.eglGetError = resolve_egl(primary_handle, dl_handle, "eglGetError");
+    handle.eglGetPlatformDisplay = resolve_egl(primary_handle, dl_handle, "eglGetPlatformDisplay");
+    handle.eglInitialize = resolve_egl(primary_handle, dl_handle, "eglInitialize");
+    handle.eglSwapBuffers = resolve_egl(primary_handle, dl_handle, "eglSwapBuffers");
+    handle.eglReleaseThread = resolve_egl(primary_handle, dl_handle, "eglReleaseThread");
+    handle.eglSwapInterval = resolve_egl(primary_handle, dl_handle, "eglSwapInterval");
+    handle.eglTerminate = resolve_egl(primary_handle, dl_handle, "eglTerminate");
+    handle.eglGetCurrentSurface = resolve_egl(primary_handle, dl_handle, "eglGetCurrentSurface");
+    handle.eglGetConfigs = resolve_egl(primary_handle, dl_handle, "eglGetConfigs");
+    handle.eglQueryString = resolve_egl(primary_handle, dl_handle, "eglQueryString");
+    handle.eglQuerySurface = resolve_egl(primary_handle, dl_handle, "eglQuerySurface");
+    handle.eglCreatePbufferSurface = resolve_egl(primary_handle, dl_handle, "eglCreatePbufferSurface");
 
     if (useLTW) {
         // Load LTW with RTLD_GLOBAL so its symbols (including eglGetProcAddress
@@ -99,6 +164,13 @@ void dlsym_EGL() {
         if (!handle.eglCreateContext) handle.eglCreateContext = dlsym(dl_handle, "eglCreateContext");
         if (!handle.eglDestroyContext) handle.eglDestroyContext = dlsym(dl_handle, "eglDestroyContext");
         if (!handle.eglMakeCurrent) handle.eglMakeCurrent = dlsym(dl_handle, "eglMakeCurrent");
+        if (!handle.eglGetProcAddress) handle.eglGetProcAddress = dlsym(dl_handle, "eglGetProcAddress");
+    }
+
+    if (useMGL && mgl_handle) {
+        // MobileGL exports GL functions via eglGetProcAddress.
+        // Resolve eglGetProcAddress from MobileGL so GL lookups go through its dispatch.
+        handle.eglGetProcAddress = dlsym(mgl_handle, "eglGetProcAddress");
         if (!handle.eglGetProcAddress) handle.eglGetProcAddress = dlsym(dl_handle, "eglGetProcAddress");
     }
 }
@@ -139,7 +211,7 @@ static void diag_probe_context(EGLint renderableType, EGLint depthSize) {
         NSLog(@"EGLBridge: [probe rt=0x%x depth=%d] makeCurrent failed 0x%x", renderableType, depthSize, handle.eglGetError());
     } else {
         typedef const unsigned char* (*glGetStringFn)(unsigned int);
-        glGetStringFn glGetString = (glGetStringFn)handle.eglGetProcAddress("glGetString");
+        glGetStringFn glGetString = (glGetStringFn)resolve_gl("glGetString");
         if (glGetString) {
             NSLog(@"EGLBridge: [probe rt=0x%x depth=%d] GL_VERSION=%s", renderableType, depthSize, glGetString(0x1F02));
             NSLog(@"EGLBridge: [probe rt=0x%x depth=%d] GL_RENDERER=%s", renderableType, depthSize, glGetString(0x1F01));
@@ -185,17 +257,29 @@ static void diag_dump_configs() {
 }
 
 static bool gl_init() {
+    NSLog(@"[EGLBridge] gl_init: calling dlsym_EGL");
     dlsym_EGL();
 
+    if (!handle.eglGetDisplay) {
+        NSLog(@"[EGLBridge] FATAL eglGetDisplay not resolved");
+        return false;
+    }
+    NSLog(@"[EGLBridge] gl_init: calling eglGetDisplay");
     g_EglDisplay = handle.eglGetDisplay(EGL_DEFAULT_DISPLAY);
     if (g_EglDisplay == EGL_NO_DISPLAY) {
-        NSDebugLog(@"EGLBridge: eglGetDisplay(EGL_DEFAULT_DISPLAY) returned EGL_NO_DISPLAY");
+        NSLog(@"[EGLBridge] eglGetDisplay(EGL_DEFAULT_DISPLAY) returned EGL_NO_DISPLAY");
         return false;
     }
+    if (!handle.eglInitialize) {
+        NSLog(@"[EGLBridge] FATAL eglInitialize not resolved");
+        return false;
+    }
+    NSLog(@"[EGLBridge] gl_init: calling eglInitialize");
     if (!handle.eglInitialize(g_EglDisplay, NULL, NULL)) {
-        NSDebugLog(@"EGLBridge: Error eglInitialize() failed: 0x%x", handle.eglGetError());
+        NSLog(@"[EGLBridge] eglInitialize() failed: 0x%x", handle.eglGetError());
         return false;
     }
+    NSLog(@"[EGLBridge] gl_init: success");
     return true;
 }
 
@@ -219,32 +303,32 @@ gl_render_window_t* gl_init_context(gl_render_window_t *share) {
     EGLint num_configs;
     EGLint vid;
     if (!handle.eglChooseConfig(g_EglDisplay, attribs, &bundle->config, 1, &num_configs)) {
-        NSDebugLog(@"EGLBridge: Error couldn't get an EGL visual config: 0x%x", handle.eglGetError());
+        NSLog(@"[EGLBridge] Error couldn't get an EGL visual config: 0x%x", handle.eglGetError());
         free(bundle);
         return NULL;
     }
     if (!bundle->config || num_configs == 0) {
-        NSLog(@"EGLBridge: No suitable EGL config found (num_configs=%d, config=%p)", num_configs, bundle->config);
+        NSLog(@"[EGLBridge] No suitable EGL config found (num_configs=%d, config=%p)", num_configs, bundle->config);
         diag_dump_configs();
         free(bundle);
         return NULL;
     }
 
     if (!handle.eglGetConfigAttrib(g_EglDisplay, bundle->config, EGL_NATIVE_VISUAL_ID, &vid)) {
-        NSDebugLog(@"EGLBridge: Error eglGetConfigAttrib() failed: 0x%x", handle.eglGetError());
+        NSLog(@"[EGLBridge] Error eglGetConfigAttrib() failed: 0x%x", handle.eglGetError());
         free(bundle);
         return NULL;
     }
 
     EGLBoolean bindResult;
     if (angleDesktopGL) {
-        NSDebugLog(@"EGLBridge: Binding to desktop OpenGL");
+        NSLog(@"[EGLBridge] Binding to desktop OpenGL");
         bindResult = handle.eglBindAPI(EGL_OPENGL_API);
     } else {
-        NSDebugLog(@"EGLBridge: Binding to OpenGL ES");
+        NSLog(@"[EGLBridge] Binding to OpenGL ES");
         bindResult = handle.eglBindAPI(EGL_OPENGL_ES_API);
     }
-    if (!bindResult) NSDebugLog(@"EGLBridge: bind failed: %p\n", handle.eglGetError());
+    if (!bindResult) NSLog(@"[EGLBridge] bind failed: %p\n", handle.eglGetError());
 
     CALayer *layer = SurfaceViewController.surface.layer;
     if ([layer isKindOfClass:CAMetalLayer.class]) {
@@ -253,17 +337,28 @@ gl_render_window_t* gl_init_context(gl_render_window_t *share) {
                                      ml.bounds.size.height * ml.contentsScale);
         if (ml.drawableSize.width == 0 || ml.drawableSize.height == 0) {
             ml.drawableSize = wantSize;
+            if (EGLRenderLogEnabled())
             NSLog(@"EGLBridge: [diag] drawableSize was zero, set to %@ before surface creation", NSStringFromCGSize(ml.drawableSize));
         }
     }
 
     bundle->surface = handle.eglCreateWindowSurface(g_EglDisplay, bundle->config, (__bridge EGLNativeWindowType)SurfaceViewController.surface.layer, NULL);
     if (!bundle->surface) {
-        NSDebugLog(@"EGLBridge: eglCreateWindowSurface finished with error: 0x%x", handle.eglGetError());
+        NSLog(@"[EGLBridge] eglCreateWindowSurface failed: 0x%x", handle.eglGetError());
         free(bundle);
         return NULL;
     }
 
+    if ([layer isKindOfClass:CAMetalLayer.class]) {
+        CAMetalLayer *ml = (CAMetalLayer *)layer;
+        CGSize wantSize = CGSizeMake(ml.bounds.size.width * ml.contentsScale,
+                                     ml.bounds.size.height * ml.contentsScale);
+        if (ml.drawableSize.width == 0 || ml.drawableSize.height == 0) {
+            ml.drawableSize = wantSize;
+        }
+    }
+
+    if (EGLRenderLogEnabled()) {
     EGLint surfW = 0, surfH = 0;
     handle.eglQuerySurface(g_EglDisplay, bundle->surface, EGL_WIDTH, &surfW);
     handle.eglQuerySurface(g_EglDisplay, bundle->surface, EGL_HEIGHT, &surfH);
@@ -272,12 +367,6 @@ gl_render_window_t* gl_init_context(gl_render_window_t *share) {
           layer.contentsScale, layer.opaque, layer.hidden, layer.superlayer);
     if ([layer isKindOfClass:CAMetalLayer.class]) {
         CAMetalLayer *ml = (CAMetalLayer *)layer;
-        CGSize wantSize = CGSizeMake(ml.bounds.size.width * ml.contentsScale,
-                                     ml.bounds.size.height * ml.contentsScale);
-        if (ml.drawableSize.width == 0 || ml.drawableSize.height == 0) {
-            ml.drawableSize = wantSize;
-            NSLog(@"EGLBridge: [diag] drawableSize was zero, set to %@", NSStringFromCGSize(ml.drawableSize));
-        }
         NSLog(@"EGLBridge: [diag] metal layer pixelFormat=0x%x framebufferOnly=%d drawableSize=%@",
               (unsigned int)ml.pixelFormat, ml.framebufferOnly, NSStringFromCGSize(ml.drawableSize));
     }
@@ -306,6 +395,7 @@ gl_render_window_t* gl_init_context(gl_render_window_t *share) {
         walk(w, 0);
         NSLog(@"EGLBridge: [diag] window tree:%@", tree);
     }
+    }
 
     const EGLint ctx_attribs[] = {
         EGL_CONTEXT_CLIENT_VERSION, 3,
@@ -313,10 +403,11 @@ gl_render_window_t* gl_init_context(gl_render_window_t *share) {
     };
     bundle->context = handle.eglCreateContext(g_EglDisplay, bundle->config, share ? share->context : EGL_NO_CONTEXT, ctx_attribs);
     if (!bundle->context) {
-        NSDebugLog(@"EGLBridge: Error eglCreateContext finished with error: 0x%x", handle.eglGetError());
+        NSLog(@"[EGLBridge] eglCreateContext failed: 0x%x", handle.eglGetError());
         free(bundle);
         return NULL;
     }
+    NSLog(@"[EGLBridge] gl_init_context: OK surface=%p context=%p", bundle->surface, bundle->context);
     //NSDebugLog(@"EGLBridge: Created CTX pointer = %p (source = %p)", bundle->context, share?share->context:0);
 
     return bundle;
@@ -324,16 +415,59 @@ gl_render_window_t* gl_init_context(gl_render_window_t *share) {
 
 void gl_make_current(gl_render_window_t* bundle) {
     if(!bundle) {
+        NSLog(@"[EGLBridge] gl_make_current: unbinding");
         if(handle.eglMakeCurrent(g_EglDisplay, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT)) {
             currentBundle = NULL;
         }
         return;
     }
 
+    NSLog(@"[EGLBridge] gl_make_current: display=%p surface=%p context=%p",
+          (void*)g_EglDisplay, (void*)bundle->surface, (void*)bundle->context);
     if(handle.eglMakeCurrent(g_EglDisplay, bundle->surface, bundle->surface, bundle->context)) {
         currentBundle = (basic_render_window_t *)bundle;
+        NSLog(@"[EGLBridge] gl_make_current: OK, currentBundle=%p", currentBundle);
+
+        // --- Deep diagnostic: verify MobileGL EGL state ---
+        typedef void* (*eglGetCurrentContextFn)(void);
+        eglGetCurrentContextFn gCtx = (eglGetCurrentContextFn)handle.eglGetCurrentContext;
+        NSLog(@"[EGLBridge] DIAG eglGetCurrentContext=%p", gCtx ? gCtx() : NULL);
+
+        // --- Test VK function availability (Vulkan symbols from MoltenVK) ---
+        void* vkLib = dlopen("@rpath/libMoltenVK.dylib", RTLD_NOLOAD);
+        if (vkLib) {
+            void* vkCreate = dlsym(vkLib, "vkCreateInstance");
+            void* vkGetProc = dlsym(vkLib, "vkGetInstanceProcAddr");
+            NSLog(@"[EGLBridge] DIAG MoltenVK vkCreateInstance=%p vkGetInstanceProcAddr=%p", vkCreate, vkGetProc);
+            dlclose(vkLib);
+        }
+
+        // --- Test GL functions (via MobileGL dlsym, bypassing flat_namespace collision) ---
+        typedef const unsigned char* (*glGetStringFn)(unsigned int);
+        typedef int (*glGetErrorFn)(void);
+        typedef void (*glGetIntegervFn)(unsigned int, int*);
+        glGetStringFn testGetString = (glGetStringFn)resolve_gl("glGetString");
+        glGetErrorFn testGetError = (glGetErrorFn)resolve_gl("glGetError");
+        glGetIntegervFn testGetIntegerv = (glGetIntegervFn)resolve_gl("glGetIntegerv");
+        NSLog(@"[EGLBridge] DIAG resolve_gl: glGetError=%p glGetString=%p glGetIntegerv=%p",
+              testGetError, testGetString, testGetIntegerv);
+
+        if (testGetError) NSLog(@"[EGLBridge] DIAG glGetError()=0x%x", testGetError());
+        if (testGetIntegerv) {
+            int major = 0, minor = 0;
+            testGetIntegerv(0x1F02 /* GL_VERSION */, &major); // intentionally wrong enum to test
+            NSLog(@"[EGLBridge] DIAG GL_VERSION(int)=%d err=0x%x", major, testGetError ? testGetError() : -1);
+        }
+        if (testGetString) {
+            const unsigned char* ver = testGetString(0x1F02 /* GL_VERSION */);
+            NSLog(@"[EGLBridge] DIAG GL_VERSION(str)=%s", ver ? (const char*)ver : "(null)");
+            const unsigned char* vendor = testGetString(0x1F00 /* GL_VENDOR */);
+            NSLog(@"[EGLBridge] DIAG GL_VENDOR=%s", vendor ? (const char*)vendor : "(null)");
+            const unsigned char* renderer = testGetString(0x1F01 /* GL_RENDERER */);
+            NSLog(@"[EGLBridge] DIAG GL_RENDERER=%s", renderer ? (const char*)renderer : "(null)");
+        }
     } else {
-        NSLog(@"EGLBridge: eglMakeCurrent returned with error: 0x%x", handle.eglGetError());
+        NSLog(@"[EGLBridge] eglMakeCurrent returned with error: 0x%x", handle.eglGetError());
     }
 }
 
@@ -343,8 +477,8 @@ static void diag_read_pixels(EGLint w, EGLint h) {
     static glReadPixelsFn readPixels = NULL;
     static glGetErrorFn getError = NULL;
     if (!readPixels) {
-        readPixels = (glReadPixelsFn)handle.eglGetProcAddress("glReadPixels");
-        getError = (glGetErrorFn)handle.eglGetProcAddress("glGetError");
+        readPixels = (glReadPixelsFn)resolve_gl("glReadPixels");
+        getError = (glGetErrorFn)resolve_gl("glGetError");
     }
     if (!readPixels) {
         NSLog(@"EGLBridge: [readback] no glReadPixels");
@@ -358,15 +492,27 @@ static void diag_read_pixels(EGLint w, EGLint h) {
               pts[i][0], pts[i][1], px[0], px[1], px[2], px[3], getError ? getError() : 0);
     }
     typedef void (*glBindFramebufferFn)(unsigned int, unsigned int);
+    typedef void (*glGetIntegervFn)(unsigned int, int *);
     static glBindFramebufferFn bindFB = NULL;
-    if (!bindFB) bindFB = (glBindFramebufferFn)handle.eglGetProcAddress("glBindFramebuffer");
+    static glGetIntegervFn getIntegerv = NULL;
+    if (!bindFB) {
+        bindFB = (glBindFramebufferFn)resolve_gl("glBindFramebuffer");
+        getIntegerv = (glGetIntegervFn)resolve_gl("glGetIntegerv");
+    }
     if (bindFB) {
+        // Save the game's READ_FRAMEBUFFER binding and restore it afterwards
+        // so the probe can never disturb game rendering or leave a GL error
+        // behind for the game's own glGetError checks.
+        int prevReadFB = 0;
+        if (getIntegerv) getIntegerv(0x8CA6 /*GL_READ_FRAMEBUFFER_BINDING*/, &prevReadFB);
         unsigned char px2[4] = { 0xAB, 0xCD, 0xEF, 0x12 };
         bindFB(0x8CA8 /*GL_READ_FRAMEBUFFER*/, 2);
         readPixels(0, 0, 1, 1, 0x1908 /*GL_RGBA*/, 0x1401 /*GL_UNSIGNED_BYTE*/, px2);
         NSLog(@"EGLBridge: [readback-fb2 @0,0] R=%u G=%u B=%u A=%u err=0x%x",
               px2[0], px2[1], px2[2], px2[3], getError ? getError() : 0);
-        bindFB(0x8CA8 /*GL_READ_FRAMEBUFFER*/, 0);
+        bindFB(0x8CA8 /*GL_READ_FRAMEBUFFER*/, (unsigned int)prevReadFB);
+        // Drain any error the probe itself produced.
+        if (getError) while (getError() != 0) {}
     }
 }
 
@@ -374,9 +520,10 @@ void gl_swap_buffers() {
     if (!currentBundle) return;
     static int swapCount = 0;
     swapCount++;
-    if (swapCount == 2 || swapCount == 3 || swapCount == 4 || swapCount == 5 ||
-        swapCount == 10 || swapCount == 20 || swapCount == 50 || swapCount == 100 ||
-        swapCount == 200 || swapCount == 300 || swapCount == 600) {
+    if (EGLRenderLogEnabled() &&
+        (swapCount == 2 || swapCount == 3 || swapCount == 4 || swapCount == 5 ||
+         swapCount == 10 || swapCount == 20 || swapCount == 50 || swapCount == 100 ||
+         swapCount == 200 || swapCount == 300 || swapCount == 600)) {
         EGLint w = 0, h = 0;
         handle.eglQuerySurface(g_EglDisplay, currentBundle->gl.surface, EGL_WIDTH, &w);
         handle.eglQuerySurface(g_EglDisplay, currentBundle->gl.surface, EGL_HEIGHT, &h);
@@ -386,7 +533,7 @@ void gl_swap_buffers() {
     if (!handle.eglSwapBuffers(g_EglDisplay, currentBundle->gl.surface)) {
         if (handle.eglGetError() == EGL_BAD_SURFACE)
             NSLog(@"eglSwapBuffers error 0x%x", handle.eglGetError());
-    } else if (swapCount <= 5 || (swapCount % 300) == 0) {
+    } else if (EGLRenderLogEnabled() && (swapCount <= 5 || (swapCount % 300) == 0)) {
         NSLog(@"EGLBridge: swap #%d ok", swapCount);
     }
 }

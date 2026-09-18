@@ -100,7 +100,6 @@ set(LTW_INCLUDES
   "${LTW_DIR}/glsl_optimizer/src"
   "${LTW_DIR}/vgpu_shaderconv"
   "${LTW_DIR}/unordered_map"
-  "${CMAKE_CURRENT_LIST_DIR}/external/MobileGlues/src/main/cpp/include"
 )
 
 include(cmake/ltw_sources.cmake)
@@ -113,6 +112,7 @@ list(FILTER GLSL_OPTIMIZER_SRC EXCLUDE REGEX ".*u_debug_stack_android\\.cpp$")
 
 add_library(glsl_optimizer STATIC ${GLSL_OPTIMIZER_SRC})
 target_include_directories(glsl_optimizer PRIVATE ${LTW_INCLUDES})
+target_include_directories(glsl_optimizer PRIVATE "${CMAKE_CURRENT_LIST_DIR}/external/MoltenVK/External/Vulkan-Headers/include")
 set_target_properties(glsl_optimizer PROPERTIES
   POSITION_INDEPENDENT_CODE ON
   CXX_STANDARD 17
@@ -124,11 +124,11 @@ target_compile_definitions(glsl_optimizer PRIVATE
   UTL_ARCH_LITTLE_ENDIAN UNIX
   HAVE_OPENGL HAVE_OPENGL_ES_1 HAVE_OPENGL_ES_2
   HAVE_TIMESPEC_GET HAVE_STRUCT_TIMESPEC
-  VK_DESCRIPTOR_TYPE_INLINE_UNIFORM_BLOCK=VK_DESCRIPTOR_TYPE_INLINE_UNIFORM_BLOCK_EXT
 )
 
 add_library(ltw SHARED ${LTW_CORE_SRC})
 target_include_directories(ltw PRIVATE ${LTW_INCLUDES})
+target_include_directories(ltw PRIVATE "${CMAKE_CURRENT_LIST_DIR}/external/MobileGlues/src/main/cpp/include")
 target_link_libraries(ltw
   "${GLOBAL_LDFLAGS}"
   -Wl,-force_load,$<TARGET_FILE:glsl_optimizer>
@@ -248,9 +248,7 @@ add_executable(Witch
   ctxbridges/gl_bridge.m
   ctxbridges/osm_bridge.m
   ctxbridges/vk_bridge.m
-
-  framegen/framegen.mm
-  framegen/framegen_jni_bridge.m
+  ctxbridges/mesa_egl_bridge.m
 
   debug/DebugServer.m
  
@@ -307,6 +305,7 @@ add_executable(Witch
   system_monitor.m
 egl_bridge.m
     ZinkConfig.m
+    MobileGLConfig.m
     input_bridge_v3.m
     ios_uikit_bridge.m
     utils.m
@@ -420,8 +419,8 @@ set_target_properties(Witch PROPERTIES
   MACOSX_BUNDLE TRUE
   MACOSX_FRAMEWORK_IDENTIFIER org.cmake.ExecutableTarget
   MACOSX_BUNDLE_INFO_PLIST "${CMAKE_CURRENT_LIST_DIR}/Info.plist"
-  CXX_STANDARD 17
+  CXX_STANDARD 23
   CXX_STANDARD_REQUIRED ON
-  OBJCXX_STANDARD 17
+  OBJCXX_STANDARD 23
   OBJCXX_STANDARD_REQUIRED ON
 )

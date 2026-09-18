@@ -18,6 +18,7 @@
 
 #include "utils.h"
 #include "ZinkConfig.h"
+#include "MobileGLConfig.h"
 
 #import "ios_uikit_bridge.h"
 #import "JavaLauncher.h"
@@ -27,8 +28,6 @@
 #import "VersionDirectoryManager.h"
 #import "TouchControllerManager.h"
 #import "authenticator/BaseAuthenticator.h"
-#import "framegen/framegen.h"
-
 static NSString *dhNativeLibPath = nil;
 
 // Forward declaration for DH fix
@@ -196,14 +195,22 @@ void init_loadMobileGluesConfig() {
 
     NSMutableDictionary *config = [NSMutableDictionary dictionary];
 
-    // Set safe defaults for compatibility, then let user preferences override
-    config[@"enableExtGL43"] = @1;
+    config[@"enableExtGL43"] = @0;
     config[@"enableExtDirectStateAccess"] = @1;
     config[@"maxGlslCacheSize"] = @128;
     config[@"customGLVersion"] = @0x030100;
 
+    id enableExtGL43 = getPrefObject(@"mobileglues.enable_ext_gl43");
+    if (enableExtGL43) config[@"enableExtGL43"] = [enableExtGL43 boolValue] ? @1 : @0;
+
     id enableAngle = getPrefObject(@"mobileglues.enable_angle");
     if (enableAngle) config[@"enableANGLE"] = [enableAngle boolValue] ? @1 : @0;
+
+    id angleBackend = getPrefObject(@"mobileglues.angle_backend");
+    if (angleBackend) {
+        NSString *backend = [angleBackend isKindOfClass:[NSString class]] ? (NSString *)angleBackend : @"metal";
+        config[@"angleBackend"] = backend;
+    }
 
     id enableNoError = getPrefObject(@"mobileglues.enable_no_error");
     if (enableNoError) config[@"enableNoError"] = @([enableNoError intValue]);
@@ -259,6 +266,55 @@ void init_loadMobileGluesConfig() {
     } else {
         NSLog(@"[JavaLauncher] Failed to serialize MobileGlues config: %@", error);
     }
+
+    // Set MoltenVK version env var for Java-side awareness
+    id mvkVersion = getPrefObject(@"video.moltenvk_version");
+    NSString *mvkVer = (mvkVersion && [mvkVersion isKindOfClass:[NSString class]]) ? (NSString *)mvkVersion : @"1.4";
+    setenv("MOLTENVK_VERSION", mvkVer.UTF8String, 1);
+    NSLog(@"[JavaLauncher] MoltenVK version: %@", mvkVer);
+}
+
+void init_loadMobileGLConfig() {
+    NSString *renderer = [PLProfiles resolveKeyForCurrentProfile:@"renderer"];
+    if (![renderer isEqualToString:@ RENDERER_NAME_MOBILEGL]) {
+        return;
+    }
+
+    // Apply MobileGL environment variables from preferences
+    [MobileGLConfig applyEnvironmentFromPreferences];
+    NSLog(@"[JavaLauncher] MobileGL config applied");
+    NSLog(@"[MobileGL] %@", [MobileGLConfig activeConfigSummary]);
+}
+
+void init_loadLTWConfig() {
+    // debug.debug_render_log (Developer option, default OFF):
+    //   OFF = quiet mode. LTW ignores GL errors (same policy as MobileGlues
+    //         enable_no_error) so a single unsupported call cannot abort the
+    //         game (e.g. Minecraft 26 GlDevice.createTexture throwing
+    //         "OpenGL error 1282"), and every per-frame render log is
+    //         disabled to avoid CPU/GPU overhead from formatting + writing
+    //         thousands of log lines (which froze the launcher on 26.x).
+    //   ON  = strict + verbose. All render error logs are recorded for
+    //         debugging (LTW wrapper logs, EGL readback/diag).
+    BOOL renderLog = getPrefBool(@"debug.debug_render_log");
+    if (renderLog) {
+        unsetenv("LIBGL_NOERROR");
+        setenv("LTW_DEBUG", "1", 1);
+        setenv("LTW_RENDER_LOG", "1", 1);
+        setenv("AMETHYST_RENDER_LOG", "1", 1);
+        NSLog(@"[JavaLauncher] Render error logging ENABLED (LTW strict mode + verbose render logs)");
+    } else {
+        setenv("LIBGL_NOERROR", "1", 1);
+        setenv("LTW_DEBUG", "0", 1);
+        setenv("LTW_RENDER_LOG", "0", 1);
+        setenv("AMETHYST_RENDER_LOG", "0", 1);
+    }
+
+    // ANGLE backend selection for LTW: metal (MetalANGLE, ES 3.0) or vulkan (VulkanANGLE, ES 3.2)
+    id angleBackend = getPrefObject(@"video.ltw_angle_backend");
+    NSString *backend = (angleBackend && [angleBackend isKindOfClass:[NSString class]]) ? (NSString *)angleBackend : @"metal";
+    setenv("LTW_ANGLE_BACKEND", backend.UTF8String, 1);
+    NSLog(@"[JavaLauncher] LTW ANGLE backend: %@", backend);
 }
 
 void init_loadCustomJvmFlags(int* argc, const char** argv) {
@@ -290,17 +346,8 @@ void init_loadCustomJvmFlags(int* argc, const char** argv) {
     }
 }
 
-// Diagnostics: whether a debugger (StikDebug) is currently attached via
-// ptrace. Sandboxed apps may get EPERM from sysctl — log it either way.
 static BOOL processIsDebugged(void) {
-    struct kinfo_proc info = {0};
-    size_t size = sizeof(info);
-    int mib[4] = {CTL_KERN, KERN_PROC, KERN_PROC_PID, getpid()};
-    if (sysctl(mib, 4, &info, &size, NULL, 0) != 0) {
-        NSLog(@"[JavaLauncher] sysctl KERN_PROC_PID failed: %s", strerror(errno));
-        return NO;
-    }
-    return (info.kp_proc.p_flag & P_TRACED) != 0;
+    return processIsCurrentlyDebugged();
 }
 
 // The JIT26 / mirror brk stubs (#0xf00d, #0x6a) are serviced by StikDebug's
@@ -354,6 +401,8 @@ int launchJVMWithArgs(NSString *username, id launchTarget, int width, int height
     init_loadDefaultEnv();
     init_loadCustomEnv();
     init_loadMobileGluesConfig();
+    init_loadLTWConfig();
+    init_loadMobileGLConfig();
 
     DeviceGetJITFlags(YES);
     BOOL requiresDebugJITMapping = DeviceNeedsDebugJITMapping();
@@ -704,9 +753,25 @@ int launchJVMWithArgs(NSString *username, id launchTarget, int width, int height
         // a GL entry point (compat code, shader build, etc.) MobileGlues can
         // route it through Vulkan rather than crashing like a context-less
         // gl4es would.
-        const char *openglLibName = (strcmp(glLibName, RENDERER_NAME_MOLTENVK) == 0)
-            ? RENDERER_NAME_MOBILEGLUES
-            : glLibName;
+        const char *openglLibName;
+        if (strcmp(glLibName, RENDERER_NAME_MOBILEGL) == 0) {
+            // MobileGL exports GL functions via its own EGL implementation.
+            // LWJGL must load libMobileGL.dylib directly so its GL function
+            // pointers resolve from the library that owns the current context.
+            openglLibName = RENDERER_NAME_MOBILEGL;
+            NSLog(@"[JavaLauncher] opengl.libname → %s (MobileGL native)", openglLibName);
+        } else if (strcmp(glLibName, RENDERER_NAME_MOLTENVK) == 0) {
+            // MoltenVK: use MobileGlues for GL entry points
+            openglLibName = RENDERER_NAME_MOBILEGLUES;
+            NSLog(@"[JavaLauncher] opengl.libname → %s (MoltenVK fallback)", openglLibName);
+        } else if ([ZinkConfig isZinkUsingEGL]) {
+            // Mesa 26.2.2 (EGL): LWJGL must resolve GL procs from libEGL.1.dylib
+            openglLibName = "libEGL_Mesa26.dylib";
+            NSLog(@"[JavaLauncher] opengl.libname → %s (Mesa 26.2.2 EGL mode)", openglLibName);
+        } else {
+            openglLibName = glLibName;
+            NSLog(@"[JavaLauncher] opengl.libname → %s (renderer default)", openglLibName);
+        }
         margv[++margc] = [NSString stringWithFormat:@"-Dorg.lwjgl.opengl.libname=%s", openglLibName].UTF8String;
     }
 
@@ -728,23 +793,6 @@ int launchJVMWithArgs(NSString *username, id launchTarget, int width, int height
     NSString *librariesPath = [NSString stringWithFormat:@"%@/libs", NSBundle.mainBundle.bundlePath];
     margv[++margc] = [NSString stringWithFormat:@"-javaagent:%@/cacio-init-agent.jar=", librariesPath].UTF8String;
     margv[++margc] = [NSString stringWithFormat:@"-javaagent:%@/patchjna_agent.jar=", librariesPath].UTF8String;
-    BOOL fgEnabled = getPrefBool(@"video.frame_generation");
-    [[NSUserDefaults standardUserDefaults] setBool:fgEnabled forKey:@"video.frame_generation"];
-    [[NSUserDefaults standardUserDefaults] synchronize];
-    fg_set_enabled(fgEnabled);
-
-    // Frame Generation works with all renderers that use MetalVK→MoltenVK→Metal pipeline:
-    // MobileGlues, LTW, Zink (VK_ZINK), MoltenVK, MTL_ANGLE, OSMesa
-    if (fgEnabled) {
-        BOOL usesMoltenVK = [renderer isEqualToString:@ RENDERER_NAME_MOLTENVK]
-                         || [renderer isEqualToString:@ RENDERER_NAME_MOBILEGLUES]
-                         || [renderer isEqualToString:@ RENDERER_NAME_LTW]
-                         || [renderer hasPrefix:@"libOSMesa"]
-                         || [renderer isEqualToString:@ RENDERER_NAME_MTL_ANGLE];
-        if (usesMoltenVK) {
-            margv[++margc] = [NSString stringWithFormat:@"-javaagent:%@/framegen-agent.jar=", librariesPath].UTF8String;
-        }
-    }
     if(getPrefBool(@"general.cosmetica")) {
         margv[++margc] = [NSString stringWithFormat:@"-javaagent:%@/arc_dns_injector.jar=23.95.137.176", librariesPath].UTF8String;
     }

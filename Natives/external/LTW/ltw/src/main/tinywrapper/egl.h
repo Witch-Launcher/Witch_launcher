@@ -69,7 +69,7 @@ typedef struct {
 typedef struct {
     EGLContext phys_context;
     bool context_rdy;
-    bool es31, es32, buffer_storage, buffer_texture_ext, multidraw_indirect, timer_query;
+    bool es31, es32, buffer_storage, buffer_texture_ext, multidraw_indirect, timer_query, base_instance;
     GLint shader_version;
     basevertex_renderer_t basevertex;
     PFNGLDRAWELEMENTSBASEVERTEXPROC drawelementsbasevertex;
@@ -93,10 +93,7 @@ typedef struct {
     char** extra_extensions_array;
 } context_t;
 
-extern __thread context_t *internal_current_context;
-extern context_t* ltw_get_current_context(void);
-#define current_context ltw_get_current_context()
-
+extern thread_local context_t *current_context;
 extern void init_egl();
 extern GLenum get_textarget_query_param(GLenum target);
 

@@ -175,6 +175,7 @@
 "preference.title.renderer.debug.gl4es" = "gl4es 1.1.4 - OpenGL版本2.1";
 "preference.title.renderer.debug.angle" = "ANGLE（仅支持1.17+）- exports OpenGL 版本 3.2";
 "preference.title.renderer.debug.zink" = "Zink (Mesa 25) - exports OpenGL 4.1 via MoltenVK";
+"preference.title.renderer.debug.mobilegl" = "MobileGL (Vulkan) - 通过 MoltenVK 导出 OpenGL 4.2";
 
 "preference.detail.renderer" = "更改使用的 OpenGL 渲染器";
 
@@ -292,3 +293,32 @@
 "preference.title.framegen_mode" = "插帧模式 (FrameGen)";
 "preference.title.framegen_mode.motion_adaptive" = "GPU 动态适应插帧 (MADI)";
 "preference.title.framegen_mode.camera_reproject" = "GPU 3D 相机重投影";
+
+"settings.group.mobilegl" = "MobileGL 设置";
+"preference.title.mobilegl_backend_type" = "后端类型";
+"preference.detail.mobilegl_backend_type" = "选择图形后端。DirectVulkan 使用 Vulkan/MoltenVK 获得最佳性能。DirectGLES 使用 OpenGL ES 备选方案。";
+"preference.title.mobilegl_disable_timer_query" = "禁用定时器查询";
+"preference.detail.mobilegl_disable_timer_query" = "禁用 GPU 定时器查询。可在某些设备上提升性能，但禁用 FPS 测量。";
+"preference.title.mobilegl_disable_subgroup" = "禁用子组";
+"preference.detail.mobilegl_disable_subgroup" = "禁用 Vulkan 着色器子组操作。可在子组支持有限的旧 GPU 上提供帮助。";
+"preference.title.mobilegl_advertise_fp64" = "声明 FP64";
+"preference.detail.mobilegl_advertise_fp64" = "声明支持 GL_ARB_gpu_shader_fp64。双精度模拟为 32 位。仅在 mod 需要时启用。";
+"preference.title.mobilegl_frames_in_flight" = "飞行中的帧数";
+"preference.detail.mobilegl_frames_in_flight" = "同时处理的帧数。较高值可提高吞吐量，但增加延迟和内存使用。";
+"preference.title.mobilegl_coherent_as_flush" = "Coherent 视为 Flush";
+"preference.detail.mobilegl_coherent_as_flush" = "将持久 GL_MAP_FLUSH_EXPLICIT_BIT 映射视为 coherent。启用以兼容从不 flush 的引擎（如 Flywheel）。";
+"preference.title.mobilegl_async_shader_compile" = "异步着色器编译";
+"preference.detail.mobilegl_async_shader_compile" = "启用异步着色器编译。自动模式在可用时使用后台线程。";
+"preference.title.mobilegl_shader_cache" = "着色器缓存";
+"preference.detail.mobilegl_shader_cache" = "启用着色器翻译缓存。缓存已编译的 SPIR-V 以减少着色器编译卡顿。";
+"preference.title.mobilegl_r11g11b10f_fallback" = "R11G11B10F 备选";
+"preference.detail.mobilegl_r11g11b10f_fallback" = "使用 R11G11B10F 纹理的格式备选方案。可提高与某些 mod 的兼容性。";
+
+"settings.group.moltenvk" = "MoltenVK";
+"settings.group.ltw" = "LTW";
+"preference.title.moltenvk_version" = "MoltenVK 版本";
+"preference.title.angle_backend" = "ANGLE 后端";
+"preference.title.zink_mesa_version" = "Mesa 版本";
+"preference.title.ltw_angle_backend" = "LTW ANGLE 后端";
+"preference.title.renderer.debug.angle_vulkan" = "ANGLE Vulkan (ES 3.1) - OpenGL ES via Vulkan";
+"preference.title.renderer.debug.angle_metal" = "ANGLE Metal (ES 3.2) - OpenGL ES via Metal";

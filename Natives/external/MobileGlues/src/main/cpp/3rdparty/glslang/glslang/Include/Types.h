@@ -87,7 +87,7 @@ struct TSampler {   // misnomer now; includes images, textures without sampler, 
     bool      image : 1;  // image, combined should be false
     bool   combined : 1;  // true means texture is combined with a sampler, false means texture with no sampler
     bool    sampler : 1;  // true means a pure sampler, other fields should be clear()
-    bool   tileQCOM : 1;  // is tile shading attachment 
+    bool   tileQCOM : 1;  // is tile shading attachment
 
     unsigned int vectorSize : 3;  // vector return type size.
     // Some languages support structures as sample results.  Storing the whole structure in the
@@ -966,8 +966,8 @@ public:
                  unsigned int layoutXfbOffset            : 13;
     static const unsigned int layoutXfbOffsetEnd     = 0x1FFF;
 
-                 unsigned int layoutAttachment           :  8;  // for input_attachment_index
-    static const unsigned int layoutAttachmentEnd      = 0XFF;
+                 unsigned int layoutAttachment;                 // for input_attachment_index
+    static const unsigned int layoutAttachmentEnd = INT_MAX;
 
                  unsigned int layoutSpecConstantId;
     static const unsigned int layoutSpecConstantIdEnd = UINT_MAX;
