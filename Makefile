@@ -415,7 +415,6 @@ dep_mobilegl:
 	@# MobileGL's internal (void*)gl* references bind to its OWN symbols, making
 	@# eglGetProcAddress return MobileGL's functions (not interposed ones).
 	@# Requires prebuilt LLVM libc++ (libc++_cxx23.dylib) in Frameworks.
-	rm -rf $(WORKINGDIR)/mobilegl
 	mkdir -p $(WORKINGDIR)/mobilegl
 	cd $(WORKINGDIR)/mobilegl && cmake \
 		-DCMAKE_CROSSCOMPILING=true \

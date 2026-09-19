@@ -181,6 +181,22 @@
             @{@"type": @"switch", @"label": localize(@"preference.title.mobilegl_disable_subgroup", nil), @"key": @"mobilegl.disable_subgroup"},
             @{@"type": @"switch", @"label": localize(@"preference.title.mobilegl_advertise_fp64", nil), @"key": @"mobilegl.advertise_fp64"},
             @{@"type": @"slider", @"label": localize(@"preference.title.mobilegl_frames_in_flight", nil), @"key": @"mobilegl.frames_in_flight", @"min": @1, @"max": @8, @"suffix": @""},
+            @{@"type": @"picker", @"label": localize(@"preference.title.mobilegl_vma_block_size", nil), @"key": @"mobilegl.vma_block_size", @"options": @[
+                @{@"key": @"8", @"name": @"8 MB"},
+                @{@"key": @"16", @"name": @"16 MB"},
+                @{@"key": @"32", @"name": @"32 MB"},
+                @{@"key": @"64", @"name": @"64 MB"},
+                @{@"key": @"128", @"name": @"128 MB"},
+                @{@"key": @"256", @"name": @"256 MB"}
+            ], @"default": @"32"},
+            @{@"type": @"picker", @"label": localize(@"preference.title.mobilegl_large_buffer_adopt_size", nil), @"key": @"mobilegl.large_buffer_adopt_size", @"options": @[
+                @{@"key": @"1", @"name": @"1 MB"},
+                @{@"key": @"2", @"name": @"2 MB"},
+                @{@"key": @"4", @"name": @"4 MB"},
+                @{@"key": @"8", @"name": @"8 MB"},
+                @{@"key": @"16", @"name": @"16 MB"},
+                @{@"key": @"32", @"name": @"32 MB"}
+            ], @"default": @"4"},
             @{@"type": @"switch", @"label": localize(@"preference.title.mobilegl_coherent_as_flush", nil), @"key": @"mobilegl.coherent_as_flush"},
             @{@"type": @"picker", @"label": localize(@"preference.title.mobilegl_async_shader_compile", nil), @"key": @"mobilegl.async_shader_compile", @"options": @[@"0", @"1", @"2"], @"default": @"0"},
             @{@"type": @"picker", @"label": localize(@"preference.title.mobilegl_shader_cache", nil), @"key": @"mobilegl.shader_cache", @"options": @[@"0", @"1", @"2"], @"default": @"0"},

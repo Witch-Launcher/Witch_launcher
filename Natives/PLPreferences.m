@@ -142,6 +142,8 @@
             @"disable_subgroup": @NO,
             @"advertise_fp64": @NO,
             @"frames_in_flight": @(3),
+            @"vma_block_size": @(32),
+            @"large_buffer_adopt_size": @(4),
             @"coherent_as_flush": @NO,
             @"async_shader_compile": @(0),
             @"shader_cache": @(0),

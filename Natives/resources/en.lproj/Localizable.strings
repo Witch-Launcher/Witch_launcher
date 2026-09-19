@@ -321,6 +321,10 @@
 "preference.detail.mobilegl_advertise_fp64" = "Advertise GL_ARB_gpu_shader_fp64 support. Double precision is emulated as 32-bit. Enable only if required by mods.";
 "preference.title.mobilegl_frames_in_flight" = "Frames in Flight";
 "preference.detail.mobilegl_frames_in_flight" = "Number of frames being processed simultaneously. Higher values improve throughput but increase latency and memory usage.";
+"preference.title.mobilegl_vma_block_size" = "VMA Block Size";
+"preference.detail.mobilegl_vma_block_size" = "Allocation block size for Vulkan memory pools. Smaller values (16MB - 32MB) prevent RAM waste and Jetsam OOM kills on iOS, especially with Sodium mod.";
+"preference.title.mobilegl_large_buffer_adopt_size" = "Zero-Copy Buffer Threshold";
+"preference.detail.mobilegl_large_buffer_adopt_size" = "Buffer size threshold above which buffers adopt GPU-resident storage and release the CPU shadow copy to save RAM.";
 "preference.title.mobilegl_coherent_as_flush" = "Coherent as Flush";
 "preference.detail.mobilegl_coherent_as_flush" = "Treat persistent GL_MAP_FLUSH_EXPLICIT_BIT maps as coherent. Enable for compatibility with engines that never flush (e.g. Flywheel).";
 "preference.title.mobilegl_async_shader_compile" = "Async Shader Compile";

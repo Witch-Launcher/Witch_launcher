@@ -305,6 +305,10 @@
 "preference.detail.mobilegl_advertise_fp64" = "声明支持 GL_ARB_gpu_shader_fp64。双精度模拟为 32 位。仅在 mod 需要时启用。";
 "preference.title.mobilegl_frames_in_flight" = "飞行中的帧数";
 "preference.detail.mobilegl_frames_in_flight" = "同时处理的帧数。较高值可提高吞吐量，但增加延迟和内存使用。";
+"preference.title.mobilegl_vma_block_size" = "VMA 块大小";
+"preference.detail.mobilegl_vma_block_size" = "Vulkan 内存池的分配块大小。较小值 (16MB - 32MB) 可减少 iOS 上的 RAM 浪费并避免 Jetsam OOM 杀进程，特别是在使用 Sodium mod 时。";
+"preference.title.mobilegl_large_buffer_adopt_size" = "零拷贝缓冲区阈值";
+"preference.detail.mobilegl_large_buffer_adopt_size" = "缓冲区大小阈值，超过此大小将直接采用 GPU 驻留存储并释放 CPU 影子副本以节省 RAM。";
 "preference.title.mobilegl_coherent_as_flush" = "Coherent 视为 Flush";
 "preference.detail.mobilegl_coherent_as_flush" = "将持久 GL_MAP_FLUSH_EXPLICIT_BIT 映射视为 coherent。启用以兼容从不 flush 的引擎（如 Flywheel）。";
 "preference.title.mobilegl_async_shader_compile" = "异步着色器编译";

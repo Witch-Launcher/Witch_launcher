@@ -71,6 +71,16 @@ NSString *const MobileGLPrefSection = @"mobilegl";
     snprintf(framesStr, sizeof(framesStr), "%d", framesInFlight ? (int)[framesInFlight integerValue] : 3);
     setenv("MOBILEGL_MAGMA_FRAMESINFLIGHT", framesStr, 1);
 
+    id vmaBlockSize = getPrefObject(@"mobilegl.vma_block_size");
+    char vmaStr[16];
+    snprintf(vmaStr, sizeof(vmaStr), "%d", vmaBlockSize ? (int)[vmaBlockSize integerValue] : 32);
+    setenv("MOBILEGL_MAGMA_VMA_BLOCK_SIZE_MB", vmaStr, 1);
+
+    id largeBufferAdopt = getPrefObject(@"mobilegl.large_buffer_adopt_size");
+    char adoptStr[16];
+    snprintf(adoptStr, sizeof(adoptStr), "%d", largeBufferAdopt ? (int)[largeBufferAdopt integerValue] : 4);
+    setenv("MOBILEGL_LARGE_BUFFER_ADOPT_MB", adoptStr, 1);
+
     id coherentAsFlush = getPrefObject(@"mobilegl.coherent_as_flush");
     setenv("MOBILEGL_COHERENT_AS_FLUSH", [coherentAsFlush boolValue] ? "1" : "0", 1);
 
@@ -103,13 +113,15 @@ NSString *const MobileGLPrefSection = @"mobilegl";
     id r11g11b10f = getPrefObject(@"mobilegl.r11g11b10f_fallback");
     setenv("MOBILEGL_MAGMA_R11G11B10F_FALLBACK", [r11g11b10f boolValue] ? "1" : "0", 1);
 
-    NSLog(@"[MobileGLConfig] Applied config: backend=%s angle=%s timerQ=%s subgroup=%s fp64=%s frames=%s coherent=%s async=%s cache=%s r11g11b10f=%s",
+    NSLog(@"[MobileGLConfig] Applied config: backend=%s angle=%s timerQ=%s subgroup=%s fp64=%s frames=%s vmaBlock=%sMB adoptThreshold=%sMB coherent=%s async=%s cache=%s r11g11b10f=%s",
         getenv("MOBILEGL_BACKEND_TYPE"),
         getenv("MOBILEGL_ANGLE_BACKEND"),
         getenv("MOBILEGL_DISABLE_TIMERQUERY"),
         getenv("MOBILEGL_MAGMA_DISABLE_SUBGROUP"),
         getenv("MOBILEGL_ADVERTISE_FP64"),
         getenv("MOBILEGL_MAGMA_FRAMESINFLIGHT"),
+        getenv("MOBILEGL_MAGMA_VMA_BLOCK_SIZE_MB"),
+        getenv("MOBILEGL_LARGE_BUFFER_ADOPT_MB"),
         getenv("MOBILEGL_COHERENT_AS_FLUSH"),
         getenv("MOBILEGL_ASYNC_SHADER_COMPILE"),
         getenv("MOBILEGL_SHADER_CACHE"),
@@ -136,6 +148,12 @@ NSString *const MobileGLPrefSection = @"mobilegl";
 
     id framesInFlight = getPrefObject(@"mobilegl.frames_in_flight");
     NSString *frames = framesInFlight ? [NSString stringWithFormat:@"%ld", (long)[framesInFlight integerValue]] : @"3";
+
+    id vmaBlockSize = getPrefObject(@"mobilegl.vma_block_size");
+    NSString *vmaBlock = vmaBlockSize ? [NSString stringWithFormat:@"%ldMB", (long)[vmaBlockSize integerValue]] : @"32MB";
+
+    id largeBufferAdopt = getPrefObject(@"mobilegl.large_buffer_adopt_size");
+    NSString *adoptThreshold = largeBufferAdopt ? [NSString stringWithFormat:@"%ldMB", (long)[largeBufferAdopt integerValue]] : @"4MB";
 
     id coherentAsFlush = getPrefObject(@"mobilegl.coherent_as_flush");
     NSString *coherent = coherentAsFlush ? ([coherentAsFlush boolValue] ? @"YES" : @"NO") : @"NO";
@@ -166,11 +184,13 @@ NSString *const MobileGLPrefSection = @"mobilegl";
         @"ANGLE Backend: %@\n"
         @"Timer Query: %@ / Subgroup: %@\n"
         @"FP64: %@ / Frames in Flight: %@\n"
+        @"VMA Block: %@ / Buffer Adopt Threshold: %@\n"
         @"Coherent: %@ / Async: %@ / Cache: %@\n"
         @"R11G11B10F: %@",
         renderer, backend, angleStr,
         timerQ, subgroup,
         fp64, frames,
+        vmaBlock, adoptThreshold,
         coherent, asyncStr, cacheStr,
         r11];
 }

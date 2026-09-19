@@ -19,6 +19,7 @@
 #include "utils.h"
 #include "ZinkConfig.h"
 #include "MobileGLConfig.h"
+#include "MemSampler.h"
 
 #import "ios_uikit_bridge.h"
 #import "JavaLauncher.h"
@@ -1052,6 +1053,10 @@ int launchJVMWithArgs(NSString *username, id launchTarget, int width, int height
     // hang where the patched JVM's first brk #0xf00d goes unserviced and the
     // JVM thread stalls inside JLI_Launch before any Java output.
     startJVMStartupWatchdog(jit26Handshake, jitNowMs());
+
+    // Footprint sampler for Jetsam diagnosis (native + GPU memory invisible
+    // to JVM heap stats). Logs every 5s until the process dies.
+    WitchMemSamplerStart();
 
     return pJLI_Launch(++margc, margv,
                    0, NULL, // sizeof(const_jargs) / sizeof(char *), const_jargs,

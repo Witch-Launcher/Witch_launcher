@@ -939,6 +939,10 @@
 "preference.detail.mobilegl_advertise_fp64" = "Thông báo hỗ trợ GL_ARB_gpu_shader_fp64. Double precision được giả lập thành 32-bit. Bật chỉ khi mod yêu cầu.";
 "preference.title.mobilegl_frames_in_flight" = "Frames đang xử lý";
 "preference.detail.mobilegl_frames_in_flight" = "Số frame đang xử lý đồng thời. Giá trị cao cải thiện thông lượng nhưng tăng độ trễ và bộ nhớ.";
+"preference.title.mobilegl_vma_block_size" = "Kích thước VMA Block";
+"preference.detail.mobilegl_vma_block_size" = "Kích thước block bộ nhớ Vulkan cấp phát từ hệ thống. Giá trị nhỏ (16MB - 32MB) giảm lãng phí RAM trên iOS và tránh bị Jetsam kill, đặc biệt khi dùng Sodium mod.";
+"preference.title.mobilegl_large_buffer_adopt_size" = "Ngưỡng Buffer Zero-Copy";
+"preference.detail.mobilegl_large_buffer_adopt_size" = "Ngưỡng dung lượng buffer để adopt trực tiếp vào GPU và giải phóng bản sao CPU shadow, tiết kiệm RAM.";
 "preference.title.mobilegl_coherent_as_flush" = "Coherent = Flush";
 "preference.detail.mobilegl_coherent_as_flush" = "Coi map GL_MAP_FLUSH_EXPLICIT_BIT là coherent. Bật để tương thích với engine không bao giờ flush (vd: Flywheel).";
 "preference.title.mobilegl_async_shader_compile" = "Biên dịch Shader bất đồng bộ";

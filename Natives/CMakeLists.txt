@@ -239,6 +239,7 @@ add_executable(Witch
   JavaLauncher.m
   external/fishhook/fishhook.c
   UIKit+hook.m
+  MemSampler.m
 
   authenticator/BaseAuthenticator.m
   authenticator/LocalAuthenticator.m
