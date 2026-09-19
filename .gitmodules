@@ -7,3 +7,12 @@
 [submodule "Natives/external/NG-GL4ES/3rdparty/SPIRV-Cross"]
 	path = Natives/external/NG-GL4ES/3rdparty/SPIRV-Cross
 	url = https://github.com/KhronosGroup/SPIRV-Cross.git
+[submodule "source"]
+	path = source
+	url = https://github.com/Ynnyny/source-mesa.git
+[submodule "Natives/external/MobileGL"]
+	path = Natives/external/MobileGL
+	url = https://github.com/Ynnyny/MobileGL-fix.git
+[submodule "Natives/external/MoltenVK"]
+	path = Natives/external/MoltenVK
+	url = https://github.com/KhronosGroup/MoltenVK.git

@@ -469,6 +469,7 @@ dep_moltenvk:
 	MOLTENVK_SRC="$(SOURCEDIR)/Natives/external/MoltenVK"
 	MOLTENVK_BUILD="$(WORKINGDIR)/moltenvk14"
 	mkdir -p "$$MOLTENVK_BUILD"
+	cp -f "$(SOURCEDIR)/patches/MoltenVK-Common-CMakeLists.txt" "$$MOLTENVK_SRC/Common/CMakeLists.txt" 2>/dev/null || true
 	cd "$$MOLTENVK_SRC/Common" && cmake \
 		-DCMAKE_CROSSCOMPILING=true \
 		-DCMAKE_SYSTEM_NAME=iOS \

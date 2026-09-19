@@ -22,6 +22,11 @@ entitlements.codesign.xml
 /plan/
 note.md
 /.config/
+jetsam.txt
+latestlog.txt
+.cache/
+__pycache__/
+*.pyc
 
 # Build artifacts (users can build themselves)
 /amethyst-prebuilt-libraries/build/
