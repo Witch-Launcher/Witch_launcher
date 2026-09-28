@@ -423,35 +423,36 @@ verify-jres:
 
 dep_mobilegl:
 	echo '[Witch v$(VERSION)] dep_mobilegl - start'
-	@# Two-level namespace build: drop -flat_namespace/-undefined,dynamic_lookup so
-	@# MobileGL's internal (void*)gl* references bind to its OWN symbols, making
-	@# eglGetProcAddress return MobileGL's functions (not interposed ones).
-	@# Requires prebuilt LLVM libc++ (libc++_cxx23.dylib) in Frameworks.
-	mkdir -p $(WORKINGDIR)/mobilegl
-	cd $(WORKINGDIR)/mobilegl && cmake \
-		-DCMAKE_CROSSCOMPILING=true \
-		-DCMAKE_SYSTEM_NAME=iOS \
-		-DCMAKE_OSX_SYSROOT="$(SDKPATH)" \
-		-DCMAKE_OSX_ARCHITECTURES=arm64 \
-		-DCMAKE_OSX_DEPLOYMENT_TARGET=14.0 \
-		-DCMAKE_C_FLAGS="-arch arm64" \
-		-DCMAKE_MAKE_PROGRAM=/usr/bin/make \
-		-DMOBILEGL_IOS=ON \
-		-DMOBILEGL_BACKEND_TYPE=DirectVulkan \
-		-DMOBILEGL_BUILD_TEST=OFF \
-		-DMOBILEGL_BUILD_BENCHMARK=OFF \
-		-DMOBILEGL_VULKAN_LIBRARY="$(SOURCEDIR)/Natives/resources/Frameworks/libMoltenVK.dylib" \
-		-DSPIRV_CROSS_SHARED="ON" \
-		-DCMAKE_SHARED_LINKER_FLAGS="-L$(SOURCEDIR)/Natives/resources/Frameworks -lc++_cxx23 -lc++abi_cxx23 -Wl,-undefined,error" \
-		$(SOURCEDIR)/Natives/external/MobileGL/
-	cmake --build $(WORKINGDIR)/mobilegl --config Release -j$(JOBS) --target MobileGL
-	cp $(WORKINGDIR)/mobilegl/libMobileGL*.dylib $(WORKINGDIR)/ 2>/dev/null || true
-	cp $(WORKINGDIR)/mobilegl/libMobileGL_s.a $(WORKINGDIR)/ 2>/dev/null || true
-	cp $(WORKINGDIR)/libMobileGL.dylib $(SOURCEDIR)/Natives/resources/Frameworks/libMobileGL.dylib
-	@# libMoltenVK.dylib's LC_ID is @rpath/libMoltenVK.1.dylib but the shipped file
-	@# is libMoltenVK.dylib; normalize the recorded name so dyld finds it.
-	install_name_tool -change @rpath/libMoltenVK.1.dylib @rpath/libMoltenVK.dylib $(WORKINGDIR)/libMobileGL.dylib
-	install_name_tool -change @rpath/libMoltenVK.1.dylib @rpath/libMoltenVK.dylib $(SOURCEDIR)/Natives/resources/Frameworks/libMobileGL.dylib
+	@if [ ! -f "$(SOURCEDIR)/Natives/external/MobileGL/CMakeLists.txt" ]; then \
+		echo '[Witch] MobileGL source missing (submodule not checked out) - using vendored libMobileGL.dylib'; \
+		test -f "$(SOURCEDIR)/Natives/resources/Frameworks/libMobileGL.dylib" || { echo 'ERROR: vendored libMobileGL.dylib missing too'; exit 1; }; \
+		cp "$(SOURCEDIR)/Natives/resources/Frameworks/libMobileGL.dylib" "$(WORKINGDIR)/libMobileGL.dylib"; \
+	else \
+		echo '[Witch] Building MobileGL from source (two-level namespace, no flat_namespace)'; \
+		mkdir -p $(WORKINGDIR)/mobilegl; \
+		cd $(WORKINGDIR)/mobilegl && cmake \
+			-DCMAKE_CROSSCOMPILING=true \
+			-DCMAKE_SYSTEM_NAME=iOS \
+			-DCMAKE_OSX_SYSROOT="$(SDKPATH)" \
+			-DCMAKE_OSX_ARCHITECTURES=arm64 \
+			-DCMAKE_OSX_DEPLOYMENT_TARGET=14.0 \
+			-DCMAKE_C_FLAGS="-arch arm64" \
+			-DCMAKE_MAKE_PROGRAM=/usr/bin/make \
+			-DMOBILEGL_IOS=ON \
+			-DMOBILEGL_BACKEND_TYPE=DirectVulkan \
+			-DMOBILEGL_BUILD_TEST=OFF \
+			-DMOBILEGL_BUILD_BENCHMARK=OFF \
+			-DMOBILEGL_VULKAN_LIBRARY="$(SOURCEDIR)/Natives/resources/Frameworks/libMoltenVK.dylib" \
+			-DSPIRV_CROSS_SHARED="ON" \
+			-DCMAKE_SHARED_LINKER_FLAGS="-L$(SOURCEDIR)/Natives/resources/Frameworks -lc++_cxx23 -lc++abi_cxx23 -Wl,-undefined,error" \
+			$(SOURCEDIR)/Natives/external/MobileGL/; \
+		cmake --build $(WORKINGDIR)/mobilegl --config Release -j$(JOBS) --target MobileGL; \
+		cp $(WORKINGDIR)/mobilegl/libMobileGL*.dylib $(WORKINGDIR)/ 2>/dev/null || true; \
+		cp $(WORKINGDIR)/mobilegl/libMobileGL_s.a $(WORKINGDIR)/ 2>/dev/null || true; \
+		cp $(WORKINGDIR)/libMobileGL.dylib $(SOURCEDIR)/Natives/resources/Frameworks/libMobileGL.dylib; \
+		install_name_tool -change @rpath/libMoltenVK.1.dylib @rpath/libMoltenVK.dylib $(WORKINGDIR)/libMobileGL.dylib; \
+		install_name_tool -change @rpath/libMoltenVK.1.dylib @rpath/libMoltenVK.dylib $(SOURCEDIR)/Natives/resources/Frameworks/libMobileGL.dylib; \
+	fi
 	echo '[Witch v$(VERSION)] dep_mobilegl - end'
 
 TGLES_SRC ?= /Volumes/D/TGLES
