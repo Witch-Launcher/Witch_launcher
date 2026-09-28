@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="Natives/logo/logo-dev.png" width="120" alt="Witch Launcher (Dev)">
+</p>
+
 # Welcome to Witch launcher for iOS
 [![Development Build](https://img.shields.io/github/actions/workflow/status/Witch-Launcher/Witch_launcher/development.yml?branch=beta&style=for-the-badge)](https://github.com/Witch-Launcher/Witch_launcher/actions/workflows/development.yml)  
 [Fork by Za_d626(DuyAnh662)](https://discord.gg/qmbuRvaEq)
@@ -26,6 +30,20 @@ Witch Launcher continues this work with additional improvements and optimization
 * Minecraft demo mode support.
 * Vulkan-based rendering through **MoltenVK / MetalVK-compatible rendering paths**.
 * And more.
+
+---
+
+## Screenshots
+
+| | |
+|---|---|
+| <img src="media/IMG_2690.png" width="400"> | <img src="media/IMG_2691.png" width="400"> |
+| <img src="media/IMG_2692.png" width="400"> | <img src="media/IMG_2693.png" width="400"> |
+| <img src="media/IMG_2694.png" width="400"> | <img src="media/IMG_2695.png" width="400"> |
+| <img src="media/IMG_2696.png" width="400"> | <img src="media/IMG_2697.png" width="400"> |
+| <img src="media/IMG_2698.png" width="400"> | <img src="media/IMG_2699.png" width="400"> |
+| <img src="media/IMG_2700.png" width="400"> | <img src="media/IMG_2701.png" width="400"> |
+| <img src="media/IMG_2702.png" width="400"> | <img src="media/IMG_2703.png" width="400"> |
 
 ---
 
