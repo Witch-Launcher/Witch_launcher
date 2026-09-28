@@ -296,6 +296,8 @@
 "preference.detail.debug_auto_correction" = "Cho phép tự động sửa khi nhập văn bản trong game.";
 "preference.title.debug_render_log" = "Ghi nhật kí lỗi Render";
 "preference.detail.debug_render_log" = "Khi BẬT, toàn bộ nhật kí lỗi của Render sẽ được ghi lại (LTW + chẩn đoán EGL). Giữ TẮT (mặc định) để tắt hoàn toàn, tránh gây giới hạn cho CPU/GPU khi render dòng log.";
+"preference.title.debug_mem_sample_log" = "Nhật kí đo bộ nhớ";
+"preference.detail.debug_mem_sample_log" = "Khi BẬT (mặc định), mức dùng bộ nhớ được ghi mỗi 5 giây để chẩn đoán Jetsam. TẮT để tắt hoàn toàn mọi log đo bộ nhớ.";
 "preference.title.debug_hide_home_indicator" = "Ẩn thanh home";
 "preference.detail.debug_hide_home_indicator" = "Tùy chọn này sẽ tắt khoá thanh điều hướng. Sử dụng tính năng \"Truy cập được hướng dẫn\" để ẩn và khoá thanh điều hướng cùng lúc.";
 "preference.title.debug_show_layout_bounds" = "Hiển thị đường viền bố cục";
@@ -929,8 +931,8 @@
 "settings.group.mobilegl" = "Cài đặt MobileGL";
 "preference.title.mobilegl_backend_type" = "Loại Backend";
 "preference.detail.mobilegl_backend_type" = "Chọn backend đồ họa. DirectVulkan dùng Vulkan/MoltenVK cho hiệu suất tốt nhất. DirectGLES dùng OpenGL ES dự phòng.";
-"preference.title.mobilegl_angle_backend" = "Backend ANGLE (khi dùng DirectGLES)";
-"preference.detail.mobilegl_angle_backend" = "Chọn backend ANGLE khi dùng OpenGL ES. VulkanANGLE: GLES → Vulkan → MoltenVK → Metal (hỗ trợ ES 3.2). MetalANGLE: GLES → Metal trực tiếp (hỗ trợ ES 3.0).";
+"preference.title.mobilegl_angle_backend" = "Backend GLES (khi dùng DirectGLES)";
+"preference.detail.mobilegl_angle_backend" = "Chọn backend GLES khi dùng OpenGL ES. TGLES: GLES → Metal trực tiếp (hỗ trợ ES 3.2). VulkanANGLE: GLES → Vulkan → MoltenVK → Metal (hỗ trợ ES 3.2, nặng hơn).";
 "preference.title.mobilegl_disable_timer_query" = "Tắt Timer Query";
 "preference.detail.mobilegl_disable_timer_query" = "Tắt truy vấn timer GPU. Có thể cải thiện hiệu suất trên một số thiết bị nhưng tắt đo FPS.";
 "preference.title.mobilegl_disable_subgroup" = "Tắt Subgroup";

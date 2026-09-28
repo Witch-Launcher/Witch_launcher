@@ -9,242 +9,104 @@ on:
     branches: ['main']
   workflow_dispatch:
 
+concurrency:
+  group: witch-release-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
-  build:
-    name: Release build
-    strategy:
-      matrix:
-        include:
-          - platform: 2
-            platform_name: ios
-          - platform: 3
-            platform_name: tvos
-          - platform: 7
-            platform_name: iossimulator
-          - platform: 8
-            platform_name: tvossimulator
-    
-    runs-on: MacStadium
-    steps:
-      - name: Remove work folders
-        env:
-          password: ${{ secrets.ELLIE_MINI_SECRET }}
-        run: |
-          echo "before"
-          ls -lah ./
-          echo $password | sudo -S rm -rf ./* || true
-          echo $password | sudo -S rm -rf ./.??* || true
-          echo "after"
-          ls -lah ./
-          
-      - name: Checkout repository
-        uses: actions/checkout@main
-
-      - name: Checkout repository submodules
-        shell: bash
-        run: |
-          set -o pipefail
-          # Same rationale as development.yml: skip the flaky ANGLE tree.
-          SUBMODULES="Natives/external/NG-GL4ES/3rdparty/SPIRV-Cross Natives/external/NG-GL4ES/3rdparty/glslang"
-          for i in 1 2 3 4 5 6; do
-            echo "::group::Submodule update attempt $i/6"
-            if git -c protocol.version=2 submodule sync -- $SUBMODULES && \
-               git -c protocol.version=2 submodule update --init --force --depth=1 $SUBMODULES; then
-              echo "::endgroup::"
-              exit 0
-            fi
-            echo "::endgroup::"
-            for p in $SUBMODULES; do
-              if [ -e "$p/.git" ] && ! git -C "$p" rev-parse --verify -q HEAD >/dev/null 2>&1; then
-                rm -rf "$p"
-                echo "Removed poisoned clone: $p"
-              fi
-            done
-            echo "Attempt $i failed; retrying in 15s..."
-            sleep 15
-          done
-          exit 1
-
-      - name: Setup JDK 8 (Zulu)
-        uses: actions/setup-java@v5
-        id: setup-java8
-        with:
-          distribution: 'zulu'
-          java-version: '8'
-
-      - name: Get gl4es latest commit hash
-        id: gl4es-sha
-        run: echo "::set-output name=sha::$(echo $(git ls-remote https://github.com/PojavLauncherTeam/gl4es-114-extra refs/heads/master | grep -io '^\S*'))"
-        shell: bash
-
-      - name: Cache gl4es
-        uses: actions/cache@main
-        if: false # use gl4es 1.1.5
-        id: gl4es-cache
-        with:
-          path: gl4es/libs
-          key: gl4es-holy-ios-shared-2-${{ steps.gl4es-sha.outputs.sha }}
-
-      - name: Get gl4es
-        if: false && steps.gl4es-cache.outputs.cache-hit != 'true'
-        uses: actions/checkout@main
-        with:
-          repository: 'PojavLauncherTeam/gl4es-114-extra'
-          path: 'gl4es'
-
-      - name: Build gl4es
-        if: false && steps.gl4es-cache.outputs.cache-hit != 'true'
-        continue-on-error: true
-        run: |
-          cd gl4es
-          git config --global user.email "github-actions@users.noreply.github.com"
-          git config --global user.name "github-actions"
-          export PATH=/opt/procursus/bin:$PATH
-          wget https://github.com/leetal/ios-cmake/raw/master/ios.toolchain.cmake
-          cmake -B build -DCMAKE_TOOLCHAIN_FILE=ios.toolchain.cmake -DDEFAULT_ES=2 \
-            -DNOX11=ON -DNOEGL=OFF -DSTATICLIB=OFF -DPLATFORM=OS64 \
-            -DCMAKE_C_FLAGS=-Wno-error=implicit-function-declaration
-          cmake --build build --config RelWithDebInfo --target GL
-          cp -R lib/libGL.dylib ../Natives/resources/Frameworks/libgl4es_114.dylib
-          
-      - name: Push gl4es
-        if: false && github.event != 'pull_request' && github.ref_name == 'main' && steps.gl4es-cache.outputs.cache-hit != 'true'
-        continue-on-error: true
-        run: |
-          git add Natives/resources/Frameworks/libgl4es_114.dylib
-          git commit -am "CI: Update gl4es"
-          git push
-          
-      - name: Get JRE8
-        uses: dawidd6/action-download-artifact@v6
-        with:
-          github_token: ${{secrets.GITHUB_TOKEN}}
-          workflow: build.yml
-          path: depends
-          workflow_conclusion: success
-          allow_forks: false
-          repo: PojavLauncherTeam/android-openjdk-build-multiarch
-          branch: buildjre8
-          name: jre8-ios-aarch64
-
-      - name: Get JRE17
-        uses: dawidd6/action-download-artifact@v6
-        with:
-          github_token: ${{secrets.GITHUB_TOKEN}}
-          workflow: build.yml
-          path: depends
-          workflow_conclusion: success
-          allow_forks: false
-          repo: PojavLauncherTeam/android-openjdk-build-multiarch
-          branch: buildjre17-21
-          name: jre17-ios-aarch64
-
-      - name: Get JRE21
-        uses: dawidd6/action-download-artifact@v6
-        with:
-          github_token: ${{secrets.GITHUB_TOKEN}}
-          workflow: build.yml
-          path: depends
-          workflow_conclusion: completed
-          allow_forks: false
-          repo: PojavLauncherTeam/android-openjdk-build-multiarch
-          branch: buildjre17-21
-          name: jre21-ios-aarch64
-
-      - name: Download JRE25
-        run: |
-          mkdir -p depends/java-25-openjdk
-          curl -L --fail -o depends/jre25-ios-aarch64.zip \
-            https://assets.angelauramc.dev/openjdk/ios-arm64/jre25-ios-aarch64.zip
-          cd depends && unzip -o jre25-ios-aarch64.zip && rm -f jre25-ios-aarch64.zip
-          cd depends && tar xf jre25-ios-arm64-*.tar.xz -C java-25-openjdk
-
-      - name: Inject Witch private config (AES-256-GCM encrypted BuildKeys)
-        env:
-          WITCH_BASE_URL: ${{ secrets.WITCH_BASE_URL }}
-          WITCH_HMAC_SECRET: ${{ secrets.WITCH_HMAC_SECRET }}
-          WITCH_PROXY_TOKEN: ${{ secrets.WITCH_PROXY_TOKEN }}
-          WITCH_CURSEFORGE_API_KEY: ${{ secrets.WITCH_CURSEFORGE_API_KEY }}
-          WITCH_ENCRYPTION_KEY: ${{ secrets.WITCH_ENCRYPTION_KEY }}
-        run: |
-          mkdir -p Natives/Config
-          # Mask encryption key so it never leaks in logs
-          if [ -n "$WITCH_ENCRYPTION_KEY" ]; then
-            echo "::add-mask::$WITCH_ENCRYPTION_KEY"
-            echo "::add-mask::$WITCH_HMAC_SECRET"
-            echo "::add-mask::$WITCH_PROXY_TOKEN"
-            echo "::add-mask::$WITCH_BASE_URL"
-          fi
-          # Install cryptography for encrypt script (fast, cached via pip)
-          python3 -m pip install --quiet --break-system-packages cryptography 2>&1 | tail -n 5 || pip3 install --quiet cryptography 2>&1 | tail -n 5 || true
-          if [ -n "$WITCH_ENCRYPTION_KEY" ]; then
-            echo "Injecting ENCRYPTED WitchConfig.h (SERVER-ONLY, no master key in IPA) — enc_v1:*** masked"
-          else
-            echo "No WITCH_ENCRYPTION_KEY — injecting PLAIN WitchConfig.h (public build)"
-          fi
-          # --server-only: master key stays ONLY on server, IPA holds only enc_v1, no WITCH_ENCRYPTION_KEY
-          python3 scripts/encrypt_witch_config.py --server-only --out Natives/Config/WitchConfig.h
-          echo "--- WitchConfig.h (masked) ---"
-          # Never cat raw secrets — show only masked preview
-          sed -E 's/enc_v1:[A-Za-z0-9+\/=]{20,}/enc_v1:***/g' Natives/Config/WitchConfig.h || cat Natives/Config/WitchConfig.h
-          echo "--- end masked ---"
-
-      - name: Build for ${{ matrix.platform_name }}
-        env:
-          password: ${{ secrets.ELLIE_MINI_SECRET }}
-          JAVA_HOME: ${{ steps.setup-java8.outputs.path }}
-          BOOTJDK: ${{ steps.setup-java8.outputs.path }}/bin
-        run: |
-          export PATH=/opt/procursus/bin:/opt/homebrew/bin:$PATH
-          export RUNNER=1
-          # release artifacts are fetched as prebuilt JRE archives above; never rebuild from source here
-          export JRE_BUILD_MODE=download
-          if [ "${{ matrix.platform_name }}" == "ios" ]; then
-            # Build ipa and tipa for iOS
-            gmake -j$(sysctl -n hw.ncpu) dsym package PLATFORM=${{ matrix.platform }}
-            gmake -j$(sysctl -n hw.ncpu) dsym package PLATFORM=${{ matrix.platform }} TROLLSTORE_JIT_ENT=1
-          elif [ "${{ matrix.platform_name }}" == "tvos" ]; then
-            # Build tipa only for tvOS
-            gmake -j$(sysctl -n hw.ncpu) dsym package PLATFORM=${{ matrix.platform }} TROLLSTORE_JIT_ENT=1
-          else
-            # Build ipa only for everything else
-            gmake -j$(sysctl -n hw.ncpu) dsym package PLATFORM=${{ matrix.platform }}
-          fi
-
-      - name: Upload regular ipa
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: Witch-${{ matrix.platform_name }}-ipa
-          path: artifacts/Witch-*-${{ matrix.platform_name }}.ipa
-          if-no-files-found: ignore
-
-      - name: Upload regular tipa
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: Witch-${{ matrix.platform_name }}-tipa
-          path: artifacts/Witch-*-${{ matrix.platform_name }}-trollstore.tipa
-          if-no-files-found: ignore
-
-      - name: Upload Witch.dSYM
-        if: matrix.platform_name == 'ios'
-        uses: actions/upload-artifact@v4
-        with:
-          name: Witch-dSYM
-          path: artifacts/Witch.dSYM
-          if-no-files-found: ignore
-
-  publish:
-    name: Publish Release
-    needs: build
+  # Reuse the development (beta) build instead of rebuilding from scratch.
+  # Flow: download rolling `pre-release` assets -> verify -> re-publish to
+  # rolling `release` with fresh stable notes + Discord notification.
+  # This saves hours of MacStadium build time per push to main.
+  # NOTE: promoted release is iOS-only (whatever beta built). If tvOS /
+  # simulator builds are needed, run the legacy MacStadium workflow manually.
+  promote:
+    name: Promote beta build to Release
     runs-on: ubuntu-latest
     permissions:
       contents: write
       actions: write
     steps:
-      - name: Download all artifacts
-        uses: actions/download-artifact@v4
+      - name: Checkout repository (for version + changelog)
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 50
+
+      - name: Resolve version (auto from Info.plist + SHA + date)
+        id: version
+        shell: bash
+        run: |
+          bash scripts/ci/resolve_version.sh
+          echo "--- resolved ---"
+          grep -E '^(APP_VERSION|SHORT_SHA|BUILD_DATE|BUILD_TAG)=' "$GITHUB_OUTPUT" | tail -n 8 || true
+
+      - name: Download pre-release assets (reuse development build)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          rm -rf promoted && mkdir -p promoted
+          echo "Downloading rolling pre-release assets..."
+          gh release download pre-release -D ./promoted || {
+            echo "::error::No pre-release found. Push to beta first so development.yml builds once."
+            exit 1
+          }
+          echo "--- promoted tree ---"
+          find promoted -maxdepth 4 -type f | head -n 50
+          COUNT=$(find promoted -type f \( -name '*.ipa' -o -name '*.tipa' \) | wc -l | tr -d ' ')
+          echo "Found $COUNT ipa/tipa files"
+          if [ "$COUNT" = "0" ]; then
+            echo "::error::pre-release exists but contains no .ipa/.tipa — check development run."
+            exit 1
+          fi
+          # Record which commit the pre-release tag points at (for traceability)
+          gh api "repos/$GITHUB_REPOSITORY/git/refs/tags/pre-release" --jq '.object.sha' > promoted/.source_tag_sha.txt 2>/dev/null || echo "unknown" > promoted/.source_tag_sha.txt
+          echo "pre-release tag sha: $(cat promoted/.source_tag_sha.txt)"
+          # Warn (not fail) if pre-release commit is not an ancestor of main HEAD
+          SRC=$(cat promoted/.source_tag_sha.txt)
+          if git cat-file -e "$SRC" 2>/dev/null && [ "$SRC" != "unknown" ]; then
+            if git merge-base --is-ancestor "$SRC" HEAD 2>/dev/null; then
+              echo "Source check: pre-release commit IS ancestor of main HEAD — good."
+            else
+              echo "::warning::pre-release commit $SRC is NOT an ancestor of main HEAD. Promoting anyway (beta/main diverged) — verify manually."
+            fi
+          else
+            echo "::warning::Could not resolve pre-release tag SHA locally (shallow clone). Skipping ancestor check."
+          fi
+
+      - name: Generate checksums
+        shell: bash
+        run: |
+          cd promoted || exit 1
+          shopt -s globstar nullglob
+          FILES=(**/*.ipa **/*.tipa *.ipa *.tipa)
+          if [ ${#FILES[@]} -eq 0 ]; then echo "::error::No ipa/tipa under promoted/"; exit 1; fi
+          sha256sum "${FILES[@]}" | tee ../checksums.txt
+          echo "--- checksums.txt ---"
+          cat ../checksums.txt
+
+      - name: "Generate release notes (verbose EN - what fixed + who fixed)"
+        env:
+          GITHUB_EVENT_BEFORE: ${{ github.event.before }}
+        shell: bash
+        run: |
+          python3 scripts/ci/gen_notes.py \
+            --before "${{ github.event.before }}" \
+            --sha "${{ github.sha }}" \
+            --branch "${{ github.ref_name }}" \
+            --repo "$GITHUB_REPOSITORY" \
+            --run-url "https://github.com/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" \
+            --version "${{ steps.version.outputs.APP_VERSION }}" \
+            --pusher "${{ github.event.pusher.name }}" \
+            --runner "promote-from-pre-release" \
+            --artifacts-dir ./promoted \
+            --out RELEASE_NOTES.md
+          {
+            echo ""
+            echo "> Promoted from rolling pre-release (reuse development build, no rebuild)."
+            echo "> Source pre-release tag sha: $(cat promoted/.source_tag_sha.txt 2>/dev/null || echo unknown)"
+          } >> RELEASE_NOTES.md
+          head -n 60 RELEASE_NOTES.md
 
       - name: Reset rolling release
         env:
@@ -257,9 +119,32 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: release
-          name: Witch Launcher — Release
+          name: Witch v${{ steps.version.outputs.APP_VERSION }} — Release (stable)
+          body_path: RELEASE_NOTES.md
           prerelease: false
+          draft: false
           fail_on_unmatched_files: false
           files: |
-            **/*.ipa
-            **/*.tipa
+            promoted/**/*.ipa
+            promoted/**/*.tipa
+            checksums.txt
+            RELEASE_NOTES.md
+
+      - name: Notify Discord (English, no mentions, verbose summary)
+        if: always()
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+        run: |
+          python3 scripts/ci/discord_notify.py \
+            --branch "${{ github.ref_name }}" \
+            --repo "$GITHUB_REPOSITORY" \
+            --sha "${{ github.sha }}" \
+            --before "${{ github.event.before }}" \
+            --pusher "${{ github.event.pusher.name }}" \
+            --version "${{ steps.version.outputs.APP_VERSION }}" \
+            --channel "release" \
+            --status "${{ job.status }}" \
+            --run-url "https://github.com/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" \
+            --release-url "https://github.com/$GITHUB_REPOSITORY/releases/tag/release" \
+            --notes-file RELEASE_NOTES.md \
+            --artifacts-dir ./promoted || true

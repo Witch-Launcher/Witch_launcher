@@ -357,6 +357,18 @@ jre: native
 	for ver in 21 25; do \
 		jvm="$(SOURCEDIR)/depends/java-$$ver-openjdk/lib/server/libjvm.dylib"; \
 		if [ -f "$$jvm" ]; then \
+			if python3 $(SOURCEDIR)/scripts/patch_libjvm_mirror_brk.py "$$jvm" && \
+			   python3 $(SOURCEDIR)/scripts/patch_libjvm_jit_alloc.py "$$jvm"; then \
+				echo "[jre] Java $$ver mirror brk patches OK"; \
+			else \
+				echo "[jre] WARNING: Java $$ver mirror brk patch failed — removing mirror marker so the launcher falls back to classic JIT26"; \
+				rm -f $(SOURCEDIR)/depends/java-$$ver-openjdk/.witch-mirror-mapping; \
+			fi; \
+		fi; \
+	done; \
+	for ver in 21 25; do \
+		jvm="$(SOURCEDIR)/depends/java-$$ver-openjdk/lib/server/libjvm.dylib"; \
+		if [ -f "$$jvm" ]; then \
 			if ! otool -l "$$jvm" >/dev/null 2>&1; then \
 				echo "[jre] ERROR: libjvm.dylib for Java $$ver failed Mach-O validation (corrupt build/download?)"; \
 				exit 1; \
@@ -441,6 +453,59 @@ dep_mobilegl:
 	install_name_tool -change @rpath/libMoltenVK.1.dylib @rpath/libMoltenVK.dylib $(WORKINGDIR)/libMobileGL.dylib
 	install_name_tool -change @rpath/libMoltenVK.1.dylib @rpath/libMoltenVK.dylib $(SOURCEDIR)/Natives/resources/Frameworks/libMobileGL.dylib
 	echo '[Witch v$(VERSION)] dep_mobilegl - end'
+
+TGLES_SRC ?= /Volumes/D/TGLES
+TGLMT_SRC ?= /Volumes/D/TGLMT
+dep_tglmt:
+	echo '[Witch v$(VERSION)] dep_tglmt - start'
+	mkdir -p "$(WORKINGDIR)"
+	if [ -d "$(TGLMT_SRC)" ]; then \
+		cmake -S "$(TGLMT_SRC)" -B "$(TGLMT_SRC)/build-ios-pkg" \
+			-DCMAKE_SYSTEM_NAME=iOS \
+			-DCMAKE_OSX_SYSROOT="$(SDKPATH)" \
+			-DCMAKE_OSX_ARCHITECTURES=arm64 \
+			-DCMAKE_OSX_DEPLOYMENT_TARGET=14.0 \
+			-DCMAKE_BUILD_TYPE=Release \
+			-DTGLMT_APPLE_METAL=ON \
+			-DTGLMT_BUILD_TESTS=OFF \
+			-DTGLMT_BUILD_SHARED=ON && \
+		cmake --build "$(TGLMT_SRC)/build-ios-pkg" --config Release && \
+		cp "$(TGLMT_SRC)/build-ios-pkg/libtglmt.dylib" \
+			"$(SOURCEDIR)/Natives/resources/Frameworks/libtglmt.dylib" && \
+		cp "$(TGLMT_SRC)/build-ios-pkg/libtglmt.dylib" \
+			"$(WORKINGDIR)/libtglmt.dylib"; \
+	else \
+		echo '[Witch] TGLMT_SRC not found at $(TGLMT_SRC), keeping vendored libtglmt.dylib'; \
+		cp "$(SOURCEDIR)/Natives/resources/Frameworks/libtglmt.dylib" \
+			"$(WORKINGDIR)/libtglmt.dylib"; \
+	fi
+	test -f "$(SOURCEDIR)/Natives/resources/Frameworks/libtglmt.dylib" || \
+		{ echo 'ERROR: libtglmt.dylib missing (set TGLMT_SRC or vendor the dylib)'; exit 1; }
+	echo '[Witch v$(VERSION)] dep_tglmt - end'
+
+dep_tgles:
+	echo '[Witch v$(VERSION)] dep_tgles - start'
+	mkdir -p "$(WORKINGDIR)"
+	if [ -d "$(TGLES_SRC)" ]; then \
+		cmake -S "$(TGLES_SRC)" -B "$(TGLES_SRC)/build-ios-dev" \
+			-DCMAKE_SYSTEM_NAME=iOS \
+			-DCMAKE_OSX_SYSROOT="$(SDKPATH)" \
+			-DCMAKE_OSX_ARCHITECTURES=arm64 \
+			-DCMAKE_OSX_DEPLOYMENT_TARGET=14.0 \
+			-DCMAKE_BUILD_TYPE=Release && \
+		cmake --build "$(TGLES_SRC)/build-ios-dev" --config Release && \
+		cp "$(TGLES_SRC)/build-ios-dev/libtgles.dylib" \
+			"$(SOURCEDIR)/Natives/resources/Frameworks/libtgles.dylib" && \
+		cp "$(TGLES_SRC)/build-ios-dev/libtgles.dylib" \
+			"$(WORKINGDIR)/libtgles.dylib"; \
+	else \
+		echo '[Witch] TGLES_SRC not found at $(TGLES_SRC), keeping vendored libtgles.dylib'; \
+		cp "$(SOURCEDIR)/Natives/resources/Frameworks/libtgles.dylib" \
+			"$(WORKINGDIR)/libtgles.dylib"; \
+	fi
+	test -f "$(SOURCEDIR)/Natives/resources/Frameworks/libtgles.dylib" || \
+		{ echo 'ERROR: libtgles.dylib missing (set TGLES_SRC or vendor the dylib)'; exit 1; }
+	echo '[Witch v$(VERSION)] dep_tgles - end'
 
 dep_moltenvk12:
 	echo '[Witch v$(VERSION)] dep_moltenvk12 - start'
@@ -589,6 +654,7 @@ dep_angle:
 	mkdir -p out/ios-vulkan-arm64 out/ios-metal-arm64 && \
 	"$$(pwd)/buildtools/mac/gn" gen out/ios-vulkan-arm64 --args=' \
 		target_os="ios" target_cpu="arm64" target_environment="device" \
+		ios_deployment_target="16.0" \
 		is_debug=false is_official_build=true chrome_pgo_phase=0 \
 		ios_enable_code_signing=false is_component_build=false symbol_level=0 \
 		angle_standalone=true angle_build_tests=false \
@@ -602,6 +668,7 @@ dep_angle:
 	"$$(pwd)/third_party/ninja/ninja" -C out/ios-vulkan-arm64 -j4 libEGL libGLESv2 && \
 	"$$(pwd)/buildtools/mac/gn" gen out/ios-metal-arm64 --args=' \
 		target_os="ios" target_cpu="arm64" target_environment="device" \
+		ios_deployment_target="16.0" \
 		is_debug=false is_official_build=true chrome_pgo_phase=0 \
 		ios_enable_code_signing=false is_component_build=false symbol_level=0 \
 		angle_standalone=true angle_build_tests=false \
@@ -696,7 +763,7 @@ lwgjl:
 	find "$$LWJGL41_DIR/bin/RELEASE" -name '*.jar' ! -name '*-natives-*' ! -name '*-sources.jar' -exec cp {} "$(SOURCEDIR)/JavaApp/libs/lwjgl41/" \; 2>/dev/null || true; \
 	echo '[Witch v$(VERSION)] lwgjl - end'
 
-payload: native dep_mg dep_mobilegl lwgjl java jre assets
+payload: native dep_mg dep_mobilegl dep_tgles dep_tglmt lwgjl java jre assets
 	echo '[Witch v$(VERSION)] payload - start'
 	rm -f $(WORKINGDIR)/Witch.app/*.png
 	$(call METHOD_DIRCHECK,$(WORKINGDIR)/Witch.app/libs)
@@ -715,6 +782,16 @@ payload: native dep_mg dep_mobilegl lwgjl java jre assets
 	cp $(SOURCEDIR)/lwgjl/lwjgl3-wip-rebase_3.3.3/bin/out/*.dylib $(WORKINGDIR)/Witch.app/libs/lwjgl33_natives/ || exit 1
 	cp $(SOURCEDIR)/lwgjl/lwjgl3-wip-rebase_3.3.6/bin/out/*.dylib $(WORKINGDIR)/Witch.app/libs/lwjgl36_natives/ || exit 1
 	cp $(SOURCEDIR)/lwgjl/lwjgl3-wip-rebase_3.4.1/bin/out/*.dylib $(WORKINGDIR)/Witch.app/libs/lwjgl41_natives/ || exit 1
+	# The LWJGL macOS build emits a macOS-platform libMoltenVK.dylib (links
+	# AppKit, platform macOS) that can never dlopen on iOS. If it stays in the
+	# natives dirs, LWJGL resolves a bare "libMoltenVK.dylib" opengl.libname via
+	# org.lwjgl.librarypath and dies with UnsatisfiedLinkError (error=null) in
+	# GL.create() on MC 26.x. The signed iOS copy lives in Frameworks and is
+	# referenced by absolute path (vulkan.libname) / dlopen redirect, so drop
+	# the macOS copies here.
+	rm -f $(WORKINGDIR)/Witch.app/libs/lwjgl33_natives/libMoltenVK*.dylib \
+		$(WORKINGDIR)/Witch.app/libs/lwjgl36_natives/libMoltenVK*.dylib \
+		$(WORKINGDIR)/Witch.app/libs/lwjgl41_natives/libMoltenVK*.dylib
 	@nm -gU $(WORKINGDIR)/Witch.app/libs/lwjgl41_natives/libshaderc.dylib | \
 		grep -q '_shaderc_compile_options_set_max_id_bound$$' || \
 		{ echo 'ERROR: LWJGL 3.4.1 Shaderc is too old for VulkanMod'; exit 1; }
@@ -776,6 +853,12 @@ payload: native dep_mg dep_mobilegl lwgjl java jre assets
 	# entitlements.trollstore.xml — adding them here breaks free-Apple-ID signing
 	# with 0xe8008016. Use TROLLSTORE_JIT_ENT=1 only for TrollStore.
 	# Optional override: SIDESTORE_ENT=/path/to/entitlements.xml
+	# ORDER MATTERS: ad-hoc-sign the whole bundle FIRST, then overlay the
+	# entitlements on the main binary. ldid -S <dir> (no plist) re-signs every
+	# Mach-O inside ad-hoc with no entitlement blob, so running it last used to
+	# silently WIPE the keys above — the installed app then reported
+	# "memorystatus=0 increased-memory-limit=0" and died at the 2 GiB Jetsam cap.
+	ldid -S $(OUTPUTDIR)/Payload/Witch.app;
 	if [ '$(TROLLSTORE_JIT_ENT)' == '1' ]; then \
 		ldid -S$(SOURCEDIR)/entitlements.trollstore.xml $(OUTPUTDIR)/Payload/Witch.app/Witch; \
 	elif [ '$(PLATFORM)' == '6' ]; then \
@@ -785,7 +868,6 @@ payload: native dep_mg dep_mobilegl lwgjl java jre assets
 	else \
 		ldid -S$(SOURCEDIR)/entitlements.sideload.xml $(OUTPUTDIR)/Payload/Witch.app/Witch; \
 	fi
-	ldid -S $(OUTPUTDIR)/Payload/Witch.app;
 	echo '[Witch v$(VERSION)] payload - end'
 
 deploy:
@@ -852,4 +934,4 @@ clean:
 
 		
 
-.PHONY: all clean check native java jre lwgjl dep_mg dep_mobilegl dep_moltenvk dep_moltenvk12 dep_mesa_zink dep_kkosmic dep_angle assets payload package dsym deploy help codesign
+.PHONY: all clean check native java jre lwgjl dep_mg dep_mobilegl dep_tgles dep_tglmt dep_moltenvk dep_moltenvk12 dep_mesa_zink dep_kkosmic dep_angle assets payload package dsym deploy help codesign

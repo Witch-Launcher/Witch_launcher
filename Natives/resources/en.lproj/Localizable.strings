@@ -287,6 +287,7 @@
 "preference.title.renderer.debug.vulkan" = "MoltenVK (Vulkan -> Metal direct)";
 "preference.title.renderer.debug.ltw" = "LTW (1.17+) - OpenGL 3.3 via OpenGL ES/Metal, EXPERIMENTAL";
 "preference.title.renderer.debug.mobilegl" = "MobileGL (Vulkan) - exports OpenGL 4.2 via MoltenVK";
+"preference.title.renderer.debug.tglmt" = "TGLMT (Metal) - exports OpenGL 4.6 Core via Metal, A11+";
 
 "Device Info" = "Device Info";
 
@@ -311,8 +312,8 @@
 "settings.group.mobilegl" = "MobileGL Settings";
 "preference.title.mobilegl_backend_type" = "Backend Type";
 "preference.detail.mobilegl_backend_type" = "Select the graphics backend. DirectVulkan uses Vulkan/MoltenVK for best performance. DirectGLES uses OpenGL ES fallback.";
-"preference.title.mobilegl_angle_backend" = "ANGLE Backend (when using DirectGLES)";
-"preference.detail.mobilegl_angle_backend" = "Select the ANGLE backend when using OpenGL ES. VulkanANGLE: GLES → Vulkan → MoltenVK → Metal (supports ES 3.2). MetalANGLE: GLES → Metal directly (supports ES 3.0).";
+"preference.title.mobilegl_angle_backend" = "GLES Backend (when using DirectGLES)";
+"preference.detail.mobilegl_angle_backend" = "Select the GLES backend when using OpenGL ES. TGLES: GLES → Metal directly (supports ES 3.2). VulkanANGLE: GLES → Vulkan → MoltenVK → Metal (supports ES 3.2, heavier).";
 "preference.title.mobilegl_disable_timer_query" = "Disable Timer Query";
 "preference.detail.mobilegl_disable_timer_query" = "Disable GPU timer queries. Can improve performance on some devices but disables FPS measurement.";
 "preference.title.mobilegl_disable_subgroup" = "Disable Subgroup";
@@ -437,6 +438,8 @@
 "preference.detail.debug_auto_correction" = "Enable auto correction when typing text in game.";
 "preference.title.debug_render_log" = "Render error logging";
 "preference.detail.debug_render_log" = "When ON, all render error logs are recorded (LTW wrapper + EGL diagnostics). Keep OFF (default) to fully disable render logging and avoid CPU/GPU overhead.";
+"preference.title.debug_mem_sample_log" = "Memory sampling log";
+"preference.detail.debug_mem_sample_log" = "When ON (default), memory footprint is logged every 5s for Jetsam diagnosis. Turn OFF to fully disable all memory-measurement logging.";
 "preference.title.debug_hide_home_indicator" = "Hide home indicator";
 "preference.detail.debug_hide_home_indicator" = "This will disable home indicator locking. You will need to use Guided Access to hide and lock home indicator at the same time.";
 

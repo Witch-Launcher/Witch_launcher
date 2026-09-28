@@ -321,22 +321,45 @@ std::string getGpuName() {
 }
 
 void set_es_version() {
-    std::string ESVersionStr = getBeforeThirdSpace(std::string((const char*)GLES.glGetString(GL_VERSION)));
+    const char* rawVersion = (const char*)GLES.glGetString(GL_VERSION);
+    std::string version = rawVersion ? rawVersion : "";
     int major, minor;
 
-    if (sscanf(ESVersionStr.c_str(), "OpenGL ES %d.%d", &major, &minor) == 2) {
+    // Locate "OpenGL ES <major>.<minor>" anywhere in the raw string rather
+    // than parsing getBeforeThirdSpace's three-word prefix. MetalANGLE writes
+    // "OpenGL ES 3.0 <vendor> ..." so the prefix alone happens to work; TGLES
+    // writes "TGL OpenGL ES 3.2 (0.2.0)", whose prefix is "TGL OpenGL ES" and
+    // drops the version, which used to send an ES 3.2 backend down the 3.0
+    // fallback. es_version picks the shader translation target (ESSL 3.2 vs
+    // 3.0), the texture-buffer emulation path, the DSA paths and the
+    // GL_SHADING_LANGUAGE_VERSION string, so it must name the real level.
+    size_t esPos = version.find("OpenGL ES");
+    if (esPos != std::string::npos &&
+        sscanf(version.c_str() + esPos, "OpenGL ES %d.%d", &major, &minor) == 2) {
         hardware->es_version = major * 100 + minor * 10;
     } else {
         hardware->es_version = 300;
     }
-    LOG_I("OpenGL ES Version: %s (%d)", ESVersionStr.c_str(), hardware->es_version)
+    LOG_I("OpenGL ES Version: %s (%d)", version.c_str(), hardware->es_version)
     if (hardware->es_version < 300) {
         LOG_I("OpenGL ES version is lower than 3.0! This version is not supported!")
     }
 }
 
 std::string getGLESName() {
-    return getBeforeThirdSpace(std::string((char*)GLES.glGetString(GL_VERSION)));
+    std::string version((const char*)GLES.glGetString(GL_VERSION));
+    // Same two formats as set_es_version: start at "OpenGL ES" (TGLES puts a
+    // vendor word in front of it, ANGLE does not) and cut at the space after
+    // major.minor, so GL_RENDERER reads "OpenGL ES 3.2" on both backends.
+    size_t esPos = version.find("OpenGL ES");
+    if (esPos != std::string::npos) {
+        size_t dot = version.find('.', esPos);
+        if (dot != std::string::npos) {
+            size_t end = version.find(' ', dot);
+            return version.substr(esPos, end == std::string::npos ? std::string::npos : end - esPos);
+        }
+    }
+    return getBeforeThirdSpace(version);
 }
 
 static std::string rendererString;

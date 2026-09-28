@@ -27,11 +27,13 @@ NSString *const MobileGLPrefSection = @"mobilegl";
     id angleBackend = getPrefObject(@"mobilegl.angle_backend");
     if (angleBackend && [angleBackend isKindOfClass:[NSString class]]) {
         NSString *ab = (NSString *)angleBackend;
-        if ([ab isEqualToString:@"metal"]) {
-            return MobileGLAngleBackendMetal;
+        if ([ab isEqualToString:@"vulkan"]) {
+            return MobileGLAngleBackendVulkan;
         }
     }
-    return MobileGLAngleBackendVulkan;
+    // Default is TGLES. The legacy value "metal" (MetalANGLE, removed) also
+    // maps here so existing installs keep working after the migration.
+    return MobileGLAngleBackendTGLES;
 }
 
 + (void)applyEnvironmentFromPreferences {
@@ -49,11 +51,11 @@ NSString *const MobileGLPrefSection = @"mobilegl";
     // ANGLE backend (only relevant when DirectGLES is selected)
     MobileGLAngleBackend angleBackend = [self selectedAngleBackend];
     switch (angleBackend) {
-        case MobileGLAngleBackendMetal:
-            setenv("MOBILEGL_ANGLE_BACKEND", "metal", 1);
+        case MobileGLAngleBackendVulkan:
+            setenv("MOBILEGL_ANGLE_BACKEND", "vulkan", 1);
             break;
         default:
-            setenv("MOBILEGL_ANGLE_BACKEND", "vulkan", 1);
+            setenv("MOBILEGL_ANGLE_BACKEND", "tgles", 1);
             break;
     }
 
@@ -135,7 +137,7 @@ NSString *const MobileGLPrefSection = @"mobilegl";
     NSString *backend = (backendType == MobileGLBackendTypeDirectGLES) ? @"DirectGLES" : @"DirectVulkan";
 
     MobileGLAngleBackend angleBackend = [self selectedAngleBackend];
-    NSString *angleStr = (angleBackend == MobileGLAngleBackendMetal) ? @"MetalANGLE" : @"VulkanANGLE";
+    NSString *angleStr = (angleBackend == MobileGLAngleBackendVulkan) ? @"VulkanANGLE" : @"TGLES";
 
     id disableTimerQuery = getPrefObject(@"mobilegl.disable_timer_query");
     NSString *timerQ = disableTimerQuery ? ([disableTimerQuery boolValue] ? @"YES" : @"NO") : @"NO";

@@ -45,6 +45,10 @@
 #define RENDERER_NAME_MOLTENVK "libMoltenVK.dylib"
 // MobileGL: desktop OpenGL 4.2+ implementation via Vulkan/MoltenVK backend
 #define RENDERER_NAME_MOBILEGL "libMobileGL.dylib"
+// TGLMT: OpenGL 4.6 Core -> Metal directly (libtglmt.dylib, no MoltenVK,
+// no ANGLE). Vanilla boot path, A11+. Selected from the renderer picker;
+// LWJGL resolves plain gl* symbols straight from this dylib.
+#define RENDERER_NAME_TGLMT "libtglmt.dylib"
 
 #define SPECIALBTN_KEYBOARD -1
 #define SPECIALBTN_TOGGLECTRL -2
@@ -94,7 +98,7 @@ void handle_fatal_exit(int code);
 void init_bypassDyldLibValidation();
 void init_jit_vm_remap_hook();
 void rebind_jit_vm_hooks_after_libjvm_load();
-void verify_libjvm_mirror_brk_patch(void);
+BOOL verify_libjvm_mirror_brk_patch(void);
 void start_jit_mirror_prepare_poll_thread(void);
 void prewarm_jit_mirror_superpage(void);
 void AmethystJIT26PrepareMirrorPair(void *rx, void *rw, size_t size);

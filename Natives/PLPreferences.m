@@ -138,6 +138,7 @@
         }.mutableCopy,
         @"mobilegl": @{
             @"backend_type": @"DirectVulkan",
+            @"angle_backend": @"tgles",
             @"disable_timer_query": @NO,
             @"disable_subgroup": @NO,
             @"advertise_fp64": @NO,
@@ -185,6 +186,7 @@
             @"debug_ipad_ui": @(realUIIdiom == UIUserInterfaceIdiomPad),
             @"debug_auto_correction": @YES,
             @"debug_render_log": @NO,
+            @"mem_sample_log": @YES,
             @"debug_server_enabled": @NO,
             @"debug_server_port": @(9090),
             @"debug_server_token": @"",

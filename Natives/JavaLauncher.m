@@ -19,6 +19,7 @@
 #include "utils.h"
 #include "ZinkConfig.h"
 #include "MobileGLConfig.h"
+#include "TGLMTConfig.h"
 #include "MemSampler.h"
 
 #import "ios_uikit_bridge.h"
@@ -287,6 +288,18 @@ void init_loadMobileGLConfig() {
     NSLog(@"[MobileGL] %@", [MobileGLConfig activeConfigSummary]);
 }
 
+void init_loadTGLMTConfig() {
+    NSString *renderer = [PLProfiles resolveKeyForCurrentProfile:@"renderer"];
+    if (![renderer isEqualToString:@ RENDERER_NAME_TGLMT]) {
+        return;
+    }
+
+    // Apply TGLMT environment variables from preferences (vanilla GL 4.6 path)
+    [TGLMTConfig applyEnvironmentFromPreferences];
+    NSLog(@"[JavaLauncher] TGLMT config applied");
+    NSLog(@"[TGLMT] %@", [TGLMTConfig activeConfigSummary]);
+}
+
 void init_loadLTWConfig() {
     // debug.debug_render_log (Developer option, default OFF):
     //   OFF = quiet mode. LTW ignores GL errors (same policy as MobileGlues
@@ -404,6 +417,7 @@ int launchJVMWithArgs(NSString *username, id launchTarget, int width, int height
     init_loadMobileGluesConfig();
     init_loadLTWConfig();
     init_loadMobileGLConfig();
+    init_loadTGLMTConfig();
 
     DeviceGetJITFlags(YES);
     BOOL requiresDebugJITMapping = DeviceNeedsDebugJITMapping();
@@ -493,20 +507,30 @@ int launchJVMWithArgs(NSString *username, id launchTarget, int width, int height
         }
         // Debugger is servicing us — restore default SIGTRAP behavior for the JVM run.
         sigaction(SIGTRAP, &oldTrapSa, NULL);
+        // Install the dyld LV bypass WHILE StikDebug is still attached. If we wait
+        // until after detach-after-first-br, processIsCurrentlyDebugged() is false
+        // and unsigned JNA / renderer dylibs fail with code-signature invalid.
+        init_bypassDyldLibValidation();
+        NSLog(@"[JavaLauncher] DyldLVBypass init completed during JIT26 handshake");
         JIT26SetDetachAfterFirstBr(!jit26AlwaysAttached);
         init_jit_vm_remap_hook();
         // make sure we don't get stuck in EXC_BAD_ACCESS
         task_set_exception_ports(mach_task_self(), EXC_MASK_BAD_ACCESS, 0, EXCEPTION_DEFAULT, MACHINE_THREAD_STATE);
     }
-    if (!requiresDebugJITMapping || jit26AlwaysAttached) {
+    // iOS 26/27 still needs the LV bypass for JNA, renderer dylibs, and mods
+    // extracted to Documents. StikDebug keeps us CS_DEBUGGED so the mirrored
+    // dyld patches are legal — do not leave this off just because
+    // requiresDebugJITMapping is set. init_bypassDyldLibValidation is idempotent.
+    BOOL debuggerAttached = processIsCurrentlyDebugged();
+    if (jit26Handshake || !requiresDebugJITMapping || jit26AlwaysAttached || debuggerAttached) {
         if (jit26AlwaysAttached) {
             // Only allow StikDebug to catch our breakpoints to prevent any stutters
             task_set_exception_ports(mach_task_self(), EXC_MASK_ALL & ~EXC_MASK_BREAKPOINT, 0,
                 EXCEPTION_DEFAULT, THREAD_STATE_NONE);
         }
-        // Activate Library Validation bypass for external runtime and dylibs (JNA, etc)
         init_bypassDyldLibValidation();
-        NSLog(@"[JavaLauncher] DyldLVBypass init completed");
+        NSLog(@"[JavaLauncher] DyldLVBypass init completed (debugger=%d handshake=%d)",
+            debuggerAttached, jit26Handshake);
     } else {
         NSLog(@"[DyldLVBypass] Hook disabled! Loading unsigned dylib will cause code signature error.");
     }
@@ -677,6 +701,11 @@ int launchJVMWithArgs(NSString *username, id launchTarget, int width, int height
     }
     margv[++margc] = "-Xms128M";
     margv[++margc] = [NSString stringWithFormat:@"-Xmx%dM", allocmem].UTF8String;
+    // One line per GC ("700M->300M(768M)") in latestlog: the only way to
+    // see the JVM's used/committed heap without rebuilding MC's logging.
+    // Accepted by every JDK we ship (JDK8 natively, JDK9+ as an alias of
+    // -Xlog:gc), so it costs nothing on the MC versions that matter.
+    margv[++margc] = "-verbose:gc";
     
     // Add DH native library path if available
     NSString *javaLibraryPath = [NSBundle.mainBundle.bundlePath stringByAppendingPathComponent:@"Frameworks"];
@@ -761,6 +790,12 @@ int launchJVMWithArgs(NSString *username, id launchTarget, int width, int height
             // pointers resolve from the library that owns the current context.
             openglLibName = RENDERER_NAME_MOBILEGL;
             NSLog(@"[JavaLauncher] opengl.libname → %s (MobileGL native)", openglLibName);
+        } else if (strcmp(glLibName, RENDERER_NAME_TGLMT) == 0) {
+            // TGLMT exports plain C gl* (701 symbols) + TGLMT_* window API.
+            // LWJGL loads it directly; context/swap chạy qua tglmt_bridge
+            // (br_* table), không qua EGL.
+            openglLibName = RENDERER_NAME_TGLMT;
+            NSLog(@"[JavaLauncher] opengl.libname → %s (TGLMT native GL 4.6)", openglLibName);
         } else if (strcmp(glLibName, RENDERER_NAME_MOLTENVK) == 0) {
             // MoltenVK: use MobileGlues for GL entry points
             openglLibName = RENDERER_NAME_MOBILEGLUES;
@@ -773,7 +808,48 @@ int launchJVMWithArgs(NSString *username, id launchTarget, int width, int height
             openglLibName = glLibName;
             NSLog(@"[JavaLauncher] opengl.libname → %s (renderer default)", openglLibName);
         }
-        margv[++margc] = [NSString stringWithFormat:@"-Dorg.lwjgl.opengl.libname=%s", openglLibName].UTF8String;
+        // Absolute Frameworks path is required so LWJGL's Library.loadNative
+        // takes the direct-load path and never resolves through
+        // org.lwjgl.librarypath (the natives dirs). A bare name lets a stale
+        // same-named file in the natives dir shadow the signed Frameworks copy
+        // -> UnsatisfiedLinkError (error=null) in GL.create() on MC 26.x.
+        {
+            NSString *frameworks = NSBundle.mainBundle.privateFrameworksPath;
+            NSString *absPath = [frameworks stringByAppendingPathComponent:@(openglLibName)];
+            if ([fm fileExistsAtPath:absPath]) {
+                margv[++margc] = [NSString stringWithFormat:@"-Dorg.lwjgl.opengl.libname=%@", absPath].UTF8String;
+                NSLog(@"[JavaLauncher] opengl.libname absolute → %@", absPath);
+            } else {
+                margv[++margc] = [NSString stringWithFormat:@"-Dorg.lwjgl.opengl.libname=%s", openglLibName].UTF8String;
+                NSLog(@"[JavaLauncher] opengl.libname bare (not in Frameworks) → %s", openglLibName);
+            }
+        }
+    }
+
+    // VulkanMod / MC 26 vulkan backend always dlopen MoltenVK via LWJGL.
+    // org.lwjgl.librarypath is the LWJGL natives dir, which does not contain
+    // a signed libMoltenVK.dylib — LWJGL then fails with UnsatisfiedLinkError
+    // (error=null) and the game crashes to the home screen. Point at the
+    // Frameworks copy. Absolute path is required so LWJGL skips name-mapping.
+    {
+        NSString *frameworks = NSBundle.mainBundle.privateFrameworksPath;
+        NSString *mvkPath = [frameworks stringByAppendingPathComponent:@"libMoltenVK.dylib"];
+        id mvkVer = getPrefObject(@"video.moltenvk_version");
+        if ([mvkVer isKindOfClass:NSString.class] && [mvkVer isEqualToString:@"1.2"]) {
+            NSString *mvk12 = [frameworks stringByAppendingPathComponent:@"libMoltenVK12.dylib"];
+            if ([fm fileExistsAtPath:mvk12]) {
+                mvkPath = mvk12;
+            }
+        }
+        if ([fm fileExistsAtPath:mvkPath]) {
+            margv[++margc] = [NSString stringWithFormat:@"-Dorg.lwjgl.vulkan.libname=%@", mvkPath].UTF8String;
+            NSLog(@"[JavaLauncher] vulkan.libname → %@", mvkPath);
+        }
+        NSString *jnaBoot = [frameworks stringByAppendingPathComponent:@"libjnidispatch.dylib"];
+        if ([fm fileExistsAtPath:jnaBoot]) {
+            margv[++margc] = [NSString stringWithFormat:@"-Djna.boot.library.path=%@", frameworks].UTF8String;
+            margv[++margc] = [NSString stringWithFormat:@"-Djna.library.path=%@", frameworks].UTF8String;
+        }
     }
 
     // Point LWJGL spvc bindings at libspirv-cross-c-shared.0.dylib (the one
@@ -851,9 +927,18 @@ int launchJVMWithArgs(NSString *username, id launchTarget, int width, int height
     [fm createDirectoryAtPath:jnaTmpDir withIntermediateDirectories:YES attributes:nil error:nil];
     NSString *jnidispatchSrc = [NSBundle.mainBundle.bundlePath stringByAppendingPathComponent:@"Frameworks/libjnidispatch.dylib"];
     NSString *jnidispatchDst = [jnaTmpDir stringByAppendingPathComponent:@"libjnidispatch.dylib"];
-    if ([fm fileExistsAtPath:jnidispatchSrc] && ![fm fileExistsAtPath:jnidispatchDst]) {
-        NSLog(@"[JavaLauncher] Copying libjnidispatch.dylib to %@", jnidispatchDst);
-        [fm copyItemAtPath:jnidispatchSrc toPath:jnidispatchDst error:nil];
+    if ([fm fileExistsAtPath:jnidispatchSrc]) {
+        // Always refresh: a leftover unsigned extract in jna_tmp (from an
+        // earlier JNA unpack) is not loadable once DyldLVBypass is off.
+        NSError *jnaCopyErr = nil;
+        if ([fm fileExistsAtPath:jnidispatchDst]) {
+            [fm removeItemAtPath:jnidispatchDst error:nil];
+        }
+        if ([fm copyItemAtPath:jnidispatchSrc toPath:jnidispatchDst error:&jnaCopyErr]) {
+            NSLog(@"[JavaLauncher] Refreshed signed libjnidispatch.dylib at %@", jnidispatchDst);
+        } else {
+            NSLog(@"[JavaLauncher] Failed to copy libjnidispatch.dylib: %@", jnaCopyErr);
+        }
     }
 
     // Load java
@@ -900,7 +985,20 @@ int launchJVMWithArgs(NSString *username, id launchTarget, int width, int height
             return 1;
         }
         NSLog(@"[JavaLauncher] libjvm preloaded at %p", libjvm);
-        verify_libjvm_mirror_brk_patch();
+        if (!verify_libjvm_mirror_brk_patch()) {
+            // The bundled runtime missed the build-time BL->brk #0x6a patch
+            // (see scripts/patch_libjvm_mirror_brk.py). Continuing would die
+            // inside JNI_CreateJavaVM (CodeCache::initialize_heaps, 240 MB
+            // mirror never prepared on iOS 27) with only a truncated hs_err.
+            // Fail fast with a clear dialog instead of a hang/home-screen kill.
+            UIKit_returnToSplitView();
+            showDialog(localize(@"Error", nil),
+                @"The bundled Java runtime is missing the iOS 27 JIT patch (mirror brk #0x6a).\n\n"
+                 @"Rebuild with “make jre” (which runs scripts/patch_libjvm_mirror_brk.py + "
+                 @"scripts/patch_libjvm_jit_alloc.py) and reinstall the app.");
+            [PLLogOutputView handleExitCode:1];
+            return 1;
+        }
         rebind_jit_vm_hooks_after_libjvm_load();
     }
 
@@ -1056,6 +1154,11 @@ int launchJVMWithArgs(NSString *username, id launchTarget, int width, int height
 
     // Footprint sampler for Jetsam diagnosis (native + GPU memory invisible
     // to JVM heap stats). Logs every 5s until the process dies.
+    // Fully gated by debug.mem_sample_log (Developer switch, default ON):
+    // OFF = zero [MemSample]/[MobileGL-MemStats] lines, no timer at all.
+    // A missing key (old installs) means ON.
+    id memLogPref = getPrefObject(@"debug.mem_sample_log");
+    WitchMemSamplerSetEnabled(memLogPref ? [memLogPref boolValue] : YES);
     WitchMemSamplerStart();
 
     return pJLI_Launch(++margc, margv,

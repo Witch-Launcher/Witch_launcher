@@ -76,9 +76,39 @@ static uint32_t *find_mirror_mapping_brk_site_in_image(const struct mach_header 
     return NULL;
 }
 
-void verify_libjvm_mirror_brk_patch(void) {
+static BOOL write_rx_u32(uint32_t *site, uint32_t insn) {
+    vm_size_t page = (vm_size_t)getpagesize();
+    vm_address_t addr = (vm_address_t)(uintptr_t)site;
+    vm_address_t pageAddr = addr & ~(page - 1);
+    vm_size_t offset = addr - pageAddr;
+
+    JIT26PrepareRegionForPatching((void *)pageAddr, page);
+
+    vm_address_t mirrored = 0;
+    vm_prot_t cur_prot = 0, max_prot = 0;
+    kern_return_t ret = vm_remap(mach_task_self(), &mirrored, page, 0, VM_FLAGS_ANYWHERE,
+                                 mach_task_self(), pageAddr, FALSE, &cur_prot, &max_prot,
+                                 VM_INHERIT_SHARE);
+    if (ret != KERN_SUCCESS) {
+        NSLog(@"[JIT26] vm_remap for libjvm brk patch failed: 0x%x", ret);
+        return NO;
+    }
+    ret = vm_protect(mach_task_self(), mirrored, page, FALSE,
+                     VM_PROT_READ | VM_PROT_WRITE | VM_PROT_COPY);
+    if (ret != KERN_SUCCESS) {
+        NSLog(@"[JIT26] vm_protect(RW) for libjvm brk patch failed: 0x%x", ret);
+        vm_deallocate(mach_task_self(), mirrored, page);
+        return NO;
+    }
+    *(volatile uint32_t *)(mirrored + offset) = insn;
+    sys_icache_invalidate(site, sizeof(insn));
+    vm_deallocate(mach_task_self(), mirrored, page);
+    return *site == insn;
+}
+
+BOOL verify_libjvm_mirror_brk_patch(void) {
     if (!DeviceNeedsDebugJITMapping()) {
-        return;
+        return YES;
     }
 
     uint32_t count = _dyld_image_count();
@@ -90,17 +120,30 @@ void verify_libjvm_mirror_brk_patch(void) {
         uint32_t *site = find_mirror_mapping_brk_site_in_image(_dyld_get_image_header(i));
         if (!site) {
             NSLog(@"[JIT26] WARNING: could not locate mirror prepare site in %s", name);
-            return;
+            return NO;
         }
         if (*site == kMirrorBrk0x6a) {
             NSLog(@"[JIT26] libjvm mirror brk #0x6a patch verified at %p in %s", site, name);
-        } else {
-            NSLog(@"[JIT26] ERROR: libjvm mirror brk patch missing at %p in %s (insn=%#x, expected brk #0x6a). "
-                  @"Run scripts/patch_libjvm_mirror_brk.py on bundled runtimes.",
-                  site, name, *site);
+            return YES;
         }
-        return;
+        if ((*site & 0xFC000000u) != 0x94000000u) {
+            NSLog(@"[JIT26] ERROR: unexpected insn %#x at mirror prepare site %p in %s",
+                  *site, site, name);
+            return NO;
+        }
+        NSLog(@"[JIT26] libjvm mirror brk patch missing at %p (insn=%#x). Patching BL printf → brk #0x6a at runtime.",
+              site, *site);
+        if (!write_rx_u32(site, kMirrorBrk0x6a)) {
+            NSLog(@"[JIT26] ERROR: failed to install brk #0x6a at %p in %s. "
+                  @"Run scripts/patch_libjvm_mirror_brk.py on bundled runtimes.",
+                  site, name);
+            return NO;
+        }
+        NSLog(@"[JIT26] libjvm mirror brk #0x6a patch verified at %p in %s", site, name);
+        return YES;
     }
+    NSLog(@"[JIT26] ERROR: libjvm.dylib is not loaded; cannot verify mirror brk patch");
+    return NO;
 }
 
 void AmethystJIT26PrepareMirrorPair(void *rx, void *rw, size_t size) {

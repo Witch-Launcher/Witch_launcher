@@ -23,7 +23,10 @@ typedef NS_ENUM(NSInteger, MobileGLBackendType) {
 
 typedef NS_ENUM(NSInteger, MobileGLAngleBackend) {
     MobileGLAngleBackendVulkan = 0,
-    MobileGLAngleBackendMetal = 1
+    // TGLES: GLES 3.2 -> Metal directly (libtgles.dylib). Replaces MetalANGLE
+    // (ES 3.0-only, removed). The stored pref value "metal" is treated as
+    // TGLES for migration of existing installs.
+    MobileGLAngleBackendTGLES = 1
 };
 
 @interface MobileGLConfig : NSObject

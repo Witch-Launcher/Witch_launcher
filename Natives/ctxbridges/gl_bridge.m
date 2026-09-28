@@ -1,10 +1,17 @@
 #import <Foundation/Foundation.h>
 #import "SurfaceViewController.h"
+#import "LauncherPreferences.h"
 #import <QuartzCore/QuartzCore.h>
+#import <Metal/Metal.h>
+#import <objc/runtime.h>
 
 #include <dlfcn.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
+#include <dispatch/dispatch.h>
+#include <mach/mach.h>
+#include <os/proc.h>
 #include "bridge_tbl.h"
 #include "environ.h"
 #include "gl_bridge.h"
@@ -14,6 +21,81 @@ static EGLDisplay g_EglDisplay;
 static egl_library handle;
 static void* ltw_handle;
 static void* g_mgl_handle = NULL;  // MobileGL handle for direct GL resolution
+
+// MTLCompileOptions.mathMode / mathFloatingPointFunctions exist only on
+// iOS 18+. ANGLE binaries built with minos 18+ call setMathMode: unconditionally
+// (the @available guard compiles out), which raises NSInvalidArgumentException
+// on iOS 16/17 inside newLibraryWithSource: during EGL_Initialize.
+// Belt-and-braces alongside the minos-16.0 ANGLE rebuild: if the selectors are
+// missing at runtime, install harmless no-ops so ANY present-or-future ANGLE
+// binary degrades to default (safe) math mode instead of crashing.
+// Getters return 0 == MTLMathModeSafe / precise-functions default.
+static void mathModeNoOp(id self, SEL _cmd, NSInteger value) {
+    (void)self; (void)_cmd; (void)value;
+}
+static NSInteger mathModeZero(id self, SEL _cmd) {
+    (void)self; (void)_cmd; return 0;
+}
+
+static void installMetalMathModeCompat(void) {
+    static BOOL installed = NO;
+    if (installed) return;
+    installed = YES;
+    // Private subclass first (the actual runtime class on iOS 16/17), then the
+    // public superclass so subclass instances inherit via the normal chain.
+    const char *classNames[] = { "MTLCompileOptionsInternal", "MTLCompileOptions" };
+    const char *setSels[] = { "setMathMode:", "setMathFloatingPointFunctions:" };
+    const char *getSels[] = { "mathMode", "mathFloatingPointFunctions" };
+    for (size_t c = 0; c < sizeof(classNames) / sizeof(classNames[0]); c++) {
+        Class cls = objc_getClass(classNames[c]);
+        if (!cls) continue;
+        for (size_t i = 0; i < sizeof(setSels) / sizeof(setSels[0]); i++) {
+            SEL sel = NSSelectorFromString(@(setSels[i]));
+            if (![cls instancesRespondToSelector:sel]) {
+                class_addMethod(cls, sel, (IMP)mathModeNoOp, "v@:q");
+                NSLog(@"[EGLBridge] installed no-op %@ on %@ (iOS <18 compat)",
+                      @(setSels[i]), @(classNames[c]));
+            }
+        }
+        for (size_t i = 0; i < sizeof(getSels) / sizeof(getSels[0]); i++) {
+            SEL sel = NSSelectorFromString(@(getSels[i]));
+            if (![cls instancesRespondToSelector:sel]) {
+                class_addMethod(cls, sel, (IMP)mathModeZero, "q@:");
+            }
+        }
+    }
+}
+
+// dlopen with a one-line success/failure log. ANGLE/MoltenVK/MobileGL
+// mismatches are silent by default (NULL handle + later 0x300B), so every
+// backend load must be visible in latestlog.txt.
+static void* checked_dlopen(NSString *path, int mode, const char *label) {
+    if (!path) {
+        NSLog(@"[EGLBridge] dlopen %s: nil path, skipped", label);
+        return NULL;
+    }
+    void *h = dlopen(path.UTF8String, mode);
+    if (h) {
+        NSLog(@"[EGLBridge] dlopen %s OK: %@", label, path.lastPathComponent);
+    } else {
+        NSLog(@"[EGLBridge] dlopen %s FAILED: %@ (%s)", label, path, dlerror());
+    }
+    return h;
+}
+
+static NSString* preferredMoltenVKPath(void) {
+    NSString *frameworks = NSBundle.mainBundle.privateFrameworksPath;
+    id ver = getPrefObject(@"video.moltenvk_version");
+    NSString *version = (ver && [ver isKindOfClass:[NSString class]]) ? (NSString *)ver : @"1.4";
+    if ([version isEqualToString:@"1.2"]) {
+        NSString *p12 = [frameworks stringByAppendingPathComponent:@"libMoltenVK12.dylib"];
+        if ([NSFileManager.defaultManager fileExistsAtPath:p12]) {
+            return p12;
+        }
+        NSLog(@"[EGLBridge] libMoltenVK12.dylib missing, falling back to libMoltenVK.dylib (check video.moltenvk_version pref)");
+    }
+    return [frameworks stringByAppendingPathComponent:@"libMoltenVK.dylib"];
+}
 
 // Render-log gate (Developer option "Render error logging", default OFF).
 // When OFF, all per-frame diagnostics (glReadPixels readbacks, swap logs,
@@ -63,49 +145,97 @@ void dlsym_EGL() {
         // but does NOT link a Vulkan library on iOS (MOBILEGL_VULKAN_LIBRARY was empty).
         // We must load MoltenVK FIRST with RTLD_GLOBAL so its Vulkan symbols are
         // in the global symbol table when MobileGL's VulkanRenderer resolves them.
-        void* mvk = dlopen("@rpath/libMoltenVK.dylib", RTLD_LAZY | RTLD_GLOBAL);
-        if (!mvk) mvk = dlopen([fwPath stringByAppendingPathComponent:@"libMoltenVK.dylib"].UTF8String, RTLD_LAZY | RTLD_GLOBAL);
+        // Pref order: video.moltenvk_version (1.2 vs 1.4) -> libvulkan.1.dylib
+        // (thin re-export of MoltenVK) -> ANGLE's custom libvulkan.dylib.
+        // NOTE: MOBILEGL_BACKEND_TYPE defaults to DirectVulkan in MobileGLConfig,
+        // but the native default is DirectGLES — env must already be set by
+        // egl_bridge.m / JavaLauncher before this runs.
+        NSString *mvkPath = preferredMoltenVKPath();
+        void* mvk = checked_dlopen(mvkPath, RTLD_LAZY | RTLD_GLOBAL, "MoltenVK");
         if (!mvk) {
-            // Fallback: libvulkan.dylib is a thin loader wrapper
-            mvk = dlopen("@rpath/libvulkan.dylib", RTLD_LAZY | RTLD_GLOBAL);
-            if (!mvk) mvk = dlopen([fwPath stringByAppendingPathComponent:@"libvulkan.dylib"].UTF8String, RTLD_LAZY | RTLD_GLOBAL);
+            // Fallback: libvulkan.1.dylib is a thin re-export wrapper for MoltenVK.
+            mvk = checked_dlopen([fwPath stringByAppendingPathComponent:@"libvulkan.1.dylib"],
+                                 RTLD_LAZY | RTLD_GLOBAL, "libvulkan.1 (MoltenVK re-export)");
         }
-        NSLog(@"[EGLBridge] MoltenVK preload: %s", mvk ? "OK" : dlerror());
+        if (!mvk) {
+            mvk = checked_dlopen([fwPath stringByAppendingPathComponent:@"libvulkan.dylib"],
+                                 RTLD_LAZY | RTLD_GLOBAL, "libvulkan (ANGLE custom)");
+        }
 
         // MobileGL implements the whole EGL/GL layer on top of Vulkan/MoltenVK.
         // dlopen it and resolve every EGL entry point from its own handle.
-        mgl_handle = dlopen("@rpath/libMobileGL.dylib", RTLD_LAZY | RTLD_GLOBAL);
-        if (!mgl_handle) mgl_handle = dlopen([fwPath stringByAppendingPathComponent:@"libMobileGL.dylib"].UTF8String, RTLD_LAZY | RTLD_GLOBAL);
+        mgl_handle = checked_dlopen([fwPath stringByAppendingPathComponent:@"libMobileGL.dylib"],
+                                    RTLD_LAZY | RTLD_GLOBAL, "libMobileGL");
         if (!mgl_handle) {
-            NSLog(@"EGLBridge: Failed to load libMobileGL.dylib: %s", dlerror());
+            NSLog(@"[EGLBridge] FATAL: libMobileGL.dylib could not be loaded, rendering is impossible");
         }
         g_mgl_handle = mgl_handle;
         // Only load ANGLE wrapper for DirectGLES backend (fallback).
         // DirectVulkan renders through Vulkan/MoltenVK directly.
+        // IMPORTANT: MobileGL's own Loader.cpp already opens the matching
+        // libGLESv2_angle_{metal,vulkan} directly (bypassing the libEGL
+        // front-end whose fixed Frameworks path may hold the OTHER backend).
+        // This dl_handle is ONLY a fallback for resolve_egl when MobileGL
+        // does not export a given symbol — it must match MOBILEGL_ANGLE_BACKEND
+        // or eglCreateWindowSurface will hit EGL_BAD_NATIVE_WINDOW (0x300B).
         const char *backendType = getenv("MOBILEGL_BACKEND_TYPE");
+        if (!backendType) {
+            NSLog(@"[EGLBridge] MOBILEGL_BACKEND_TYPE unset, assuming DirectVulkan (MobileGLConfig default)");
+        }
         if (backendType && strcmp(backendType, "DirectGLES") == 0) {
-            dl_handle = dlopen("@rpath/libtinygl4angle.dylib", RTLD_GLOBAL);
-            if (!dl_handle) dl_handle = dlopen([fwPath stringByAppendingPathComponent:@"libtinygl4angle.dylib"].UTF8String, RTLD_LAZY | RTLD_GLOBAL);
+            const char *angleBackend = getenv("MOBILEGL_ANGLE_BACKEND");
+            // MobileGLConfig default is tgles; egl_bridge forces the env before us.
+            // "metal" is the legacy MetalANGLE value (removed) and maps to TGLES.
+            BOOL useTgles = (angleBackend == NULL) ||
+                            (strcmp(angleBackend, "tgles") == 0) ||
+                            (strcmp(angleBackend, "metal") == 0);
+            if (useTgles) {
+                NSLog(@"[EGLBridge] DirectGLES backend: TGLES");
+                dl_handle = checked_dlopen([fwPath stringByAppendingPathComponent:@"libtgles.dylib"],
+                                           RTLD_LAZY | RTLD_GLOBAL, "libtgles");
+            } else {
+                const char *eglLibName = "libEGL_angle_vulkan";
+                NSLog(@"[EGLBridge] DirectGLES ANGLE backend: %s", angleBackend);
+                dl_handle = checked_dlopen([fwPath stringByAppendingPathComponent:@(eglLibName)],
+                                           RTLD_LAZY | RTLD_GLOBAL, eglLibName);
+            }
+            if (!dl_handle) {
+                dl_handle = checked_dlopen([fwPath stringByAppendingPathComponent:@"libtinygl4angle.dylib"],
+                                           RTLD_LAZY | RTLD_GLOBAL, "libtinygl4angle (fallback)");
+            }
+            if (!dl_handle) {
+                NSLog(@"[EGLBridge] WARNING: no GLES fallback library; EGL symbols resolve from libMobileGL only");
+            }
         }
     } else if (useMG) {
-        // MobileGlues implements the whole EGL/GL layer on top of the ANGLE
-        // frameworks. dlopen it first — its static init loads and binds the
-        // ANGLE backend (libGLESv2/libEGL) itself, so load order does not
-        // matter — then resolve every EGL entry point from MG's own handle so
-        // the whole context/surface lifecycle runs through MG's wrappers.
+        // MobileGlues implements the whole EGL/GL layer on top of the GLES
+        // backend the launcher pre-loaded into the global scope (see
+        // pojavInitOpenGL). dlopen it first — its static init runs
+        // init_target_egl, which probes EGL through RTLD_DEFAULT — then
+        // resolve every EGL entry point from MG's own handle so the whole
+        // context/surface lifecycle runs through MG's wrappers.
         mg_handle = dlopen("@rpath/libmobileglues.dylib", RTLD_LAZY | RTLD_GLOBAL);
         if (!mg_handle) mg_handle = dlopen([fwPath stringByAppendingPathComponent:@"libmobileglues.dylib"].UTF8String, RTLD_LAZY | RTLD_GLOBAL);
         if (!mg_handle) {
             NSLog(@"EGLBridge: Failed to load libmobileglues.dylib: %s", dlerror());
         }
-        // Make sure the ANGLE backend is present for fallback resolution.
-        dl_handle = dlopen("@rpath/libtinygl4angle.dylib", RTLD_GLOBAL);
-        if (!dl_handle) dl_handle = dlopen([fwPath stringByAppendingPathComponent:@"libtinygl4angle.dylib"].UTF8String, RTLD_LAZY | RTLD_GLOBAL);
-        if (!dl_handle) {
-            dl_handle = dlopen("@rpath/libEGL.framework/libEGL", RTLD_GLOBAL);
+        // Backend image for resolve_egl's fallback. It must match what
+        // pojavInitOpenGL pre-loaded: TGLES for the tgles backend (MobileGlues
+        // now translates GLES through TGLES instead of MetalANGLE), the
+        // libtinygl4angle/ANGLE stack when TGLES was not available.
+        const char *angleBackend = getenv("MOBILEGL_ANGLE_BACKEND");
+        if (angleBackend && strcmp(angleBackend, "tgles") == 0) {
+            dl_handle = checked_dlopen([fwPath stringByAppendingPathComponent:@"libtgles.dylib"],
+                                       RTLD_LAZY | RTLD_GLOBAL, "libtgles");
+        } else {
+            dl_handle = dlopen("@rpath/libtinygl4angle.dylib", RTLD_GLOBAL);
+            if (!dl_handle) dl_handle = dlopen([fwPath stringByAppendingPathComponent:@"libtinygl4angle.dylib"].UTF8String, RTLD_LAZY | RTLD_GLOBAL);
+            if (!dl_handle) {
+                dl_handle = dlopen("@rpath/libEGL.framework/libEGL", RTLD_GLOBAL);
+            }
         }
         if (!dl_handle) {
-            NSLog(@"EGLBridge: Failed to load ANGLE EGL library");
+            NSLog(@"EGLBridge: Failed to load the GLES backend library for MobileGlues");
         }
     } else {
         dl_handle = dlopen("@rpath/libtinygl4angle.dylib", RTLD_GLOBAL);
@@ -256,9 +386,46 @@ static void diag_dump_configs() {
     diag_probe_context(0x2 /*GL*/, 24);
 }
 
+// ── Which image really implements EGL? ─────────────────────────────────────
+// ANGLE is shipped twice here (Metal build = Frameworks/libEGL_angle_metal +
+// libGLESv2_angle_metal, Vulkan build = libEGL.framework/libEGL +
+// libGLESv2.framework/libGLESv2).  Both builds export the *same* forwarder
+// symbols (EGL_CreateWindowSurface, EGL_GetDisplay, ...) and both carry the same
+// canonical install name, while the libEGL wrapper resolves its libGLESv2
+// companion by the canonical framework path.  If that path holds the other
+// backend's build, the "metal" renderer silently drives the Vulkan backend,
+// which cannot bind an iOS CAMetalLayer: eglCreateWindowSurface() then fails
+// with EGL_BAD_NATIVE_WINDOW (0x300B) and Minecraft aborts window creation.
+// These two log lines make that swap visible in the log (path of the image that
+// actually answers each entry point), so the pairing can be verified in one run.
+static void log_egl_implementation(const char* tag) {
+    Dl_info info;
+    struct { const char* name; void* fn; } probes[] = {
+        { "eglCreateWindowSurface",  (void*)handle.eglCreateWindowSurface },
+        { "eglGetDisplay",           (void*)handle.eglGetDisplay },
+        { "EGL_CreateWindowSurface", dlsym(RTLD_DEFAULT, "EGL_CreateWindowSurface") },
+        { "EGL_GetDisplay",          dlsym(RTLD_DEFAULT, "EGL_GetDisplay") },
+        { "eglInitialize",           (void*)handle.eglInitialize },
+    };
+    for (size_t i = 0; i < sizeof(probes) / sizeof(probes[0]); i++) {
+        const char* img = "(unresolved)";
+        if (probes[i].fn && dladdr(probes[i].fn, &info) && info.dli_fname) {
+            img = info.dli_fname;
+        }
+        NSLog(@"[EGLBridge] %s impl %s -> %s", tag, probes[i].name, img);
+    }
+}
+
 static bool gl_init() {
+    // Must run before any ANGLE entry point: ANGLE compiles its default Metal
+    // shader library during eglInitialize, which is where the iOS <18
+    // setMathMode: crash happens.
+    installMetalMathModeCompat();
     NSLog(@"[EGLBridge] gl_init: calling dlsym_EGL");
     dlsym_EGL();
+    // Always log the implementation image: a metal/vulkan ANGLE swap is the
+    // #1 cause of 0x300B and is invisible otherwise. Cheap (5 dladdr calls).
+    log_egl_implementation("gl_init");
 
     if (!handle.eglGetDisplay) {
         NSLog(@"[EGLBridge] FATAL eglGetDisplay not resolved");
@@ -283,9 +450,379 @@ static bool gl_init() {
     return true;
 }
 
+// ── TGLES present glue (launcher-side) ─────────────────────────────────────
+// TGLES draws through its in-dylib Metal bridge, but nothing inside the dylib
+// owns the game's CAMetalLayer: the host must attach it via
+// tglHostAttachMetalLayer() once per window surface (and resize it via
+// tglHostResizeMetalLayer() when the layer size changes; see GameSurfaceView).
+// Neither MobileGL nor MobileGlues knows about these entry points, so the
+// launcher performs the attach right after its window surface is created.
+//
+// Error attribution (see also the [TGLES] log lines below):
+//   * attach FAILED (launcher)  -> launcher glue issue (dylib missing, wrong
+//     layer/size). Fix in the launcher.
+//   * attach OK but black screen / present errors -> TGLES-side. Report to
+//     the TGLES owner with the [TGLES] + frontend log lines.
+// Bump when the TGLES glue changes so a log line tells which build is on
+// device (avoids diagnosing a stale install).
+static const char *kTglesGlueVersion = "v16-mobileglues";
+static void *gTglesLib = NULL;
+static int (*gTglesAttachFn)(void *, int, int) = NULL;
+static int (*gTglesReadbackFn)(int, int, unsigned char[4]) = NULL;
+static void (*gTglesSetDebugLogFn)(int) = NULL;
+static int (*gTglesGetDebugLogFn)(char *, int) = NULL;
+static int (*gTglesEglGetErrorFn)(void) = NULL;
+static CALayer *gTglesAttachedLayer = NULL;
+
+// Cached: env + renderer never change at runtime.
+//
+// TGLES is the GLES backend of two renderers: MobileGL's DirectGLES path
+// (chosen through MOBILEGL_BACKEND_TYPE / MOBILEGL_ANGLE_BACKEND) and
+// MobileGlues, which now translates GLES through TGLES instead of
+// MetalANGLE. For MobileGlues the launcher publishes the same
+// MOBILEGL_ANGLE_BACKEND=tgles, and only when libtgles.dylib actually
+// loaded -- an unset value means the MetalANGLE fallback is in use and the
+// glue must stay off.
+static BOOL tgles_is_active(void) {
+    static BOOL checked = NO;
+    static BOOL active = NO;
+    if (checked) return active;
+    checked = YES;
+    NSString *renderer = NSProcessInfo.processInfo.environment[@"AMETHYST_RENDERER"];
+    BOOL isMobileGL = [renderer isEqualToString:@ RENDERER_NAME_MOBILEGL];
+    BOOL isMobileGlues = [renderer isEqualToString:@ RENDERER_NAME_MOBILEGLUES];
+    if (!isMobileGL && !isMobileGlues) return active;
+    const char *angleBackend = getenv("MOBILEGL_ANGLE_BACKEND");
+    if (angleBackend && strcmp(angleBackend, "vulkan") == 0) return active;  // VulkanANGLE path
+    if (isMobileGL) {
+        const char *backendType = getenv("MOBILEGL_BACKEND_TYPE");
+        if (!backendType || strcmp(backendType, "DirectGLES") != 0) return active;
+    } else if (!angleBackend || strcmp(angleBackend, "tgles") != 0) {
+        return active;
+    }
+    active = YES;
+    return active;
+}
+
+static void tgles_resolve(void) {
+    if (gTglesLib) return;
+    NSString *tglesPath = [NSBundle.mainBundle.privateFrameworksPath
+                               stringByAppendingPathComponent:@"libtgles.dylib"];
+    gTglesLib = dlopen(tglesPath.UTF8String, RTLD_NOLOAD);
+    if (!gTglesLib) gTglesLib = dlopen("@rpath/libtgles.dylib", RTLD_NOLOAD);
+    if (!gTglesLib) gTglesLib = dlopen(tglesPath.UTF8String, RTLD_LAZY | RTLD_GLOBAL);
+    if (gTglesLib) {
+        gTglesAttachFn =
+            (int (*)(void *, int, int))dlsym(gTglesLib, "tglHostAttachMetalLayer");
+        gTglesReadbackFn =
+            (int (*)(int, int, unsigned char[4]))dlsym(gTglesLib, "tglHostReadbackPixel");
+        gTglesSetDebugLogFn =
+            (void (*)(int))dlsym(gTglesLib, "tglHostSetDebugLog");
+        gTglesGetDebugLogFn =
+            (int (*)(char *, int))dlsym(gTglesLib, "tglHostGetDebugLog");
+        gTglesEglGetErrorFn =
+            (int (*)(void))dlsym(gTglesLib, "eglGetError");
+    }
+}
+
+static void tgles_attach_metal_layer_if_needed(CALayer *layer) {
+    if (!tgles_is_active()) return;
+    if (![layer isKindOfClass:CAMetalLayer.class]) {
+        NSLog(@"[TGLES] attach skipped (launcher): surface layer is %@, not CAMetalLayer",
+              NSStringFromClass(layer.class));
+        return;
+    }
+    tgles_resolve();
+    if (!gTglesLib) {
+        NSLog(@"[TGLES] attach FAILED (launcher): libtgles.dylib not loaded: %s", dlerror());
+        return;
+    }
+    if (!gTglesAttachFn) {
+        NSLog(@"[TGLES] attach FAILED (launcher): tglHostAttachMetalLayer missing in loaded libtgles");
+        return;
+    }
+    CAMetalLayer *ml = (CAMetalLayer *)layer;
+    CGFloat scale = ml.contentsScale > 0 ? ml.contentsScale : UIScreen.mainScreen.scale;
+    int w = (int)MAX(2, ml.bounds.size.width * scale);
+    int h = (int)MAX(2, ml.bounds.size.height * scale);
+    if (gTglesAttachFn((__bridge void *)ml, w, h)) {
+        gTglesAttachedLayer = layer;
+        // Keep TGLES's fail-closed channel fully on (stderr + memory ring);
+        // the launcher drains the ring in tgles_probe_diagnostics below.
+        if (gTglesSetDebugLogFn) gTglesSetDebugLogFn(3);
+        NSLog(@"[TGLES] attach OK: layer=%p size=%dx%d", ml, w, h);
+        NSLog(@"[TGLES] glue %s caps: readback=%d dbglog=%d eglerr=%d watchdog=1",
+              kTglesGlueVersion, gTglesReadbackFn ? 1 : 0,
+              gTglesGetDebugLogFn ? 1 : 0, gTglesEglGetErrorFn ? 1 : 0);
+        if (gTglesGetDebugLogFn) {
+            NSLog(@"[TGLES] debug channel ON: TGLES fail-closed reasons will appear as [TGL-DEBUG] lines");
+        } else {
+            NSLog(@"[TGLES] debug channel MISSING (launcher/packaging): loaded libtgles has no tglHostGetDebugLog - stale dylib on device? Rebuild payload so Frameworks/libtgles.dylib is refreshed");
+        }
+    } else {
+        NSLog(@"[TGLES] attach FAILED (TGLES-side): tglHostAttachMetalLayer(%p, %d, %d) returned 0 - no Metal device or bad size",
+              ml, w, h);
+    }
+}
+
+// Per-swap guard: if the surface view/layer was recreated after the attach
+// (rotation, external display, view re-parenting), TGLES would keep
+// presenting to the detached layer -> black screen. Re-attach on change.
+static void tgles_ensure_attached(void) {
+    if (!tgles_is_active()) return;
+    CALayer *now = SurfaceViewController.surface.layer;
+    if (now && now != gTglesAttachedLayer) {
+        NSLog(@"[TGLES] layer changed (%p -> %p), re-attaching (launcher)",
+              gTglesAttachedLayer, now);
+        tgles_attach_metal_layer_if_needed(now);
+    }
+    // Presenting into a layer that left the window (or was hidden/opacity 0)
+    // is a frozen screen where every present still "succeeds". Log the first
+    // time it is seen so a freeze has a launcher-side reason in the log.
+    static BOOL layerAnomalyLogged = NO;
+    if (!layerAnomalyLogged) {
+        CALayer *att = gTglesAttachedLayer;
+        UIView *sv = SurfaceViewController.surface;
+        BOOL detached = (att != nil && att.superlayer == nil);
+        BOOL hidden = (att != nil && (att.hidden || att.opacity <= 0.0));
+        BOOL noWindow = (sv != nil && sv.window == nil);
+        if (att != nil && (detached || hidden || noWindow)) {
+            layerAnomalyLogged = YES;
+            NSLog(@"[TGLES] attached layer anomaly: hidden=%d super=%p opacity=%.2f surface_in_window=%d -> presents reach nothing",
+                  (att.hidden || att.opacity <= 0.0) ? 1 : 0, att.superlayer,
+                  att.opacity, noWindow ? 0 : 1);
+        }
+    }
+}
+
+// Render-log-gated diagnostics (Developer "Render error logging", default
+// OFF): bridge-side pixel probe + TGLES gap-ledger dump. Answers the black
+// screen split decisively:
+//   * bridge pixels BLACK + screen black  -> TGLES draws nothing (TGLES-side)
+//   * bridge pixels NON-BLACK + screen black -> present/compositing never
+//     reaches the visible layer (launcher-side)
+static void tgles_dump_gap_ledger(void) {
+    if (!gTglesLib) return;
+    unsigned (*countFn)(void) =
+        (unsigned (*)(void))dlsym(gTglesLib, "tglesAbiGapCount");
+    const char* (*nameFn)(unsigned) =
+        (const char* (*)(unsigned))dlsym(gTglesLib, "tglesAbiGapName");
+    unsigned long long (*callsFn)(const char*) =
+        (unsigned long long (*)(const char*))dlsym(gTglesLib, "tglesAbiGapCalls");
+    if (!countFn || !nameFn || !callsFn) {
+        NSLog(@"[TGLES] gap dump skipped (launcher): ledger symbols missing in loaded libtgles");
+        return;
+    }
+    unsigned total = countFn();
+    unsigned hit = 0;
+    for (unsigned i = 0; i < total; i++) {
+        const char *n = nameFn(i);
+        if (n && callsFn(n) > 0) hit++;
+    }
+    NSLog(@"[TGLES] gap ledger: %u/%u declared gaps called at least once (TGLES-side validation-only entry points)", hit, total);
+    unsigned logged = 0;
+    for (unsigned i = 0; i < total && logged < 30; i++) {
+        const char *n = nameFn(i);
+        unsigned long long c = n ? callsFn(n) : 0;
+        if (c > 0) {
+            NSLog(@"[TGLES] gap[%u] %s calls=%llu", i, n, c);
+            logged++;
+        }
+    }
+}
+
+static void tgles_probe_diagnostics(int swapCount) {
+    if (!tgles_is_active()) return;
+    tgles_resolve();
+    // Drain TGLES's own fail-closed ring first: it names WHY validation-only
+    // paths ran (TGLES-side reasons, verbatim).
+    if (gTglesGetDebugLogFn) {
+        int pending = gTglesGetDebugLogFn(NULL, 0);
+        if (pending > 0) {
+            char dbg[4096];
+            int got = gTglesGetDebugLogFn(dbg, (int)sizeof(dbg));
+            if (got > 0) {
+                dbg[sizeof(dbg) - 1] = '\0';
+                NSLog(@"[TGL-DEBUG] %s", dbg);
+            }
+        }
+    }
+    if (gTglesReadbackFn && currentBundle) {
+        EGLint w = 0, h = 0;
+        handle.eglQuerySurface(g_EglDisplay, currentBundle->gl.surface, EGL_WIDTH, &w);
+        handle.eglQuerySurface(g_EglDisplay, currentBundle->gl.surface, EGL_HEIGHT, &h);
+        if (w <= 0 || h <= 0) {
+            // Fallback: if attach/resize has not run yet (or an old dylib is
+            // still on device), probe the CAMetalLayer so readback hits real
+            // pixels instead of (0,0)/(-1,-1).
+            CALayer *layer = SurfaceViewController.surface.layer;
+            if ([layer isKindOfClass:CAMetalLayer.class]) {
+                CAMetalLayer *ml = (CAMetalLayer *)layer;
+                CGFloat scale = ml.contentsScale > 0 ? ml.contentsScale : UIScreen.mainScreen.scale;
+                w = (EGLint)MAX(2, ml.bounds.size.width * scale);
+                h = (EGLint)MAX(2, ml.bounds.size.height * scale);
+            }
+        }
+        // 5x3 grid (coords in each tag): content can sit in any band — the
+        // old 3 fixed points only saw splash corners + center.
+        const int cols = 5, rows = 3;
+        for (int r = 0; r < rows; r++) {
+            for (int c = 0; c < cols; c++) {
+                const int gx = (int)((long long)(w - 1) * c / (cols - 1));
+                const int gy = (int)((long long)(h - 1) * r / (rows - 1));
+                unsigned char px[4] = {0};
+                int ok = gTglesReadbackFn(gx, gy, px);
+                NSLog(@"[TGLES] bridge pixel @%d,%d R=%u G=%u B=%u A=%u ok=%d (swap #%d)",
+                      gx, gy, px[0], px[1], px[2], px[3], ok, swapCount);
+            }
+        }
+    }
+    if (swapCount == 100 || swapCount == 600) {
+        tgles_dump_gap_ledger();
+    }
+}
+
+// ── Swap-stall watchdog (TGLES path) ───────────────────────────────────────
+// Symptom seen on-device: swaps stop mid-boot, the log goes silent and CPU
+// idles — the render thread is blocked somewhere above the swap, and a hang
+// leaves no stack in latestlog. The watchdog fires once per stall episode
+// and drains everything attributable: last swap #, stall seconds, TGLES
+// fail-closed ring + gap summary. Always on for the TGLES path (one timer
+// fire per 5 s, silent while frames flow).
+static uint64_t tgles_lastSwapNs = 0;
+static int tgles_lastSwapCount = 0;
+static BOOL tgles_watchdogArmed = NO;
+static BOOL tgles_stallReported = NO;
+// The timer MUST be retained: a dispatch source with no strong reference is
+// released (and cancelled) as soon as the creating scope exits. A local
+// variable here silently killed the watchdog in v5.
+static dispatch_source_t gTglesWatchdogTimer = NULL;
+
+static uint64_t tgles_now_ns(void) {
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (uint64_t)ts.tv_sec * 1000000000ull + (uint64_t)ts.tv_nsec;
+}
+
+static void tgles_watchdog_fire(void) {
+    if (!tgles_is_active() || !currentBundle) return;
+    // Benign race: written on the render thread, read here; a stale read
+    // only delays the report by one interval, never invents a stall.
+    uint64_t last = tgles_lastSwapNs;
+    if (last == 0) return;
+    uint64_t ageSec = (tgles_now_ns() - last) / 1000000000ull;
+    // Stall report threshold: 20s let a freeze the user closed by hand slip
+    // through. 5s matches the timer interval, so any freeze the user can
+    // see still produces a [WATCHDOG] line + TGLES ring dump.
+    if (ageSec < 5) {
+        tgles_stallReported = NO;  // frames flowing again; re-arm
+        return;
+    }
+    if (tgles_stallReported) return;
+    tgles_stallReported = YES;
+    NSLog(@"[WATCHDOG] no swap for %llu s (last swap #%d) - render thread stalled; draining TGLES state",
+          ageSec, tgles_lastSwapCount);
+    tgles_resolve();
+    if (gTglesGetDebugLogFn) {
+        int pending = gTglesGetDebugLogFn(NULL, 0);
+        if (pending > 0) {
+            char dbg[4096];
+            int got = gTglesGetDebugLogFn(dbg, (int)sizeof(dbg));
+            if (got > 0) {
+                dbg[sizeof(dbg) - 1] = '\0';
+                NSLog(@"[TGL-DEBUG] %s", dbg);
+            }
+        } else {
+            NSLog(@"[WATCHDOG] TGLES debug ring empty at stall (no fail-closed reason recorded)");
+        }
+    }
+    tgles_dump_gap_ledger();
+}
+
+static void tgles_watchdog_note_swap(int swapCount) {
+    if (!tgles_is_active()) return;
+    tgles_lastSwapNs = tgles_now_ns();
+    tgles_lastSwapCount = swapCount;
+    // Memory: the device killed the process with reason "per-process-limit"
+    // (rpages = 134272 x 16 KB = exactly the 2 GiB cap, with and without the
+    // increased-memory-limit entitlement) and a Jetsam kill writes nothing to
+    // latestlog. Log the footprint while frames flow so the next run shows
+    // which phase eats the budget and how fast. Bounded: every 3 s for the
+    // first 120 samples (~6 min), then every 30 s.
+    static CFAbsoluteTime tgles_lastMemLog = 0;
+    static int tgles_memLogCount = 0;
+    CFAbsoluteTime tgles_memNow = CFAbsoluteTimeGetCurrent();
+    double tgles_memPeriod = (tgles_memLogCount < 120) ? 3.0 : 30.0;
+    if (tgles_memNow - tgles_lastMemLog >= tgles_memPeriod) {
+        tgles_lastMemLog = tgles_memNow;
+        ++tgles_memLogCount;
+        mach_task_basic_info_data_t tgles_memInfo;
+        mach_msg_type_number_t tgles_memCnt = MACH_TASK_BASIC_INFO_COUNT;
+        long long tgles_residentMb = -1;
+        if (task_info(mach_task_self(), MACH_TASK_BASIC_INFO,
+                      (task_info_t)&tgles_memInfo, &tgles_memCnt) == KERN_SUCCESS) {
+            tgles_residentMb = (long long)(tgles_memInfo.resident_size / (1024 * 1024));
+        }
+        // task_vm_info splits the footprint the kill actually charges:
+        // internal (anonymous: JVM heap, native heaps, facade CPU buffers) vs
+        // compressed (evicted pages still owned) vs external (IOKit/GPU).
+        // phys_footprint is what Jetsam compares against the limit. The count
+        // from a newer SDK can exceed what the running kernel exposes, so
+        // retry with an older revision before giving up (an all-failed call
+        // here is why the earlier sampler emitted zero lines).
+        long long tgles_footprintMb = -1, tgles_internalMb = -1;
+        long long tgles_compressedMb = -1, tgles_externalMb = -1;
+        int tgles_tviOk = 0;
+        {
+            task_vm_info_data_t vmInfo;
+            mach_msg_type_number_t vmCnt = TASK_VM_INFO_COUNT;
+            if (task_info(mach_task_self(), TASK_VM_INFO,
+                          (task_info_t)&vmInfo, &vmCnt) != KERN_SUCCESS) {
+                vmCnt = TASK_VM_INFO_REV1_COUNT;
+                if (task_info(mach_task_self(), TASK_VM_INFO,
+                              (task_info_t)&vmInfo, &vmCnt) != KERN_SUCCESS) {
+                    vmInfo = (task_vm_info_data_t){0};
+                } else {
+                    tgles_tviOk = 2;
+                }
+            } else {
+                tgles_tviOk = 1;
+            }
+            if (tgles_tviOk) {
+                tgles_footprintMb = (long long)(vmInfo.phys_footprint / (1024 * 1024));
+                tgles_internalMb = (long long)(vmInfo.internal / (1024 * 1024));
+                tgles_compressedMb = (long long)(vmInfo.compressed / (1024 * 1024));
+                tgles_externalMb = (long long)(vmInfo.external / (1024 * 1024));
+                if (tgles_residentMb < 0) {
+                    tgles_residentMb = (long long)(vmInfo.resident_size / (1024 * 1024));
+                }
+            }
+        }
+        long long tgles_availMb = -1;
+        size_t tgles_avail = os_proc_available_memory();
+        if (tgles_avail > 0) {
+            tgles_availMb = (long long)(tgles_avail / (1024 * 1024));
+        }
+        NSLog(@"[MEM] #%d resident=%lldMB footprint=%lldMB internal=%lldMB "
+              @"compressed=%lldMB external=%lldMB tvi=%d avail_of_cap=%lldMB swap=%d",
+              tgles_memLogCount, tgles_residentMb, tgles_footprintMb,
+              tgles_internalMb, tgles_compressedMb, tgles_externalMb,
+              tgles_tviOk, tgles_availMb, swapCount);
+    }
+    if (tgles_watchdogArmed) return;
+    tgles_watchdogArmed = YES;
+    dispatch_queue_t q = dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_BACKGROUND, 0);
+    gTglesWatchdogTimer =
+        dispatch_source_create(DISPATCH_SOURCE_TYPE_TIMER, 0, 0, q);
+    if (!gTglesWatchdogTimer) return;
+    dispatch_source_set_timer(gTglesWatchdogTimer, dispatch_time(DISPATCH_TIME_NOW, (int64_t)(5 * NSEC_PER_SEC)),
+                              (uint64_t)(5 * NSEC_PER_SEC), (uint64_t)(1 * NSEC_PER_SEC));
+    dispatch_source_set_event_handler(gTglesWatchdogTimer, ^{ tgles_watchdog_fire(); });
+    dispatch_resume(gTglesWatchdogTimer);
+}
+
 gl_render_window_t* gl_init_context(gl_render_window_t *share) {
     gl_render_window_t* bundle = calloc(1, sizeof(gl_render_window_t));
-
     NSString *renderer = NSProcessInfo.processInfo.environment[@"AMETHYST_RENDERER"];
     BOOL angleDesktopGL = [renderer isEqualToString:@ RENDERER_NAME_MTL_ANGLE];
 
@@ -331,37 +868,90 @@ gl_render_window_t* gl_init_context(gl_render_window_t *share) {
     if (!bindResult) NSLog(@"[EGLBridge] bind failed: %p\n", handle.eglGetError());
 
     CALayer *layer = SurfaceViewController.surface.layer;
+    // Safety net for ANGLE's iOS WSI (mirrors GameSurfaceView): the layer must
+    // be a CAMetalLayer with BGRA8 + framebufferOnly=NO + non-zero drawableSize
+    // at eglCreateWindowSurface time, or ANGLE returns EGL_BAD_NATIVE_WINDOW.
+    // GameSurfaceView already sets these in init/layout, but the surface view
+    // can be recreated (rotation / external display) after that.
     if ([layer isKindOfClass:CAMetalLayer.class]) {
         CAMetalLayer *ml = (CAMetalLayer *)layer;
-        CGSize wantSize = CGSizeMake(ml.bounds.size.width * ml.contentsScale,
-                                     ml.bounds.size.height * ml.contentsScale);
-        if (ml.drawableSize.width == 0 || ml.drawableSize.height == 0) {
-            ml.drawableSize = wantSize;
-            if (EGLRenderLogEnabled())
-            NSLog(@"EGLBridge: [diag] drawableSize was zero, set to %@ before surface creation", NSStringFromCGSize(ml.drawableSize));
+        if (ml.pixelFormat != MTLPixelFormatBGRA8Unorm) {
+            ml.pixelFormat = MTLPixelFormatBGRA8Unorm;
+            NSLog(@"[EGLBridge] metal layer pixelFormat corrected to BGRA8Unorm for ANGLE");
         }
+        if (ml.framebufferOnly != NO) {
+            ml.framebufferOnly = NO;
+        }
+        CGFloat scale = ml.contentsScale > 0 ? ml.contentsScale : UIScreen.mainScreen.scale;
+        CGSize wantSize = CGSizeMake(MAX(2, ml.bounds.size.width * scale),
+                                     MAX(2, ml.bounds.size.height * scale));
+        if (ml.drawableSize.width < 2 || ml.drawableSize.height < 2) {
+            ml.drawableSize = wantSize;
+            NSLog(@"[EGLBridge] drawableSize was %.0fx%.0f, set to %@ before surface creation",
+                  ml.drawableSize.width, ml.drawableSize.height, NSStringFromCGSize(ml.drawableSize));
+        }
+        if (!ml.superlayer) {
+            NSLog(@"[EGLBridge] WARNING: CAMetalLayer has no superlayer yet (view not attached); surface creation may fail with 0x300B");
+        }
+    } else {
+        NSLog(@"[EGLBridge] WARNING: surface layer is %@, not CAMetalLayer - GLES-on-Metal backends (TGLES/ANGLE) require CAMetalLayer",
+              NSStringFromClass(layer.class));
     }
 
     bundle->surface = handle.eglCreateWindowSurface(g_EglDisplay, bundle->config, (__bridge EGLNativeWindowType)SurfaceViewController.surface.layer, NULL);
     if (!bundle->surface) {
-        NSLog(@"[EGLBridge] eglCreateWindowSurface failed: 0x%x", handle.eglGetError());
+        EGLint err = handle.eglGetError();
+        NSLog(@"[EGLBridge] eglCreateWindowSurface failed: 0x%x (EGL_BAD_NATIVE_WINDOW=0x300b, EGL_BAD_MATCH=0x3009)", err);
+        if (err == EGL_BAD_NATIVE_WINDOW) {
+            // Either the layer handed over was not a valid CAMetalLayer, or the EGL
+            // implementation we resolved is not the one matching the loaded ANGLE
+            // backend (see log_egl_implementation above).
+            // For MobileGL DirectGLES: check MOBILEGL_ANGLE_BACKEND (metal vs vulkan)
+            // matches the actually-loaded libGLESv2_angle_* image below. A swap means
+            // both backends got dlopened in one process (dyld dedup by install_name)
+            // — changing angle_backend requires a full app restart.
+            NSLog(@"[EGLBridge] native window = %@ (bounds=%@ scale=%.2f, class=%@)",
+                  SurfaceViewController.surface.layer, NSStringFromCGRect(SurfaceViewController.surface.layer.bounds),
+                  SurfaceViewController.surface.layer.contentsScale,
+                  NSStringFromClass(SurfaceViewController.surface.layer.class));
+            NSLog(@"[EGLBridge] MOBILEGL_BACKEND_TYPE=%s MOBILEGL_ANGLE_BACKEND=%s (DirectGLES: tgles=TGLES libtgles.dylib, vulkan=VulkanANGLE - changing angle_backend requires a full app restart)",
+                  getenv("MOBILEGL_BACKEND_TYPE") ?: "(unset)",
+                  getenv("MOBILEGL_ANGLE_BACKEND") ?: "(unset)");
+            log_egl_implementation("surface-failure");
+        }
         free(bundle);
         return NULL;
     }
 
     if ([layer isKindOfClass:CAMetalLayer.class]) {
         CAMetalLayer *ml = (CAMetalLayer *)layer;
-        CGSize wantSize = CGSizeMake(ml.bounds.size.width * ml.contentsScale,
-                                     ml.bounds.size.height * ml.contentsScale);
-        if (ml.drawableSize.width == 0 || ml.drawableSize.height == 0) {
+        CGFloat scale = ml.contentsScale > 0 ? ml.contentsScale : UIScreen.mainScreen.scale;
+        CGSize wantSize = CGSizeMake(MAX(2, ml.bounds.size.width * scale),
+                                     MAX(2, ml.bounds.size.height * scale));
+        if (ml.drawableSize.width < 2 || ml.drawableSize.height < 2) {
             ml.drawableSize = wantSize;
         }
     }
+
+    // TGLES (MobileGL DirectGLES / MobileGlues): the window surface exists
+    // now, so attach the CAMetalLayer to TGLES's in-dylib Metal bridge. No-op
+    // for every other renderer/backend.
+    tgles_attach_metal_layer_if_needed(layer);
 
     if (EGLRenderLogEnabled()) {
     EGLint surfW = 0, surfH = 0;
     handle.eglQuerySurface(g_EglDisplay, bundle->surface, EGL_WIDTH, &surfW);
     handle.eglQuerySurface(g_EglDisplay, bundle->surface, EGL_HEIGHT, &surfH);
+    if (surfW <= 0 || surfH <= 0) {
+        // Frontend MobileGL SurfaceObject starts Width=0 until ResizeSurface;
+        // probe the CAMetalLayer so the diag names real drawable pixels.
+        if ([layer isKindOfClass:CAMetalLayer.class]) {
+            CAMetalLayer *ml2 = (CAMetalLayer *)layer;
+            CGFloat sc = ml2.contentsScale > 0 ? ml2.contentsScale : UIScreen.mainScreen.scale;
+            surfW = (EGLint)MAX(2, ml2.bounds.size.width * sc);
+            surfH = (EGLint)MAX(2, ml2.bounds.size.height * sc);
+        }
+    }
     NSLog(@"EGLBridge: [diag] egl surface %dx%d layer=%@ bounds=%@ scale=%.2f opaque=%d hidden=%d superlayer=%@",
           surfW, surfH, NSStringFromClass(layer.class), NSStringFromCGRect(layer.bounds),
           layer.contentsScale, layer.opaque, layer.hidden, layer.superlayer);
@@ -454,9 +1044,14 @@ void gl_make_current(gl_render_window_t* bundle) {
 
         if (testGetError) NSLog(@"[EGLBridge] DIAG glGetError()=0x%x", testGetError());
         if (testGetIntegerv) {
+            // Query the real integer version (GL_MAJOR/MINOR_VERSION), not
+            // GL_VERSION (0x1F02, string-only — Integerv on it always yields
+            // INVALID_ENUM 0x500 and confuses log triage).
             int major = 0, minor = 0;
-            testGetIntegerv(0x1F02 /* GL_VERSION */, &major); // intentionally wrong enum to test
-            NSLog(@"[EGLBridge] DIAG GL_VERSION(int)=%d err=0x%x", major, testGetError ? testGetError() : -1);
+            testGetIntegerv(0x821B /* GL_MAJOR_VERSION */, &major);
+            testGetIntegerv(0x821C /* GL_MINOR_VERSION */, &minor);
+            EGLint glErr = testGetError ? testGetError() : -1;
+            NSLog(@"[EGLBridge] DIAG GL_VERSION(int)=%d.%d err=0x%x", major, minor, glErr);
         }
         if (testGetString) {
             const unsigned char* ver = testGetString(0x1F02 /* GL_VERSION */);
@@ -472,6 +1067,16 @@ void gl_make_current(gl_render_window_t* bundle) {
 }
 
 static void diag_read_pixels(EGLint w, EGLint h) {
+    if (w <= 0 || h <= 0) {
+        // Window surfaces report 0x0 before tglHostAttachMetalLayer /
+        // tglHostResizeMetalLayer mirrors the drawable size (and old dylibs
+        // on device may still lack that fix). Probing (0,0)/(-1,-1) then
+        // always yields INVALID_FRAMEBUFFER_OPERATION with untouched 0xAB..
+        // pattern — pure log noise. Skip; tgles_probe_diagnostics already
+        // falls back to the CAMetalLayer size for the authoritative pixels.
+        NSLog(@"EGLBridge: [readback] skipped, egl surface %dx%d has no size (window surface, see TGLES bridge pixels)", w, h);
+        return;
+    }
     typedef void (*glReadPixelsFn)(int, int, int, int, unsigned int, unsigned int, void*);
     typedef unsigned int (*glGetErrorFn)(void);
     static glReadPixelsFn readPixels = NULL;
@@ -484,12 +1089,18 @@ static void diag_read_pixels(EGLint w, EGLint h) {
         NSLog(@"EGLBridge: [readback] no glReadPixels");
         return;
     }
-    const int pts[][2] = { {0, 0}, {w / 2, h / 2}, {w - 1, h - 1} };
-    for (int i = 0; i < 3; i++) {
-        unsigned char px[4] = { 0xAB, 0xCD, 0xEF, 0x12 };
-        readPixels(pts[i][0], pts[i][1], 1, 1, 0x1908 /*GL_RGBA*/, 0x1401 /*GL_UNSIGNED_BYTE*/, px);
-        NSLog(@"EGLBridge: [readback @%d,%d] R=%u G=%u B=%u A=%u err=0x%x",
-              pts[i][0], pts[i][1], px[0], px[1], px[2], px[3], getError ? getError() : 0);
+    // 5x3 grid (coords in each tag): menu/loading content can occupy any
+    // band — the old 3 fixed points only ever saw splash corners + center.
+    const int cols = 5, rows = 3;
+    for (int r = 0; r < rows; r++) {
+        for (int c = 0; c < cols; c++) {
+            const int x = (int)((long long)(w - 1) * c / (cols - 1));
+            const int y = (int)((long long)(h - 1) * r / (rows - 1));
+            unsigned char px[4] = { 0xAB, 0xCD, 0xEF, 0x12 };
+            readPixels(x, y, 1, 1, 0x1908 /*GL_RGBA*/, 0x1401 /*GL_UNSIGNED_BYTE*/, px);
+            NSLog(@"EGLBridge: [readback @%d,%d] R=%u G=%u B=%u A=%u err=0x%x",
+                  x, y, px[0], px[1], px[2], px[3], getError ? getError() : 0);
+        }
     }
     typedef void (*glBindFramebufferFn)(unsigned int, unsigned int);
     typedef void (*glGetIntegervFn)(unsigned int, int *);
@@ -520,6 +1131,11 @@ void gl_swap_buffers() {
     if (!currentBundle) return;
     static int swapCount = 0;
     swapCount++;
+    tgles_watchdog_note_swap(swapCount);
+    // TGLES: re-attach if the surface layer was recreated since the attach
+    // (rotation / external display / re-parenting). Pointer compare per swap
+    // is trivial; the attach itself runs only on change.
+    tgles_ensure_attached();
     if (EGLRenderLogEnabled() &&
         (swapCount == 2 || swapCount == 3 || swapCount == 4 || swapCount == 5 ||
          swapCount == 10 || swapCount == 20 || swapCount == 50 || swapCount == 100 ||
@@ -527,14 +1143,39 @@ void gl_swap_buffers() {
         EGLint w = 0, h = 0;
         handle.eglQuerySurface(g_EglDisplay, currentBundle->gl.surface, EGL_WIDTH, &w);
         handle.eglQuerySurface(g_EglDisplay, currentBundle->gl.surface, EGL_HEIGHT, &h);
+        if (w <= 0 || h <= 0) {
+            // Frontend SurfaceObject may still be 0x0 if backend attach has
+            // not published size yet; probe the CAMetalLayer for real pixels.
+            CALayer *layer3 = SurfaceViewController.surface.layer;
+            if ([layer3 isKindOfClass:CAMetalLayer.class]) {
+                CAMetalLayer *ml3 = (CAMetalLayer *)layer3;
+                CGFloat sc3 = ml3.contentsScale > 0 ? ml3.contentsScale : UIScreen.mainScreen.scale;
+                w = (EGLint)MAX(2, ml3.bounds.size.width * sc3);
+                h = (EGLint)MAX(2, ml3.bounds.size.height * sc3);
+            }
+        }
         NSLog(@"EGLBridge: [readback] egl surface %dx%d before swap #%d", w, h, swapCount);
         diag_read_pixels(w, h);
+        // TGLES bridge-side pixels + (at #600) gap ledger: tells black-screen
+        // apart (TGLES draws nothing vs present never reaches the screen).
+        tgles_probe_diagnostics(swapCount);
     }
     if (!handle.eglSwapBuffers(g_EglDisplay, currentBundle->gl.surface)) {
         if (handle.eglGetError() == EGL_BAD_SURFACE)
             NSLog(@"eglSwapBuffers error 0x%x", handle.eglGetError());
     } else if (EGLRenderLogEnabled() && (swapCount <= 5 || (swapCount % 300) == 0)) {
         NSLog(@"EGLBridge: swap #%d ok", swapCount);
+    }
+    // TGLES host error poll (render-log only): the backend's host swap runs
+    // inside the frontend swap above on this same thread. A latched host
+    // error (e.g. 0x3003 BAD_ALLOC from an empty TGLES Present) names the
+    // failing stage; draining it also keeps stale errors out of later probes.
+    if (EGLRenderLogEnabled() && tgles_is_active() && gTglesEglGetErrorFn) {
+        int hostErr = gTglesEglGetErrorFn();
+        if (hostErr != 0x3000 /*EGL_SUCCESS*/) {
+            NSLog(@"[TGLES] host egl error after swap #%d: 0x%x (0x3003=BAD_ALLOC empty present, 0x300d=BAD_SURFACE, 0x300b=BAD_NATIVE_WINDOW)",
+                  swapCount, hostErr);
+        }
     }
 }
 

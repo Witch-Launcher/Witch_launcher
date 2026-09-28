@@ -185,7 +185,8 @@ NSArray* getRendererKeys(BOOL containsDefault) {
         @ RENDERER_NAME_LTW,
         @ RENDERER_NAME_VK_ZINK,
         @ RENDERER_NAME_MOLTENVK,
-        @ RENDERER_NAME_MOBILEGL
+        @ RENDERER_NAME_MOBILEGL,
+        @ RENDERER_NAME_TGLMT
     ].mutableCopy;
 
     if (containsDefault) {
@@ -200,6 +201,12 @@ NSArray* getRendererNames(BOOL containsDefault) {
     if (containsDefault) {
         [array addObject:@"(default)"];
     }
+    // localize() trả về key khi thiếu bản dịch — fallback tiếng Anh để
+    // picker không hiện key thô ở ngôn ngữ chưa dịch TGLMT.
+    NSString *tglmtName = localize(@"preference.title.renderer.debug.tglmt", nil);
+    if ([tglmtName hasPrefix:@"preference.title"]) {
+        tglmtName = @"TGLMT (Metal) - exports OpenGL 4.6 Core via Metal, A11+";
+    }
     NSString *names[] = {
         localize(@"preference.title.renderer.debug.auto", nil),
         localize(@"preference.title.renderer.debug.gl4es", nil),
@@ -208,7 +215,8 @@ NSArray* getRendererNames(BOOL containsDefault) {
         localize(@"preference.title.renderer.debug.ltw", nil),
         localize(@"preference.title.renderer.debug.zink", nil),
         localize(@"preference.title.renderer.debug.vulkan", nil),
-        localize(@"preference.title.renderer.debug.mobilegl", nil)
+        localize(@"preference.title.renderer.debug.mobilegl", nil),
+        tglmtName
     };
     for (int i = 0; i < sizeof(names)/sizeof(names[0]); i++) {
         if (names[i]) {

@@ -9,6 +9,10 @@ on:
     branches: ['beta']
   workflow_dispatch:
 
+concurrency:
+  group: witch-prerelease-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   build:
     name: Development build
@@ -211,22 +215,42 @@ jobs:
           mv artifacts/Witch-*.ipa artifacts/full/ 2>/dev/null || true
           mv artifacts/Witch-*.tipa artifacts/full/ 2>/dev/null || true
 
-      - name: Upload full IPA & tIPA
+      - name: Upload full IPA (separate, no zip-merge)
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: Witch-full
-          path: artifacts/full/*
+          name: Witch-full-ipa
+          path: artifacts/full/*.ipa
           retention-days: 30
           if-no-files-found: warn
           compression-level: 0
 
-      - name: Upload slimmed IPA & tIPA
+      - name: Upload full tIPA (separate, no zip-merge)
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: Witch-slimmed
-          path: artifacts/slimmed/*
+          name: Witch-full-tipa
+          path: artifacts/full/*.tipa
+          retention-days: 30
+          if-no-files-found: warn
+          compression-level: 0
+
+      - name: Upload slimmed IPA (separate, no zip-merge)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Witch-slimmed-ipa
+          path: artifacts/slimmed/*.ipa
+          retention-days: 30
+          if-no-files-found: warn
+          compression-level: 0
+
+      - name: Upload slimmed tIPA (separate, no zip-merge)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Witch-slimmed-tipa
+          path: artifacts/slimmed/*.tipa
           retention-days: 30
           if-no-files-found: warn
           compression-level: 0
@@ -260,8 +284,57 @@ jobs:
       contents: write
       actions: write
     steps:
+      - name: Checkout repository (for version + changelog)
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 50
+
       - name: Download all artifacts
         uses: actions/download-artifact@v4
+        with:
+          path: ./downloaded
+
+      - name: Resolve version (auto from Info.plist + SHA + date)
+        id: version
+        shell: bash
+        run: |
+          bash scripts/ci/resolve_version.sh
+          echo "--- resolved ---"
+          grep -E '^(APP_VERSION|SHORT_SHA|BUILD_DATE|BUILD_TAG)=' "$GITHUB_OUTPUT" | tail -n 8 || true
+
+      - name: Generate checksums
+        shell: bash
+        run: |
+          cd downloaded || exit 0
+          shopt -s globstar nullglob
+          FILES=(**/*.ipa **/*.tipa *.ipa *.tipa)
+          if [ ${#FILES[@]} -eq 0 ]; then
+            echo "No ipa/tipa found under downloaded/ — listing tree:"
+            find . -maxdepth 4 -type f | head -n 50
+            exit 0
+          fi
+          sha256sum "${FILES[@]}" | tee ../checksums.txt
+          echo "--- checksums.txt ---"
+          cat ../checksums.txt
+
+      - name: "Generate release notes (verbose EN - what fixed + who fixed)"
+        env:
+          GITHUB_EVENT_BEFORE: ${{ github.event.before }}
+        shell: bash
+        run: |
+          python3 scripts/ci/gen_notes.py \
+            --before "${{ github.event.before }}" \
+            --sha "${{ github.sha }}" \
+            --branch "${{ github.ref_name }}" \
+            --repo "$GITHUB_REPOSITORY" \
+            --run-url "https://github.com/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" \
+            --version "${{ steps.version.outputs.APP_VERSION }}" \
+            --pusher "${{ github.event.pusher.name }}" \
+            --runner "macos-14" \
+            --artifacts-dir ./downloaded \
+            --out RELEASE_NOTES.md
+          echo "--- RELEASE_NOTES.md (head) ---"
+          head -n 60 RELEASE_NOTES.md
 
       - name: Reset rolling pre-release
         env:
@@ -274,9 +347,32 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: pre-release
-          name: Witch Launcher — Pre-release
+          name: Witch v${{ steps.version.outputs.APP_VERSION }} — Pre-release (beta)
+          body_path: RELEASE_NOTES.md
           prerelease: true
+          draft: false
           fail_on_unmatched_files: false
           files: |
-            **/*.ipa
-            **/*.tipa
+            downloaded/**/*.ipa
+            downloaded/**/*.tipa
+            checksums.txt
+            RELEASE_NOTES.md
+
+      - name: Notify Discord (English, no mentions, verbose summary)
+        if: always()
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+        run: |
+          python3 scripts/ci/discord_notify.py \
+            --branch "${{ github.ref_name }}" \
+            --repo "$GITHUB_REPOSITORY" \
+            --sha "${{ github.sha }}" \
+            --before "${{ github.event.before }}" \
+            --pusher "${{ github.event.pusher.name }}" \
+            --version "${{ steps.version.outputs.APP_VERSION }}" \
+            --channel "pre-release" \
+            --status "${{ job.status }}" \
+            --run-url "https://github.com/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" \
+            --release-url "https://github.com/$GITHUB_REPOSITORY/releases/tag/pre-release" \
+            --notes-file RELEASE_NOTES.md \
+            --artifacts-dir ./downloaded || true

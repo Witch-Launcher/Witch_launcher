@@ -6,8 +6,9 @@
 #import "config.h"
 #import "AmethystBlurView.h"
 #import "utils.h"
+#import "WitchUpdateService.h"
 
-static NSString *const NewsURLString = @"https://raw.githubusercontent.com/Ynnyny/Angel-Aura-Amethyst-iOS/refs/heads/main/news.md";
+static NSString *const NewsURLString = @"https://raw.githubusercontent.com/Witch-Launcher/Witch_launcher/refs/heads/main/news.md";
 static const NSTimeInterval NewsRefreshInterval = 300.0; // 5 minutes
 
 @interface MainMenuViewController () <WKNavigationDelegate>
@@ -46,6 +47,53 @@ static const NSTimeInterval NewsRefreshInterval = 300.0; // 5 minutes
     [self updateColors];
     [self loadNews];
     [self startNewsRefreshTimer];
+    // Auto-check launcher update (beta->pre-release, stable->release), respects "Để sau" 3 days.
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        [WitchUpdateService.shared autoCheckFromViewController:self];
+        [self maybeShowRuntimeOnboarding];
+    });
+}
+
+- (void)maybeShowRuntimeOnboarding {
+    // Slim build has no bundled runtimes: Bundle/java_runtimes missing or empty.
+    // Show once per install (pref witch.runtime_onboarded) so full builds never nag.
+    if ([getPrefObject(@"witch.runtime_onboarded") boolValue]) return;
+    NSFileManager *fm = [NSFileManager defaultManager];
+    NSString *internalPath = [NSString stringWithFormat:@"%@/java_runtimes", NSBundle.mainBundle.bundlePath];
+    BOOL hasInternal = NO;
+    NSArray *contents = [fm contentsOfDirectoryAtPath:internalPath error:nil];
+    for (NSString *c in contents) {
+        if ([c hasPrefix:@"java-"]) { hasInternal = YES; break; }
+    }
+    if (hasInternal) {
+        setPrefObject(@"witch.runtime_onboarded", @YES);
+        return;
+    }
+    const char *home = getenv("POJAV_HOME");
+    NSString *extPath = home ? [NSString stringWithFormat:@"%s/java_runtimes", home] : nil;
+    NSArray *extContents = extPath ? [fm contentsOfDirectoryAtPath:extPath error:nil] : @[];
+    BOOL hasExternal = NO;
+    for (NSString *c in extContents) {
+        if ([c hasPrefix:@"java-"]) { hasExternal = YES; break; }
+    }
+    if (hasExternal) {
+        setPrefObject(@"witch.runtime_onboarded", @YES);
+        return;
+    }
+    setPrefObject(@"witch.runtime_onboarded", @YES);
+    UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Bản Simple: chưa có Runtime"
+        message:@"Bản Simple không kèm JDK/LWJGL để nhẹ. Bạn muốn mở bảng tải ngay (có đánh dấu [quan trọng]) hay để sau trong Settings → Tải Runtime JDK/LWJGL?"
+        preferredStyle:UIAlertControllerStyleAlert];
+    [alert addAction:[UIAlertAction actionWithTitle:@"Để sau" style:UIAlertActionStyleCancel handler:nil]];
+    [alert addAction:[UIAlertAction actionWithTitle:@"Mở bảng tải" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a) {
+        Class cls = NSClassFromString(@"RuntimeDownloadViewController");
+        if (!cls) return;
+        UIViewController *vc = [[cls alloc] init];
+        [vc setValue:@YES forKey:@"onboardingMode"];
+        UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:vc];
+        [self presentViewController:nav animated:YES completion:nil];
+    }]];
+    [self presentViewController:alert animated:YES completion:nil];
 }
 
 - (void)viewWillAppear:(BOOL)animated {

@@ -200,6 +200,7 @@
 		<string>stikdebug</string>
 		<string>sidestore</string>
 		<string>apple-magnifier</string>
+		<string>trollstore</string>
 	</array>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>

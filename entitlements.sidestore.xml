@@ -2,7 +2,7 @@
 <plist version="1.0">
 <dict>
 	<key>application-identifier</key>
-	<string>com.amethyst.zad626</string>
+	<string>com.witch.zad626</string>
 	<key>get-task-allow</key>
 	<true/>
 

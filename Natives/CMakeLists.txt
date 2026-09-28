@@ -250,6 +250,7 @@ add_executable(Witch
   ctxbridges/osm_bridge.m
   ctxbridges/vk_bridge.m
   ctxbridges/mesa_egl_bridge.m
+  ctxbridges/tglmt_bridge.m
 
   debug/DebugServer.m
  
@@ -307,6 +308,7 @@ add_executable(Witch
 egl_bridge.m
     ZinkConfig.m
     MobileGLConfig.m
+    TGLMTConfig.m
     input_bridge_v3.m
     ios_uikit_bridge.m
     utils.m
@@ -346,6 +348,8 @@ egl_bridge.m
     ../UI/Managers/CursorTypeManager.m
     ../UI/Managers/WindowsCursorParser.m
     ../UI/Managers/InstalledModsManager.m
+   ../UI/Managers/WitchUpdateService.m
+   ../UI/Managers/WitchRuntimeService.m
     ../UI/Screens/MainMenu/MainMenuViewController.m
      WitchAIService.m
      WitchLogReporter.m
@@ -372,6 +376,8 @@ egl_bridge.m
     ../UI/Screens/Settings/CursorSettingsViewController.m
     ../UI/Screens/Settings/CursorTypeDetailViewController.m
     ../UI/Screens/Settings/CursorHitboxEditorViewController.m
+   ../UI/Screens/Settings/LauncherUpdateViewController.m
+   ../UI/Screens/Settings/RuntimeDownloadViewController.m
    ../UI/Screens/Account/AccountViewController.m
    ../UI/Screens/ProfileSettings/ProfileSettingsViewController.m
    ../UI/Screens/Download/DownloadHubViewController.m

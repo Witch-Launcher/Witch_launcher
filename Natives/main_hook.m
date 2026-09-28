@@ -4,11 +4,21 @@
 #import "ios_uikit_bridge.h"
 #import "utils.h"
 #import "mach_excServer.h"
+#import "MemSampler.h"
 
 #include <dlfcn.h>
 #include <libgen.h>
 #include <pthread.h>
+#include <signal.h>
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
 #include "external/fishhook/fishhook.h"
+
+#if __has_include(<execinfo.h>)
+#include <execinfo.h>
+#define WITCH_HAVE_BACKTRACE 1
+#endif
 
 mach_port_t excPort;
 void *hooked_dlopen_26_ppl(const char *path, int mode);
@@ -47,23 +57,89 @@ void handle_fatal_exit(int code) {
 }
 
 void hooked_abort() {
-    NSLog(@"abort() called");
-    handle_fatal_exit(SIGABRT);
-    orig_abort();
+    // abort() is often entered from a signal/crash reporter (HotSpot
+    // VMError::report_and_die → os::die). NSLog / malloc / ObjC here
+    // re-enters the same handlers until the stack guard is hit.
+    static volatile sig_atomic_t in_abort;
+    if (in_abort) {
+        if (orig_abort) {
+            orig_abort();
+        }
+        _exit(128 + SIGABRT);
+    }
+    in_abort = 1;
+    WitchMemSamplerNoteCrash();
+    static const char msg[] = "abort() called\n";
+    (void)write(STDERR_FILENO, msg, sizeof(msg) - 1);
+    if (orig_abort) {
+        orig_abort();
+    }
+    _exit(128 + SIGABRT);
 }
 
 void hooked___assert_rtn(const char* func, const char* file, int line, const char* failedexpr)
 {
+    // fprintf/malloc here re-enters JVM signal handlers the same way
+    // customNSLog did — format on the stack and write(2) only.
+    char buf[512];
+    int n;
     if (func == NULL) {
-        fprintf(stderr, "Assertion failed: (%s), file %s, line %d.\n", failedexpr, file, line);
+        n = snprintf(buf, sizeof(buf),
+            "Assertion failed: (%s), file %s, line %d.\n",
+            failedexpr ? failedexpr : "?",
+            file ? file : "?", line);
     } else {
-        fprintf(stderr, "Assertion failed: (%s), function %s, file %s, line %d.\n", failedexpr, func, file, line);
+        n = snprintf(buf, sizeof(buf),
+            "Assertion failed: (%s), function %s, file %s, line %d.\n",
+            failedexpr ? failedexpr : "?",
+            func, file ? file : "?", line);
+    }
+    if (n > 0) {
+        (void)write(STDERR_FILENO, buf, (size_t)(n < (int)sizeof(buf) ? n : (int)sizeof(buf)));
     }
     hooked_abort();
 }
 
 void hooked_exit(int code) {
-    NSLog(@"exit(%d) called", code);
+    // exit() can be reached from JVM fatal-error paths (System.exit during
+    // VMError handling). backtrace_symbols() mallocs and customNSLog retains
+    // ObjC objects — both re-enter JVM_handle_bsd_signal until the stack
+    // guard is hit. So: write(2) only, dladdr() only, no NSString here.
+    {
+        char hdr[64];
+        int n = snprintf(hdr, sizeof(hdr), "exit(%d) called\n", code);
+        if (n > 0) {
+            (void)write(STDERR_FILENO, hdr, (size_t)(n < (int)sizeof(hdr) ? n : (int)sizeof(hdr)));
+        }
+    }
+#ifdef WITCH_HAVE_BACKTRACE
+    // exit(0) during the loading screen means SOMEONE decided to quit
+    // (game, launcher or user action) — the log never said who. Dump the
+    // caller chain before suspending so the next latestlog names it.
+    // NOTE: backtrace() + dladdr() only. backtrace_symbols() is deliberately
+    // NOT used: it mallocs and deadlocks against the malloc zone lock when
+    // exit() races a crash on another thread.
+    {
+        void *frames[32];
+        int n = backtrace(frames, 32);
+        char line[256];
+        int limit = n < 12 ? n : 12;
+        for (int i = 0; i < limit; i++) {
+            Dl_info info;
+            int m;
+            if (dladdr(frames[i], &info) != 0 && info.dli_sname != NULL) {
+                long long off = (long long)((char *)frames[i] - (char *)info.dli_saddr);
+                m = snprintf(line, sizeof(line), "  exit-bt #%d %s (+%lld) %p\n",
+                             i, info.dli_sname, off, frames[i]);
+            } else {
+                m = snprintf(line, sizeof(line), "  exit-bt #%d %p\n", i, frames[i]);
+            }
+            if (m > 0) {
+                (void)write(STDERR_FILENO, line, (size_t)(m < (int)sizeof(line) ? m : (int)sizeof(line)));
+            }
+        }
+    }
+#endif
     if (code == 0) {
         dispatch_async(dispatch_get_main_queue(), ^{
             [UIApplication.sharedApplication performSelector:@selector(suspend)];
@@ -74,12 +150,57 @@ void hooked_exit(int code) {
     }
     // Give the stdout/stderr pipe read thread time to flush so we capture
     // any Java exception stack traces logged right before System.exit().
+    // Stop the mem sampler first: its malloc_zone_statistics fights over the
+    // malloc zone lock while other threads may be crashing concurrently.
+    WitchMemSamplerNoteCrash();
     usleep(500*1000);
     handle_fatal_exit(code);
     orig_exit(code);
 }
 
+static const char *signedMoltenVKPath(const char *requested) {
+    if (!requested) {
+        return NULL;
+    }
+    const char *base = strrchr(requested, '/');
+    base = base ? base + 1 : requested;
+    BOOL want12 = strcmp(base, "libMoltenVK12.dylib") == 0;
+    if (!want12 && strcmp(base, "libMoltenVK.dylib") != 0) {
+        return NULL;
+    }
+    if (strstr(requested, "/Frameworks/")) {
+        return NULL;
+    }
+    static char path14[PATH_MAX];
+    static char path12[PATH_MAX];
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        NSString *frameworks = NSBundle.mainBundle.privateFrameworksPath;
+        snprintf(path14, sizeof(path14), "%s/libMoltenVK.dylib", frameworks.UTF8String);
+        snprintf(path12, sizeof(path12), "%s/libMoltenVK12.dylib", frameworks.UTF8String);
+    });
+    if (want12 && access(path12, F_OK) == 0) {
+        return path12;
+    }
+    if (access(path14, F_OK) == 0) {
+        return path14;
+    }
+    return NULL;
+}
+
 void* hooked_dlopen(const char* path, int mode) {
+    const char *mvk = signedMoltenVKPath(path);
+    if (mvk) {
+        // Java-level error messages print the originally requested path, so
+        // log the redirect here — otherwise a natives-dir path in
+        // UnsatisfiedLinkError looks like the hook never ran.
+        static char lastLogged[PATH_MAX];
+        if (strcmp(mvk, lastLogged) != 0) {
+            snprintf(lastLogged, sizeof(lastLogged), "%s", mvk);
+            NSLog(@"[MoltenVK] dlopen redirect: %s → %s", path, mvk);
+        }
+        path = mvk;
+    }
     BOOL shouldUseDyldBypass26PPL = NO;
     if (DeviceHasJITFlags(JIT_FLAG_FORCE_MIRRORED)) {
         shouldUseDyldBypass26PPL = hwRedirectOrig[0] && !DeviceHasJITFlags(JIT_FLAG_HAS_TXM);
