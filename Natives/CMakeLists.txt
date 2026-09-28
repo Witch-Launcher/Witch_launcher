@@ -112,7 +112,15 @@ list(FILTER GLSL_OPTIMIZER_SRC EXCLUDE REGEX ".*u_debug_stack_android\\.cpp$")
 
 add_library(glsl_optimizer STATIC ${GLSL_OPTIMIZER_SRC})
 target_include_directories(glsl_optimizer PRIVATE ${LTW_INCLUDES})
-target_include_directories(glsl_optimizer PRIVATE "${CMAKE_CURRENT_LIST_DIR}/external/MoltenVK/External/Vulkan-Headers/include")
+# Vulkan headers for nir_print.c / nir_vulkan.h. Prefer the MoltenVK
+# submodule copy when checked out (local dev), else fall back to the
+# minimal vendored copy (CI only inits the GL4ES deps, not MoltenVK).
+if(EXISTS "${CMAKE_CURRENT_LIST_DIR}/external/MoltenVK/External/Vulkan-Headers/include/vulkan/vulkan_core.h")
+  set(VULKAN_HEADERS_INCLUDE "${CMAKE_CURRENT_LIST_DIR}/external/MoltenVK/External/Vulkan-Headers/include")
+else()
+  set(VULKAN_HEADERS_INCLUDE "${CMAKE_CURRENT_LIST_DIR}/external/vulkan-headers-compat/include")
+endif()
+target_include_directories(glsl_optimizer PRIVATE "${VULKAN_HEADERS_INCLUDE}")
 set_target_properties(glsl_optimizer PROPERTIES
   POSITION_INDEPENDENT_CODE ON
   CXX_STANDARD 17
