@@ -42,7 +42,15 @@
     CGFloat scale = ml.contentsScale > 0 ? ml.contentsScale : UIScreen.mainScreen.scale;
     CGSize want = CGSizeMake(MAX(2, boundsSize.width * scale),
                              MAX(2, boundsSize.height * scale));
-    if (ml.drawableSize.width < 2 || ml.drawableSize.height < 2) {
+    if (isTGLMT) {
+        // TGLMT render đúng drawableSize lúc CreateWindow nhưng present copy
+        // min(target, drawable): drawable kẹt ở bounds×1 (736x414, do set lúc
+        // init khi contentsScale chưa có) là toàn màn hình bị crop+upscale 3x.
+        // Luôn đồng bộ (khác ANGLE: EGL surface nhạy với đổi size sau tạo).
+        if (ml.drawableSize.width != want.width || ml.drawableSize.height != want.height) {
+            ml.drawableSize = want;
+        }
+    } else if (ml.drawableSize.width < 2 || ml.drawableSize.height < 2) {
         ml.drawableSize = want;
     }
 }

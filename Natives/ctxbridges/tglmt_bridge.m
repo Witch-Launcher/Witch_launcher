@@ -28,6 +28,7 @@ static int (*p_SwapBuffers)(void *, void *) = NULL;
 static void (*p_SwapInterval)(int) = NULL;
 static void (*p_ResizeWindow)(void *, uint32_t, uint32_t) = NULL;
 static int (*p_HasRealGPU)(void) = NULL;
+static const char *(*p_BackendName)(void) = NULL;
 
 static void *g_tglmtWin = NULL;
 static __weak CALayer *g_tglmtLayer = nil;
@@ -73,6 +74,8 @@ static void *tglmt_load(void) {
     TGLMT_SYM(SwapInterval);
     TGLMT_SYM(ResizeWindow);
     TGLMT_SYM(HasRealGPU);
+    p_BackendName = dlsym(g_tglmtLib, "TGLMT_BackendName");
+    if (!p_BackendName) NSLog(@"[TGLMT] dlsym TGLMT_BackendName missing (dylib cu, rebuild)");
 #undef TGLMT_SYM
     return g_tglmtLib;
 }
@@ -84,9 +87,8 @@ static bool tglmt_init(void) {
     }
     [TGLMTConfig applyEnvironmentFromPreferences];
     NSLog(@"[TGLMT] %@", [TGLMTConfig activeConfigSummary]);
-    if (p_HasRealGPU && !p_HasRealGPU()) {
-        NSLog(@"[TGLMT] WARNING: no MTLDevice (Null fallback) — frames will be trace-only");
-    }
+    // NOTE: HasRealGPU/BackendName chỉ đúng SAU CreateWindow (shim tạo
+    // Renderer ở đó) nên log ở tglmt_init_context, không phải ở đây.
     return true;
 }
 
@@ -106,8 +108,9 @@ static basic_render_window_t *tglmt_init_context(basic_render_window_t *share) {
         CGFloat scale = ml.contentsScale > 0 ? ml.contentsScale : UIScreen.mainScreen.scale;
         CGSize want = CGSizeMake(MAX(2, ml.bounds.size.width * scale),
                                  MAX(2, ml.bounds.size.height * scale));
-        if (ml.drawableSize.width < 2 || ml.drawableSize.height < 2) {
+        if (ml.drawableSize.width != want.width || ml.drawableSize.height != want.height) {
             ml.drawableSize = want;
+            NSLog(@"[TGLMT] drawableSize synced to %.0fx%.0f", want.width, want.height);
         }
         int w = (int)MAX(2, ml.bounds.size.width * scale);
         int h = (int)MAX(2, ml.bounds.size.height * scale);
@@ -119,6 +122,10 @@ static basic_render_window_t *tglmt_init_context(basic_render_window_t *share) {
         g_tglmtLayer = layer;
         p_MakeCurrent(g_tglmtWin);
         NSLog(@"[TGLMT] context OK: window=%p %dx%d layer=%p", g_tglmtWin, w, h, layer);
+        if (p_BackendName) NSLog(@"[TGLMT] backend: %s", p_BackendName());
+        if (p_HasRealGPU && !p_HasRealGPU()) {
+            NSLog(@"[TGLMT] WARNING: no MTLDevice (Null fallback) — frames will be trace-only");
+        }
     } else {
         NSLog(@"[TGLMT] WARNING: surface layer is %@, not CAMetalLayer — need CAMetalLayer",
               NSStringFromClass(layer.class));
