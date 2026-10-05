@@ -26,7 +26,6 @@
 @end
 
 @interface WitchUpdateService ()
-- (void)markSeen:(WitchReleaseInfo *)info;
 - (void)presentShareSheet:(NSURL *)fileURL fromVC:(UIViewController *)vc;
 @end
 
@@ -143,36 +142,24 @@
             if (asset.name.length && asset.downloadURL.length) [assets addObject:asset];
         }
         info.assets = assets;
-        // Heuristic hasUpdate: body contains newer version OR assets exist and tag differs from suppressed.
+        // Heuristic hasUpdate: compare updated_at against last seen value. Store per-tag updated_at.
         // GitHub rolling tags (pre-release/release) keep same tag name, so compare published/updated_at
-        // against last seen value. Store per-tag updated_at.
+        // against last seen value. If they match, user already knows about this release.
         NSString *updatedAt = json[@"updated_at"] ?: json[@"published_at"] ?: @"";
         NSString *key = [NSString stringWithFormat:@"witch.update_last_seen_%@", tag];
         NSString *lastSeen = getPrefObject(key);
         BOOL hasUpdate = YES;
-        if ([lastSeen isKindOfClass:[NSString class]] && [lastSeen isEqualToString:updatedAt] && !force) {
+        if ([lastSeen isKindOfClass:[NSString class]] && [lastSeen isEqualToString:updatedAt]) {
             hasUpdate = NO;
         }
-        if (updatedAt.length > 0 && force) {
-            // force check still refreshes marker only after user acts (see markSeen below via caller)
+        // Always mark as seen when checking (force or not) so user won't be nagged again for same release
+        if (updatedAt.length > 0) {
+            setPrefObject(key, updatedAt);
         }
         // stash updatedAt for caller
         objc_setAssociatedObject(info, @selector(checkForUpdateForce:completion:), updatedAt, OBJC_ASSOCIATION_COPY_NONATOMIC);
         dispatch_async(dispatch_get_main_queue(), ^{ completion(info, hasUpdate, nil); });
     }] resume];
-}
-
-+ (NSString *)seenMarkerForInfo:(WitchReleaseInfo *)info {
-    return objc_getAssociatedObject(info, @selector(checkForUpdateForce:completion:));
-}
-
-- (void)markSeen:(WitchReleaseInfo *)info {
-    NSString *marker = [[self class] seenMarkerForInfo:info];
-    if (!marker) return;
-    NSString *key = [NSString stringWithFormat:@"witch.update_last_seen_%@", info.tagName.length ? info.tagName : [self effectiveTag]];
-    // tagName for rolling releases is literally "pre-release"/"release"
-    NSString *eff = [self effectiveTag];
-    setPrefObject([NSString stringWithFormat:@"witch.update_last_seen_%@", eff], marker);
 }
 
 - (void)downloadAsset:(WitchReleaseAsset *)asset progress:(void(^)(float))progress completion:(void(^)(NSURL *, NSError *))completion {
@@ -276,7 +263,6 @@
         }]];
         [alert addAction:[UIAlertAction actionWithTitle:@"Cập nhật" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a) {
             setPrefObject(@"witch.update_last_prompt", @([[NSDate date] timeIntervalSince1970]));
-            [self markSeen:info];
             Class cls = NSClassFromString(@"LauncherUpdateViewController");
             if (cls) {
                 UIViewController *uvc = [[cls alloc] init];
