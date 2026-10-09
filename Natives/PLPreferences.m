@@ -150,6 +150,14 @@
             @"shader_cache": @(0),
             @"r11g11b10f_fallback": @NO
         }.mutableCopy,
+        // Renderer TGLMT (libtglmt.dylib). Key PHẢI có sẵn ở đây, nếu không
+        // PLPreferences setObject sẽ không tạo được mục mới và setting ghi im lặng.
+        // Env do TGLMTConfig apply khi khởi động game (không phải lúc bấm UI).
+        @"tglmt": @{
+            @"diag": @NO,
+            @"frames_in_flight": @(2),
+            @"buf_pool_slots": @(3)
+        }.mutableCopy,
         @"witch": @{
             @"server_enabled": @YES,
             @"proxy_base_url": @"",

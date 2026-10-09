@@ -35,14 +35,33 @@ NSString *const TGLMTPrefSection = @"tglmt";
 
 + (void)applyEnvironmentFromPreferences {
     setenv("TGLMT_RENDERER", "1", 1);
-    // Số frame bay (throughput TBDR A11): mặc định 3, chỉnh qua tglmt.frames_in_flight.
-    id frames = getPrefObject(@"tglmt.frames_in_flight");
     char buf[16];
-    snprintf(buf, sizeof(buf), "%d", frames ? (int)[frames integerValue] : 3);
+
+    // Số frame bay (throughput TBDR A11): 1..8, mặc định 2.
+    id frames = getPrefObject(@"tglmt.frames_in_flight");
+    int fif = frames ? (int)[frames integerValue] : 2;
+    if (fif < 1) fif = 1;
+    if (fif > 8) fif = 8;
+    snprintf(buf, sizeof(buf), "%d", fif);
     setenv("TGLMT_FRAMES_IN_FLIGHT", buf, 1);
 
-    NSLog(@"[TGLMTConfig] Applied config: frames=%s note=%@",
-        getenv("TGLMT_FRAMES_IN_FLIGHT"), [self deviceSupportNote]);
+    // Slot buffer xoay khi GPU đang bận: 1..8, mặc định 3. Cao = ít chờ
+    // (bufWaitStall) nhưng tốn RAM pool; thấp = tiết kiệm RAM hơn.
+    id pool = getPrefObject(@"tglmt.buf_pool_slots");
+    int slots = pool ? (int)[pool integerValue] : 3;
+    if (slots < 1) slots = 1;
+    if (slots > 8) slots = 8;
+    snprintf(buf, sizeof(buf), "%d", slots);
+    setenv("TGLMT_BUF_POOL", buf, 1);
+
+    // Chẩn đoán nặng (fprintf + readback mỗi draw). Tắt khi chơi thật —
+    // bật làm FPS tụt mạnh (đo trên iPhone 8 Plus: 10-20 fps).
+    BOOL diag = getPrefBool(@"tglmt.diag");
+    setenv("TGLMT_DIAG", diag ? "1" : "0", 1);
+
+    NSLog(@"[TGLMTConfig] Applied config: fif=%s pool=%s diag=%s note=%@",
+        getenv("TGLMT_FRAMES_IN_FLIGHT"), getenv("TGLMT_BUF_POOL"),
+        getenv("TGLMT_DIAG"), [self deviceSupportNote]);
     if (![self deviceSupportsTGLMT]) {
         NSLog(@"[TGLMTConfig] WARNING: %@", [self deviceSupportNote]);
     }
@@ -51,14 +70,19 @@ NSString *const TGLMTPrefSection = @"tglmt";
 + (NSString *)activeConfigSummary {
     NSString *renderer = [PLProfiles resolveKeyForCurrentProfile:@"renderer"];
     id frames = getPrefObject(@"tglmt.frames_in_flight");
-    NSString *framesStr = frames ? [NSString stringWithFormat:@"%ld", (long)[frames integerValue]] : @"3";
+    id pool = getPrefObject(@"tglmt.buf_pool_slots");
+    NSString *framesStr = frames ? [NSString stringWithFormat:@"%ld", (long)[frames integerValue]] : @"2";
+    NSString *poolStr = pool ? [NSString stringWithFormat:@"%ld", (long)[pool integerValue]] : @"3";
+    NSString *diagStr = getPrefBool(@"tglmt.diag") ? @"on" : @"off";
     return [NSString stringWithFormat:
         @"[TGLMT Config]\n"
         @"Renderer: %@\n"
         @"Backend: GL 4.6 Core -> Metal (libtglmt.dylib)\n"
         @"GPU: %@\n"
-        @"Frames in Flight: %@",
-        renderer, [self deviceSupportNote], framesStr];
+        @"Frames in Flight: %@\n"
+        @"Buffer pool slots: %@\n"
+        @"Diagnostics: %@",
+        renderer, [self deviceSupportNote], framesStr, poolStr, diagStr];
 }
 
 @end

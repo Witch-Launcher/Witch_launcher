@@ -1011,3 +1011,8 @@
 "versions.empty" = "Chưa cài phiên bản nào";
 "preference.title.renderer.debug.angle_vulkan" = "ANGLE Vulkan (ES 3.1) - OpenGL ES qua Vulkan";
 "preference.title.renderer.debug.angle_metal" = "ANGLE Metal (ES 3.2) - OpenGL ES qua Metal";
+
+"settings.group.tglmt" = "TGLMT (Metal)";
+"preference.title.tglmt_diag" = "Chẩn đoán TGLMT";
+"preference.title.tglmt_frames_in_flight" = "TGLMT - Số frame đang bay";
+"preference.title.tglmt_buf_pool_slots" = "TGLMT - Số slot đệm buffer";

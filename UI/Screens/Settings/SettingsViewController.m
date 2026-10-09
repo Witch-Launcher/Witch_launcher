@@ -208,6 +208,10 @@
             @{@"type": @"picker", @"label": localize(@"preference.title.mobilegl_async_shader_compile", nil), @"key": @"mobilegl.async_shader_compile", @"options": @[@"0", @"1", @"2"], @"default": @"0"},
             @{@"type": @"picker", @"label": localize(@"preference.title.mobilegl_shader_cache", nil), @"key": @"mobilegl.shader_cache", @"options": @[@"0", @"1", @"2"], @"default": @"0"},
             @{@"type": @"switch", @"label": localize(@"preference.title.mobilegl_r11g11b10f_fallback", nil), @"key": @"mobilegl.r11g11b10f_fallback"},
+            header(@"settings.group.tglmt"),
+            @{@"type": @"switch", @"label": localize(@"preference.title.tglmt_diag", nil), @"key": @"tglmt.diag"},
+            @{@"type": @"slider", @"label": localize(@"preference.title.tglmt_frames_in_flight", nil), @"key": @"tglmt.frames_in_flight", @"min": @1, @"max": @8, @"suffix": @""},
+            @{@"type": @"slider", @"label": localize(@"preference.title.tglmt_buf_pool_slots", nil), @"key": @"tglmt.buf_pool_slots", @"min": @1, @"max": @8, @"suffix": @""},
         ]},
         @{@"title": localize(@"Network", nil), @"items": @[
             header(@"settings.group.witch"),
