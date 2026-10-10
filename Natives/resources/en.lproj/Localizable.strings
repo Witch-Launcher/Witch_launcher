@@ -1106,3 +1106,4 @@
 "preference.title.tglmt_diag" = "TGLMT Diagnostics";
 "preference.title.tglmt_frames_in_flight" = "TGLMT Frames in Flight";
 "preference.title.tglmt_buf_pool_slots" = "TGLMT Buffer Pool Slots";
+"preference.title.tglmt_pool_mb" = "TGLMT Pool Budget";

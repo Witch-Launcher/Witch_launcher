@@ -156,7 +156,8 @@
         @"tglmt": @{
             @"diag": @NO,
             @"frames_in_flight": @(2),
-            @"buf_pool_slots": @(3)
+            @"buf_pool_slots": @(3),
+            @"pool_mb": @(192)
         }.mutableCopy,
         @"witch": @{
             @"server_enabled": @YES,

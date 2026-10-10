@@ -1016,3 +1016,4 @@
 "preference.title.tglmt_diag" = "Chẩn đoán TGLMT";
 "preference.title.tglmt_frames_in_flight" = "TGLMT - Số frame đang bay";
 "preference.title.tglmt_buf_pool_slots" = "TGLMT - Số slot đệm buffer";
+"preference.title.tglmt_pool_mb" = "TGLMT - Trần bộ nhớ pool (RAM)";

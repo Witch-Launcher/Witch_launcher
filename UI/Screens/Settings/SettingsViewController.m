@@ -212,6 +212,7 @@
             @{@"type": @"switch", @"label": localize(@"preference.title.tglmt_diag", nil), @"key": @"tglmt.diag"},
             @{@"type": @"slider", @"label": localize(@"preference.title.tglmt_frames_in_flight", nil), @"key": @"tglmt.frames_in_flight", @"min": @1, @"max": @8, @"suffix": @""},
             @{@"type": @"slider", @"label": localize(@"preference.title.tglmt_buf_pool_slots", nil), @"key": @"tglmt.buf_pool_slots", @"min": @1, @"max": @8, @"suffix": @""},
+            @{@"type": @"slider", @"label": localize(@"preference.title.tglmt_pool_mb", nil), @"key": @"tglmt.pool_mb", @"min": @32, @"max": @512, @"suffix": @"MB"},
         ]},
         @{@"title": localize(@"Network", nil), @"items": @[
             header(@"settings.group.witch"),

@@ -54,14 +54,24 @@ NSString *const TGLMTPrefSection = @"tglmt";
     snprintf(buf, sizeof(buf), "%d", slots);
     setenv("TGLMT_BUF_POOL", buf, 1);
 
+    // Trần TỔNG byte slot pool (MB): pool từng đo 320MB sau spike load chunk →
+    // góp phần chạm jetsam limit 2148MB. Vượt trần dylib không alloc slot mới
+    // nữa (rơi vào nhánh chờ) thay vì giữ thêm RAM. 32..512, mặc định 192.
+    id poolMb = getPrefObject(@"tglmt.pool_mb");
+    int mb = poolMb ? (int)[poolMb integerValue] : 192;
+    if (mb < 32) mb = 32;
+    if (mb > 512) mb = 512;
+    snprintf(buf, sizeof(buf), "%d", mb);
+    setenv("TGLMT_POOL_MB", buf, 1);
+
     // Chẩn đoán nặng (fprintf + readback mỗi draw). Tắt khi chơi thật —
     // bật làm FPS tụt mạnh (đo trên iPhone 8 Plus: 10-20 fps).
     BOOL diag = getPrefBool(@"tglmt.diag");
     setenv("TGLMT_DIAG", diag ? "1" : "0", 1);
 
-    NSLog(@"[TGLMTConfig] Applied config: fif=%s pool=%s diag=%s note=%@",
+    NSLog(@"[TGLMTConfig] Applied config: fif=%s pool=%s poolMB=%s diag=%s note=%@",
         getenv("TGLMT_FRAMES_IN_FLIGHT"), getenv("TGLMT_BUF_POOL"),
-        getenv("TGLMT_DIAG"), [self deviceSupportNote]);
+        getenv("TGLMT_POOL_MB"), getenv("TGLMT_DIAG"), [self deviceSupportNote]);
     if (![self deviceSupportsTGLMT]) {
         NSLog(@"[TGLMTConfig] WARNING: %@", [self deviceSupportNote]);
     }
@@ -71,8 +81,10 @@ NSString *const TGLMTPrefSection = @"tglmt";
     NSString *renderer = [PLProfiles resolveKeyForCurrentProfile:@"renderer"];
     id frames = getPrefObject(@"tglmt.frames_in_flight");
     id pool = getPrefObject(@"tglmt.buf_pool_slots");
+    id poolMb = getPrefObject(@"tglmt.pool_mb");
     NSString *framesStr = frames ? [NSString stringWithFormat:@"%ld", (long)[frames integerValue]] : @"2";
     NSString *poolStr = pool ? [NSString stringWithFormat:@"%ld", (long)[pool integerValue]] : @"3";
+    NSString *poolMbStr = poolMb ? [NSString stringWithFormat:@"%ld", (long)[poolMb integerValue]] : @"192";
     NSString *diagStr = getPrefBool(@"tglmt.diag") ? @"on" : @"off";
     return [NSString stringWithFormat:
         @"[TGLMT Config]\n"
@@ -81,8 +93,9 @@ NSString *const TGLMTPrefSection = @"tglmt";
         @"GPU: %@\n"
         @"Frames in Flight: %@\n"
         @"Buffer pool slots: %@\n"
+        @"Pool budget: %@ MB\n"
         @"Diagnostics: %@",
-        renderer, [self deviceSupportNote], framesStr, poolStr, diagStr];
+        renderer, [self deviceSupportNote], framesStr, poolStr, poolMbStr, diagStr];
 }
 
 @end
