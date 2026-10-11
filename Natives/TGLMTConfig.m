@@ -37,18 +37,18 @@ NSString *const TGLMTPrefSection = @"tglmt";
     setenv("TGLMT_RENDERER", "1", 1);
     char buf[16];
 
-    // Số frame bay (throughput TBDR A11): 1..8, mặc định 2.
+    // Số frame bay (throughput TBDR A11): 1..8, mặc định 4.
     id frames = getPrefObject(@"tglmt.frames_in_flight");
-    int fif = frames ? (int)[frames integerValue] : 2;
+    int fif = frames ? (int)[frames integerValue] : 4;
     if (fif < 1) fif = 1;
     if (fif > 8) fif = 8;
     snprintf(buf, sizeof(buf), "%d", fif);
     setenv("TGLMT_FRAMES_IN_FLIGHT", buf, 1);
 
-    // Slot buffer xoay khi GPU đang bận: 1..8, mặc định 3. Cao = ít chờ
+    // Slot buffer xoay khi GPU đang bận: 1..8, mặc định 4 (>= framesInFlight). Cao = ít chờ
     // (bufWaitStall) nhưng tốn RAM pool; thấp = tiết kiệm RAM hơn.
     id pool = getPrefObject(@"tglmt.buf_pool_slots");
-    int slots = pool ? (int)[pool integerValue] : 3;
+    int slots = pool ? (int)[pool integerValue] : 4;
     if (slots < 1) slots = 1;
     if (slots > 8) slots = 8;
     snprintf(buf, sizeof(buf), "%d", slots);
@@ -82,8 +82,8 @@ NSString *const TGLMTPrefSection = @"tglmt";
     id frames = getPrefObject(@"tglmt.frames_in_flight");
     id pool = getPrefObject(@"tglmt.buf_pool_slots");
     id poolMb = getPrefObject(@"tglmt.pool_mb");
-    NSString *framesStr = frames ? [NSString stringWithFormat:@"%ld", (long)[frames integerValue]] : @"2";
-    NSString *poolStr = pool ? [NSString stringWithFormat:@"%ld", (long)[pool integerValue]] : @"3";
+    NSString *framesStr = frames ? [NSString stringWithFormat:@"%ld", (long)[frames integerValue]] : @"4";
+    NSString *poolStr = pool ? [NSString stringWithFormat:@"%ld", (long)[pool integerValue]] : @"4";
     NSString *poolMbStr = poolMb ? [NSString stringWithFormat:@"%ld", (long)[poolMb integerValue]] : @"192";
     NSString *diagStr = getPrefBool(@"tglmt.diag") ? @"on" : @"off";
     return [NSString stringWithFormat:

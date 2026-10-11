@@ -155,8 +155,8 @@
         // Env do TGLMTConfig apply khi khởi động game (không phải lúc bấm UI).
         @"tglmt": @{
             @"diag": @NO,
-            @"frames_in_flight": @(2),
-            @"buf_pool_slots": @(3),
+            @"frames_in_flight": @(4),
+            @"buf_pool_slots": @(4),
             @"pool_mb": @(192)
         }.mutableCopy,
         @"witch": @{
