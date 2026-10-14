@@ -144,7 +144,9 @@ function JIT26NewBreakpoints(brkResponse) {
     let instrU32 = littleEndianHexToU32(instructionResponse);
     let brkImmediate = extractBrkImmediate(instrU32);
     
-    let memResponse = send_command(`m${x0.toString(16)},${x1}`);
+    // GDB RSP `m addr,length`: BOTH fields are hex. x1 arrives as a BigInt —
+    // format it hex (its default toString is decimal, which over-reads).
+    let memResponse = send_command(`m${x0.toString(16)},${x1.toString(16)}`);
 
     let scriptText = hexToAscii(memResponse);
     log_verbose(`Script text: ${scriptText}`);
@@ -179,22 +181,60 @@ function parseRegNum(brkResponse, regNum) {
     return readRegister(regNum);
 }
 
+// Mirror superpage address band. iOS 26 placed the 240 MB reservation inside
+// 0x700000000-0x800000000, but iOS 27 puts LARGE reservations high:
+// hs_err_pid8878 (iPhone 13, iOS 27.0, Java 25) shows CodeHeap RX=0x700F004000
+// (~481 GB) with the Java heap right after it. A 34 GB ceiling therefore
+// misclassifies the true pair as "out-of-band" and leaves it unblessed ->
+// SIGBUS at the first stub. Accept up to 1 TB; still rejects kernel addresses,
+// tagged pointers and register garbage (0xCCCC.../0xDEAD.../0xFFFF...).
+const MIRROR_BAND_LO = 0x100000000n;
+const MIRROR_BAND_HI = 0x10000000000n;
+function mirrorInBand(v) {
+    return v !== null && v !== undefined && v >= MIRROR_BAND_LO && v < MIRROR_BAND_HI;
+}
+
 // brk 0x6a: patched libjvm stops after mirror vm_remap (replaces printf).
+// Register truth (verified by disassembling get_debug_jit_mapping in the
+// bundled Java 25 libjvm): the site replaced `bl printf`, and NOTHING reloads
+// x1/x2 after the preceding calls, so x1/x2 hold call leftovers (garbage).
+// The live values are x20 (callee-saved, carries the RX base from the alloc
+// result) and x8 (freshly reloaded from the vm_remap out-slot = RW alias).
+// x1/x2 are kept only as a legacy fallback for older libjvm builds.
+function resolveMirrorPair(brkResponse, rxGuess, rwGuess) {
+    const fmt = (v) => (v === null || v === undefined ? "?" : "0x" + v.toString(16));
+    let x8v = null, x20v = null;
+    try { x8v = parseRegNum(brkResponse, 0x08); } catch (e) { x8v = null; }
+    try { x20v = parseRegNum(brkResponse, 0x14); } catch (e) { x20v = null; }
+    log(`Mirror brk 0x6a regs: x1=${fmt(rwGuess)} x2=${fmt(rxGuess)} x8=${fmt(x8v)} x20=${fmt(x20v)}`);
+    if (mirrorInBand(x20v) && mirrorInBand(x8v)) {
+        log(`Mirror pair from x20/x8 (live regs): RX=0x${x20v.toString(16)} RW=0x${x8v.toString(16)}`);
+        return { rx: x20v, rw: x8v };
+    }
+    if (mirrorInBand(rxGuess) && mirrorInBand(rwGuess)) {
+        log(`Mirror pair from x1/x2 (legacy fallback)`);
+        return { rx: rxGuess, rw: rwGuess };
+    }
+    return null;
+}
+
 function JIT26HandleBrk0x6a(brkResponse) {
-    let rw = x1;
-    let rx = parseRegNum(brkResponse, 0x02);
-    if (!rx) {
-        rx = parseRegNum(brkResponse, 0x00);
+    let rwGuess = x1;
+    let rxGuess = parseRegNum(brkResponse, 0x02);
+    if (!rxGuess) {
+        rxGuess = parseRegNum(brkResponse, 0x00);
     }
-    if (!rw) {
-        rw = parseRegNum(brkResponse, 0x01);
+    if (!rwGuess) {
+        rwGuess = parseRegNum(brkResponse, 0x01);
     }
-    if (!rx || !rw) {
-        log(`Mirror prepare brk 0x6a: missing rx/rw (rw=${rw}, rx=${rx})`);
+    const pair = resolveMirrorPair(brkResponse, rxGuess, rwGuess);
+    if (!pair) {
+        log(`Mirror prepare brk 0x6a: no valid pair (rwGuess=${rwGuess}, rxGuess=${rxGuess}); region stays unblessed`);
         return;
     }
-    // Accept any valid 64-bit user-space address range (0x100000000-0x800000000).
-    if (rx < 0x100000000n || rx >= 0x800000000n || rw < 0x100000000n || rw >= 0x800000000n) {
+    const rx = pair.rx, rw = pair.rw;
+    // Range-guard the resolved pair (see MIRROR_BAND_* above).
+    if (!mirrorInBand(rx) || !mirrorInBand(rw)) {
         log(`Mirror prepare brk 0x6a: out-of-band rx=0x${rx.toString(16)} rw=0x${rw.toString(16)}, skipping (layout drift?)`);
         return;
     }

@@ -123,8 +123,8 @@ void requestExternalJITEnable(void) {
             NSLog(@"[JIT] Could not build StikDebug URL");
             return;
         }
-        NSLog(@"[JIT] Requesting StikDebug JIT (pid %@, iOS26=%d)", pidString,
-              DeviceHasJITFlags(JIT_FLAG_IS_IOS_26));
+        NSLog(@"[JIT] Requesting StikDebug JIT (pid %@, iOS26=%d, urlLen=%lu)", pidString,
+              DeviceHasJITFlags(JIT_FLAG_IS_IOS_26), (unsigned long)stikURL.absoluteString.length);
         void (^trySideStore)(void) = ^{
             if (!sideURL) {
                 return;
@@ -381,7 +381,9 @@ void JIT26PrepareRegionForPatching(void *addr, size_t size) {
 }
 void JIT26SendJITScript(NSString* script) {
     NSCAssert(script, @"Script must not be nil");
-    BreakSendJITScript((char*)script.UTF8String, script.length);
+    // script.length counts UTF-16 units; the debugger reads raw bytes, so use
+    // the UTF-8 byte count (they differ for any non-ASCII character).
+    BreakSendJITScript((char*)script.UTF8String, strlen(script.UTF8String));
 }
 
 BOOL DeviceCanCreateRXMap(void) {

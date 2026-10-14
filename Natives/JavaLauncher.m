@@ -14,6 +14,7 @@
 #include <sys/sysctl.h>
 #include <sys/proc.h>
 #include <signal.h>
+#include <setjmp.h>
 #include <unistd.h>
 
 #include "utils.h"
@@ -367,11 +368,18 @@ static BOOL processIsDebugged(void) {
 // The JIT26 / mirror brk stubs (#0xf00d, #0x6a) are serviced by StikDebug's
 // exception server. When nothing services them the kernel raises SIGTRAP and
 // the default action kills the app (crash straight back to the home screen).
-// During the handshake window we catch SIGTRAP instead: the stub resumes with
-// stale registers and the probe below fails with a diagnostic dialog telling
-// the user exactly what to fix (enable JIT / assign the script).
+// During the handshake window we catch SIGTRAP instead, ARMED as a bail-out:
+// a synchronous brk trap resumes AT the faulting instruction, so returning
+// from an empty handler would re-trap forever (black-screen spin, no dialog,
+// no further log). siglongjmp lands back at the armed setjmp point with the
+// call skipped, turning every unserviced brk into the diagnostic dialogs below.
+static sigjmp_buf g_jitTrapJmp;
+static volatile sig_atomic_t g_jitTrapArmed = 0;
 static void onUnservicedBrk(int sig) {
     (void)sig;
+    if (g_jitTrapArmed) {
+        siglongjmp(g_jitTrapJmp, 1);
+    }
 }
 
 static BOOL JIT26ProbeLooksValid(void *result) {
@@ -472,7 +480,15 @@ int launchJVMWithArgs(NSString *username, id launchTarget, int width, int height
         // sending our extension first can leave an unattached debugger waiting
         // forever on command 2 (the black screen seen before "probe returned").
         // Use the same brk #0xf00d path as patched libjvm (not legacy brk #0x69).
-        void *probeMapping = JIT26PrepareRegion(NULL, getpagesize());
+        void *volatile probeMapping = NULL;
+        g_jitTrapArmed = 1;
+        if (sigsetjmp(g_jitTrapJmp, 1) == 0) {
+            probeMapping = JIT26PrepareRegion(NULL, getpagesize());
+        } else {
+            NSLog(@"[JavaLauncher] JIT26 probe brk was NOT serviced on this thread "
+                  @"(debugger detached or has no script). Failing loudly instead of spinning.");
+        }
+        g_jitTrapArmed = 0;
         NSLog(@"[JavaLauncher] JIT26 probe returned %p (txm=%d, flags=0x%X)", probeMapping,
             DeviceHasTXM(), (unsigned)DeviceGetJITFlags(NO));
         if (!JIT26ProbeLooksValid(probeMapping)) {
@@ -503,7 +519,30 @@ int launchJVMWithArgs(NSString *username, id launchTarget, int width, int height
         NSString *extensionScript = extPath ? [NSString stringWithContentsOfFile:extPath encoding:NSUTF8StringEncoding error:nil] : nil;
         if (extensionScript.length > 0) {
             NSLog(@"[JavaLauncher] Loading UniversalJIT26Extension.js (%lu bytes)", (unsigned long)extensionScript.length);
-            JIT26SendJITScript(extensionScript);
+            BOOL extensionDelivered = YES;
+            g_jitTrapArmed = 1;
+            if (sigsetjmp(g_jitTrapJmp, 1) == 0) {
+                JIT26SendJITScript(extensionScript);
+            } else {
+                extensionDelivered = NO;
+                NSLog(@"[JavaLauncher] Extension brk was NOT serviced — the StikDebug script "
+                      @"does not implement command 2 (0x68). Assign UniversalJIT26.js in StikDebug.");
+            }
+            g_jitTrapArmed = 0;
+            if (!extensionDelivered) {
+                sigaction(SIGTRAP, &oldTrapSa, NULL);
+                init_setupUniversalJITScript(YES);
+                showDialog(localize(@"Error", nil),
+                    @"Witch could not upload its JIT helpers to the debugger.\n\n"
+                     @"The script assigned in StikDebug does not implement command 2 (0x68) — "
+                     @"this happens with attachDetach.js or a mismatched universal.js.\n\n"
+                     @"UniversalJIT26.js was copied to your clipboard and refreshed in Witch Documents — "
+                     @"assign it in StikDebug (as \"Universal JIT 26\"), re-enable JIT, then launch again.");
+                [PLLogOutputView handleExitCode:1];
+                return 1;
+            }
+            NSLog(@"[JavaLauncher] Extension delivered; if the game later hangs, confirm "
+                  @"'Amethyst UniversalJIT26 extension loaded' appears in the StikDebug log");
         } else {
             NSLog(@"[JavaLauncher] UniversalJIT26Extension.js is missing or empty; using assigned base JIT script only");
         }
@@ -518,6 +557,21 @@ int launchJVMWithArgs(NSString *username, id launchTarget, int width, int height
         init_jit_vm_remap_hook();
         // make sure we don't get stuck in EXC_BAD_ACCESS
         task_set_exception_ports(mach_task_self(), EXC_MASK_BAD_ACCESS, 0, EXCEPTION_DEFAULT, MACHINE_THREAD_STATE);
+        // Pre-flight: prove debugger-blessed memory is really executable before
+        // handing control to the JVM. A stale debugger / detached session /
+        // wrong script fails HERE with a dialog instead of a black-screen crash
+        // inside JLI_Launch (the JVM abort path cannot show UI).
+        if (!JIT26ExecPreflight()) {
+            UIKit_returnToSplitView();
+            showDialog(localize(@"Error", nil),
+                @"JIT memory test failed: the debugger cannot provide executable memory "
+                 @"on this device.\n\n"
+                 @"1. Update StikDebug to 3.1.6 or newer\n"
+                 @"2. Assign \"Universal JIT 26\" (UniversalJIT26.js) in StikDebug\n"
+                 @"3. Re-enable JIT for Witch, close and reopen Witch, then try again");
+            [PLLogOutputView handleExitCode:1];
+            return 1;
+        }
     }
     // iOS 26/27 still needs the LV bypass for JNA, renderer dylibs, and mods
     // extracted to Documents. StikDebug keeps us CS_DEBUGGED so the mirrored

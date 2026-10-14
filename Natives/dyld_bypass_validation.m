@@ -60,6 +60,13 @@ bool redirectFunctionDirect(char *name, void *patchAddr, void *target) {
     builtin_memcpy((char *)patchAddr, patch, sizeof(patch));
     *(void **)((char*)patchAddr + 16) = target;
     sys_icache_invalidate((void*)patchAddr, sizeof(patch));
+    // Read-back verify: a silently-unapplied hook breaks unsigned-dylib loading
+    // later with a misleading code-signature error. Fail loudly instead.
+    if (memcmp((char *)patchAddr, patch, 16) != 0 ||
+        *(void **)((char *)patchAddr + 16) != target) {
+        NSLog(@"[DyldLVBypass] hook %s wrote but read-back mismatch — hook NOT installed", name);
+        return FALSE;
+    }
     
     kret = builtin_vm_protect(mach_task_self(), (vm_address_t)patchAddr, sizeof(patch), false, PROT_READ | PROT_EXEC);
     if (kret != KERN_SUCCESS) {
@@ -104,7 +111,17 @@ bool redirectFunctionMirrored(char *name, void *patchAddr, void *target) {
     builtin_memcpy((char *)mirrored, patch, sizeof(patch));
     *(void **)((char*)mirrored + 16) = target;
     sys_icache_invalidate((void*)patchAddr, sizeof(patch));
-    
+
+    // Read-back verify through the shared view: a non-shared mirror (or a
+    // patch site that is not the real stub entry) would otherwise fail silently
+    // and corrupt/miss the hook. Fail loudly with the addresses for post-mortem.
+    if (memcmp((char *)patchAddr, patch, 16) != 0 ||
+        *(void **)((char *)patchAddr + 16) != target) {
+        NSLog(@"[DyldLVBypass] hook %s wrote mirror %p but read-back mismatch at %p — hook NOT installed",
+            name, (void *)mirrored, patchAddr);
+        vm_deallocate(mach_task_self(), mirrored, sizeof(patch));
+        return FALSE;
+    }
     NSLog(@"[DyldLVBypass] hook %s succeed!", name);
     
     vm_deallocate(mach_task_self(), mirrored, sizeof(patch));
@@ -148,11 +165,24 @@ size_t getDyldTextSize(void *dyldBase) {
 bool searchAndPatch(char *name, char *base, char *signature, int length, void *target) {
     char *patchAddr = NULL;
     size_t searchSize = getDyldTextSize(base);
+    int matchCount = 0;
     for(size_t i=0; i < searchSize; i+=4) {
         if (base[i] == signature[0] && memcmp(base+i, signature, length) == 0) {
-            patchAddr = base + i;
-            break;
+            matchCount++;
+            if (patchAddr == NULL) {
+                patchAddr = base + i;
+            }
         }
+    }
+    // More than one match means the 8-byte signature is ambiguous on this
+    // dyld build (chip/iOS-specific shared cache): the first hit may not be
+    // the real stub entry, and patching it corrupts dyld -> multi-thread
+    // SIGSEGV shortly after. Kept as first-match (behavior unchanged) but
+    // flagged loudly so the next black-screen has a post-mortem trail.
+    if (matchCount != 1) {
+        NSLog(@"[DyldLVBypass] %s: signature matched %d sites in dyld __text "
+              @"(dyld=%p, size=0x%zx) — first-match patching is SUSPECT on this OS build",
+              name, matchCount, base, searchSize);
     }
     
     if (patchAddr == NULL) {

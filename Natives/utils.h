@@ -103,6 +103,7 @@ BOOL verify_libjvm_mirror_brk_patch(void);
 void start_jit_mirror_prepare_poll_thread(void);
 void prewarm_jit_mirror_superpage(void);
 void AmethystJIT26PrepareMirrorPair(void *rx, void *rw, size_t size);
+BOOL JIT26ExecPreflight(void);
 void init_hookFunctions();
 void init_hookUIKitConstructor();
 void init_setupMultiDir();

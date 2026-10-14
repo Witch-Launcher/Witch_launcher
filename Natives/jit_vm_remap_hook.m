@@ -6,9 +6,12 @@
 #include <mach-o/dyld.h>
 #include <mach/vm_map.h>
 #include <pthread.h>
+#include <signal.h>
+#include <setjmp.h>
 #include <stdarg.h>
 #include <stdatomic.h>
 #include <string.h>
+#include <sys/mman.h>
 #include <unistd.h>
 
 static vm_address_t g_lastPreparedRx;
@@ -178,4 +181,81 @@ void rebind_jit_vm_hooks_after_libjvm_load(void) {
 
 void init_jit_vm_remap_hook(void) {
     NSLog(@"[JIT26] JIT handler initialized (breakpoint-driven JIT mode for iOS 26+/27)");
+}
+
+static sigjmp_buf g_jitPreflightJmp;
+static volatile sig_atomic_t g_jitPreflightArmed = 0;
+
+static void jit_preflight_fault(int sig) {
+    (void)sig;
+    if (g_jitPreflightArmed) {
+        siglongjmp(g_jitPreflightJmp, 1);
+    }
+}
+
+// Pre-flight proof that debugger-backed JIT execution REALLY works with the
+// attached StikDebug session: bless 2 pages via brk, mirror an RW alias, write
+// a `mov w0,#42; ret` stub, and CALL it under a fault guard. Returns YES only
+// if the stub executes and returns 42. A stale debugger, detached session, or
+// wrong script fails LOUDLY here instead of crashing later inside JLI_Launch
+// with a black screen and no dialog (the JVM abort path cannot show UI).
+BOOL JIT26ExecPreflight(void) {
+    vm_size_t page = (vm_size_t)getpagesize();
+    vm_size_t len = page * 2;
+
+    void *rx = JIT26PrepareRegion(NULL, len);
+    if (!rx || rx == MAP_FAILED || ((vm_address_t)rx & (page - 1)) != 0) {
+        NSLog(@"[JIT26] preflight: debugger did not return a usable RX region (%p)", rx);
+        return NO;
+    }
+
+    vm_address_t mirrored = 0;
+    vm_prot_t cur_prot = 0, max_prot = 0;
+    kern_return_t ret = vm_remap(mach_task_self(), &mirrored, len, 0, VM_FLAGS_ANYWHERE,
+                                 mach_task_self(), (vm_address_t)rx, FALSE,
+                                 &cur_prot, &max_prot, VM_INHERIT_SHARE);
+    if (ret != KERN_SUCCESS) {
+        NSLog(@"[JIT26] preflight: vm_remap failed: 0x%x", ret);
+        return NO;
+    }
+    ret = vm_protect(mach_task_self(), mirrored, len, FALSE, VM_PROT_READ | VM_PROT_WRITE | VM_PROT_COPY);
+    if (ret != KERN_SUCCESS) {
+        NSLog(@"[JIT26] preflight: vm_protect(RW) failed: 0x%x", ret);
+        vm_deallocate(mach_task_self(), mirrored, len);
+        return NO;
+    }
+    static const uint32_t stub[] = { 0x52800540u, 0xD65F03C0u }; // movz w0, #42; ret
+    memcpy((void *)mirrored, stub, sizeof(stub));
+    sys_icache_invalidate(rx, sizeof(stub));
+
+    struct sigaction sa = {0}, oldBus, oldSegv, oldTrap;
+    sa.sa_handler = jit_preflight_fault;
+    sigemptyset(&sa.sa_mask);
+    sigaction(SIGBUS, &sa, &oldBus);
+    sigaction(SIGSEGV, &sa, &oldSegv);
+    sigaction(SIGTRAP, &sa, &oldTrap);
+
+    volatile int result = -1;
+    g_jitPreflightArmed = 1;
+    if (sigsetjmp(g_jitPreflightJmp, 1) == 0) {
+        int (*fn)(void) = (int (*)(void))rx;
+        result = fn();
+    } else {
+        NSLog(@"[JIT26] preflight: fault while executing blessed region (blessing ineffective)");
+    }
+    g_jitPreflightArmed = 0;
+
+    sigaction(SIGBUS, &oldBus, NULL);
+    sigaction(SIGSEGV, &oldSegv, NULL);
+    sigaction(SIGTRAP, &oldTrap, NULL);
+    vm_deallocate(mach_task_self(), mirrored, len);
+    // NOTE: the 2 RX pages stay reserved (debugger-owned); negligible and keeps
+    // the debugger allocator state intact for the JVM's own requests.
+
+    if (result != 42) {
+        NSLog(@"[JIT26] preflight: FAILED (stub returned %d, want 42)", result);
+        return NO;
+    }
+    NSLog(@"[JIT26] preflight: executable JIT memory works (stub returned 42)");
+    return YES;
 }

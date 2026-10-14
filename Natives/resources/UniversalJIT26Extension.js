@@ -33,21 +33,42 @@ function parseRegNum(brkResponse, regNum) {
     return readRegister(regNum);
 }
 
+function resolveMirrorPair(brkResponse, rxGuess, rwGuess) {
+    const inBand = (v) => v !== null && v !== undefined && v >= 0x100000000n && v < 0x10000000000n;
+    const fmt = (v) => (v === null || v === undefined ? "?" : "0x" + v.toString(16));
+    let x8v = null, x20v = null;
+    try { x8v = parseRegNum(brkResponse, 0x08); } catch (e) { x8v = null; }
+    try { x20v = parseRegNum(brkResponse, 0x14); } catch (e) { x20v = null; }
+    log(`Mirror brk 0x6a regs: x1=${fmt(rwGuess)} x2=${fmt(rxGuess)} x8=${fmt(x8v)} x20=${fmt(x20v)}`);
+    if (inBand(x20v) && inBand(x8v)) {
+        log(`Mirror pair from x20/x8 (live regs): RX=0x${x20v.toString(16)} RW=0x${x8v.toString(16)}`);
+        return { rx: x20v, rw: x8v };
+    }
+    if (inBand(rxGuess) && inBand(rwGuess)) {
+        log(`Mirror pair from x1/x2 (legacy fallback)`);
+        return { rx: rxGuess, rw: rwGuess };
+    }
+    return null;
+}
+
 legacyCommands[0x6a] = function(brkResponse) {
-    let rw = x1;
-    let rx = parseRegNum(brkResponse, 0x02);
-    if (!rx) {
-        rx = parseRegNum(brkResponse, 0x00);
+    let rwGuess = x1;
+    let rxGuess = parseRegNum(brkResponse, 0x02);
+    if (!rxGuess) {
+        rxGuess = parseRegNum(brkResponse, 0x00);
     }
-    if (!rw) {
-        rw = parseRegNum(brkResponse, 0x01);
+    if (!rwGuess) {
+        rwGuess = parseRegNum(brkResponse, 0x01);
     }
-    if (!rx || !rw) {
-        log(`Mirror prepare brk 0x6a: missing rx/rw (rw=${rw}, rx=${rx})`);
+    const pair = resolveMirrorPair(brkResponse, rxGuess, rwGuess);
+    if (!pair) {
+        log(`Mirror prepare brk 0x6a: no valid pair (rwGuess=${rwGuess}, rxGuess=${rxGuess}); region stays unblessed`);
         return;
     }
-    // Accept any valid 64-bit user-space address range (0x100000000-0x800000000).
-    if (rx < 0x100000000n || rx >= 0x800000000n || rw < 0x100000000n || rw >= 0x800000000n) {
+    const rx = pair.rx, rw = pair.rw;
+    // Range-guard (band: 4 GB..1 TB — iOS 27 parks large reservations high,
+    // e.g. CodeHeap RX=0x700F004000; see UniversalJIT26.js MIRROR_BAND_*).
+    if (rx < 0x100000000n || rx >= 0x10000000000n || rw < 0x100000000n || rw >= 0x10000000000n) {
         log(`Mirror prepare brk 0x6a: out-of-band rx=0x${rx.toString(16)} rw=0x${rw.toString(16)}, skipping (layout drift?)`);
         return;
     }
