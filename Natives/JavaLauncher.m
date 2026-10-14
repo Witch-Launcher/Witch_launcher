@@ -442,7 +442,8 @@ int launchJVMWithArgs(NSString *username, id launchTarget, int width, int height
         // Catch unserviced handshake brks (SIGTRAP) so the app shows an error
         // dialog instead of dying to the home screen.
         BOOL traced = processIsDebugged();
-        NSLog(@"[JavaLauncher] JIT26 handshake begin (debugger attached: %d)", traced);
+        NSLog(@"[JavaLauncher] JIT26 handshake begin (debugger attached: %d, txm=%d, flags=0x%X)",
+            traced, DeviceHasTXM(), (unsigned)DeviceGetJITFlags(NO));
         if (!traced) {
             // No debugger servicing breakpoints. The patched JRE on iOS 26+/27
             // always routes code-cache allocation through brk #0xf00d / 0x6a;
@@ -472,7 +473,8 @@ int launchJVMWithArgs(NSString *username, id launchTarget, int width, int height
         // forever on command 2 (the black screen seen before "probe returned").
         // Use the same brk #0xf00d path as patched libjvm (not legacy brk #0x69).
         void *probeMapping = JIT26PrepareRegion(NULL, getpagesize());
-        NSLog(@"[JavaLauncher] JIT26 probe returned %p", probeMapping);
+        NSLog(@"[JavaLauncher] JIT26 probe returned %p (txm=%d, flags=0x%X)", probeMapping,
+            DeviceHasTXM(), (unsigned)DeviceGetJITFlags(NO));
         if (!JIT26ProbeLooksValid(probeMapping)) {
             sigaction(SIGTRAP, &oldTrapSa, NULL);
             init_setupUniversalJITScript(YES);
@@ -606,6 +608,8 @@ int launchJVMWithArgs(NSString *username, id launchTarget, int width, int height
     }
 
     if (requiresDebugJITMapping && !RuntimeSupportsDebugJITMapping(javaHome)) {
+        NSLog(@"[JavaLauncher] Missing mirror marker: javaHome=%@ marker=.witch-mirror-mapping (txm=%d, flags=0x%X). Pick a bundled Java 21/25 runtime rebuilt with `make jre`.",
+            javaHome, DeviceHasTXM(), (unsigned)DeviceGetJITFlags(NO));
         UIKit_returnToSplitView();
         showDialog(localize(@"Error", nil),
             @"The selected Java runtime does not support JIT on this iOS version. "
@@ -985,7 +989,10 @@ int launchJVMWithArgs(NSString *username, id launchTarget, int width, int height
             return 1;
         }
         NSLog(@"[JavaLauncher] libjvm preloaded at %p", libjvm);
-        if (!verify_libjvm_mirror_brk_patch()) {
+        BOOL mirrorBrkOK = verify_libjvm_mirror_brk_patch();
+        NSLog(@"[JavaLauncher] mirror brk verify: %d (libjvm=%@/lib/server/libjvm.dylib, txm=%d)",
+            mirrorBrkOK, javaHome, DeviceHasTXM());
+        if (!mirrorBrkOK) {
             // The bundled runtime missed the build-time BL->brk #0x6a patch
             // (see scripts/patch_libjvm_mirror_brk.py). Continuing would die
             // inside JNI_CreateJavaVM (CodeCache::initialize_heaps, 240 MB

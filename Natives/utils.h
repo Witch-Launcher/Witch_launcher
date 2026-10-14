@@ -90,6 +90,7 @@ JITFlags DeviceGetJITFlags(BOOL refresh);
 BOOL DeviceHasJITFlags(JITFlags flags);
 BOOL DeviceNeedsDebugJITMapping(void);
 BOOL DeviceHasTXMReal(void);
+BOOL DeviceHasTXM(void);
 BOOL JIT26IsLikelyDebuggerKeepAttached(void);
 
 void handle_fatal_exit(int code);

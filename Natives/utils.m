@@ -87,9 +87,23 @@ void requestExternalJITEnable(void) {
     [items addObject:[NSURLQueryItem queryItemWithName:@"bundle-id" value:bundleID]];
     [items addObject:[NSURLQueryItem queryItemWithName:@"pid" value:pidString]];
 
-    // Custom UniversalJIT26.js (brk 0xf00d / 0x6a) must be sent as script-data on
+    // Custom UniversalJIT26.js (brk 0xf00d / 0x6a) is sent as script-data on
     // iOS 26+ so StikDebug does not need a pre-installed matching file.
-    if (DeviceNeedsDebugJITMapping() || DeviceHasJITFlags(JIT_FLAG_IS_IOS_26)) {
+    // NOTE (spec divergence, StikJIT INTEGRATION.md): the spec says non-TXM
+    // devices should OMIT script params (attach/detach is enough). Witch keeps
+    // sending the script on every iOS 26+ device because the bundled Java 21/25
+    // runtimes ALWAYS route code-cache alloc through brk #0xf00d/0x6a
+    // (scripts/patch_libjvm_jit_alloc.py) — without a servicing script those
+    // brks trap even on non-TXM. debug.spec_strict_jit_url=1 restores the
+    // strict spec path (script only when HAS_TXM) for the one-shot device test.
+    BOOL specStrictURL = getPrefBool(@"debug.spec_strict_jit_url");
+    BOOL sendScript = DeviceHasJITFlags(JIT_FLAG_HAS_TXM);
+    if (!specStrictURL) {
+        sendScript = DeviceNeedsDebugJITMapping() || DeviceHasJITFlags(JIT_FLAG_IS_IOS_26);
+    }
+    NSLog(@"[JIT] URL script decision: txm=%d strict=%d sendScript=%d",
+        DeviceHasJITFlags(JIT_FLAG_HAS_TXM), specStrictURL, sendScript);
+    if (sendScript) {
         NSString *scriptPath = [NSBundle.mainBundle pathForResource:@"UniversalJIT26" ofType:@"js"];
         NSData *scriptData = scriptPath ? [NSData dataWithContentsOfFile:scriptPath] : nil;
         if (scriptData.length > 0) {
