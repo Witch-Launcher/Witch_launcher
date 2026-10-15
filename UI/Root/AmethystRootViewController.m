@@ -7,6 +7,8 @@
 #import "LauncherPreferences.h"
 #import "ios_uikit_bridge.h"
 #import "AmethystBlurView.h"
+#import "DownloadManager.h"
+#import "HapticManager.h"
 #import <AVFoundation/AVFoundation.h>
 #import <QuartzCore/QuartzCore.h>
 
@@ -23,6 +25,9 @@
 @property (nonatomic) AVPlayer *backgroundVideoPlayer;
 @property (nonatomic) BOOL didInitialLayout;
 @property (nonatomic) CAShapeLayer *shellBorder;
+// Portrait-only floating launch button (right panel is hidden in portrait).
+@property (nonatomic) UIButton *floatingLaunchBtn;
+@property (nonatomic) BOOL floatingLaunchIsCancel;
 @end
 
 @implementation AmethystRootViewController
@@ -32,7 +37,9 @@
     [self setupViews];
     [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(updateColors) name:ThemeDidChangeNotification object:nil];
     [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(updateColors) name:AmethystBlurIntensityDidChangeNotification object:nil];
+    [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(updateFloatingLaunch) name:DownloadTasksDidChangeNotification object:nil];
     [self updateColors];
+    [self updateFloatingLaunch];
 }
 
 - (void)setupViews {
@@ -80,6 +87,24 @@
     [_rightPanelVC didMoveToParentViewController:self];
     [AmethystBlurView installInView:_rightPanelVC.view prefKey:@"amethyst_rightpanel_blur"];
 
+    // Portrait floating launch: single circle overlay (panel hidden in portrait).
+    _floatingLaunchBtn = [UIButton buttonWithType:UIButtonTypeSystem];
+    _floatingLaunchBtn.backgroundColor = ThemeManager.shared.accentColor;
+    [_floatingLaunchBtn setImage:[UIImage systemImageNamed:@"play.fill"] forState:UIControlStateNormal];
+    _floatingLaunchBtn.tintColor = ThemeManager.shared.buttonTextColor;
+    _floatingLaunchBtn.layer.cornerRadius = 32;
+    _floatingLaunchBtn.clipsToBounds = NO;
+    _floatingLaunchBtn.layer.shadowColor = UIColor.blackColor.CGColor;
+    _floatingLaunchBtn.layer.shadowOpacity = 0.30;
+    _floatingLaunchBtn.layer.shadowRadius = 12;
+    _floatingLaunchBtn.layer.shadowOffset = CGSizeMake(0, 4);
+    _floatingLaunchBtn.accessibilityLabel = @"Play";
+    _floatingLaunchBtn.hidden = YES;
+    [_floatingLaunchBtn addTarget:self action:@selector(floatingLaunchTapped) forControlEvents:UIControlEventTouchUpInside];
+    UILongPressGestureRecognizer *lp = [[UILongPressGestureRecognizer alloc] initWithTarget:self action:@selector(floatingLaunchLongPressed:)];
+    [_floatingLaunchBtn addGestureRecognizer:lp];
+    [self.view addSubview:_floatingLaunchBtn];
+
     // One continuous stroke around the whole shell — no seams at junctions.
     // CRITICAL: CAShapeLayer defaults to an OPAQUE BLACK fillColor. The
     // even-odd path below fills the entire ring where the top/left/right
@@ -97,15 +122,20 @@
 
     CGFloat topBarHeight = 44.0;
     CGFloat sidebarWidth = 48.0;
-    CGFloat rightPanelWidth = 180.0;
+    // Portrait: collapse the 180pt right panel (it squeezes content down to
+    // ~150pt on phones) and show the floating circular launch button instead.
+    // Landscape keeps the exact current layout.
+    CGRect bounds = self.view.bounds;
+    if (bounds.size.width == 0 || bounds.size.height == 0) return;
+    BOOL isPortrait = bounds.size.width < bounds.size.height;
+    CGFloat rightPanelWidth = isPortrait ? 0.0 : 180.0;
+    _rightPanelVC.view.hidden = isPortrait;
+    _floatingLaunchBtn.hidden = !isPortrait;
     // Seamless frame (option B evolved): the three bars TOUCH each other and
     // form one continuous shell around the content — rounded only on the
     // OUTER corners.
     CGFloat fGap = 5.0;      // screen-edge margin of the shell
     CGFloat innerGap = 6.0;  // breathing room between shell and content
-
-    CGRect bounds = self.view.bounds;
-    if (bounds.size.width == 0 || bounds.size.height == 0) return;
 
     UIEdgeInsets safeArea = self.view.safeAreaInsets;
 
@@ -143,6 +173,16 @@
 
     if (self.currentContentVC) {
         self.currentContentVC.view.frame = _contentContainer.bounds;
+    }
+
+    // Portrait floating launch circle, bottom-right above the home indicator.
+    if (isPortrait) {
+        CGFloat btnSize = 64.0;
+        CGFloat margin = 16.0;
+        _floatingLaunchBtn.frame = CGRectMake(bounds.size.width - rightInset - margin - btnSize,
+                                              bounds.size.height - safeArea.bottom - margin - btnSize,
+                                              btnSize, btnSize);
+        [self.view bringSubviewToFront:_floatingLaunchBtn];
     }
 
     [self updateShellBorderPath];
@@ -203,6 +243,7 @@
     [self styleFloatingView:_sidebarVC.view corners:kCALayerMinXMaxYCorner];
     [self styleFloatingView:_rightPanelVC.view corners:kCALayerMaxXMaxYCorner];
     [self updateShellBorderPath];
+    [self updateFloatingLaunch];
     if (theme.backgroundVideoURL) {
         [self setupBackgroundVideo:theme.backgroundVideoURL];
         _backgroundImageView.hidden = YES;
@@ -372,6 +413,41 @@
 
 - (void)rightPanelDidEditVersion:(NSString *)versionName {
     [self.coordinator editVersion:versionName];
+}
+
+#pragma mark - Portrait floating launch
+
+- (void)floatingLaunchTapped {
+    if (_floatingLaunchIsCancel) {
+        [[HapticManager shared] play:HapticTypeHeavy];
+        [DownloadManager.shared cancelAllTasks];
+        return;
+    }
+    [[HapticManager shared] play:HapticTypeMedium];
+    [self rightPanelDidTapLaunch];
+}
+
+- (void)floatingLaunchLongPressed:(UILongPressGestureRecognizer *)gesture {
+    if (gesture.state == UIGestureRecognizerStateBegan) {
+        [[HapticManager shared] play:HapticTypeLight];
+        [self rightPanelDidTapAccount];
+    }
+}
+
+- (void)updateFloatingLaunch {
+    BOOL busy = [DownloadManager.shared activeTasks].count > 0;
+    _floatingLaunchIsCancel = busy;
+    ThemeManager *theme = ThemeManager.shared;
+    if (busy) {
+        [_floatingLaunchBtn setImage:[UIImage systemImageNamed:@"stop.fill"] forState:UIControlStateNormal];
+        _floatingLaunchBtn.backgroundColor = theme.errorColor;
+        _floatingLaunchBtn.accessibilityLabel = @"Cancel downloads (long-press for account)";
+    } else {
+        [_floatingLaunchBtn setImage:[UIImage systemImageNamed:@"play.fill"] forState:UIControlStateNormal];
+        _floatingLaunchBtn.backgroundColor = theme.accentColor;
+        _floatingLaunchBtn.accessibilityLabel = @"Play (long-press for account)";
+    }
+    _floatingLaunchBtn.tintColor = theme.buttonTextColor;
 }
 
 - (void)dealloc {
