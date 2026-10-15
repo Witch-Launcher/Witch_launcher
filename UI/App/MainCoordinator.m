@@ -17,7 +17,8 @@
 #import "MapListViewController.h"
 #import "ModDetailViewController.h"
 #import "FileBrowserViewController.h"
-#import "ProfileSettingsViewController.h"
+#import "ProfileDetailPageViewController.h"
+#import "ErrorPresenter.h"
 
 #import "PLProfiles.h"
 #import "MinecraftResourceDownloadTask.h"
@@ -244,29 +245,33 @@
 
 - (void)editVersion:(NSString *)versionName {
     NSMutableDictionary *targetProfile = nil;
+    NSString *targetKey = nil;
     for (NSString *key in PLProfiles.current.profiles) {
         NSMutableDictionary *profile = PLProfiles.current.profiles[key];
         if ([profile[@"lastVersionId"] isEqualToString:versionName]) {
             targetProfile = profile;
+            targetKey = key;
             break;
         }
     }
+    BOOL isNew = NO;
     if (!targetProfile) {
         targetProfile = @{
             @"name": versionName,
             @"lastVersionId": versionName,
         }.mutableCopy;
         PLProfiles.current.profiles[versionName] = targetProfile;
+        targetKey = versionName;
+        isNew = YES;
     }
     [PLProfiles.current save];
 
-    PLProfiles.current.selectedProfileName = targetProfile[@"name"];
+    PLProfiles.current.selectedProfileName = targetProfile[@"name"] ?: targetKey;
 
-    ProfileSettingsViewController *vc = [ProfileSettingsViewController new];
-    vc.profile = targetProfile;
-    UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:vc];
-    nav.modalPresentationStyle = UIModalPresentationFormSheet;
-    [self.rootVC presentViewController:nav animated:YES completion:nil];
+    // Full-page replacement for the old FormSheet popup: real Back button,
+    // inner tabs (Overview / Mods / Shaders / Resources) live inside.
+    ProfileDetailPageViewController *vc = [[ProfileDetailPageViewController alloc] initWithProfile:targetProfile isNew:isNew];
+    [self.rootVC pushContent:vc animated:YES];
 }
 
 #pragma mark - Launch
@@ -274,18 +279,21 @@
 - (void)launchGame {
     NSString *accountName = BaseAuthenticator.current.authData[@"username"];
     if (!accountName) {
-        showDialog(localize(@"Account Required", nil), localize(@"Please add and select an account first.", nil));
+        __weak typeof(self) weakSelf = self;
+        [ErrorPresenter showMissingAccountWithAction:^{
+            [weakSelf showAccount];
+        }];
         return;
     }
 
     if ([accountName hasPrefix:@"Demo."]) {
-        showDialog(localize(@"Minecraft Not Purchased", nil), localize(@"Your Microsoft account has not purchased Minecraft. Please purchase the game from minecraft.net to play.", nil));
+        [ErrorPresenter showDemoAccount];
         return;
     }
 
     NSString *versionStr = VersionDirectoryManager.shared.currentVersion;
     if (versionStr.length == 0) {
-        showDialog(localize(@"No Version", nil), localize(@"Please select a version from the sidebar first.", nil));
+        [ErrorPresenter showMissingVersion];
         return;
     }
 
@@ -298,18 +306,21 @@
 - (void)launchWithServer:(NSDictionary *)server {
     NSString *accountName = BaseAuthenticator.current.authData[@"username"];
     if (!accountName) {
-        showDialog(localize(@"Account Required", nil), localize(@"Please add and select an account first.", nil));
+        __weak typeof(self) weakSelf = self;
+        [ErrorPresenter showMissingAccountWithAction:^{
+            [weakSelf showAccount];
+        }];
         return;
     }
 
     if ([accountName hasPrefix:@"Demo."]) {
-        showDialog(localize(@"Minecraft Not Purchased", nil), localize(@"Your Microsoft account has not purchased Minecraft. Please purchase the game from minecraft.net to play.", nil));
+        [ErrorPresenter showDemoAccount];
         return;
     }
 
     NSString *versionStr = VersionDirectoryManager.shared.currentVersion;
     if (versionStr.length == 0) {
-        showDialog(localize(@"No Version", nil), localize(@"Please select a version from the sidebar first.", nil));
+        [ErrorPresenter showMissingVersion];
         return;
     }
     [self showProgressAlert:localize(@"launcher.checking", nil)];
@@ -337,7 +348,7 @@
             [overlay dismiss];
             if (!success) {
                 NSString *errMsg = [status isKindOfClass:NSError.class] ? [(NSError *)status localizedDescription] : ([status isKindOfClass:NSString.class] ? status : @"Failed to refresh session.");
-                showDialog(localize(@"Error", nil), errMsg);
+                [ErrorPresenter showError:localize(@"Error", nil) message:errMsg];
                 return;
             }
             if (weakSelf) completion();
@@ -351,7 +362,7 @@
         if (error || !data) {
             dispatch_async(dispatch_get_main_queue(), ^{
                 [self dismissProgressAlert];
-                showDialog(@"Network Error", error.localizedDescription ?: @"Failed to fetch version manifest");
+                [ErrorPresenter showNetworkError:error message:@"Failed to fetch version manifest"];
             });
             return;
         }
@@ -359,7 +370,7 @@
         if (!json[@"versions"]) {
             dispatch_async(dispatch_get_main_queue(), ^{
                 [self dismissProgressAlert];
-                showDialog(@"Error", @"Invalid version manifest.");
+                [ErrorPresenter showError:@"Error" message:@"Invalid version manifest."];
             });
             return;
         }
@@ -389,7 +400,7 @@
         if (!versionObj) {
             dispatch_async(dispatch_get_main_queue(), ^{
                 [self dismissProgressAlert];
-                showDialog(@"Error", @"Cannot find version data.");
+                [ErrorPresenter showError:@"Error" message:@"Cannot find version data."];
             });
             return;
         }
@@ -404,7 +415,7 @@
                     [strongSelf safeRemoveProgressObserver];
                     strongSelf.downloadTask = nil;
                     [strongSelf dismissProgressAlert];
-                    showDialog(@"Download Error", @"Failed to download Minecraft resources.");
+                    [ErrorPresenter showError:@"Download Error" message:@"Failed to download Minecraft resources."];
                 });
             };
 
@@ -557,7 +568,7 @@
 
         UIKit_launchMinecraftSurfaceVC(self.rootVC.view.window, self.downloadTask.metadata);
     } else {
-        showDialog(@"Error", @"No version metadata available.");
+        [ErrorPresenter showError:@"Error" message:@"No version metadata available."];
     }
 }
 

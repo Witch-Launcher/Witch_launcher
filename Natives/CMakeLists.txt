@@ -345,6 +345,8 @@ egl_bridge.m
     ../UI/Common/UIView+LiquidGlass.m
     ../UI/Common/AmethystBlurView.m
    ../UI/Common/BlurredDialog.m
+   ../UI/Common/AppErrorDialog.m
+   ../UI/Common/ErrorPresenter.m
     ../UI/Root/AmethystRootViewController.m
    ../UI/Root/TopBarView.m
    ../UI/Root/SidebarViewController.m
@@ -356,6 +358,10 @@ egl_bridge.m
     ../UI/Managers/CursorTypeManager.m
     ../UI/Managers/WindowsCursorParser.m
     ../UI/Managers/InstalledModsManager.m
+   ../UI/Managers/DependencyResolver.m
+   ../UI/Managers/ProfileAvatarManager.m
+   ../UI/Managers/ModIconReader.m
+   ../UI/Managers/ModUpdateChecker.m
    ../UI/Managers/WitchUpdateService.m
    ../UI/Managers/WitchRuntimeService.m
     ../UI/Screens/MainMenu/MainMenuViewController.m
@@ -388,6 +394,7 @@ egl_bridge.m
    ../UI/Screens/Settings/RuntimeDownloadViewController.m
    ../UI/Screens/Account/AccountViewController.m
    ../UI/Screens/ProfileSettings/ProfileSettingsViewController.m
+   ../UI/Screens/ProfileSettings/ProfileDetailPageViewController.m
    ../UI/Screens/Download/DownloadHubViewController.m
    ../UI/Screens/Download/VersionBrowserViewController.m
     ../UI/Screens/Download/MapListViewController.m

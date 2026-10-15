@@ -5,7 +5,7 @@
 #import "ModrinthService.h"
 #import "DownloadManager.h"
 #import "HapticManager.h"
-#import "ios_uikit_bridge.h"
+#import "ErrorPresenter.h"
 #import "utils.h"
 #import "UIImageView+AFNetworking.h"
 #import "AmethystBlurView.h"
@@ -501,7 +501,7 @@ static NSString * const kInstalledModsManifestName = @"installed_mods.json";
     [HapticManager.shared play:HapticTypeMedium];
     NSString *projectId = item[@"project_id"];
     if (!projectId || projectId.length == 0) {
-        showDialog(@"Error", @"This item was not installed through the launcher.");
+        [ErrorPresenter showError:@"Error" message:@"This item was not installed through the launcher."];
         return;
     }
 

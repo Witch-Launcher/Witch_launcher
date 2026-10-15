@@ -4,7 +4,7 @@
 #import "PLProfiles.h"
 #import "MinecraftResourceUtils.h"
 #import "utils.h"
-#import "ios_uikit_bridge.h"
+#import "ErrorPresenter.h"
 #import "HapticManager.h"
 #import "AmethystBlurView.h"
 
@@ -175,7 +175,7 @@
             PLProfiles.current.selectedProfileName = newName;
         }
     } else {
-        showDialog(localize(@"Error", nil), localize(@"profile.error.name_exists", nil));
+        [ErrorPresenter showError:localize(@"Error", nil) message:localize(@"profile.error.name_exists", nil)];
         return;
     }
 
@@ -374,7 +374,7 @@
                                                             preferredStyle:UIAlertControllerStyleActionSheet];
 
     if (![options isKindOfClass:[NSArray class]] || options.count == 0) {
-        showDialog(@"No Options", @"No options available for this setting.");
+        [ErrorPresenter showError:@"No Options" message:@"No options available for this setting."];
         return;
     }
 
@@ -452,7 +452,7 @@
     }
 
     if (list == nil || list.count == 0) {
-        showDialog(@"No Versions", [NSString stringWithFormat:@"No %@ versions found.", typeName]);
+        [ErrorPresenter showError:@"No Versions" message:[NSString stringWithFormat:@"No %@ versions found.", typeName]];
         return;
     }
 

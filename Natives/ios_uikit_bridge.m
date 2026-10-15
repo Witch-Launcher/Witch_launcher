@@ -13,21 +13,19 @@
 #include <objc/runtime.h>
 #include "ios_uikit_bridge.h"
 #include "utils.h"
-#import "BlurredDialog.h"
+#import "AppErrorDialog.h"
 
 void internal_showDialog(NSString* title, NSString* message) {
     NSLog(@"[UI] Dialog shown: %@: %@", title, message);
 
-    UIWindow *alertWindow = [[UIWindow alloc] initWithWindowScene:UIWindow.mainWindow.windowScene];
-    alertWindow.frame = UIScreen.mainScreen.bounds;
-    alertWindow.rootViewController = [UIViewController new];
-    alertWindow.windowLevel = 1000;
-    alertWindow.backgroundColor = UIColor.clearColor;
-    [alertWindow makeKeyAndVisible];
-    // Frosted realtime dialog (samples the app behind the window)
-    // Localize here so every caller gets the launcher language for free;
-    // dynamic messages (names, paths, versions) match no key and pass through.
-    [BlurredDialog presentInWindow:alertWindow title:localize(title, nil) message:(message ? localize(message, nil) : nil) okTitle:localize(@"OK", nil)];
+    // Route every legacy showDialog() through the global AppErrorDialog so all
+    // launcher errors share one frosted card + kind icon (tintable SF Symbol,
+    // no sticker/emoji) + haptic. Localize here so every caller gets the
+    // launcher language for free; dynamic messages pass through untouched.
+    NSString *lt = title ? localize(title, nil) : nil;
+    NSString *lm = message ? localize(message, nil) : nil;
+    // AppErrorDialog localizes again (idempotent) and picks its own window.
+    [AppErrorDialog presentLegacyTitle:lt message:lm];
 }
 
 void showDialog(NSString* title, NSString* message) {
