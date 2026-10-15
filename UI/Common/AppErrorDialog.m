@@ -77,20 +77,20 @@
             }
         }
         if (!scene) return;
-        UIWindow *prevKey = nil;
-        for (UIWindow *w in scene.windows) {
-            if (w.isKeyWindow) { prevKey = w; break; }
-        }
+        // NOTE: this window is shown WITHOUT makeKeyAndVisible on purpose.
+        // A visible (non-key) window at Alert+1 still sits above every alert,
+        // picker and sheet for both display and touches, but it never steals
+        // key status — so dismissing can never leave the app with a hidden
+        // key window (which freezes all interaction while the UI still renders).
         UIWindow *window = [[UIWindow alloc] initWithWindowScene:scene];
         window.windowLevel = UIWindowLevelAlert + 1;
         window.backgroundColor = [UIColor clearColor];
         UIViewController *host = [[UIViewController alloc] init];
         host.view.backgroundColor = [UIColor clearColor];
         window.rootViewController = host;
-        [window makeKeyAndVisible];
+        window.hidden = NO;
         // Retain while visible; released on dismiss.
         objc_setAssociatedObject(host, "errorDialogWindow", window, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-        if (prevKey) objc_setAssociatedObject(host, "errorDialogPrevKey", prevKey, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
         UIView *root = host.view;
 
         ThemeManager *theme = ThemeManager.shared;
@@ -259,23 +259,13 @@
     while (r && ![r isKindOfClass:[UIViewController class]]) r = r.nextResponder;
     UIViewController *host = (UIViewController *)r;
     UIWindow *window = objc_getAssociatedObject(host, "errorDialogWindow");
-    UIWindow *prevKey = objc_getAssociatedObject(host, "errorDialogPrevKey");
     [self removeFromSuperview];
     if (window) {
+        // Just hide: the main window was never dethroned, so interaction
+        // continues exactly where it was. No key-window restore needed.
         window.hidden = YES;
         objc_setAssociatedObject(host, "errorDialogWindow", nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     }
-    // Defensive restore: prev window may be gone (e.g. stacked dialogs).
-    if (!prevKey || prevKey.hidden) {
-        for (UIScene *s in UIApplication.sharedApplication.connectedScenes) {
-            if (![s isKindOfClass:[UIWindowScene class]]) continue;
-            for (UIWindow *w in ((UIWindowScene *)s).windows) {
-                if (!w.hidden && w.windowLevel < UIWindowLevelAlert) { prevKey = w; break; }
-            }
-            if (prevKey && !prevKey.hidden) break;
-        }
-    }
-    if (prevKey) [prevKey makeKeyAndVisible];
 }
 
 - (void)appErrorDialog_dimTapped {
