@@ -97,8 +97,11 @@ static BOOL write_rx_u32(uint32_t *site, uint32_t insn) {
         return NO;
     }
     ret = vm_protect(mach_task_self(), mirrored, page, FALSE,
-                     VM_PROT_READ | VM_PROT_WRITE | VM_PROT_COPY);
+                     VM_PROT_READ | VM_PROT_WRITE);
     if (ret != KERN_SUCCESS) {
+        // NOTE: no VM_PROT_COPY here on purpose — COW would route the write to a
+        // private copy and the patch would silently never land (same trap as the
+        // old dyld mirrored path). Fail loudly; the caller reports it.
         NSLog(@"[JIT26] vm_protect(RW) for libjvm brk patch failed: 0x%x", ret);
         vm_deallocate(mach_task_self(), mirrored, page);
         return NO;
@@ -203,11 +206,13 @@ BOOL JIT26ExecPreflight(void) {
     vm_size_t page = (vm_size_t)getpagesize();
     vm_size_t len = page * 2;
 
+    NSLog(@"[JIT26] preflight: requesting scratch RX region via debugger");
     void *rx = JIT26PrepareRegion(NULL, len);
     if (!rx || rx == MAP_FAILED || ((vm_address_t)rx & (page - 1)) != 0) {
         NSLog(@"[JIT26] preflight: debugger did not return a usable RX region (%p)", rx);
         return NO;
     }
+    NSLog(@"[JIT26] preflight: got RX=%p, mirroring RW alias", rx);
 
     vm_address_t mirrored = 0;
     vm_prot_t cur_prot = 0, max_prot = 0;
@@ -227,6 +232,7 @@ BOOL JIT26ExecPreflight(void) {
     static const uint32_t stub[] = { 0x52800540u, 0xD65F03C0u }; // movz w0, #42; ret
     memcpy((void *)mirrored, stub, sizeof(stub));
     sys_icache_invalidate(rx, sizeof(stub));
+    NSLog(@"[JIT26] preflight: stub written, calling it under fault guard");
 
     struct sigaction sa = {0}, oldBus, oldSegv, oldTrap;
     sa.sa_handler = jit_preflight_fault;

@@ -419,6 +419,11 @@ int launchJVM(NSString *username, id launchTarget, int width, int height, int mi
 
 int launchJVMWithArgs(NSString *username, id launchTarget, int width, int height, int minVersion, NSArray<NSString *> *jarArgs) {
     NSLog(@"[JavaLauncher] Beginning JVM launch");
+    JITReportInit();
+    JITReportLine(@"device=%@ ios=%@ flags=0x%X txm=%d memorystatus=%d",
+        WitchHardwareMachine(), UIDevice.currentDevice.systemVersion,
+        (unsigned)DeviceGetJITFlags(YES), DeviceHasTXM(),
+        getEntitlementValue(@"com.apple.private.memorystatus"));
 
     init_loadDefaultEnv();
     init_loadCustomEnv();
@@ -452,6 +457,7 @@ int launchJVMWithArgs(NSString *username, id launchTarget, int width, int height
         BOOL traced = processIsDebugged();
         NSLog(@"[JavaLauncher] JIT26 handshake begin (debugger attached: %d, txm=%d, flags=0x%X)",
             traced, DeviceHasTXM(), (unsigned)DeviceGetJITFlags(NO));
+        JITReportLine(@"handshake traced=%d", traced);
         if (!traced) {
             // No debugger servicing breakpoints. The patched JRE on iOS 26+/27
             // always routes code-cache allocation through brk #0xf00d / 0x6a;
@@ -491,6 +497,7 @@ int launchJVMWithArgs(NSString *username, id launchTarget, int width, int height
         g_jitTrapArmed = 0;
         NSLog(@"[JavaLauncher] JIT26 probe returned %p (txm=%d, flags=0x%X)", probeMapping,
             DeviceHasTXM(), (unsigned)DeviceGetJITFlags(NO));
+        JITReportLine(@"probe=%p valid=%d", probeMapping, JIT26ProbeLooksValid(probeMapping));
         if (!JIT26ProbeLooksValid(probeMapping)) {
             sigaction(SIGTRAP, &oldTrapSa, NULL);
             init_setupUniversalJITScript(YES);
@@ -498,8 +505,9 @@ int launchJVMWithArgs(NSString *username, id launchTarget, int width, int height
             if ([fm fileExistsAtPath:lcAppInfoPath]) {
                 showDialog(localize(@"Error", nil),
                     [NSString stringWithFormat:
-                        @"StikDebug probe failed (got %p). Expected a real RX page, not a legacy error code.\n\n"
-                         @"Witch refreshed UniversalJIT26.js in LiveContainer & clipboard — restart LiveContainer, re-enable JIT, then try again.",
+                         @"StikDebug probe failed (got %p). Expected a real RX page, not a legacy error code.\n\n"
+                          @"Witch refreshed UniversalJIT26.js in LiveContainer & clipboard — restart LiveContainer, re-enable JIT, then try again.\n\n"
+                          @"Please send Documents/JITReport-latest.txt with your report.",
                         probeMapping]);
                 [PLLogOutputView handleExitCode:1];
                 return 1;
@@ -509,8 +517,9 @@ int launchJVMWithArgs(NSString *username, id launchTarget, int width, int height
                     @"StikDebug probe failed (got %p). JIT is not servicing Witch's breakpoints.\n\n"
                      @"Make sure the JIT toggle for Witch in StikDebug is ON, close and reopen Witch after "
                      @"enabling it, and that the assigned script is \"Universal JIT 26\".\n\n"
-                     @"UniversalJIT26.js was copied to your clipboard and refreshed in Witch Documents — "
-                     @"paste/assign it in StikDebug, re-enable JIT, then launch again.",
+                      @"UniversalJIT26.js was copied to your clipboard and refreshed in Witch Documents — "
+                      @"paste/assign it in StikDebug, re-enable JIT, then launch again.\n\n"
+                      @"Please send Documents/JITReport-latest.txt with your report.",
                     probeMapping]);
             [PLLogOutputView handleExitCode:1];
             return 1;
@@ -532,17 +541,20 @@ int launchJVMWithArgs(NSString *username, id launchTarget, int width, int height
             if (!extensionDelivered) {
                 sigaction(SIGTRAP, &oldTrapSa, NULL);
                 init_setupUniversalJITScript(YES);
+                JITReportLine(@"extension=UNSERVICED");
                 showDialog(localize(@"Error", nil),
                     @"Witch could not upload its JIT helpers to the debugger.\n\n"
                      @"The script assigned in StikDebug does not implement command 2 (0x68) — "
                      @"this happens with attachDetach.js or a mismatched universal.js.\n\n"
                      @"UniversalJIT26.js was copied to your clipboard and refreshed in Witch Documents — "
-                     @"assign it in StikDebug (as \"Universal JIT 26\"), re-enable JIT, then launch again.");
+                     @"assign it in StikDebug (as \"Universal JIT 26\"), re-enable JIT, then launch again.\n\n"
+                     @"Please send Documents/JITReport-latest.txt with your report.");
                 [PLLogOutputView handleExitCode:1];
                 return 1;
             }
             NSLog(@"[JavaLauncher] Extension delivered; if the game later hangs, confirm "
                   @"'Amethyst UniversalJIT26 extension loaded' appears in the StikDebug log");
+            JITReportLine(@"extension=delivered");
         } else {
             NSLog(@"[JavaLauncher] UniversalJIT26Extension.js is missing or empty; using assigned base JIT script only");
         }
@@ -553,6 +565,8 @@ int launchJVMWithArgs(NSString *username, id launchTarget, int width, int height
         // and unsigned JNA / renderer dylibs fail with code-signature invalid.
         init_bypassDyldLibValidation();
         NSLog(@"[JavaLauncher] DyldLVBypass init completed during JIT26 handshake");
+        JITReportLine(@"dyld mmap_matches=%d mmap_ok=%d fcntl_matches=%d fcntl_ok=%d",
+            g_dyldMmapMatches, g_dyldMmapOK, g_dyldFcntlMatches, g_dyldFcntlOK);
         JIT26SetDetachAfterFirstBr(!jit26AlwaysAttached);
         init_jit_vm_remap_hook();
         // make sure we don't get stuck in EXC_BAD_ACCESS
@@ -561,14 +575,17 @@ int launchJVMWithArgs(NSString *username, id launchTarget, int width, int height
         // handing control to the JVM. A stale debugger / detached session /
         // wrong script fails HERE with a dialog instead of a black-screen crash
         // inside JLI_Launch (the JVM abort path cannot show UI).
-        if (!JIT26ExecPreflight()) {
+        BOOL preflightOK = JIT26ExecPreflight();
+        JITReportLine(@"preflight=%d", preflightOK);
+        if (!preflightOK) {
             UIKit_returnToSplitView();
             showDialog(localize(@"Error", nil),
                 @"JIT memory test failed: the debugger cannot provide executable memory "
                  @"on this device.\n\n"
                  @"1. Update StikDebug to 3.1.6 or newer\n"
                  @"2. Assign \"Universal JIT 26\" (UniversalJIT26.js) in StikDebug\n"
-                 @"3. Re-enable JIT for Witch, close and reopen Witch, then try again");
+                 @"3. Re-enable JIT for Witch, close and reopen Witch, then try again\n\n"
+                 @"Please send Documents/JITReport-latest.txt with your report.");
             [PLLogOutputView handleExitCode:1];
             return 1;
         }
@@ -1046,6 +1063,7 @@ int launchJVMWithArgs(NSString *username, id launchTarget, int width, int height
         BOOL mirrorBrkOK = verify_libjvm_mirror_brk_patch();
         NSLog(@"[JavaLauncher] mirror brk verify: %d (libjvm=%@/lib/server/libjvm.dylib, txm=%d)",
             mirrorBrkOK, javaHome, DeviceHasTXM());
+        JITReportLine(@"mirror_verify=%d java=%@", mirrorBrkOK, javaHome);
         if (!mirrorBrkOK) {
             // The bundled runtime missed the build-time BL->brk #0x6a patch
             // (see scripts/patch_libjvm_mirror_brk.py). Continuing would die
@@ -1173,6 +1191,7 @@ int launchJVMWithArgs(NSString *username, id launchTarget, int width, int height
     }
 
     NSLog(@"[Init] Calling JLI_Launch");
+    JITReportLine(@"jli=reached");
 
     // 26.x (SDL3 windowing / RenderPearl) refuses SDL_Init until
     // SDL_SetMainReady() runs; pojavInit (GLFW games only) never fires on the

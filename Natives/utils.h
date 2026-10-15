@@ -108,6 +108,12 @@ void init_hookFunctions();
 void init_hookUIKitConstructor();
 void init_setupMultiDir();
 void init_setupUniversalJITScript(BOOL copyToClipboard);
+void JITReportInit(void);
+void JITReportLine(NSString *format, ...);
+NSString* WitchHardwareMachine(void);
+// Last dyld-bypass outcome, for the one-page JIT report (-1/NO = not attempted).
+extern int g_dyldMmapMatches, g_dyldFcntlMatches;
+extern BOOL g_dyldMmapOK, g_dyldFcntlOK;
 
 BOOL PLPatchMachOPlatformForFile(const char *path);
 

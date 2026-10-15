@@ -386,6 +386,45 @@ void JIT26SendJITScript(NSString* script) {
     BreakSendJITScript((char*)script.UTF8String, strlen(script.UTF8String));
 }
 
+// One-page JIT report for "still the same" bug reports: every handshake phase
+// appends one line and ATOMICALLY rewrites Documents/JITReport-latest.txt, so an
+// abrupt death (JVM abort, SIGTRAP, Jetsam) still leaves the trail. The reporter
+// only has to send this single file (reachable via Files app sharing).
+static NSMutableString *g_jitReportBody = nil;
+static NSString *g_jitReportPath = nil;
+
+void JITReportInit(void) {
+    g_jitReportBody = [NSMutableString string];
+    const char *home = getenv("POJAV_HOME");
+    if (!home) return;
+    g_jitReportPath = [[NSString stringWithFormat:@"%s/JITReport-latest.txt", home] copy];
+    [g_jitReportBody appendFormat:@"Witch JIT report %@\n",
+        [[NSDate date] descriptionWithLocale:nil]];
+    [g_jitReportBody writeToFile:g_jitReportPath atomically:YES
+        encoding:NSUTF8StringEncoding error:nil];
+    NSLog(@"[JITReport] writing %@", g_jitReportPath);
+}
+
+void JITReportLine(NSString *format, ...) {
+    if (!g_jitReportBody || !g_jitReportPath) return;
+    va_list ap;
+    va_start(ap, format);
+    NSString *line = [[NSString alloc] initWithFormat:format arguments:ap];
+    va_end(ap);
+    [g_jitReportBody appendFormat:@"%@\n", line];
+    [g_jitReportBody writeToFile:g_jitReportPath atomically:YES
+        encoding:NSUTF8StringEncoding error:nil];
+}
+
+NSString* WitchHardwareMachine(void) {
+    char buffer[64];
+    size_t len = sizeof(buffer);
+    if (sysctlbyname("hw.machine", buffer, &len, NULL, 0) != 0) {
+        return @"unknown";
+    }
+    return @(buffer);
+}
+
 BOOL DeviceCanCreateRXMap(void) {
     // This is only guaranteed to be accurate when JIT is already enabled. Obviously this is only useful for vphone and similar internal environments where JIT is always enabled.
     uint32_t *map = mmap(NULL, getpagesize(), PROT_READ | PROT_WRITE, MAP_ANONYMOUS | MAP_SHARED, -1, 0);

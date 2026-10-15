@@ -26,6 +26,9 @@ char fcntlSig[] = {0x90, 0x0B, 0x80, 0xD2, 0x01, 0x10, 0x00, 0xD4};
 char syscallSig[] = {0x01, 0x10, 0x00, 0xD4};
 int (*orig_fcntl)(int fildes, int cmd, void *param) = 0;
 bool (*redirectFunction)(char *name, void *patchAddr, void *target) = NULL;
+// Last dyld-bypass outcome for the one-page JIT report (-1/NO = not attempted).
+int g_dyldMmapMatches = -1, g_dyldFcntlMatches = -1;
+BOOL g_dyldMmapOK = NO, g_dyldFcntlOK = NO;
 
 extern void* __mmap(void *addr, size_t len, int prot, int flags, int fd, off_t offset);
 extern int __fcntl(int fildes, int cmd, void* param);
@@ -101,10 +104,17 @@ bool redirectFunctionMirrored(char *name, void *patchAddr, void *target) {
     }
     
     mirrored += (vm_address_t)patchAddr & PAGE_MASK;
+    // NOTE: this used to request VM_PROT_COPY (copy-on-write). COW deliberately
+    // routes writes to a PRIVATE copy, so the memcpy below could NEVER reach the
+    // shared dyld page: the hook silently never installed while reporting
+    // success (caught by the read-back verify on iPhone 12 Pro Max, iOS 27.0.1).
+    // Request plain SHARE-write instead; if dyld __TEXT maxprot forbids it the
+    // call fails LOUDLY below and the hook is honestly reported absent.
     kern_return_t kret = vm_protect(mach_task_self(), mirrored, sizeof(patch), NO,
-               VM_PROT_READ | VM_PROT_WRITE | VM_PROT_COPY);
+               VM_PROT_READ | VM_PROT_WRITE);
     if (kret != KERN_SUCCESS) {
-        NSLog(@"[DyldLVBypass] vm_protect(RW) fails on mirror for %s: 0x%x", name, kret);
+        NSLog(@"[DyldLVBypass] vm_protect(RW) fails on mirror for %s: 0x%x "
+              @"(dyld __TEXT maxprot likely forbids write — hook honestly absent)", name, kret);
         vm_deallocate(mach_task_self(), mirrored, sizeof(patch));
         return FALSE;
     }
@@ -174,6 +184,7 @@ bool searchAndPatch(char *name, char *base, char *signature, int length, void *t
             }
         }
     }
+    
     // More than one match means the 8-byte signature is ambiguous on this
     // dyld build (chip/iOS-specific shared cache): the first hit may not be
     // the real stub entry, and patching it corrupts dyld -> multi-thread
@@ -184,14 +195,19 @@ bool searchAndPatch(char *name, char *base, char *signature, int length, void *t
               @"(dyld=%p, size=0x%zx) — first-match patching is SUSPECT on this OS build",
               name, matchCount, base, searchSize);
     }
-    
+
     if (patchAddr == NULL) {
         NSDebugLog(@"[DyldLVBypass] hook %s fails line %d (searchSize=0x%zx)", name, __LINE__, searchSize);
+        if (strcmp(name, "dyld_mmap") == 0) { g_dyldMmapMatches = matchCount; g_dyldMmapOK = NO; }
+        else if (strcmp(name, "dyld_fcntl") == 0) { g_dyldFcntlMatches = matchCount; g_dyldFcntlOK = NO; }
         return FALSE;
     }
-    
+
     NSDebugLog(@"[DyldLVBypass] found %s at %p", name, patchAddr);
-    return redirectFunction(name, patchAddr, target);
+    BOOL hookOK = redirectFunction(name, patchAddr, target);
+    if (strcmp(name, "dyld_mmap") == 0) { g_dyldMmapMatches = matchCount; g_dyldMmapOK = hookOK; }
+    else if (strcmp(name, "dyld_fcntl") == 0) { g_dyldFcntlMatches = matchCount; g_dyldFcntlOK = hookOK; }
+    return hookOK;
 }
 
 void *getDyldBase(void) {
