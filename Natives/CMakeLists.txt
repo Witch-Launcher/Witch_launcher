@@ -361,6 +361,7 @@ egl_bridge.m
    ../UI/Managers/DependencyResolver.m
    ../UI/Managers/ProfileAvatarManager.m
    ../UI/Managers/ModIconReader.m
+   ../UI/Managers/ModMetadataReader.m
    ../UI/Managers/ModUpdateChecker.m
    ../UI/Managers/WitchUpdateService.m
    ../UI/Managers/WitchRuntimeService.m
@@ -394,7 +395,11 @@ egl_bridge.m
    ../UI/Screens/Settings/RuntimeDownloadViewController.m
    ../UI/Screens/Account/AccountViewController.m
    ../UI/Screens/ProfileSettings/ProfileSettingsViewController.m
-   ../UI/Screens/ProfileSettings/ProfileDetailPageViewController.m
+   ../UI/Screens/ProfileSettings/ProfileTabbedPageViewController.m
+   ../UI/Screens/ProfileSettings/ProfileOverviewVC.m
+   ../UI/Screens/ProfileSettings/ProfileContentListVC.m
+   ../UI/Screens/ProfileSettings/ProfileWorldsVC.m
+   ../UI/Screens/ProfileSettings/ProfileItemCell.m
    ../UI/Screens/Download/DownloadHubViewController.m
    ../UI/Screens/Download/VersionBrowserViewController.m
     ../UI/Screens/Download/MapListViewController.m

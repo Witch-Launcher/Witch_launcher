@@ -25,10 +25,21 @@ extern NSString * const InstalledItemCategoryResourcePack;
 - (NSString *)modsDirForCurrentProfile;
 - (NSString *)resourcePacksDirForCurrentProfile;
 - (NSString *)shaderPacksDirForCurrentProfile;
+- (NSString *)savesDirForCurrentProfile;
 - (NSString *)dirForCategory:(NSString *)category;
+
+// --- Directories for an explicit profile dict (uses lastVersionId) ---
+- (NSString *)versionKeyForProfile:(NSDictionary *)profile;
+- (NSString *)modsDirForProfile:(NSDictionary *)profile;
+- (NSString *)resourcePacksDirForProfile:(NSDictionary *)profile;
+- (NSString *)shaderPacksDirForProfile:(NSDictionary *)profile;
+- (NSString *)savesDirForProfile:(NSDictionary *)profile;
+- (NSString *)serversDirForProfile:(NSDictionary *)profile;
+- (NSString *)dirForCategory:(NSString *)category profile:(NSDictionary *)profile;
 
 // --- Reads ---
 - (NSArray<NSDictionary *> *)allInstalledForCategory:(NSString *)category;
+- (NSArray<NSDictionary *> *)allInstalledForCategory:(NSString *)category profile:(NSDictionary *)profile;
 - (NSDictionary *)infoForProjectId:(NSString *)projectId; // legacy: mods only
 - (NSDictionary *)infoForProjectId:(NSString *)projectId category:(NSString *)category;
 - (NSDictionary *)infoForFilename:(NSString *)filename category:(NSString *)category;
@@ -57,12 +68,29 @@ extern NSString * const InstalledItemCategoryResourcePack;
                mcVersion:(NSString *)mcVersion
                   loader:(NSString *)loader;
 
+// Same but stores the manifest in the given profile's directory.
+- (void)recordProjectId:(NSString *)projectId
+                   title:(NSString *)title
+           versionNumber:(NSString *)versionNumber
+                filename:(NSString *)filename
+                 iconURL:(NSString *)iconURL
+                  source:(NSString *)source
+                category:(NSString *)category
+               mcVersion:(NSString *)mcVersion
+                  loader:(NSString *)loader
+                 profile:(NSDictionary *)profile;
+
 - (void)removeProjectId:(NSString *)projectId category:(NSString *)category;
+- (void)removeProjectId:(NSString *)projectId category:(NSString *)category profile:(NSDictionary *)profile;
 - (void)removeRecordForFilename:(NSString *)filename category:(NSString *)category;
 - (void)updateFilename:(NSString *)newFilename forProjectId:(NSString *)projectId category:(NSString *)category;
+- (void)updateFilename:(NSString *)newFilename forProjectId:(NSString *)projectId category:(NSString *)category profile:(NSDictionary *)profile;
 
 // --- Enable / disable (.jar <-> .jar.off, .zip <-> .zip.off) ---
+- (NSString *)baseNameForFilename:(NSString *)filename; // strips one trailing .off
 - (BOOL)isEnabledForFilename:(NSString *)filename category:(NSString *)category;
+- (BOOL)isEnabledForFilename:(NSString *)filename category:(NSString *)category profile:(NSDictionary *)profile;
 - (BOOL)setEnabled:(BOOL)enabled forFilename:(NSString *)filename category:(NSString *)category;
+- (BOOL)setEnabled:(BOOL)enabled forFilename:(NSString *)filename category:(NSString *)category profile:(NSDictionary *)profile;
 
 @end

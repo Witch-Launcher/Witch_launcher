@@ -41,13 +41,54 @@ static NSString * const kResourceManifestName = @"installed_resourcepacks.json";
     return [VersionDirectoryManager.shared shaderPacksPathForVersion:[self versionKeyForCurrentProfile]];
 }
 
-- (NSString *)dirForCategory:(NSString *)category {
-    if ([category isEqualToString:InstalledItemCategoryResourcePack]) {
-        return [self resourcePacksDirForCurrentProfile];
-    } else if ([category isEqualToString:InstalledItemCategoryShaderPack]) {
-        return [self shaderPacksDirForCurrentProfile];
+- (NSString *)versionKeyForProfile:(NSDictionary *)profile {
+    id lastVersion = profile[@"lastVersionId"];
+    if ([lastVersion isKindOfClass:[NSString class]] && [(NSString *)lastVersion length] > 0) {
+        return lastVersion;
     }
-    return [self modsDirForCurrentProfile];
+    return [self versionKeyForCurrentProfile];
+}
+
+- (NSString *)dirForCategory:(NSString *)category versionKey:(NSString *)ver {
+    NSString *v = ([ver isKindOfClass:[NSString class]] && ver.length > 0) ? ver : @"";
+    if ([category isEqualToString:InstalledItemCategoryResourcePack]) {
+        return [VersionDirectoryManager.shared resourcePacksPathForVersion:v];
+    } else if ([category isEqualToString:InstalledItemCategoryShaderPack]) {
+        return [VersionDirectoryManager.shared shaderPacksPathForVersion:v];
+    }
+    return [VersionDirectoryManager.shared modsPathForVersion:v];
+}
+
+- (NSString *)modsDirForProfile:(NSDictionary *)profile {
+    return [VersionDirectoryManager.shared modsPathForVersion:[self versionKeyForProfile:profile]];
+}
+
+- (NSString *)resourcePacksDirForProfile:(NSDictionary *)profile {
+    return [VersionDirectoryManager.shared resourcePacksPathForVersion:[self versionKeyForProfile:profile]];
+}
+
+- (NSString *)shaderPacksDirForProfile:(NSDictionary *)profile {
+    return [VersionDirectoryManager.shared shaderPacksPathForVersion:[self versionKeyForProfile:profile]];
+}
+
+- (NSString *)savesDirForCurrentProfile {
+    return [VersionDirectoryManager.shared savesPathForVersion:[self versionKeyForCurrentProfile]];
+}
+
+- (NSString *)savesDirForProfile:(NSDictionary *)profile {
+    return [VersionDirectoryManager.shared savesPathForVersion:[self versionKeyForProfile:profile]];
+}
+
+- (NSString *)serversDirForProfile:(NSDictionary *)profile {
+    return [VersionDirectoryManager.shared serversPathForVersion:[self versionKeyForProfile:profile]];
+}
+
+- (NSString *)dirForCategory:(NSString *)category profile:(NSDictionary *)profile {
+    return [self dirForCategory:category versionKey:[self versionKeyForProfile:profile]];
+}
+
+- (NSString *)dirForCategory:(NSString *)category {
+    return [self dirForCategory:category versionKey:[self versionKeyForCurrentProfile]];
 }
 
 - (NSString *)manifestNameForCategory:(NSString *)category {
@@ -56,9 +97,17 @@ static NSString * const kResourceManifestName = @"installed_resourcepacks.json";
     return kModsManifestName;
 }
 
-- (NSString *)manifestPathForCategory:(NSString *)category {
-    NSString *dir = [self dirForCategory:category];
+- (NSString *)manifestPathForCategory:(NSString *)category versionKey:(NSString *)ver {
+    NSString *dir = [self dirForCategory:category versionKey:ver];
     return [dir stringByAppendingPathComponent:[self manifestNameForCategory:category]];
+}
+
+- (NSString *)manifestPathForCategory:(NSString *)category profile:(NSDictionary *)profile {
+    return [self manifestPathForCategory:category versionKey:[self versionKeyForProfile:profile]];
+}
+
+- (NSString *)manifestPathForCategory:(NSString *)category {
+    return [self manifestPathForCategory:category versionKey:[self versionKeyForCurrentProfile]];
 }
 
 - (NSString *)normalizedCategory:(NSString *)category {
@@ -69,8 +118,7 @@ static NSString * const kResourceManifestName = @"installed_resourcepacks.json";
 
 #pragma mark - Manifest IO
 
-- (NSMutableDictionary *)loadManifestForCategory:(NSString *)category {
-    NSString *path = [self manifestPathForCategory:category];
+- (NSMutableDictionary *)loadManifestAtPath:(NSString *)path {
     NSData *data = [NSData dataWithContentsOfFile:path];
     if (!data) return [NSMutableDictionary dictionary];
     id parsed = [NSJSONSerialization JSONObjectWithData:data options:0 error:nil];
@@ -79,12 +127,26 @@ static NSString * const kResourceManifestName = @"installed_resourcepacks.json";
     return [NSMutableDictionary dictionary];
 }
 
-- (void)saveManifest:(NSDictionary *)manifest forCategory:(NSString *)category {
-    NSString *path = [self manifestPathForCategory:category];
-    NSString *dir = path.stringByDeletingLastPathComponent;
-    [[NSFileManager defaultManager] createDirectoryAtPath:dir withIntermediateDirectories:YES attributes:nil error:nil];
+- (void)saveManifest:(NSDictionary *)manifest atPath:(NSString *)path {
+    [[NSFileManager defaultManager] createDirectoryAtPath:path.stringByDeletingLastPathComponent withIntermediateDirectories:YES attributes:nil error:nil];
     NSData *data = [NSJSONSerialization dataWithJSONObject:manifest options:NSJSONWritingPrettyPrinted error:nil];
     if (data) [data writeToFile:path atomically:YES];
+}
+
+- (NSMutableDictionary *)loadManifestForCategory:(NSString *)category {
+    return [self loadManifestAtPath:[self manifestPathForCategory:category]];
+}
+
+- (NSMutableDictionary *)loadManifestForCategory:(NSString *)category profile:(NSDictionary *)profile {
+    return [self loadManifestAtPath:[self manifestPathForCategory:category profile:profile]];
+}
+
+- (void)saveManifest:(NSDictionary *)manifest forCategory:(NSString *)category {
+    [self saveManifest:manifest atPath:[self manifestPathForCategory:category]];
+}
+
+- (void)saveManifest:(NSDictionary *)manifest forCategory:(NSString *)category profile:(NSDictionary *)profile {
+    [self saveManifest:manifest atPath:[self manifestPathForCategory:category profile:profile]];
 }
 
 - (void)postChange {
@@ -94,8 +156,13 @@ static NSString * const kResourceManifestName = @"installed_resourcepacks.json";
 #pragma mark - Reads
 
 - (NSArray<NSDictionary *> *)allInstalledForCategory:(NSString *)category {
+    return [self allInstalledForCategory:category profile:nil];
+}
+
+- (NSArray<NSDictionary *> *)allInstalledForCategory:(NSString *)category profile:(NSDictionary *)profile {
     NSString *cat = [self normalizedCategory:category];
-    NSMutableDictionary *m = [self loadManifestForCategory:cat];
+    NSMutableDictionary *m = profile ? [self loadManifestForCategory:cat profile:profile]
+                                     : [self loadManifestForCategory:cat];
     NSMutableArray *out = [NSMutableArray arrayWithCapacity:m.count];
     for (NSString *pid in m) {
         NSDictionary *entry = m[pid];
@@ -165,10 +232,25 @@ static NSString * const kResourceManifestName = @"installed_resourcepacks.json";
                 category:(NSString *)category
                mcVersion:(NSString *)mcVersion
                   loader:(NSString *)loader {
+    [self recordProjectId:projectId title:title versionNumber:versionNumber filename:filename
+                 iconURL:iconURL source:source category:category mcVersion:mcVersion loader:loader profile:nil];
+}
+
+- (void)recordProjectId:(NSString *)projectId
+                   title:(NSString *)title
+           versionNumber:(NSString *)versionNumber
+                filename:(NSString *)filename
+                 iconURL:(NSString *)iconURL
+                  source:(NSString *)source
+                category:(NSString *)category
+               mcVersion:(NSString *)mcVersion
+                  loader:(NSString *)loader
+                 profile:(NSDictionary *)profile {
     if (projectId.length == 0 || filename.length == 0) return;
     @synchronized (self) {
         NSString *cat = [self normalizedCategory:category];
-        NSMutableDictionary *m = [self loadManifestForCategory:cat];
+        NSMutableDictionary *m = profile ? [self loadManifestForCategory:cat profile:profile]
+                                         : [self loadManifestForCategory:cat];
         NSMutableDictionary *existing = [m[projectId] isKindOfClass:[NSDictionary class]]
             ? [(NSDictionary *)m[projectId] mutableCopy] : [NSMutableDictionary dictionary];
         existing[@"title"] = title ?: existing[@"title"] ?: @"";
@@ -183,19 +265,26 @@ static NSString * const kResourceManifestName = @"installed_resourcepacks.json";
         if (loader.length > 0) existing[@"loader"] = loader;
         existing[@"installed_at"] = @([[NSDate date] timeIntervalSince1970]);
         m[projectId] = existing;
-        [self saveManifest:m forCategory:cat];
+        if (profile) [self saveManifest:m forCategory:cat profile:profile];
+        else [self saveManifest:m forCategory:cat];
     }
     [self postChange];
 }
 
 - (void)removeProjectId:(NSString *)projectId category:(NSString *)category {
+    [self removeProjectId:projectId category:category profile:nil];
+}
+
+- (void)removeProjectId:(NSString *)projectId category:(NSString *)category profile:(NSDictionary *)profile {
     if (projectId.length == 0) return;
     @synchronized (self) {
         NSString *cat = [self normalizedCategory:category];
-        NSMutableDictionary *m = [self loadManifestForCategory:cat];
+        NSMutableDictionary *m = profile ? [self loadManifestForCategory:cat profile:profile]
+                                         : [self loadManifestForCategory:cat];
         if (m[projectId]) {
             [m removeObjectForKey:projectId];
-            [self saveManifest:m forCategory:cat];
+            if (profile) [self saveManifest:m forCategory:cat profile:profile];
+            else [self saveManifest:m forCategory:cat];
         }
     }
     [self postChange];
@@ -210,21 +299,34 @@ static NSString * const kResourceManifestName = @"installed_resourcepacks.json";
 }
 
 - (void)updateFilename:(NSString *)newFilename forProjectId:(NSString *)projectId category:(NSString *)category {
+    [self updateFilename:newFilename forProjectId:projectId category:category profile:nil];
+}
+
+- (void)updateFilename:(NSString *)newFilename forProjectId:(NSString *)projectId category:(NSString *)category profile:(NSDictionary *)profile {
     if (projectId.length == 0 || newFilename.length == 0) return;
     @synchronized (self) {
         NSString *cat = [self normalizedCategory:category];
-        NSMutableDictionary *m = [self loadManifestForCategory:cat];
+        NSMutableDictionary *m = profile ? [self loadManifestForCategory:cat profile:profile]
+                                         : [self loadManifestForCategory:cat];
         NSMutableDictionary *entry = [m[projectId] isKindOfClass:[NSDictionary class]]
             ? [(NSDictionary *)m[projectId] mutableCopy] : nil;
         if (!entry) return;
         entry[@"filename"] = newFilename;
         m[projectId] = entry;
-        [self saveManifest:m forCategory:cat];
+        if (profile) [self saveManifest:m forCategory:cat profile:profile];
+        else [self saveManifest:m forCategory:cat];
     }
     [self postChange];
 }
 
 #pragma mark - Enable / disable
+
+- (NSString *)baseNameForFilename:(NSString *)filename {
+    if ([filename isKindOfClass:[NSString class]] && [filename hasSuffix:@".off"]) {
+        return [filename substringToIndex:filename.length - 4];
+    }
+    return filename;
+}
 
 - (NSString *)onDiskNameForFilename:(NSString *)filename category:(NSString *)category enabled:(BOOL)enabled {
     // enabled=NO appends .off; enabled=YES strips it
@@ -237,11 +339,14 @@ static NSString * const kResourceManifestName = @"installed_resourcepacks.json";
 }
 
 - (BOOL)isEnabledForFilename:(NSString *)filename category:(NSString *)category {
+    return [self isEnabledForFilename:filename category:category profile:nil];
+}
+
+- (BOOL)isEnabledForFilename:(NSString *)filename category:(NSString *)category profile:(NSDictionary *)profile {
     if (filename.length == 0) return YES;
-    NSString *dir = [self dirForCategory:category];
+    NSString *dir = profile ? [self dirForCategory:category profile:profile] : [self dirForCategory:category];
     NSFileManager *fm = [NSFileManager defaultManager];
-    NSString *base = [filename hasSuffix:@".off"]
-        ? [filename substringToIndex:filename.length - 4] : filename;
+    NSString *base = [self baseNameForFilename:filename];
     NSString *onPath = [dir stringByAppendingPathComponent:base];
     NSString *offPath = [dir stringByAppendingPathComponent:[base stringByAppendingString:@".off"]];
     BOOL isOn = [fm fileExistsAtPath:onPath];
@@ -253,11 +358,14 @@ static NSString * const kResourceManifestName = @"installed_resourcepacks.json";
 }
 
 - (BOOL)setEnabled:(BOOL)enabled forFilename:(NSString *)filename category:(NSString *)category {
+    return [self setEnabled:enabled forFilename:filename category:category profile:nil];
+}
+
+- (BOOL)setEnabled:(BOOL)enabled forFilename:(NSString *)filename category:(NSString *)category profile:(NSDictionary *)profile {
     if (filename.length == 0) return NO;
-    NSString *dir = [self dirForCategory:category];
+    NSString *dir = profile ? [self dirForCategory:category profile:profile] : [self dirForCategory:category];
     NSFileManager *fm = [NSFileManager defaultManager];
-    NSString *base = [filename hasSuffix:@".off"]
-        ? [filename substringToIndex:filename.length - 4] : filename;
+    NSString *base = [self baseNameForFilename:filename];
     NSString *onPath = [dir stringByAppendingPathComponent:base];
     NSString *offPath = [dir stringByAppendingPathComponent:[base stringByAppendingString:@".off"]];
     NSError *err = nil;
@@ -272,6 +380,7 @@ static NSString * const kResourceManifestName = @"installed_resourcepacks.json";
         }
     }
     if (!ok) NSLog(@"[InstalledMods] setEnabled=%d %@ failed: %@", enabled, filename, err);
+    else [self postChange];
     return ok;
 }
 

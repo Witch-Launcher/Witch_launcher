@@ -64,20 +64,32 @@
              onPrimary:(void(^)(void))onPrimary
            onSecondary:(void(^)(void))onSecondary {
     dispatch_async(dispatch_get_main_queue(), ^{
-        UIWindow *window = nil;
-        for (UIScene *scene in UIApplication.sharedApplication.connectedScenes) {
-            if ([scene isKindOfClass:[UIWindowScene class]]) {
-                UIWindowScene *ws = (UIWindowScene *)scene;
-                if (ws.activationState == UISceneActivationStateForegroundActive) {
-                    window = ws.windows.firstObject ?: [[UIWindow alloc] initWithWindowScene:ws];
-                    break;
-                }
+        // Dedicated window above everything (alerts, pickers, sheets):
+        // windowLevel Alert+1 always wins regardless of the present stack.
+        UIWindowScene *scene = nil;
+        for (UIScene *s in UIApplication.sharedApplication.connectedScenes) {
+            if ([s isKindOfClass:[UIWindowScene class]] &&
+                ((UIWindowScene *)s).activationState == UISceneActivationStateForegroundActive) {
+                scene = (UIWindowScene *)s;
+                break;
             }
         }
-        if (!window) window = UIApplication.sharedApplication.windows.firstObject;
-        if (!window) return;
-        UIView *root = window.rootViewController.view;
-        if (!root) return;
+        if (!scene) return;
+        UIWindow *prevKey = nil;
+        for (UIWindow *w in scene.windows) {
+            if (w.isKeyWindow) { prevKey = w; break; }
+        }
+        UIWindow *window = [[UIWindow alloc] initWithWindowScene:scene];
+        window.windowLevel = UIWindowLevelAlert + 1;
+        window.backgroundColor = [UIColor clearColor];
+        UIViewController *host = [[UIViewController alloc] init];
+        host.view.backgroundColor = [UIColor clearColor];
+        window.rootViewController = host;
+        [window makeKeyAndVisible];
+        // Retain while visible; released on dismiss.
+        objc_setAssociatedObject(host, "errorDialogWindow", window, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+        if (prevKey) objc_setAssociatedObject(host, "errorDialogPrevKey", prevKey, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+        UIView *root = host.view;
 
         ThemeManager *theme = ThemeManager.shared;
         UIColor *accent = [self colorForKind:kind theme:theme];
@@ -88,9 +100,17 @@
         else if (kind == AppErrorKindSuccess) [HapticManager.shared play:HapticTypeSuccess];
         else [HapticManager.shared play:HapticTypeLight];
 
-        UIView *overlay = [[UIView alloc] initWithFrame:root.bounds];
+        UIView *overlay = [[UIView alloc] initWithFrame:UIScreen.mainScreen.bounds];
         overlay.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
         [root addSubview:overlay];
+        // Pin to host edges so rotation is handled.
+        overlay.translatesAutoresizingMaskIntoConstraints = NO;
+        [NSLayoutConstraint activateConstraints:@[
+            [overlay.topAnchor constraintEqualToAnchor:root.topAnchor],
+            [overlay.bottomAnchor constraintEqualToAnchor:root.bottomAnchor],
+            [overlay.leadingAnchor constraintEqualToAnchor:root.leadingAnchor],
+            [overlay.trailingAnchor constraintEqualToAnchor:root.trailingAnchor],
+        ]];
 
         UIView *dim = [[UIView alloc] init];
         dim.translatesAutoresizingMaskIntoConstraints = NO;
@@ -227,10 +247,27 @@
 
 @implementation UIView (AppErrorDialogTap)
 
+- (void)appErrorDialog_teardownWindow {
+    // overlay -> host.view -> host: walk up to the host view controller.
+    UIView *v = self;
+    while (v.superview) v = v.superview;
+    UIResponder *r = v.nextResponder;
+    while (r && ![r isKindOfClass:[UIViewController class]]) r = r.nextResponder;
+    UIViewController *host = (UIViewController *)r;
+    UIWindow *window = objc_getAssociatedObject(host, "errorDialogWindow");
+    UIWindow *prevKey = objc_getAssociatedObject(host, "errorDialogPrevKey");
+    [self removeFromSuperview];
+    if (window) {
+        window.hidden = YES;
+        objc_setAssociatedObject(host, "errorDialogWindow", nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    }
+    if (prevKey) [prevKey makeKeyAndVisible];
+}
+
 - (void)appErrorDialog_primaryTapped {
     void (^cb)(void) = objc_getAssociatedObject(self, "onPrimary");
     [UIView animateWithDuration:0.16 animations:^{ self.alpha = 0; } completion:^(BOOL f) {
-        [self removeFromSuperview];
+        [self appErrorDialog_teardownWindow];
         if (cb) cb();
     }];
 }
@@ -238,7 +275,7 @@
 - (void)appErrorDialog_secondaryTapped {
     void (^cb)(void) = objc_getAssociatedObject(self, "onSecondary");
     [UIView animateWithDuration:0.16 animations:^{ self.alpha = 0; } completion:^(BOOL f) {
-        [self removeFromSuperview];
+        [self appErrorDialog_teardownWindow];
         if (cb) cb();
     }];
 }

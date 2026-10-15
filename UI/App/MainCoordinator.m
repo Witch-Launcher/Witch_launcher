@@ -17,7 +17,7 @@
 #import "MapListViewController.h"
 #import "ModDetailViewController.h"
 #import "FileBrowserViewController.h"
-#import "ProfileDetailPageViewController.h"
+#import "ProfileTabbedPageViewController.h"
 #import "ErrorPresenter.h"
 
 #import "PLProfiles.h"
@@ -268,9 +268,9 @@
 
     PLProfiles.current.selectedProfileName = targetProfile[@"name"] ?: targetKey;
 
-    // Full-page replacement for the old FormSheet popup: real Back button,
-    // inner tabs (Overview / Mods / Shaders / Resources) live inside.
-    ProfileDetailPageViewController *vc = [[ProfileDetailPageViewController alloc] initWithProfile:targetProfile isNew:isNew];
+    // Full-page floating-overlay page: real Back button,
+    // inner tabs (Overview / Mods / Shaders / Resources / Worlds) inside.
+    ProfileTabbedPageViewController *vc = [[ProfileTabbedPageViewController alloc] initWithProfile:targetProfile isNew:isNew];
     [self.rootVC pushContent:vc animated:YES];
 }
 
