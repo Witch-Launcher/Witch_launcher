@@ -359,6 +359,37 @@ static NSString * const kResourceManifestName = @"installed_resourcepacks.json";
 
 #pragma mark - Enable / disable
 
+- (NSString *)offDirForCategory:(NSString *)category profile:(NSDictionary *)profile {
+    NSString *dir = profile ? [self dirForCategory:category profile:profile] : [self dirForCategory:category];
+    return [dir stringByAppendingPathComponent:@"off"];
+}
+
+// One-time migration: legacy "<name>.off" next to the dir -> "off/<name>".
+- (void)migrateLegacyOffFilesForCategory:(NSString *)category profile:(NSDictionary *)profile {
+    NSString *dir = profile ? [self dirForCategory:category profile:profile] : [self dirForCategory:category];
+    NSString *offDir = [self offDirForCategory:category profile:profile];
+    NSFileManager *fm = [NSFileManager defaultManager];
+    NSArray *files = [fm contentsOfDirectoryAtPath:dir error:nil];
+    BOOL migrated = NO;
+    for (NSString *f in files ?: @[]) {
+        if (![f hasSuffix:@".off"]) continue;
+        NSString *base = [f substringToIndex:f.length - 4];
+        if (base.length == 0) continue;
+        NSString *src = [dir stringByAppendingPathComponent:f];
+        NSString *dst = [offDir stringByAppendingPathComponent:base];
+        BOOL isDir = NO;
+        if (![fm fileExistsAtPath:src isDirectory:&isDir] || isDir) continue;
+        [fm createDirectoryAtPath:offDir withIntermediateDirectories:YES attributes:nil error:nil];
+        if ([fm fileExistsAtPath:dst]) {
+            // A live file with the same name already exists; drop the stale copy.
+            [fm removeItemAtPath:src error:nil];
+        } else if ([fm moveItemAtPath:src toPath:dst error:nil]) {
+            migrated = YES;
+        }
+    }
+    if (migrated) [self postChange];
+}
+
 - (NSString *)baseNameForFilename:(NSString *)filename {
     if ([filename isKindOfClass:[NSString class]] && [filename hasSuffix:@".off"]) {
         return [filename substringToIndex:filename.length - 4];
@@ -383,15 +414,16 @@ static NSString * const kResourceManifestName = @"installed_resourcepacks.json";
 - (BOOL)isEnabledForFilename:(NSString *)filename category:(NSString *)category profile:(NSDictionary *)profile {
     if (filename.length == 0) return YES;
     NSString *dir = profile ? [self dirForCategory:category profile:profile] : [self dirForCategory:category];
+    NSString *offDir = [self offDirForCategory:category profile:profile];
     NSFileManager *fm = [NSFileManager defaultManager];
     NSString *base = [self baseNameForFilename:filename];
     NSString *onPath = [dir stringByAppendingPathComponent:base];
-    NSString *offPath = [dir stringByAppendingPathComponent:[base stringByAppendingString:@".off"]];
+    NSString *offPath = [offDir stringByAppendingPathComponent:base];
+    NSString *legacyOff = [dir stringByAppendingPathComponent:[base stringByAppendingString:@".off"]];
     BOOL isOn = [fm fileExistsAtPath:onPath];
-    BOOL isOff = [fm fileExistsAtPath:offPath];
+    BOOL isOff = [fm fileExistsAtPath:offPath] || [fm fileExistsAtPath:legacyOff];
     if (isOn && !isOff) return YES;
     if (isOff && !isOn) return NO;
-    // Both or neither: treat as enabled if base file exists or manifest says so
     return YES;
 }
 
@@ -402,10 +434,17 @@ static NSString * const kResourceManifestName = @"installed_resourcepacks.json";
 - (BOOL)setEnabled:(BOOL)enabled forFilename:(NSString *)filename category:(NSString *)category profile:(NSDictionary *)profile {
     if (filename.length == 0) return NO;
     NSString *dir = profile ? [self dirForCategory:category profile:profile] : [self dirForCategory:category];
+    NSString *offDir = [self offDirForCategory:category profile:profile];
     NSFileManager *fm = [NSFileManager defaultManager];
     NSString *base = [self baseNameForFilename:filename];
     NSString *onPath = [dir stringByAppendingPathComponent:base];
-    NSString *offPath = [dir stringByAppendingPathComponent:[base stringByAppendingString:@".off"]];
+    NSString *offPath = [offDir stringByAppendingPathComponent:base];
+    NSString *legacyOff = [dir stringByAppendingPathComponent:[base stringByAppendingString:@".off"]];
+    // Absorb legacy state first.
+    if ([fm fileExistsAtPath:legacyOff] && ![fm fileExistsAtPath:onPath] && ![fm fileExistsAtPath:offPath]) {
+        [fm createDirectoryAtPath:offDir withIntermediateDirectories:YES attributes:nil error:nil];
+        [fm moveItemAtPath:legacyOff toPath:offPath error:nil];
+    }
     NSError *err = nil;
     BOOL ok = YES;
     if (enabled) {
@@ -414,6 +453,7 @@ static NSString * const kResourceManifestName = @"installed_resourcepacks.json";
         }
     } else {
         if ([fm fileExistsAtPath:onPath] && ![fm fileExistsAtPath:offPath]) {
+            [fm createDirectoryAtPath:offDir withIntermediateDirectories:YES attributes:nil error:nil];
             ok = [fm moveItemAtPath:onPath toPath:offPath error:&err];
         }
     }

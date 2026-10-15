@@ -12,6 +12,7 @@
 @property (nonatomic) UIStackView *progressStack;
 @property (nonatomic) UIButton *fileManagerButton;
 @property (nonatomic) UIButton *settingsButton;
+@property (nonatomic) UIButton *downloadHubButton;
 @property (nonatomic) NSTimer *timeTimer;
 @property (nonatomic) NSTimer *jitTimer;
 @end
@@ -60,6 +61,12 @@
     [_settingsButton addTarget:self action:@selector(settingsTapped) forControlEvents:UIControlEventTouchUpInside];
     [self addSubview:_settingsButton];
 
+    _downloadHubButton = [UIButton buttonWithType:UIButtonTypeSystem];
+    _downloadHubButton.translatesAutoresizingMaskIntoConstraints = NO;
+    [_downloadHubButton setImage:[UIImage systemImageNamed:@"arrow.down.circle"] forState:UIControlStateNormal];
+    [_downloadHubButton addTarget:self action:@selector(downloadHubTapped) forControlEvents:UIControlEventTouchUpInside];
+    [self addSubview:_downloadHubButton];
+
     [NSLayoutConstraint activateConstraints:@[
         [_jitStatusLabel.leadingAnchor constraintEqualToAnchor:self.leadingAnchor constant:14],
         [_jitStatusLabel.centerYAnchor constraintEqualToAnchor:self.centerYAnchor],
@@ -80,6 +87,11 @@
         [_fileManagerButton.centerYAnchor constraintEqualToAnchor:self.centerYAnchor],
         [_fileManagerButton.widthAnchor constraintEqualToConstant:28],
         [_fileManagerButton.heightAnchor constraintEqualToConstant:28],
+
+        [_downloadHubButton.trailingAnchor constraintEqualToAnchor:_fileManagerButton.leadingAnchor constant:-6],
+        [_downloadHubButton.centerYAnchor constraintEqualToAnchor:self.centerYAnchor],
+        [_downloadHubButton.widthAnchor constraintEqualToConstant:28],
+        [_downloadHubButton.heightAnchor constraintEqualToConstant:28],
     ]];
 
     [self updateTime];
@@ -190,6 +202,12 @@
     if (self.delegate) [self.delegate topBarDidTapSettings];
 }
 
+- (void)downloadHubTapped {
+    if (self.delegate && [self.delegate respondsToSelector:@selector(topBarDidTapDownloadHub)]) {
+        [self.delegate topBarDidTapDownloadHub];
+    }
+}
+
 - (void)updateColors {
     ThemeManager *theme = ThemeManager.shared;
     // When the per-bar frost is enabled, fade the base color so the realtime
@@ -203,6 +221,7 @@
     _timeLabel.textColor = theme.primaryTextColor;
     _fileManagerButton.tintColor = theme.accentColor;
     _settingsButton.tintColor = theme.accentColor;
+    _downloadHubButton.tintColor = theme.accentColor;
 }
 
 - (void)updateJITStatus:(BOOL)enabled {

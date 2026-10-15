@@ -65,7 +65,7 @@
     // Floating tab pill
     _tabPill = [[UIView alloc] init];
     _tabPill.translatesAutoresizingMaskIntoConstraints = NO;
-    _tabPill.layer.cornerRadius = 22;
+    _tabPill.layer.cornerRadius = 19;
     _tabPill.clipsToBounds = YES;
     _tabPill.layer.borderWidth = 1;
     _tabPill.layer.borderColor = [ThemeManager.shared.accentColor colorWithAlphaComponent:0.30].CGColor;
@@ -81,10 +81,10 @@
     _tabStack.distribution = UIStackViewDistributionFillEqually;
     [_tabPill addSubview:_tabStack];
     [NSLayoutConstraint activateConstraints:@[
-        [_tabStack.topAnchor constraintEqualToAnchor:_tabPill.topAnchor constant:6],
-        [_tabStack.bottomAnchor constraintEqualToAnchor:_tabPill.bottomAnchor constant:-6],
-        [_tabStack.leadingAnchor constraintEqualToAnchor:_tabPill.leadingAnchor constant:8],
-        [_tabStack.trailingAnchor constraintEqualToAnchor:_tabPill.trailingAnchor constant:-8],
+        [_tabStack.topAnchor constraintEqualToAnchor:_tabPill.topAnchor constant:5],
+        [_tabStack.bottomAnchor constraintEqualToAnchor:_tabPill.bottomAnchor constant:-5],
+        [_tabStack.leadingAnchor constraintEqualToAnchor:_tabPill.leadingAnchor constant:6],
+        [_tabStack.trailingAnchor constraintEqualToAnchor:_tabPill.trailingAnchor constant:-6],
     ]];
     for (NSUInteger i = 0; i < 5; i++) {
         UIButton *btn = [UIButton buttonWithType:UIButtonTypeSystem];
@@ -92,7 +92,7 @@
         UIImage *img = [UIImage systemImageNamed:icons[i]];
         [btn setImage:img forState:UIControlStateNormal];
         [btn setTitle:labels[i] forState:UIControlStateNormal];
-        btn.titleLabel.font = [UIFont systemFontOfSize:9 weight:UIFontWeightMedium];
+        btn.titleLabel.font = [UIFont systemFontOfSize:8 weight:UIFontWeightMedium];
         btn.tintColor = ThemeManager.shared.secondaryTextColor;
         [btn setTitleColor:ThemeManager.shared.secondaryTextColor forState:UIControlStateNormal];
         // Stack image above label
@@ -134,7 +134,7 @@
             [_tabPill.topAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.topAnchor constant:8],
             [_tabPill.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor constant:12],
             [_tabPill.bottomAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.bottomAnchor constant:-8],
-            [_tabPill.widthAnchor constraintEqualToConstant:76],
+            [_tabPill.widthAnchor constraintEqualToConstant:62],
             [_cardHost.topAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.topAnchor constant:8],
             [_cardHost.leadingAnchor constraintEqualToAnchor:_tabPill.trailingAnchor constant:8],
             [_cardHost.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor constant:-12],
@@ -145,7 +145,7 @@
             [_tabPill.topAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.topAnchor constant:8],
             [_tabPill.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor constant:12],
             [_tabPill.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor constant:-12],
-            [_tabPill.heightAnchor constraintEqualToConstant:64],
+            [_tabPill.heightAnchor constraintEqualToConstant:56],
             [_cardHost.topAnchor constraintEqualToAnchor:_tabPill.bottomAnchor constant:8],
             [_cardHost.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor constant:12],
             [_cardHost.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor constant:-12],
@@ -159,7 +159,7 @@
             [_cardHost.bottomAnchor constraintEqualToAnchor:_tabPill.topAnchor constant:-8],
             [_tabPill.centerXAnchor constraintEqualToAnchor:self.view.centerXAnchor],
             [_tabPill.bottomAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.bottomAnchor constant:-8],
-            [_tabPill.heightAnchor constraintEqualToConstant:64],
+            [_tabPill.heightAnchor constraintEqualToConstant:56],
         ]];
     }
     _chromeConstraints = c;

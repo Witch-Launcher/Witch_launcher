@@ -76,7 +76,44 @@ typedef NS_ENUM(NSInteger, ProfileListFilter) {
 - (NSString *)contentDir {
     NSString *dir = [[InstalledModsManager shared] dirForCategory:self.category profile:self.profile];
     [[NSFileManager defaultManager] createDirectoryAtPath:dir withIntermediateDirectories:YES attributes:nil error:nil];
+    // One-time: legacy "<name>.off" -> "off/<name>".
+    [[InstalledModsManager shared] migrateLegacyOffFilesForCategory:self.category profile:self.profile];
     return dir;
+}
+
+// Fill display fields straight from the file when the manifest lacks them.
+- (NSMutableDictionary *)enrichedItem:(NSDictionary *)entry filePath:(NSString *)full {
+    NSMutableDictionary *e = [entry mutableCopy] ?: [NSMutableDictionary dictionary];
+    e[@"_profile"] = self.profile;
+    BOOL needParse = NO;
+    for (NSString *k in @[@"title", @"version_number", @"author", @"description"]) {
+        id v = e[k];
+        if (![v isKindOfClass:[NSString class]] || [(NSString *)v length] == 0) { needParse = YES; break; }
+    }
+    if (needParse && full.length > 0 && [[NSFileManager defaultManager] fileExistsAtPath:full]) {
+        NSDictionary *meta = [ModMetadataReader metadataForFileAtPath:full category:self.category];
+        for (NSString *k in @[@"title", @"version", @"authors", @"description"]) {
+            NSString *dst = [k isEqualToString:@"version"] ? @"version_number" : ([k isEqualToString:@"authors"] ? @"author" : k);
+            id cur = e[dst];
+            id got = meta[k];
+            if ((!([cur isKindOfClass:[NSString class]]) || [(NSString *)cur length] == 0) &&
+                [got isKindOfClass:[NSString class]] && [(NSString *)got length] > 0) {
+                e[dst] = got;
+            }
+        }
+        if ((![e[@"version_number"] isKindOfClass:[NSString class]] || [(NSString *)e[@"version_number"] length] == 0) &&
+            [meta[@"pack_format"] isKindOfClass:[NSString class]]) {
+            e[@"version_number"] = [ModMetadataReader displayVersionForPackFormat:meta[@"pack_format"]];
+        }
+    }
+    if (![e[@"mc_version"] isKindOfClass:[NSString class]] || [(NSString *)e[@"mc_version"] length] == 0) {
+        e[@"mc_version"] = [self profileMcVersion];
+    }
+    if ([self.category isEqualToString:InstalledItemCategoryMod] &&
+        (![e[@"loader"] isKindOfClass:[NSString class]] || [(NSString *)e[@"loader"] length] == 0)) {
+        e[@"loader"] = [self profileLoader];
+    }
+    return e;
 }
 
 #pragma mark - View
@@ -116,6 +153,10 @@ typedef NS_ENUM(NSInteger, ProfileListFilter) {
 
     _bottomBar = [[UIToolbar alloc] init];
     _bottomBar.translatesAutoresizingMaskIntoConstraints = NO;
+    _bottomBar.layer.cornerRadius = 18;
+    _bottomBar.clipsToBounds = YES;
+    _bottomBar.layer.borderWidth = 1;
+    _bottomBar.layer.borderColor = [ThemeManager.shared.accentColor colorWithAlphaComponent:0.25].CGColor;
     [self.view addSubview:_bottomBar];
     [self rebuildBottomBar];
 
@@ -144,6 +185,8 @@ typedef NS_ENUM(NSInteger, ProfileListFilter) {
     [wrap addSubview:_searchBar];
     _filterControl = [[UISegmentedControl alloc] initWithItems:@[@"All", @"On", @"Off", @"Outdated"]];
     _filterControl.selectedSegmentIndex = 0;
+    _filterControl.layer.cornerRadius = 10;
+    _filterControl.clipsToBounds = YES;
     _filterControl.translatesAutoresizingMaskIntoConstraints = NO;
     [_filterControl addTarget:self action:@selector(filterChanged) forControlEvents:UIControlEventValueChanged];
     [wrap addSubview:_filterControl];
@@ -199,60 +242,83 @@ typedef NS_ENUM(NSInteger, ProfileListFilter) {
 
 - (void)reloadContent {
     NSString *dir = [self contentDir];
+    NSString *offDir = [[InstalledModsManager shared] offDirForCategory:self.category profile:self.profile];
     NSArray *manifest = [[InstalledModsManager shared] allInstalledForCategory:self.category profile:self.profile];
     NSMutableArray *enriched = [NSMutableArray arrayWithCapacity:manifest.count];
     for (NSDictionary *m in manifest) {
-        NSMutableDictionary *e = [m mutableCopy];
-        e[@"_profile"] = self.profile;
-        if (![e[@"mc_version"] isKindOfClass:[NSString class]] || [(NSString *)e[@"mc_version"] length] == 0) {
-            e[@"mc_version"] = [self profileMcVersion];
+        NSString *fn = m[@"filename"];
+        NSString *base = ([fn isKindOfClass:[NSString class]] && fn.length > 0)
+            ? [[InstalledModsManager shared] baseNameForFilename:fn] : @"";
+        NSString *full = base.length > 0 ? [dir stringByAppendingPathComponent:base] : @"";
+        if (base.length > 0 && ![[NSFileManager defaultManager] fileExistsAtPath:full]) {
+            NSString *off = [offDir stringByAppendingPathComponent:base];
+            if ([[NSFileManager defaultManager] fileExistsAtPath:off]) full = off;
         }
-        if ([self.category isEqualToString:InstalledItemCategoryMod] &&
-            (![e[@"loader"] isKindOfClass:[NSString class]] || [(NSString *)e[@"loader"] length] == 0)) {
-            e[@"loader"] = [self profileLoader];
-        }
+        NSMutableDictionary *e = [self enrichedItem:m filePath:full];
+        // Manifest always stores the base name; the file may live in off/.
+        if (base.length > 0) e[@"filename"] = base;
         [enriched addObject:e];
     }
     _manifestItems = enriched;
 
     NSArray *files = [[NSFileManager defaultManager] contentsOfDirectoryAtPath:dir error:nil] ?: @[];
+    NSArray *offFiles = [[NSFileManager defaultManager] contentsOfDirectoryAtPath:offDir error:nil] ?: @[];
     NSSet *known = [NSSet setWithArray:[_manifestItems valueForKey:@"filename"]];
     BOOL isMod = [self.category isEqualToString:InstalledItemCategoryMod];
     NSMutableArray *orphans = [NSMutableArray array];
+    // Live files...
     for (NSString *f in files) {
-        if ([f hasSuffix:@".json"] || [f hasSuffix:@".off"]) continue;
+        if ([f isEqualToString:@"off"] || [f hasSuffix:@".json"] || [f hasSuffix:@".off"]) continue;
+        BOOL isDir = NO;
+        if (![[NSFileManager defaultManager] fileExistsAtPath:[dir stringByAppendingPathComponent:f] isDirectory:&isDir] || isDir) continue;
         BOOL match = isMod ? [f hasSuffix:@".jar"] : [f hasSuffix:@".zip"];
         if (!match || [known containsObject:f]) continue;
-        NSString *full = [dir stringByAppendingPathComponent:f];
-        NSDictionary *meta = [ModMetadataReader metadataForFileAtPath:full category:self.category];
-        NSString *title = meta[@"title"];
-        if (![title isKindOfClass:[NSString class]] || title.length == 0) {
-            title = [[f stringByDeletingPathExtension] stringByReplacingOccurrencesOfString:@"_" withString:@" "];
-        }
-        NSString *ver = meta[@"version"];
-        if (![ver isKindOfClass:[NSString class]]) {
-            NSString *pf = meta[@"pack_format"];
-            ver = [pf isKindOfClass:[NSString class]] ? [ModMetadataReader displayVersionForPackFormat:pf] : @"";
-        }
-        [orphans addObject:@{
-            @"title": title,
-            @"filename": f,
-            @"version_number": ver ?: @"",
-            @"author": ([meta[@"authors"] isKindOfClass:[NSString class]] ? meta[@"authors"] : @""),
-            @"description": ([meta[@"description"] isKindOfClass:[NSString class]] ? meta[@"description"] : @""),
-            @"icon_url": @"",
-            @"source": @"local",
-            @"category": self.category,
-            @"mc_version": [self profileMcVersion] ?: @"",
-            @"loader": (isMod ? [self profileLoader] : @""),
-            @"isOrphan": @YES,
-            @"_profile": self.profile,
-        }];
+        [orphans addObject:[self orphanItemForFilename:f inDir:dir]];
+    }
+    // ...plus disabled files in off/ (they stay listed, switch OFF).
+    for (NSString *f in offFiles) {
+        if ([f hasPrefix:@"."]) continue;
+        BOOL isDir = NO;
+        if (![[NSFileManager defaultManager] fileExistsAtPath:[offDir stringByAppendingPathComponent:f] isDirectory:&isDir] || isDir) continue;
+        BOOL match = isMod ? [f hasSuffix:@".jar"] : [f hasSuffix:@".zip"];
+        if (!match || [known containsObject:f]) continue;
+        NSMutableDictionary *o = [self orphanItemForFilename:f inDir:offDir];
+        o[@"_wasOff"] = @YES;
+        [orphans addObject:o];
     }
     _orphanItems = orphans;
     _checkResults = nil;
     [self applyFilter];
     [self checkForUpdatesForce:NO];
+}
+
+- (NSMutableDictionary *)orphanItemForFilename:(NSString *)f inDir:(NSString *)dir {
+    NSString *full = [dir stringByAppendingPathComponent:f];
+    NSDictionary *meta = [ModMetadataReader metadataForFileAtPath:full category:self.category];
+    NSString *title = meta[@"title"];
+    if (![title isKindOfClass:[NSString class]] || title.length == 0) {
+        title = [[f stringByDeletingPathExtension] stringByReplacingOccurrencesOfString:@"_" withString:@" "];
+    }
+    NSString *ver = meta[@"version"];
+    if (![ver isKindOfClass:[NSString class]]) {
+        NSString *pf = meta[@"pack_format"];
+        ver = [pf isKindOfClass:[NSString class]] ? [ModMetadataReader displayVersionForPackFormat:pf] : @"";
+    }
+    BOOL isMod = [self.category isEqualToString:InstalledItemCategoryMod];
+    return [@{
+        @"title": title,
+        @"filename": f,
+        @"version_number": ver ?: @"",
+        @"author": ([meta[@"authors"] isKindOfClass:[NSString class]] ? meta[@"authors"] : @""),
+        @"description": ([meta[@"description"] isKindOfClass:[NSString class]] ? meta[@"description"] : @""),
+        @"icon_url": @"",
+        @"source": @"local",
+        @"category": self.category,
+        @"mc_version": [self profileMcVersion] ?: @"",
+        @"loader": (isMod ? [self profileLoader] : @""),
+        @"isOrphan": @YES,
+        @"_profile": self.profile,
+    } mutableCopy];
 }
 
 - (void)applyFilter {
@@ -336,11 +402,9 @@ typedef NS_ENUM(NSInteger, ProfileListFilter) {
     NSString *fn = item[@"filename"];
     NSString *requested = ([fn isKindOfClass:[NSString class]] ? fn : @"");
     if (requested.length > 0) {
-        NSString *dir = [self contentDir];
-        NSString *full = [dir stringByAppendingPathComponent:requested];
-        if (![[NSFileManager defaultManager] fileExistsAtPath:full]) {
-            full = [dir stringByAppendingPathComponent:[requested stringByAppendingString:@".off"]];
-        }
+        // Resolve the real file: live dir first, then off/, then legacy .off.
+        NSString *full = [self diskPathForItem:item];
+        if (!full) full = [[self contentDir] stringByAppendingPathComponent:requested];
         __weak ProfileItemCell *weakCell = cell;
         __weak typeof(self) weakSelf = self;
         [[ModMetadataReader shared] iconForFileAtPath:full category:weakSelf.category completion:^(UIImage *image, NSDictionary *meta) {
@@ -469,8 +533,12 @@ typedef NS_ENUM(NSInteger, ProfileListFilter) {
     NSString *dir = [self contentDir];
     NSString *path = [dir stringByAppendingPathComponent:base];
     if ([[NSFileManager defaultManager] fileExistsAtPath:path]) return path;
-    NSString *off = [dir stringByAppendingPathComponent:[base stringByAppendingString:@".off"]];
+    NSString *offDir = [[InstalledModsManager shared] offDirForCategory:self.category profile:self.profile];
+    NSString *off = [offDir stringByAppendingPathComponent:base];
     if ([[NSFileManager defaultManager] fileExistsAtPath:off]) return off;
+    // Legacy "<name>.off" next to the dir.
+    NSString *legacy = [dir stringByAppendingPathComponent:[base stringByAppendingString:@".off"]];
+    if ([[NSFileManager defaultManager] fileExistsAtPath:legacy]) return legacy;
     return nil;
 }
 
@@ -496,7 +564,6 @@ typedef NS_ENUM(NSInteger, ProfileListFilter) {
     }
     NSString *fn = path.lastPathComponent;
     NSString *base = [[InstalledModsManager shared] baseNameForFilename:fn];
-    BOOL wasOff = ![fn isEqualToString:base];
     NSString *ext = base.pathExtension.length > 0 ? [@"." stringByAppendingString:base.pathExtension] : @"";
     NSString *stem = [base stringByDeletingPathExtension];
     UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Rename file" message:nil preferredStyle:UIAlertControllerStyleAlert];
@@ -512,8 +579,8 @@ typedef NS_ENUM(NSInteger, ProfileListFilter) {
             return;
         }
         NSString *newBase = [newStem stringByAppendingString:ext];
-        NSString *newName = wasOff ? [newBase stringByAppendingString:@".off"] : newBase;
-        NSString *dst = [path.stringByDeletingLastPathComponent stringByAppendingPathComponent:newName];
+        // Rename inside the same folder (live dir or off/); name never changes form.
+        NSString *dst = [path.stringByDeletingLastPathComponent stringByAppendingPathComponent:newBase];
         if ([[NSFileManager defaultManager] fileExistsAtPath:dst]) {
             [ErrorPresenter showError:@"Name exists" message:@"A file with that name already exists."];
             return;

@@ -1,7 +1,60 @@
 #import "ErrorPresenter.h"
+#import "HapticManager.h"
 #import "utils.h"
 
 @implementation ErrorPresenter
+
++ (void)showToast:(NSString *)message {
+    [self showToast:message success:YES];
+}
+
++ (void)showToast:(NSString *)message success:(BOOL)success {
+    if (!message.length) return;
+    dispatch_async(dispatch_get_main_queue(), ^{
+        UIWindowScene *scene = nil;
+        for (UIScene *s in UIApplication.sharedApplication.connectedScenes) {
+            if ([s isKindOfClass:[UIWindowScene class]] &&
+                ((UIWindowScene *)s).activationState == UISceneActivationStateForegroundActive) {
+                scene = (UIWindowScene *)s;
+                break;
+            }
+        }
+        if (!scene) return;
+        UIWindow *host = nil;
+        for (UIWindow *w in scene.windows) {
+            if (w.isKeyWindow) { host = w; break; }
+        }
+        if (!host) host = scene.windows.firstObject;
+        if (!host) return;
+        [HapticManager.shared play:success ? HapticTypeSuccess : HapticTypeWarning];
+
+        UILabel *toast = [[UILabel alloc] init];
+        toast.text = message;
+        toast.font = [UIFont systemFontOfSize:14 weight:UIFontWeightSemibold];
+        toast.textColor = UIColor.whiteColor;
+        toast.textAlignment = NSTextAlignmentCenter;
+        toast.numberOfLines = 2;
+        toast.backgroundColor = [UIColor colorWithWhite:0.08 alpha:0.88];
+        toast.layer.cornerRadius = 14;
+        toast.clipsToBounds = YES;
+        toast.alpha = 0;
+        toast.translatesAutoresizingMaskIntoConstraints = NO;
+        [host.rootViewController.view addSubview:toast];
+        [NSLayoutConstraint activateConstraints:@[
+            [toast.centerXAnchor constraintEqualToAnchor:host.rootViewController.view.centerXAnchor],
+            [toast.bottomAnchor constraintEqualToAnchor:host.rootViewController.view.safeAreaLayoutGuide.bottomAnchor constant:-90],
+            [toast.leadingAnchor constraintGreaterThanOrEqualToAnchor:host.rootViewController.view.leadingAnchor constant:40],
+            [toast.trailingAnchor constraintLessThanOrEqualToAnchor:host.rootViewController.view.trailingAnchor constant:-40],
+        ]];
+        [UIView animateWithDuration:0.25 animations:^{ toast.alpha = 1; } completion:^(BOOL f) {
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.6 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+                [UIView animateWithDuration:0.3 animations:^{ toast.alpha = 0; } completion:^(BOOL f2) {
+                    [toast removeFromSuperview];
+                }];
+            });
+        }];
+    });
+}
 
 + (void)showWithKind:(AppErrorKind)kind
                title:(NSString *)title

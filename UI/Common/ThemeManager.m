@@ -29,9 +29,11 @@ NSString * const ThemeDidChangeNotification = @"ThemeDidChangeNotification";
         _uiOpacity = 1.0;
         [[NSUserDefaults standardUserDefaults] registerDefaults:@{
             @"amethyst_ui_opacity": @1.0,
-            @"amethyst_ui_border_enabled": @YES,
+            @"amethyst_ui_border_enabled": @NO,
             @"amethyst_ui_border_width": @1.0,
             @"amethyst_ui_border_radius": @10.0,
+            @"amethyst_shell_gap": @0,
+            @"amethyst_shell_inner_gap": @0,
             @"amethyst_settings_blur": @55,
             @"amethyst_topbar_blur": @55,
             @"amethyst_sidebar_blur": @55,

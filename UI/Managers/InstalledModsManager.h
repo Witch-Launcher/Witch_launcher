@@ -93,8 +93,12 @@ extern NSString * const InstalledItemCategoryResourcePack;
 - (void)updateFilename:(NSString *)newFilename forProjectId:(NSString *)projectId category:(NSString *)category;
 - (void)updateFilename:(NSString *)newFilename forProjectId:(NSString *)projectId category:(NSString *)category profile:(NSDictionary *)profile;
 
-// --- Enable / disable (.jar <-> .jar.off, .zip <-> .zip.off) ---
-- (NSString *)baseNameForFilename:(NSString *)filename; // strips one trailing .off
+// --- Enable / disable (moves files to <dir>/off/, name untouched) ---
+// Disabled files keep their exact name inside an "off" subfolder, so they
+// never vanish from scans and never need renaming.
+- (NSString *)baseNameForFilename:(NSString *)filename; // strips one trailing .off (legacy)
+- (NSString *)offDirForCategory:(NSString *)category profile:(NSDictionary *)profile;
+- (void)migrateLegacyOffFilesForCategory:(NSString *)category profile:(NSDictionary *)profile;
 - (BOOL)isEnabledForFilename:(NSString *)filename category:(NSString *)category;
 - (BOOL)isEnabledForFilename:(NSString *)filename category:(NSString *)category profile:(NSDictionary *)profile;
 - (BOOL)setEnabled:(BOOL)enabled forFilename:(NSString *)filename category:(NSString *)category;

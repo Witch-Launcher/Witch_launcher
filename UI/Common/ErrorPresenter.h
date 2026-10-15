@@ -29,6 +29,11 @@ NS_ASSUME_NONNULL_BEGIN
            onPrimary:(nullable void(^)(void))onPrimary
          onSecondary:(nullable void(^)(void))onSecondary;
 
+// Non-modal toast: small floating label that fades by itself.
+// Never steals the key window, so it can never freeze the UI.
++ (void)showToast:(nullable NSString *)message;
++ (void)showToast:(nullable NSString *)message success:(BOOL)success;
+
 @end
 
 NS_ASSUME_NONNULL_END

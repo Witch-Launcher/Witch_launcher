@@ -572,7 +572,8 @@
     // Witch launcher icon on the home screen.
     _originalName = [name copy];
     _isNewProfile = NO;
-    [ErrorPresenter showSuccess:@"Saved" message:@"Profile saved."];
+    // Non-modal toast: never steals the key window, so saving can never hang UI.
+    [ErrorPresenter showToast:@"Profile saved."];
     [self refreshHeader];
     return YES;
 }

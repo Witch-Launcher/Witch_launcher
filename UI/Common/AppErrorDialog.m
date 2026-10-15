@@ -7,6 +7,8 @@
 @interface UIView (AppErrorDialogTap)
 - (void)appErrorDialog_primaryTapped;
 - (void)appErrorDialog_secondaryTapped;
+- (void)appErrorDialog_dimTapped;
+- (void)appErrorDialog_teardownWindow;
 @end
 
 @implementation AppErrorDialog
@@ -115,7 +117,9 @@
         UIView *dim = [[UIView alloc] init];
         dim.translatesAutoresizingMaskIntoConstraints = NO;
         dim.backgroundColor = [UIColor colorWithWhite:0 alpha:0.30];
+        dim.userInteractionEnabled = YES;
         [overlay addSubview:dim];
+        [dim addGestureRecognizer:[[UITapGestureRecognizer alloc] initWithTarget:overlay action:@selector(appErrorDialog_dimTapped)]];
         [AmethystBlurView installInView:overlay];
 
         UIView *card = [[UIView alloc] init];
@@ -261,7 +265,24 @@
         window.hidden = YES;
         objc_setAssociatedObject(host, "errorDialogWindow", nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     }
+    // Defensive restore: prev window may be gone (e.g. stacked dialogs).
+    if (!prevKey || prevKey.hidden) {
+        for (UIScene *s in UIApplication.sharedApplication.connectedScenes) {
+            if (![s isKindOfClass:[UIWindowScene class]]) continue;
+            for (UIWindow *w in ((UIWindowScene *)s).windows) {
+                if (!w.hidden && w.windowLevel < UIWindowLevelAlert) { prevKey = w; break; }
+            }
+            if (prevKey && !prevKey.hidden) break;
+        }
+    }
     if (prevKey) [prevKey makeKeyAndVisible];
+}
+
+- (void)appErrorDialog_dimTapped {
+    // Dismiss without firing any button callback.
+    [UIView animateWithDuration:0.16 animations:^{ self.alpha = 0; } completion:^(BOOL f) {
+        [self appErrorDialog_teardownWindow];
+    }];
 }
 
 - (void)appErrorDialog_primaryTapped {

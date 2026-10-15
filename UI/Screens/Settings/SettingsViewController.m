@@ -262,6 +262,10 @@
             @{@"type": @"slider", @"label": localize(@"appearance.left_bar_blur", nil), @"key": @"amethyst_sidebar_blur", @"min": @0, @"max": @100, @"suffix": @"%"},
             @{@"type": @"slider", @"label": localize(@"appearance.right_panel_blur", nil), @"key": @"amethyst_rightpanel_blur", @"min": @0, @"max": @100, @"suffix": @"%"},
             @{@"type": @"slider", @"label": localize(@"appearance.bar_border_thickness", nil), @"key": @"amethyst_bar_border_width", @"min": @0, @"max": @4, @"suffix": @" pt"},
+            @{@"type": @"switch", @"label": @"UI Border", @"key": @"amethyst_ui_border_enabled"},
+            @{@"type": @"slider", @"label": @"Border radius", @"key": @"amethyst_ui_border_radius", @"min": @0, @"max": @24, @"suffix": @" pt"},
+            @{@"type": @"slider", @"label": @"Shell edge margin", @"key": @"amethyst_shell_gap", @"min": @0, @"max": @12, @"suffix": @" pt"},
+            @{@"type": @"slider", @"label": @"Panel spacing", @"key": @"amethyst_shell_inner_gap", @"min": @0, @"max": @12, @"suffix": @" pt"},
             @{@"type": @"export", @"label": localize(@"appearance.export_theme", nil)},
             @{@"type": @"import", @"label": localize(@"appearance.import_theme", nil)},
             @{@"type": @"color", @"label": localize(@"appearance.reset", nil), @"key": @"amethyst_reset_appearance"},
@@ -990,7 +994,11 @@
         }
     } else if ([type isEqualToString:@"switch"]) {
         UISwitch *sw = (UISwitch *)cell.accessoryView;
-        sw.on = getPrefBool(item[@"key"]);
+        if ([item[@"key"] isEqualToString:@"amethyst_ui_border_enabled"]) {
+            sw.on = [[NSUserDefaults standardUserDefaults] boolForKey:@"amethyst_ui_border_enabled"];
+        } else {
+            sw.on = getPrefBool(item[@"key"]);
+        }
     } else if ([type isEqualToString:@"slider"]) {
         UILabel *label = (UILabel *)[cell.contentView viewWithTag:kLabelTag];
         UILabel *valLabel = (UILabel *)[cell.contentView viewWithTag:kValLabelTag];
@@ -1011,6 +1019,10 @@
             // them from there), NOT in the launcher preference plist that
             // getPrefFloat targets. bg_blur is handled above, so this covers
             // settings/topbar/sidebar/rightpanel blur.
+            val = [[NSUserDefaults standardUserDefaults] floatForKey:item[@"key"]];
+        } else if ([item[@"key"] isEqualToString:@"amethyst_ui_border_radius"] ||
+                   [item[@"key"] isEqualToString:@"amethyst_shell_gap"] ||
+                   [item[@"key"] isEqualToString:@"amethyst_shell_inner_gap"]) {
             val = [[NSUserDefaults standardUserDefaults] floatForKey:item[@"key"]];
         } else {
             val = getPrefFloat(item[@"key"]);
@@ -1174,7 +1186,11 @@
     if (!ip) return;
     NSDictionary *item = [self itemAtIndexPath:ip inTable:table];
     setPrefBool(item[@"key"], sender.on);
-    if ([item[@"key"] isEqualToString:@"java.auto_ram"]) {
+    if ([item[@"key"] isEqualToString:@"amethyst_ui_border_enabled"]) {
+        // UI border lives in NSUserDefaults (ThemeManager reads it from there).
+        ThemeManager.shared.uiBorderEnabled = sender.on;
+        [[NSNotificationCenter defaultCenter] postNotificationName:ThemeDidChangeNotification object:nil];
+    } else if ([item[@"key"] isEqualToString:@"java.auto_ram"]) {
         if (!sender.on) {
             CGFloat autoRatio = getEntitlementValue(@"com.apple.private.memorystatus") ? 0.4 : 0.25;
             float autoVal = roundf((NSProcessInfo.processInfo.physicalMemory / 1048576) * autoRatio);
@@ -1213,6 +1229,13 @@
         ThemeManager.shared.backgroundBlurIntensity = val;
     } else if ([item[@"key"] isEqualToString:@"amethyst_ui_opacity"]) {
         ThemeManager.shared.uiOpacity = val / 100.0;
+    } else if ([item[@"key"] isEqualToString:@"amethyst_ui_border_radius"]) {
+        ThemeManager.shared.uiBorderCornerRadius = val;
+        [[NSNotificationCenter defaultCenter] postNotificationName:ThemeDidChangeNotification object:nil];
+    } else if ([item[@"key"] isEqualToString:@"amethyst_shell_gap"] ||
+               [item[@"key"] isEqualToString:@"amethyst_shell_inner_gap"]) {
+        [[NSUserDefaults standardUserDefaults] setFloat:val forKey:item[@"key"]];
+        [[NSNotificationCenter defaultCenter] postNotificationName:ThemeDidChangeNotification object:nil];
     } else if ([item[@"key"] hasPrefix:@"amethyst_"] && [item[@"key"] hasSuffix:@"_blur"]) {
         // Save UI panel blur to NSUserDefaults — the store AmethystBlurView
         // actually reads. setPrefFloat would write the launcher plist and the

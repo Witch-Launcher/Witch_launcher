@@ -28,6 +28,7 @@
 @property (nonatomic) AVPlayer *backgroundVideoPlayer;
 @property (nonatomic) BOOL didInitialLayout;
 @property (nonatomic) CAShapeLayer *shellBorder;
+@property (nonatomic) NSUInteger switchToken;
 // Portrait-only floating launch button (right panel is hidden in portrait).
 @property (nonatomic) UIButton *floatingLaunchBtn;
 @property (nonatomic) BOOL floatingLaunchIsCancel;
@@ -231,11 +232,12 @@
         _quickPanel.hidden = YES;
         _quickDim.hidden = YES;
     }
-    // Seamless frame (option B evolved): the three bars TOUCH each other and
-    // form one continuous shell around the content — rounded only on the
-    // OUTER corners.
-    CGFloat fGap = 5.0;      // screen-edge margin of the shell
-    CGFloat innerGap = 6.0;  // breathing room between shell and content
+    // Seamless shell: bars attach edge-to-edge with safe-area-aware insets
+    // (notch / Dynamic Island are handled via safeArea, no shrinking).
+    // Gaps are user-tunable (Appearance > Shell edge margin / Panel spacing).
+    NSUserDefaults *shellDefs = [NSUserDefaults standardUserDefaults];
+    CGFloat fGap = MAX(0.0, MIN([shellDefs floatForKey:@"amethyst_shell_gap"], 12.0));
+    CGFloat innerGap = MAX(0.0, MIN([shellDefs floatForKey:@"amethyst_shell_inner_gap"], 12.0));
 
     UIEdgeInsets safeArea = self.view.safeAreaInsets;
 
@@ -289,7 +291,7 @@
         [self.view bringSubviewToFront:_quickPanel];
         [self.view bringSubviewToFront:_quickPanelBtn];
         [self.view bringSubviewToFront:_floatingLaunchBtn];
-        [self layoutQuickPanel:NO];
+        [self layoutQuickPanel:_quickPanelOpen];
     }
 
     [self updateShellBorderPath];
@@ -302,6 +304,12 @@
 
 - (void)updateShellBorderPath {
     if (!_shellBorder) return;
+    if (!ThemeManager.shared.uiBorderEnabled) {
+        _shellBorder.hidden = YES;
+        _shellBorder.path = NULL;
+        return;
+    }
+    _shellBorder.hidden = NO;
     CGFloat w = MAX(0.0f, MIN([[NSUserDefaults standardUserDefaults] floatForKey:@"amethyst_bar_border_width"], 4.0f));
     _shellBorder.lineWidth = w;
     _shellBorder.strokeColor = [ThemeManager.shared.accentColor colorWithAlphaComponent:0.45].CGColor;
@@ -327,7 +335,7 @@
 }
 
 - (void)styleFloatingView:(UIView *)v corners:(CACornerMask)corners {
-    v.layer.cornerRadius = 16;
+    v.layer.cornerRadius = ThemeManager.shared.uiBorderCornerRadius;
     v.layer.maskedCorners = corners;
     // User-adjustable border thickness (Appearance > Bar Border Thickness).
     v.clipsToBounds = YES;
@@ -350,6 +358,7 @@
     [self styleFloatingView:_sidebarVC.view corners:kCALayerMinXMaxYCorner];
     [self styleFloatingView:_rightPanelVC.view corners:kCALayerMaxXMaxYCorner];
     [self updateShellBorderPath];
+    [self.view setNeedsLayout];
     [self updateFloatingLaunch];
     _quickPanel.backgroundColor = ThemeManager.shared.cardBackgroundColor;
     _quickPanelBtn.tintColor = ThemeManager.shared.accentColor;
@@ -415,6 +424,9 @@
     if (self.currentContentVC == vc) return;
 
     UIViewController *oldVC = self.currentContentVC;
+    // Token guards rapid A->B->A switches: a stale animation completion must
+    // never remove the view of the currently visible controller (blank tab).
+    NSUInteger token = ++_switchToken;
 
     [self.contentContainer.layer removeAllAnimations];
     for (UIView *subview in self.contentContainer.subviews) {
@@ -439,6 +451,16 @@
             oldVC.view.alpha = 0;
             oldVC.view.transform = CGAffineTransformMakeTranslation(-30, 0);
         } completion:^(BOOL finished) {
+            if (token != self->_switchToken || self->_currentContentVC == oldVC) {
+                // Superseded (or old became current again): only detach old if
+                // it is neither visible nor current.
+                if (self->_currentContentVC != oldVC && oldVC.view.superview == self.contentContainer && oldVC != vc) {
+                    [oldVC willMoveToParentViewController:nil];
+                    [oldVC.view removeFromSuperview];
+                    [oldVC removeFromParentViewController];
+                }
+                return;
+            }
             [oldVC willMoveToParentViewController:nil];
             [oldVC.view removeFromSuperview];
             [oldVC removeFromParentViewController];
@@ -485,6 +507,10 @@
 
 - (void)topBarDidTapSettings {
     [self.coordinator showSettings];
+}
+
+- (void)topBarDidTapDownloadHub {
+    [self.coordinator showDownloadHub];
 }
 
 #pragma mark - RightPanelDelegate

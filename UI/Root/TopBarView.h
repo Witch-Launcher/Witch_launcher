@@ -3,6 +3,7 @@
 @protocol TopBarDelegate <NSObject>
 - (void)topBarDidTapFileManager;
 - (void)topBarDidTapSettings;
+- (void)topBarDidTapDownloadHub;
 @end
 
 @interface TopBarView : UIView

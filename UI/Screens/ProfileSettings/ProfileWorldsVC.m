@@ -66,6 +66,10 @@
 
     _bottomBar = [[UIToolbar alloc] init];
     _bottomBar.translatesAutoresizingMaskIntoConstraints = NO;
+    _bottomBar.layer.cornerRadius = 18;
+    _bottomBar.clipsToBounds = YES;
+    _bottomBar.layer.borderWidth = 1;
+    _bottomBar.layer.borderColor = [ThemeManager.shared.accentColor colorWithAlphaComponent:0.25].CGColor;
     [self.view addSubview:_bottomBar];
     UIBarButtonItem *importItem = [[UIBarButtonItem alloc] initWithTitle:@"Import" style:UIBarButtonItemStylePlain target:self action:@selector(importTapped)];
     importItem.image = [UIImage systemImageNamed:@"tray.and.arrow.down"];

@@ -15,7 +15,6 @@
 @property (nonatomic) UILabel *accountNameLabel;
 @property (nonatomic) UIImageView *skinPreviewView;
 @property (nonatomic) UIButton *launchButton;
-@property (nonatomic) UIButton *downloadHubButton;
 @property (nonatomic) UILabel *versionsLabel;
 @property (nonatomic) UIStackView *versionsStack;
 @property (nonatomic) UIScrollView *versionsScroll;
@@ -122,15 +121,6 @@
     separator2.translatesAutoresizingMaskIntoConstraints = NO;
     [contentView addSubview:separator2];
 
-    _downloadHubButton = [UIButton buttonWithType:UIButtonTypeSystem];
-    _downloadHubButton.translatesAutoresizingMaskIntoConstraints = NO;
-    _downloadHubButton.titleLabel.font = [UIFont systemFontOfSize:18 weight:UIFontWeightRegular];
-    [_downloadHubButton setTitle:@"+" forState:UIControlStateNormal];
-    _downloadHubButton.layer.cornerRadius = 16;
-    _downloadHubButton.clipsToBounds = YES;
-    [_downloadHubButton addTarget:self action:@selector(didTapDownloadHub) forControlEvents:UIControlEventTouchUpInside];
-    [contentView addSubview:_downloadHubButton];
-
     _launchButton = [UIButton buttonWithType:UIButtonTypeSystem];
     _launchButton.translatesAutoresizingMaskIntoConstraints = NO;
     _launchButton.titleLabel.font = [UIFont systemFontOfSize:20 weight:UIFontWeightBold];
@@ -190,13 +180,9 @@
         [separator2.trailingAnchor constraintEqualToAnchor:contentView.trailingAnchor constant:-4],
         [separator2.heightAnchor constraintEqualToConstant:1],
 
-        [_downloadHubButton.centerXAnchor constraintEqualToAnchor:contentView.centerXAnchor],
-        [_downloadHubButton.topAnchor constraintEqualToAnchor:separator2.bottomAnchor constant:8],
-        [_downloadHubButton.widthAnchor constraintEqualToConstant:32],
-        [_downloadHubButton.heightAnchor constraintEqualToConstant:32],
-
         [_launchButton.leadingAnchor constraintEqualToAnchor:contentView.leadingAnchor constant:4],
         [_launchButton.trailingAnchor constraintEqualToAnchor:contentView.trailingAnchor constant:-4],
+        [_launchButton.topAnchor constraintEqualToAnchor:separator2.bottomAnchor constant:8],
         [_launchButton.bottomAnchor constraintEqualToAnchor:contentView.bottomAnchor constant:-4],
         [_launchButton.heightAnchor constraintEqualToConstant:44],
     ]];
@@ -213,8 +199,6 @@
     _versionsLabel.textColor = theme.secondaryTextColor;
     _addVersionButton.tintColor = theme.accentColor;
     _addVersionButton.backgroundColor = [theme.accentColor colorWithAlphaComponent:0.12];
-    _downloadHubButton.tintColor = theme.secondaryTextColor;
-    _downloadHubButton.backgroundColor = [theme.cardBackgroundColor colorWithAlphaComponent:0.5];
     _launchButton.backgroundColor = theme.accentColor;
     [_launchButton setTitleColor:theme.buttonTextColor forState:UIControlStateNormal];
 }
