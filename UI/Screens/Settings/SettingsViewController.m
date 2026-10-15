@@ -272,6 +272,7 @@
             @{@"type": @"switch", @"label": localize(@"preference.title.debug_ipad_ui", nil), @"key": @"debug.debug_ipad_ui"},
             @{@"type": @"switch", @"label": localize(@"preference.title.debug_skip_wait_jit", nil), @"key": @"debug.debug_skip_wait_jit"},
             @{@"type": @"switch", @"label": localize(@"preference.title.debug_always_attached_jit", nil), @"key": @"debug.debug_always_attached_jit"},
+            @{@"type": @"text", @"label": localize(@"preference.title.debug_mirror_mapped_code_cache", nil), @"key": @"debug.debug_mirror_mapped_code_cache", @"placeholder": @"-1"},
             @{@"type": @"switch", @"label": localize(@"preference.title.debug_hide_home_indicator", nil), @"key": @"debug.debug_hide_home_indicator"},
             @{@"type": @"switch", @"label": localize(@"preference.title.debug_auto_correction", nil), @"key": @"debug.debug_auto_correction"},
             @{@"type": @"switch", @"label": localize(@"preference.title.debug_render_log", nil), @"key": @"debug.debug_render_log"},

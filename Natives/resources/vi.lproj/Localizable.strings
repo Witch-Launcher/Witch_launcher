@@ -290,6 +290,8 @@
 
 "preference.title.debug_skip_wait_jit" = "Bỏ qua thông bảo \"Đang đợi JIT\"";
 "preference.detail.debug_skip_wait_jit" = "Tùy chọn này không cho phép chạy trò chơi mà không có JIT, thay vào đó trình khởi chạy sẽ bỏ qua việc kiểm tra. Hữu ích nếu kiểm tra thất bại với một số trình jailbreak.";
+"preference.title.debug_mirror_mapped_code_cache" = "Mirror JIT (-1 tự động, 0 classic, 1 mirror)";
+"preference.detail.debug_mirror_mapped_code_cache" = "Đường code-cache trên iOS 26+. Để trống/-1 = classic trước (khuyên dùng). 1 = mirror qua debugger (cần script Universal JIT 26). Chỉ đổi khi được yêu cầu.";
 "preference.title.debug_ipad_ui" = "Mở khóa giao diện iPadOS";
 "preference.detail.debug_ipad_ui" = "Mở khóa giao diện người dùng mở rộng cho iPad (thông báo, bàn phím,..) nếu được bật hoặc giao diện iPhone bị tắt.";
 "preference.title.debug_auto_correction" = "Tự động sửa";

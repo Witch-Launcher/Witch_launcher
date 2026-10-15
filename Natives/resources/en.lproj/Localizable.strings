@@ -430,6 +430,8 @@
 
 "preference.title.debug_always_attached_jit" = "Keep attached to StikDebug";
 "preference.detail.debug_always_attached_jit" = "Enable this if your mods require loading .dylib at runtime. When this is on, StikDebug's PiP should not be closed during gameplay.";
+"preference.title.debug_mirror_mapped_code_cache" = "Mirror JIT (-1 auto, 0 classic, 1 mirror)";
+"preference.detail.debug_mirror_mapped_code_cache" = "iOS 26+ code-cache path. -1/empty = classic JIT first (recommended: matches the working main-branch behavior). 1 = debugger-backed mirror (needs Universal JIT 26 script). Change only if told to.";
 "preference.title.debug_skip_wait_jit" = "Skip \"Waiting for JIT\" dialog";
 "preference.detail.debug_skip_wait_jit" = "This does not allow you to launch without JIT, instead this skips debugger check, because check fails on certain jailbreaks.";
 "preference.title.debug_ipad_ui" = "Unlock iPadOS UI";

@@ -447,6 +447,11 @@ int launchJVMWithArgs(NSString *username, id launchTarget, int width, int height
     BOOL jit26Handshake = DeviceHasJITFlags(JIT_FLAG_IS_IOS_26);
     NSLog(@"[JavaLauncher] JIT flags 0x%X -> requiresDebugJITMapping=%d jit26Handshake=%d",
         (unsigned)DeviceGetJITFlags(NO), requiresDebugJITMapping, jit26Handshake);
+    // Script liveness + preflight outcome. The handshake below only RECORDS them;
+    // enforcement happens at the mirror decision (classic path needs an attached
+    // debugger, not a script — so script failures must NOT abort a classic launch).
+    BOOL jitScriptAlive = YES;
+    BOOL preflightOK = NO;
     if (jit26Handshake) {
         // Ensure UniversalJIT26.js is synced to Documents, LCAppInfo.plist, and Clipboard
         init_setupUniversalJITScript(YES);
@@ -498,32 +503,15 @@ int launchJVMWithArgs(NSString *username, id launchTarget, int width, int height
         NSLog(@"[JavaLauncher] JIT26 probe returned %p (txm=%d, flags=0x%X)", probeMapping,
             DeviceHasTXM(), (unsigned)DeviceGetJITFlags(NO));
         JITReportLine(@"probe=%p valid=%d", probeMapping, JIT26ProbeLooksValid(probeMapping));
-        if (!JIT26ProbeLooksValid(probeMapping)) {
-            sigaction(SIGTRAP, &oldTrapSa, NULL);
+        // Soft-fail: a dead script only matters for the mirror path (enforced at
+        // the mirror decision). The classic path needs attach, not a script.
+        BOOL probeValid = JIT26ProbeLooksValid(probeMapping);
+        if (!probeValid) {
+            NSLog(@"[JavaLauncher] probe not serviced (got %p) — recording script-dead, continuing to classic evaluation", probeMapping);
             init_setupUniversalJITScript(YES);
-            NSString *lcAppInfoPath = [NSBundle.mainBundle.bundlePath stringByAppendingPathComponent:@"LCAppInfo.plist"];
-            if ([fm fileExistsAtPath:lcAppInfoPath]) {
-                showDialog(localize(@"Error", nil),
-                    [NSString stringWithFormat:
-                         @"StikDebug probe failed (got %p). Expected a real RX page, not a legacy error code.\n\n"
-                          @"Witch refreshed UniversalJIT26.js in LiveContainer & clipboard — restart LiveContainer, re-enable JIT, then try again.\n\n"
-                          @"Please send Documents/JITReport-latest.txt with your report.",
-                        probeMapping]);
-                [PLLogOutputView handleExitCode:1];
-                return 1;
-            }
-            showDialog(localize(@"Error", nil),
-                [NSString stringWithFormat:
-                    @"StikDebug probe failed (got %p). JIT is not servicing Witch's breakpoints.\n\n"
-                     @"Make sure the JIT toggle for Witch in StikDebug is ON, close and reopen Witch after "
-                     @"enabling it, and that the assigned script is \"Universal JIT 26\".\n\n"
-                      @"UniversalJIT26.js was copied to your clipboard and refreshed in Witch Documents — "
-                      @"paste/assign it in StikDebug, re-enable JIT, then launch again.\n\n"
-                      @"Please send Documents/JITReport-latest.txt with your report.",
-                    probeMapping]);
-            [PLLogOutputView handleExitCode:1];
-            return 1;
+            jitScriptAlive = NO;
         }
+        if (jitScriptAlive) {
         NSString *extPath = [NSBundle.mainBundle pathForResource:@"UniversalJIT26Extension" ofType:@"js"];
         NSString *extensionScript = extPath ? [NSString stringWithContentsOfFile:extPath encoding:NSUTF8StringEncoding error:nil] : nil;
         if (extensionScript.length > 0) {
@@ -539,27 +527,23 @@ int launchJVMWithArgs(NSString *username, id launchTarget, int width, int height
             }
             g_jitTrapArmed = 0;
             if (!extensionDelivered) {
-                sigaction(SIGTRAP, &oldTrapSa, NULL);
                 init_setupUniversalJITScript(YES);
                 JITReportLine(@"extension=UNSERVICED");
-                showDialog(localize(@"Error", nil),
-                    @"Witch could not upload its JIT helpers to the debugger.\n\n"
-                     @"The script assigned in StikDebug does not implement command 2 (0x68) — "
-                     @"this happens with attachDetach.js or a mismatched universal.js.\n\n"
-                     @"UniversalJIT26.js was copied to your clipboard and refreshed in Witch Documents — "
-                     @"assign it in StikDebug (as \"Universal JIT 26\"), re-enable JIT, then launch again.\n\n"
-                     @"Please send Documents/JITReport-latest.txt with your report.");
-                [PLLogOutputView handleExitCode:1];
-                return 1;
-            }
+                NSLog(@"[JavaLauncher] Extension brk was NOT serviced — the StikDebug script "
+                      @"does not implement command 2 (0x68). Recording script-dead.");
+                jitScriptAlive = NO;
+            } else {
             NSLog(@"[JavaLauncher] Extension delivered; if the game later hangs, confirm "
                   @"'Amethyst UniversalJIT26 extension loaded' appears in the StikDebug log");
             JITReportLine(@"extension=delivered");
+            }
         } else {
             NSLog(@"[JavaLauncher] UniversalJIT26Extension.js is missing or empty; using assigned base JIT script only");
         }
-        // Debugger is servicing us — restore default SIGTRAP behavior for the JVM run.
+        } // end extension attempt (skipped entirely when probe already failed)
+        // ALWAYS restore the pre-handshake SIGTRAP disposition before continuing.
         sigaction(SIGTRAP, &oldTrapSa, NULL);
+        if (jitScriptAlive) {
         // Install the dyld LV bypass WHILE StikDebug is still attached. If we wait
         // until after detach-after-first-br, processIsCurrentlyDebugged() is false
         // and unsigned JNA / renderer dylibs fail with code-signature invalid.
@@ -571,31 +555,28 @@ int launchJVMWithArgs(NSString *username, id launchTarget, int width, int height
         init_jit_vm_remap_hook();
         // make sure we don't get stuck in EXC_BAD_ACCESS
         task_set_exception_ports(mach_task_self(), EXC_MASK_BAD_ACCESS, 0, EXCEPTION_DEFAULT, MACHINE_THREAD_STATE);
-        // Pre-flight: prove debugger-blessed memory is really executable before
-        // handing control to the JVM. A stale debugger / detached session /
-        // wrong script fails HERE with a dialog instead of a black-screen crash
-        // inside JLI_Launch (the JVM abort path cannot show UI).
-        BOOL preflightOK = JIT26ExecPreflight();
+        // Pre-flight: prove debugger-blessed memory is really executable. A failure
+        // is RECORDED, not fatal here: the mirror decision below is the single
+        // enforcement point (classic path may still work via native MAP_JIT bless).
+        preflightOK = JIT26ExecPreflight();
         JITReportLine(@"preflight=%d", preflightOK);
         if (!preflightOK) {
-            UIKit_returnToSplitView();
-            showDialog(localize(@"Error", nil),
-                @"JIT memory test failed: the debugger cannot provide executable memory "
-                 @"on this device.\n\n"
-                 @"1. Update StikDebug to 3.1.6 or newer\n"
-                 @"2. Assign \"Universal JIT 26\" (UniversalJIT26.js) in StikDebug\n"
-                 @"3. Re-enable JIT for Witch, close and reopen Witch, then try again\n\n"
-                 @"Please send Documents/JITReport-latest.txt with your report.");
-            [PLLogOutputView handleExitCode:1];
-            return 1;
+            NSLog(@"[JavaLauncher] preflight failed — recording; mirror gate decides");
+            jitScriptAlive = NO;
         }
+        } // end script-dependent section (dyld bypass + preflight need a live script)
+        JITReportLine(@"script_alive=%d", jitScriptAlive);
     }
     // iOS 26/27 still needs the LV bypass for JNA, renderer dylibs, and mods
     // extracted to Documents. StikDebug keeps us CS_DEBUGGED so the mirrored
     // dyld patches are legal — do not leave this off just because
     // requiresDebugJITMapping is set. init_bypassDyldLibValidation is idempotent.
     BOOL debuggerAttached = processIsCurrentlyDebugged();
-    if (jit26Handshake || !requiresDebugJITMapping || jit26AlwaysAttached || debuggerAttached) {
+    // Skip the (debugger-dependent) bypass when the script is dead: its x16=4 brks
+    // would otherwise trap with the default disposition. Unsigned runtime libs
+    // then fail later with visible signature errors instead of silent death.
+    if ((jit26Handshake || !requiresDebugJITMapping || jit26AlwaysAttached || debuggerAttached) &&
+        (jitScriptAlive || !jit26Handshake)) {
         if (jit26AlwaysAttached) {
             // Only allow StikDebug to catch our breakpoints to prevent any stutters
             task_set_exception_ports(mach_task_self(), EXC_MASK_ALL & ~EXC_MASK_BREAKPOINT, 0,
@@ -963,27 +944,53 @@ int launchJVMWithArgs(NSString *username, id launchTarget, int width, int height
     margv[++margc] = "-XX:+UseParallelGC";
     margv[++margc] = "-XX:ParallelGCThreads=2";
 
-    // On iOS 26+, use mirror mapped JIT for better code cache performance.
-    // The patched runtimes interpret -XX:+MirrorMappedCodeCache as permission
-    // to request the debugger-backed RX mapping. Only enable it after the
-    // Universal JIT script has been selected for a device that cannot create
-    // RX mappings (JIT_FLAG_FORCE_MIRRORED), regardless of TXM presence, since
-    // iOS 26.6+/27 blocks direct executable mappings on every device.
-    // Patched Java 21/25 always route code-cache writes through mirror_w on iOS 26+,
-    // including iOS 27. Turning MirrorMappedCodeCache off does not disable mirror
-    // usage — it only skips the debugger-backed RX prepare and SIGBUSes in
-    // StubRoutines::call_stub during JVM init. Override with
-    // debug.debug_mirror_mapped_code_cache: -1 = auto, 0 = off, 1 = on.
+    // JIT mode for iOS 26+: classic-first. Field evidence (main-branch 2.1.3 boots
+    // and runs MC 26.2 on iPhone 14 Pro / iOS 27.0.1 TXM with NO mirror flag and
+    // NO script dance) shows plain StikDebug attach blesses MAP_JIT natively, so
+    // the custom mirror allocator is opt-in, not mandatory. The old theory that
+    // "flag off always SIGBUSes in call_stub" was never confirmed on device and
+    // contradicts that run — the device round decides, not the theory.
+    // debug.debug_mirror_mapped_code_cache: -1 = auto (classic), 0 = off, 1 = on.
+    // If a device SIGBUSes in StubRoutines::call_stub on classic, set it to 1
+    // (mirror path, needs a live script + passing preflight, enforced below).
     BOOL mirrorEnabled;
     id mirrorOverrideObj = getPrefObject(@"debug.debug_mirror_mapped_code_cache");
     NSInteger mirrorOverride = mirrorOverrideObj ? [mirrorOverrideObj integerValue] : -1;
     if (mirrorOverride >= 0) {
         mirrorEnabled = mirrorOverride > 0;
         NSLog(@"[JavaLauncher] MirrorMappedCodeCache override set to %s", mirrorEnabled ? "ON" : "OFF");
-    } else if (@available(iOS 26.0, *)) {
-        mirrorEnabled = needsMirrorJITPrepare;
     } else {
         mirrorEnabled = NO;
+        NSLog(@"[JavaLauncher] MirrorMappedCodeCache auto: OFF (classic-first; set debug.debug_mirror_mapped_code_cache=1 to force mirror)");
+    }
+    JITReportLine(@"mirror=%d script_alive=%d preflight=%d", mirrorEnabled, jitScriptAlive, preflightOK);
+    // Single enforcement point: the mirror path NEEDS a live script (0x6a/prepare)
+    // and a passing exec preflight. Classic only needs the attached debugger
+    // (checked at handshake begin), so script problems must not block it.
+    if (mirrorEnabled && !jitScriptAlive) {
+        UIKit_returnToSplitView();
+        showDialog(localize(@"Error", nil),
+            @"The mirror JIT path needs a working StikDebug script, but none serviced Witch's breakpoints.\n\n"
+             @"1. Update StikDebug to 3.1.6 or newer\n"
+             @"2. Assign \"Universal JIT 26\" (UniversalJIT26.js) in StikDebug\n"
+             @"3. Re-enable JIT for Witch, close and reopen Witch, then try again\n\n"
+             @"(Or set debug.debug_mirror_mapped_code_cache=0 for the classic path.)\n\n"
+             @"Please send Documents/JITReport-latest.txt with your report.");
+        [PLLogOutputView handleExitCode:1];
+        return 1;
+    }
+    if (mirrorEnabled && !preflightOK) {
+        UIKit_returnToSplitView();
+        showDialog(localize(@"Error", nil),
+            @"JIT memory test failed: the debugger cannot provide executable memory "
+             @"on this device, but the mirror path requires it.\n\n"
+             @"1. Update StikDebug to 3.1.6 or newer\n"
+             @"2. Assign \"Universal JIT 26\" (UniversalJIT26.js) in StikDebug\n"
+             @"3. Re-enable JIT for Witch, close and reopen Witch, then try again\n\n"
+             @"(Or set debug.debug_mirror_mapped_code_cache=0 for the classic path.)\n\n"
+             @"Please send Documents/JITReport-latest.txt with your report.");
+        [PLLogOutputView handleExitCode:1];
+        return 1;
     }
     if (mirrorEnabled) {
         margv[++margc] = "-XX:+MirrorMappedCodeCache";
