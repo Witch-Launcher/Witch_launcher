@@ -655,18 +655,33 @@ static NSString *const kVerCell = @"VerCell";
     } completion:^(NSString *path, NSError *dlError) {
         [[DownloadManager shared] completeTask:hubTask error:dlError];
         if (!path) return;
-        NSString *modsDir = [VersionDirectoryManager.shared modsPathForVersion:mcVersion];
-        NSString *targetPath = [modsDir stringByAppendingPathComponent:filename];
-        if (![targetPath hasSuffix:@".jar"]) targetPath = [targetPath stringByAppendingPathExtension:@"jar"];
-        [[NSFileManager defaultManager] createDirectoryAtPath:modsDir withIntermediateDirectories:YES attributes:nil error:nil];
+        NSDictionary *strongMod = weakSelf.mod;
+        NSString *projectType = strongMod[@"project_type"];
+        if (![projectType isKindOfClass:[NSString class]] || projectType.length == 0) projectType = @"mod";
+        NSString *ext = [[InstalledModsManager shared] extensionForProjectType:projectType];
+        NSString *contentDir = [[InstalledModsManager shared] dirForProjectType:projectType version:mcVersion];
+        NSString *targetPath = [contentDir stringByAppendingPathComponent:filename];
+        if (![targetPath hasSuffix:[@"." stringByAppendingString:ext]]) targetPath = [targetPath stringByAppendingPathExtension:ext];
+        [[NSFileManager defaultManager] createDirectoryAtPath:contentDir withIntermediateDirectories:YES attributes:nil error:nil];
         [[NSFileManager defaultManager] removeItemAtPath:targetPath error:nil];
         NSError *moveError = nil;
         [[NSFileManager defaultManager] moveItemAtPath:path toPath:targetPath error:&moveError];
         if (moveError == nil) {
-            [[InstalledModsManager shared] recordProjectId:weakSelf.mod[@"project_id"]
-                                                     title:weakSelf.mod[@"title"]
+            NSString *source = [ModSourceService isCurseForgeMod:strongMod] ? @"curseforge" : @"modrinth";
+            NSString *category = [[InstalledModsManager shared] categoryForProjectType:projectType];
+            NSString *loader = [VersionDirectoryManager.shared.currentProfile.modLoader lowercaseString] ?: @"";
+            NSString *iconURL = [strongMod[@"icon_url"] isKindOfClass:[NSString class]] ? strongMod[@"icon_url"] : @"";
+            [[InstalledModsManager shared] recordProjectId:strongMod[@"project_id"]
+                                                     title:strongMod[@"title"]
                                             versionNumber:ver[@"version_number"]
-                                                  filename:targetPath.lastPathComponent];
+                                                  filename:targetPath.lastPathComponent
+                                                   iconURL:iconURL
+                                                    source:source
+                                                  category:category
+                                                 mcVersion:mcVersion
+                                                    loader:loader
+                                               projectType:projectType
+                                                   profile:nil];
         }
     }];
 }
@@ -936,10 +951,20 @@ static NSString *const kVerCell = @"VerCell";
         NSError *moveError = nil;
         [[NSFileManager defaultManager] moveItemAtPath:path toPath:targetPath error:&moveError];
         if (moveError == nil) {
+            NSString *depSource = [dep[@"_source"] isKindOfClass:[NSString class]] ? dep[@"_source"] : @"modrinth";
+            NSString *depLoader = [VersionDirectoryManager.shared.currentProfile.modLoader lowercaseString] ?: @"";
+            NSString *depIcon = [dep[@"icon_url"] isKindOfClass:[NSString class]] ? dep[@"icon_url"] : @"";
             [[InstalledModsManager shared] recordProjectId:dep[@"project_id"]
                                                      title:dep[@"title"]
-                                            versionNumber:dep[@"version_number"]
-                                                  filename:targetPath.lastPathComponent];
+                                            versionNumber:dep[@"version"]
+                                                  filename:targetPath.lastPathComponent
+                                                   iconURL:depIcon
+                                                    source:depSource
+                                                  category:InstalledItemCategoryMod
+                                                 mcVersion:mcVersion
+                                                    loader:depLoader
+                                               projectType:@"mod"
+                                                   profile:nil];
         }
     }];
 }

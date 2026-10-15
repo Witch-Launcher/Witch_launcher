@@ -9,10 +9,13 @@
 #import "AmethystBlurView.h"
 #import "DownloadManager.h"
 #import "HapticManager.h"
+#import "PLProfiles.h"
+#import "VersionDirectoryManager.h"
+#import "authenticator/BaseAuthenticator.h"
 #import <AVFoundation/AVFoundation.h>
 #import <QuartzCore/QuartzCore.h>
 
-@interface AmethystRootViewController () <RightPanelDelegate, TopBarDelegate>
+@interface AmethystRootViewController () <RightPanelDelegate, TopBarDelegate, UITableViewDelegate, UITableViewDataSource>
 @property (nonatomic) TopBarView *topBar;
 @property (nonatomic) SidebarViewController *sidebarVC;
 @property (nonatomic) RightPanelViewController *rightPanelVC;
@@ -28,6 +31,14 @@
 // Portrait-only floating launch button (right panel is hidden in portrait).
 @property (nonatomic) UIButton *floatingLaunchBtn;
 @property (nonatomic) BOOL floatingLaunchIsCancel;
+// Portrait quick panel: versions + account, slides in from the right.
+@property (nonatomic) UIButton *quickPanelBtn;
+@property (nonatomic) UIView *quickDim;
+@property (nonatomic) UIView *quickPanel;
+@property (nonatomic) UITableView *quickTable;
+@property (nonatomic) UIButton *quickAccountBtn;
+@property (nonatomic) NSArray<NSString *> *quickVersions;
+@property (nonatomic) BOOL quickPanelOpen;
 @end
 
 @implementation AmethystRootViewController
@@ -105,6 +116,89 @@
     [_floatingLaunchBtn addGestureRecognizer:lp];
     [self.view addSubview:_floatingLaunchBtn];
 
+    // Portrait quick-panel trigger (versions + account).
+    _quickPanelBtn = [UIButton buttonWithType:UIButtonTypeSystem];
+    _quickPanelBtn.backgroundColor = ThemeManager.shared.cardBackgroundColor;
+    [_quickPanelBtn setImage:[UIImage systemImageNamed:@"list.bullet"] forState:UIControlStateNormal];
+    _quickPanelBtn.tintColor = ThemeManager.shared.accentColor;
+    _quickPanelBtn.layer.cornerRadius = 24;
+    _quickPanelBtn.clipsToBounds = NO;
+    _quickPanelBtn.layer.shadowColor = UIColor.blackColor.CGColor;
+    _quickPanelBtn.layer.shadowOpacity = 0.30;
+    _quickPanelBtn.layer.shadowRadius = 10;
+    _quickPanelBtn.layer.shadowOffset = CGSizeMake(0, 3);
+    _quickPanelBtn.layer.borderWidth = 1;
+    _quickPanelBtn.layer.borderColor = [ThemeManager.shared.accentColor colorWithAlphaComponent:0.35].CGColor;
+    _quickPanelBtn.accessibilityLabel = @"Versions and account";
+    _quickPanelBtn.hidden = YES;
+    [_quickPanelBtn addTarget:self action:@selector(toggleQuickPanel) forControlEvents:UIControlEventTouchUpInside];
+    [self.view addSubview:_quickPanelBtn];
+
+    // Quick panel: dim + card sliding from the right edge.
+    _quickDim = [[UIView alloc] init];
+    _quickDim.backgroundColor = [UIColor colorWithWhite:0 alpha:0.35];
+    _quickDim.alpha = 0;
+    _quickDim.hidden = YES;
+    [_quickDim addGestureRecognizer:[[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(hideQuickPanel)]];
+    [self.view addSubview:_quickDim];
+
+    _quickPanel = [[UIView alloc] init];
+    _quickPanel.backgroundColor = ThemeManager.shared.cardBackgroundColor;
+    _quickPanel.layer.cornerRadius = 18;
+    _quickPanel.clipsToBounds = YES;
+    _quickPanel.layer.borderWidth = 1;
+    _quickPanel.layer.borderColor = [ThemeManager.shared.accentColor colorWithAlphaComponent:0.30].CGColor;
+    _quickPanel.hidden = YES;
+    [self.view addSubview:_quickPanel];
+
+    UILabel *quickTitle = [[UILabel alloc] init];
+    quickTitle.translatesAutoresizingMaskIntoConstraints = NO;
+    quickTitle.text = @"Versions & Account";
+    quickTitle.font = [UIFont systemFontOfSize:16 weight:UIFontWeightBold];
+    quickTitle.textColor = ThemeManager.shared.primaryTextColor;
+    quickTitle.tag = 9001;
+    [_quickPanel addSubview:quickTitle];
+
+    UIButton *quickClose = [UIButton buttonWithType:UIButtonTypeSystem];
+    quickClose.translatesAutoresizingMaskIntoConstraints = NO;
+    [quickClose setImage:[UIImage systemImageNamed:@"xmark.circle.fill"] forState:UIControlStateNormal];
+    quickClose.tintColor = ThemeManager.shared.secondaryTextColor;
+    [quickClose addTarget:self action:@selector(hideQuickPanel) forControlEvents:UIControlEventTouchUpInside];
+    [_quickPanel addSubview:quickClose];
+
+    _quickAccountBtn = [UIButton buttonWithType:UIButtonTypeSystem];
+    _quickAccountBtn.translatesAutoresizingMaskIntoConstraints = NO;
+    _quickAccountBtn.contentHorizontalAlignment = UIControlContentHorizontalAlignmentLeft;
+    _quickAccountBtn.titleLabel.font = [UIFont systemFontOfSize:15 weight:UIFontWeightSemibold];
+    [_quickAccountBtn addTarget:self action:@selector(quickAccountTapped) forControlEvents:UIControlEventTouchUpInside];
+    [_quickPanel addSubview:_quickAccountBtn];
+
+    _quickTable = [[UITableView alloc] initWithFrame:CGRectZero style:UITableViewStylePlain];
+    _quickTable.translatesAutoresizingMaskIntoConstraints = NO;
+    _quickTable.delegate = self;
+    _quickTable.dataSource = self;
+    _quickTable.backgroundColor = [UIColor clearColor];
+    _quickTable.rowHeight = 48;
+    [_quickPanel addSubview:_quickTable];
+
+    [NSLayoutConstraint activateConstraints:@[
+        [quickTitle.topAnchor constraintEqualToAnchor:_quickPanel.topAnchor constant:14],
+        [quickTitle.leadingAnchor constraintEqualToAnchor:_quickPanel.leadingAnchor constant:16],
+        [quickClose.centerYAnchor constraintEqualToAnchor:quickTitle.centerYAnchor],
+        [quickClose.trailingAnchor constraintEqualToAnchor:_quickPanel.trailingAnchor constant:-12],
+        [quickClose.widthAnchor constraintEqualToConstant:28],
+        [quickClose.heightAnchor constraintEqualToConstant:28],
+        [_quickAccountBtn.topAnchor constraintEqualToAnchor:quickTitle.bottomAnchor constant:8],
+        [_quickAccountBtn.leadingAnchor constraintEqualToAnchor:_quickPanel.leadingAnchor constant:16],
+        [_quickAccountBtn.trailingAnchor constraintEqualToAnchor:_quickPanel.trailingAnchor constant:-16],
+        [_quickAccountBtn.heightAnchor constraintEqualToConstant:44],
+        [_quickTable.topAnchor constraintEqualToAnchor:_quickAccountBtn.bottomAnchor constant:8],
+        [_quickTable.leadingAnchor constraintEqualToAnchor:_quickPanel.leadingAnchor constant:8],
+        [_quickTable.trailingAnchor constraintEqualToAnchor:_quickPanel.trailingAnchor constant:-8],
+        [_quickTable.bottomAnchor constraintEqualToAnchor:_quickPanel.bottomAnchor constant:-12],
+    ]];
+    [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(quickVersionsChanged) name:@"VersionDidChangeNotification" object:nil];
+
     // One continuous stroke around the whole shell — no seams at junctions.
     // CRITICAL: CAShapeLayer defaults to an OPAQUE BLACK fillColor. The
     // even-odd path below fills the entire ring where the top/left/right
@@ -131,6 +225,12 @@
     CGFloat rightPanelWidth = isPortrait ? 0.0 : 180.0;
     _rightPanelVC.view.hidden = isPortrait;
     _floatingLaunchBtn.hidden = !isPortrait;
+    _quickPanelBtn.hidden = !isPortrait;
+    if (!isPortrait && _quickPanelOpen) {
+        _quickPanelOpen = NO;
+        _quickPanel.hidden = YES;
+        _quickDim.hidden = YES;
+    }
     // Seamless frame (option B evolved): the three bars TOUCH each other and
     // form one continuous shell around the content — rounded only on the
     // OUTER corners.
@@ -182,7 +282,14 @@
         _floatingLaunchBtn.frame = CGRectMake(bounds.size.width - rightInset - margin - btnSize,
                                               bounds.size.height - safeArea.bottom - margin - btnSize,
                                               btnSize, btnSize);
+        _quickPanelBtn.frame = CGRectMake(bounds.size.width - rightInset - margin - 48,
+                                          bounds.size.height - safeArea.bottom - margin - btnSize - 12 - 48,
+                                          48, 48);
+        [self.view bringSubviewToFront:_quickDim];
+        [self.view bringSubviewToFront:_quickPanel];
+        [self.view bringSubviewToFront:_quickPanelBtn];
         [self.view bringSubviewToFront:_floatingLaunchBtn];
+        [self layoutQuickPanel:NO];
     }
 
     [self updateShellBorderPath];
@@ -244,6 +351,9 @@
     [self styleFloatingView:_rightPanelVC.view corners:kCALayerMaxXMaxYCorner];
     [self updateShellBorderPath];
     [self updateFloatingLaunch];
+    _quickPanel.backgroundColor = ThemeManager.shared.cardBackgroundColor;
+    _quickPanelBtn.tintColor = ThemeManager.shared.accentColor;
+    [_quickTable reloadData];
     if (theme.backgroundVideoURL) {
         [self setupBackgroundVideo:theme.backgroundVideoURL];
         _backgroundImageView.hidden = YES;
@@ -413,6 +523,136 @@
 
 - (void)rightPanelDidEditVersion:(NSString *)versionName {
     [self.coordinator editVersion:versionName];
+}
+
+#pragma mark - Portrait quick panel (versions + account)
+
+- (CGFloat)quickPanelWidth {
+    return MIN(300.0, self.view.bounds.size.width * 0.82);
+}
+
+- (void)layoutQuickPanel:(BOOL)visible {
+    UIEdgeInsets safeArea = self.view.safeAreaInsets;
+    CGFloat w = [self quickPanelWidth];
+    CGFloat top = safeArea.top + 2 + 44.0;
+    CGFloat h = self.view.bounds.size.height - top - safeArea.bottom - 5.0;
+    _quickDim.frame = self.view.bounds;
+    CGFloat x = visible ? (self.view.bounds.size.width - w - 5.0) : self.view.bounds.size.width;
+    _quickPanel.frame = CGRectMake(x, top, w, MAX(h, 200));
+}
+
+- (void)toggleQuickPanel {
+    if (_quickPanelOpen) [self hideQuickPanel];
+    else [self showQuickPanel];
+}
+
+- (void)showQuickPanel {
+    [[HapticManager shared] play:HapticTypeLight];
+    [self quickVersionsChanged];
+    NSString *name = BaseAuthenticator.current.authData[@"username"];
+    [_quickAccountBtn setTitle:(name.length > 0 ? name : @"Add account") forState:UIControlStateNormal];
+    [_quickAccountBtn setTitleColor:ThemeManager.shared.accentColor forState:UIControlStateNormal];
+    _quickPanelOpen = YES;
+    _quickDim.hidden = NO;
+    _quickPanel.hidden = NO;
+    [self.view bringSubviewToFront:_quickDim];
+    [self.view bringSubviewToFront:_quickPanel];
+    [self.view bringSubviewToFront:_quickPanelBtn];
+    [self.view bringSubviewToFront:_floatingLaunchBtn];
+    [self layoutQuickPanel:NO];
+    _quickDim.alpha = 0;
+    [UIView animateWithDuration:0.32 delay:0 usingSpringWithDamping:0.85 initialSpringVelocity:0.6 options:UIViewAnimationOptionCurveEaseOut animations:^{
+        [self layoutQuickPanel:YES];
+        self->_quickDim.alpha = 1;
+    } completion:nil];
+}
+
+- (void)hideQuickPanel {
+    if (!_quickPanelOpen) return;
+    [[HapticManager shared] play:HapticTypeLight];
+    _quickPanelOpen = NO;
+    [UIView animateWithDuration:0.24 delay:0 options:UIViewAnimationOptionCurveEaseIn animations:^{
+        [self layoutQuickPanel:NO];
+        self->_quickDim.alpha = 0;
+    } completion:^(BOOL finished) {
+        self->_quickPanel.hidden = YES;
+        self->_quickDim.hidden = YES;
+    }];
+}
+
+- (void)quickVersionsChanged {
+    NSString *versionsDir = VersionDirectoryManager.shared.versionsRootPath;
+    NSArray *contents = [[NSFileManager defaultManager] contentsOfDirectoryAtPath:versionsDir error:nil] ?: @[];
+    NSMutableArray *versions = [NSMutableArray array];
+    for (NSString *item in contents) {
+        NSString *fullPath = [versionsDir stringByAppendingPathComponent:item];
+        BOOL isDir = NO;
+        if ([[NSFileManager defaultManager] fileExistsAtPath:fullPath isDirectory:&isDir] && isDir) {
+            [versions addObject:item];
+        }
+    }
+    _quickVersions = [versions sortedArrayUsingSelector:@selector(localizedStandardCompare:)];
+    [_quickTable reloadData];
+}
+
+- (NSString *)displayNameForVersion:(NSString *)ver {
+    for (NSString *key in PLProfiles.current.profiles) {
+        NSDictionary *p = PLProfiles.current.profiles[key];
+        if ([p[@"lastVersionId"] isEqualToString:ver] && [p[@"name"] isKindOfClass:[NSString class]]) {
+            return p[@"name"];
+        }
+    }
+    VersionProfile *profile = [VersionProfile profileWithVersionId:ver];
+    NSString *mcVersion = profile.mcVersion ?: ver;
+    if (![profile.modLoader isEqualToString:@"Vanilla"] && profile.modLoader.length > 0) {
+        return [NSString stringWithFormat:@"%@-%@", mcVersion, profile.modLoader];
+    }
+    return mcVersion;
+}
+
+- (void)quickAccountTapped {
+    [self hideQuickPanel];
+    [self rightPanelDidTapAccount];
+}
+
+- (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section {
+    if (tableView == _quickTable) return _quickVersions.count + 1;
+    return 0;
+}
+
+- (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {
+    if (tableView != _quickTable) return [[UITableViewCell alloc] init];
+    static NSString *cellId = @"QuickVersionCell";
+    UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:cellId];
+    if (!cell) {
+        cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleDefault reuseIdentifier:cellId];
+        cell.backgroundColor = [UIColor clearColor];
+        cell.textLabel.font = [UIFont systemFontOfSize:15 weight:UIFontWeightMedium];
+    }
+    if (indexPath.row < (NSInteger)_quickVersions.count) {
+        NSString *ver = _quickVersions[indexPath.row];
+        cell.textLabel.text = [self displayNameForVersion:ver];
+        BOOL isCurrent = [ver isEqualToString:VersionDirectoryManager.shared.currentVersion];
+        cell.accessoryType = isCurrent ? UITableViewCellAccessoryCheckmark : UITableViewCellAccessoryNone;
+        cell.textLabel.textColor = isCurrent ? ThemeManager.shared.accentColor : ThemeManager.shared.primaryTextColor;
+    } else {
+        cell.textLabel.text = @"Add version";
+        cell.textLabel.textColor = ThemeManager.shared.accentColor;
+        cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
+    }
+    return cell;
+}
+
+- (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)indexPath {
+    if (tableView != _quickTable) return;
+    [tableView deselectRowAtIndexPath:indexPath animated:YES];
+    if (indexPath.row < (NSInteger)_quickVersions.count) {
+        [self.coordinator selectVersion:_quickVersions[indexPath.row]];
+        [_quickTable reloadData];
+    } else {
+        [self hideQuickPanel];
+        [self.coordinator showAddVersion];
+    }
 }
 
 #pragma mark - Portrait floating launch

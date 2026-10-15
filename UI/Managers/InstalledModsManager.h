@@ -37,6 +37,12 @@ extern NSString * const InstalledItemCategoryResourcePack;
 - (NSString *)serversDirForProfile:(NSDictionary *)profile;
 - (NSString *)dirForCategory:(NSString *)category profile:(NSDictionary *)profile;
 
+// --- Project-type routing (mod / shader / resourcepack / modpack) ---
+// Maps a Modrinth/CurseForge project_type to a content category + extension.
+- (NSString *)categoryForProjectType:(NSString *)projectType;
+- (NSString *)dirForProjectType:(NSString *)projectType version:(NSString *)version;
+- (NSString *)extensionForProjectType:(NSString *)projectType; // @"jar" or @"zip"
+
 // --- Reads ---
 - (NSArray<NSDictionary *> *)allInstalledForCategory:(NSString *)category;
 - (NSArray<NSDictionary *> *)allInstalledForCategory:(NSString *)category profile:(NSDictionary *)profile;
@@ -78,6 +84,7 @@ extern NSString * const InstalledItemCategoryResourcePack;
                 category:(NSString *)category
                mcVersion:(NSString *)mcVersion
                   loader:(NSString *)loader
+             projectType:(NSString *)projectType
                  profile:(NSDictionary *)profile;
 
 - (void)removeProjectId:(NSString *)projectId category:(NSString *)category;

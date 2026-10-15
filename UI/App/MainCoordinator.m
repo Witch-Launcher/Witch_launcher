@@ -161,7 +161,13 @@
 - (void)showAccount {
     AccountViewController *vc = [[AccountViewController alloc] init];
     vc.coordinator = self;
-    [self.rootVC presentContentAsSheet:vc];
+    UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:vc];
+    vc.navigationItem.rightBarButtonItem = [[UIBarButtonItem alloc] initWithTitle:@"Xong" style:UIBarButtonItemStyleDone target:self action:@selector(dismissTopSheet)];
+    [self.rootVC presentContentAsSheet:nav];
+}
+
+- (void)dismissTopSheet {
+    [self.rootVC dismissViewControllerAnimated:YES completion:nil];
 }
 
 - (void)showSettings {

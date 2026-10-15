@@ -116,6 +116,26 @@ static NSString * const kResourceManifestName = @"installed_resourcepacks.json";
     return InstalledItemCategoryMod;
 }
 
+#pragma mark - Project-type routing
+
+- (NSString *)categoryForProjectType:(NSString *)projectType {
+    if ([projectType isEqualToString:@"shader"]) return InstalledItemCategoryShaderPack;
+    if ([projectType isEqualToString:@"resourcepack"]) return InstalledItemCategoryResourcePack;
+    return InstalledItemCategoryMod;
+}
+
+- (NSString *)extensionForProjectType:(NSString *)projectType {
+    if ([projectType isEqualToString:@"shader"] || [projectType isEqualToString:@"resourcepack"]) return @"zip";
+    return @"jar";
+}
+
+- (NSString *)dirForProjectType:(NSString *)projectType version:(NSString *)version {
+    NSString *v = ([version isKindOfClass:[NSString class]] && version.length > 0) ? version : @"";
+    if ([projectType isEqualToString:@"shader"]) return [VersionDirectoryManager.shared shaderPacksPathForVersion:v];
+    if ([projectType isEqualToString:@"resourcepack"]) return [VersionDirectoryManager.shared resourcePacksPathForVersion:v];
+    return [VersionDirectoryManager.shared modsPathForVersion:v];
+}
+
 #pragma mark - Manifest IO
 
 - (NSMutableDictionary *)loadManifestAtPath:(NSString *)path {
@@ -246,6 +266,22 @@ static NSString * const kResourceManifestName = @"installed_resourcepacks.json";
                mcVersion:(NSString *)mcVersion
                   loader:(NSString *)loader
                  profile:(NSDictionary *)profile {
+    [self recordProjectId:projectId title:title versionNumber:versionNumber filename:filename
+                 iconURL:iconURL source:source category:category mcVersion:mcVersion loader:loader
+              projectType:nil profile:profile];
+}
+
+- (void)recordProjectId:(NSString *)projectId
+                   title:(NSString *)title
+           versionNumber:(NSString *)versionNumber
+                filename:(NSString *)filename
+                 iconURL:(NSString *)iconURL
+                  source:(NSString *)source
+                category:(NSString *)category
+               mcVersion:(NSString *)mcVersion
+                  loader:(NSString *)loader
+             projectType:(NSString *)projectType
+                 profile:(NSDictionary *)profile {
     if (projectId.length == 0 || filename.length == 0) return;
     @synchronized (self) {
         NSString *cat = [self normalizedCategory:category];
@@ -263,6 +299,8 @@ static NSString * const kResourceManifestName = @"installed_resourcepacks.json";
         existing[@"category"] = cat;
         if (mcVersion.length > 0) existing[@"mc_version"] = mcVersion;
         if (loader.length > 0) existing[@"loader"] = loader;
+        if (projectType.length > 0) existing[@"project_type"] = projectType;
+        else if (!existing[@"project_type"]) existing[@"project_type"] = @"mod";
         existing[@"installed_at"] = @([[NSDate date] timeIntervalSince1970]);
         m[projectId] = existing;
         if (profile) [self saveManifest:m forCategory:cat profile:profile];

@@ -123,6 +123,10 @@
     if ([mc isKindOfClass:[NSString class]] && mc.length > 0) [parts addObject:[NSString stringWithFormat:@"MC %@", mc]];
     NSString *loader = item[@"loader"];
     if ([loader isKindOfClass:[NSString class]] && loader.length > 0) [parts addObject:loader];
+    NSString *ptype = item[@"project_type"];
+    if ([ptype isKindOfClass:[NSString class]] && ptype.length > 0 && ![ptype isEqualToString:@"mod"]) {
+        [parts addObject:[ptype capitalizedString]];
+    }
     if (parts.count == 0 && [item[@"filename"] isKindOfClass:[NSString class]]) [parts addObject:item[@"filename"]];
     _detailLabel.text = [parts componentsJoinedByString:@"  •  "];
 
@@ -179,6 +183,8 @@
         }
     }
     [_enabledSwitch setOn:enabled animated:NO];
+    // Dim disabled rows so toggle state is obvious at a glance.
+    self.contentView.alpha = enabled ? 1.0 : 0.55;
     _requestToken = [filename isKindOfClass:[NSString class]] ? filename : nil;
 }
 
@@ -191,6 +197,7 @@
 - (void)prepareForReuse {
     [super prepareForReuse];
     _requestToken = nil;
+    self.contentView.alpha = 1.0;
     _iconView.image = nil;
     _nameLabel.text = nil;
     _detailLabel.text = nil;

@@ -966,10 +966,22 @@
             NSError *moveError = nil;
             [[NSFileManager defaultManager] moveItemAtPath:path toPath:targetPath error:&moveError];
             if (moveError == nil) {
+                NSString *selType = [_selectedMod[@"project_type"] isKindOfClass:[NSString class]] ? _selectedMod[@"project_type"] : @"mod";
+                NSString *selSource = [ModSourceService isCurseForgeMod:_selectedMod] ? @"curseforge" : @"modrinth";
+                NSString *selCat = [[InstalledModsManager shared] categoryForProjectType:selType];
+                NSString *selLoader = [VersionDirectoryManager.shared.currentProfile.modLoader lowercaseString] ?: @"";
+                NSString *selIcon = [_selectedMod[@"icon_url"] isKindOfClass:[NSString class]] ? _selectedMod[@"icon_url"] : @"";
                 [[InstalledModsManager shared] recordProjectId:_selectedMod[@"project_id"]
                                                           title:_selectedMod[@"title"]
                                                  versionNumber:best[@"version_number"]
-                                                        filename:targetPath.lastPathComponent];
+                                                        filename:targetPath.lastPathComponent
+                                                         iconURL:selIcon
+                                                          source:selSource
+                                                        category:selCat
+                                                       mcVersion:targetVersion
+                                                          loader:selLoader
+                                                     projectType:selType
+                                                         profile:nil];
             } else {
                 showDialog(@"Install Failed", moveError.localizedDescription ?: @"Unknown error");
             }
@@ -1348,10 +1360,18 @@ static const NSInteger kModActionLoadingTag = 9001;
                         [[NSFileManager defaultManager] createDirectoryAtPath:modsDir withIntermediateDirectories:YES attributes:nil error:nil];
                         [[NSFileManager defaultManager] removeItemAtPath:targetPath error:nil];
                         [[NSFileManager defaultManager] moveItemAtPath:path toPath:targetPath error:nil];
+                        NSString *depIcon = [project[@"icon_url"] isKindOfClass:[NSString class]] ? project[@"icon_url"] : @"";
                         [[InstalledModsManager shared] recordProjectId:depProjectId
                                                                  title:depTitle
                                                         versionNumber:bestVer[@"version_number"]
-                                                              filename:targetPath.lastPathComponent];
+                                                              filename:targetPath.lastPathComponent
+                                                               iconURL:depIcon
+                                                                source:depSource
+                                                              category:InstalledItemCategoryMod
+                                                             mcVersion:mcVersion
+                                                                loader:targetLoader
+                                                           projectType:@"mod"
+                                                               profile:nil];
                     }
                     [weakSelf installDependencies:deps index:index + 1 version:mainVersion completion:completion];
                 }];
@@ -1394,10 +1414,22 @@ static const NSInteger kModActionLoadingTag = 9001;
         NSError *moveError = nil;
         [[NSFileManager defaultManager] moveItemAtPath:path toPath:targetPath error:&moveError];
         if (moveError == nil) {
+            NSString *dlType = [_downloadMod[@"project_type"] isKindOfClass:[NSString class]] ? _downloadMod[@"project_type"] : @"mod";
+            NSString *dlSource = [ModSourceService isCurseForgeMod:_downloadMod] ? @"curseforge" : @"modrinth";
+            NSString *dlCat = [[InstalledModsManager shared] categoryForProjectType:dlType];
+            NSString *dlLoader = [VersionDirectoryManager.shared.currentProfile.modLoader lowercaseString] ?: @"";
+            NSString *dlIcon = [_downloadMod[@"icon_url"] isKindOfClass:[NSString class]] ? _downloadMod[@"icon_url"] : @"";
             [[InstalledModsManager shared] recordProjectId:_downloadMod[@"project_id"]
                                                      title:_downloadMod[@"title"]
                                             versionNumber:version[@"version_number"]
-                                                  filename:targetPath.lastPathComponent];
+                                                  filename:targetPath.lastPathComponent
+                                                   iconURL:dlIcon
+                                                    source:dlSource
+                                                  category:dlCat
+                                                 mcVersion:mcVersion
+                                                    loader:dlLoader
+                                               projectType:dlType
+                                                   profile:nil];
         }
     }];
     if (task) [_dependencyInstallTasks addObject:task];

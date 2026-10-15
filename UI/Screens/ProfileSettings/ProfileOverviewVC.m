@@ -533,7 +533,17 @@
 #pragma mark - Save
 
 - (BOOL)saveProfile {
+    static BOOL saving = NO;
+    if (saving) return NO;
+    saving = YES;
+    [self.view endEditing:YES];
     [HapticManager.shared play:HapticTypeMedium];
+    BOOL result = [self doSaveProfile];
+    saving = NO;
+    return result;
+}
+
+- (BOOL)doSaveProfile {
     NSString *name = _profile[@"name"];
     if (![name isKindOfClass:[NSString class]] || name.length == 0) {
         if ([_originalName isKindOfClass:[NSString class]] && _originalName.length > 0) {
@@ -557,7 +567,9 @@
     }
     if (self.pendingVersion) _profile[@"lastVersionId"] = self.pendingVersion;
     [PLProfiles.current save];
-    [ProfileAvatarManager.shared updateAppIconForCurrentProfile];
+    // NOTE: intentionally NOT calling updateAppIconForCurrentProfile here.
+    // Saving a profile must only change the profile's own avatar, never the
+    // Witch launcher icon on the home screen.
     _originalName = [name copy];
     _isNewProfile = NO;
     [ErrorPresenter showSuccess:@"Saved" message:@"Profile saved."];

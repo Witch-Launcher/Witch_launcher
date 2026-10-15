@@ -6,14 +6,17 @@
 #import "AmethystBlurView.h"
 #import "HapticManager.h"
 #import "InstalledModsManager.h"
+#import "LauncherPreferences.h"
 
 @interface ProfileTabbedPageViewController ()
 @property (nonatomic) UIView *cardHost;
 @property (nonatomic) UIView *tabPill;
+@property (nonatomic) UIStackView *tabStack;
 @property (nonatomic) NSMutableArray<UIButton *> *tabButtons;
 @property (nonatomic) NSArray<UIViewController *> *tabs;
 @property (nonatomic) ProfileOverviewVC *overviewVC;
 @property (nonatomic) NSInteger selectedIndex;
+@property (nonatomic) NSArray<NSLayoutConstraint *> *chromeConstraints;
 @end
 
 @implementation ProfileTabbedPageViewController
@@ -32,7 +35,11 @@
     [super viewDidLoad];
     NSString *name = self.profile[@"name"];
     self.navigationItem.title = ([name isKindOfClass:[NSString class]] && name.length > 0) ? name : @"Profile";
-    self.navigationItem.rightBarButtonItem = [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemSave target:self action:@selector(saveTapped)];
+    self.navigationItem.leftBarButtonItem = [[UIBarButtonItem alloc] initWithTitle:@"Xong" style:UIBarButtonItemStyleDone target:self action:@selector(doneTapped)];
+    self.navigationItem.rightBarButtonItems = @[
+        [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemSave target:self action:@selector(saveTapped)],
+        [[UIBarButtonItem alloc] initWithImage:[UIImage systemImageNamed:@"rectangle.3.group"] style:UIBarButtonItemStylePlain target:self action:@selector(cycleTabPosition)],
+    ];
     [AmethystBlurView installInView:self.view];
 
     _overviewVC = [[ProfileOverviewVC alloc] initWithProfile:self.profile isNew:_isNewProfile];
@@ -68,10 +75,19 @@
     NSArray *icons = @[@"person.crop.circle", @"puzzlepiece.extension", @"paintbrush.pointed", @"paintpalette", @"globe"];
     NSArray *labels = @[@"Home", @"Mods", @"Shader", @"Packs", @"Worlds"];
     _tabButtons = [NSMutableArray array];
-    UIView *prev = nil;
+    _tabStack = [[UIStackView alloc] init];
+    _tabStack.translatesAutoresizingMaskIntoConstraints = NO;
+    _tabStack.spacing = 2;
+    _tabStack.distribution = UIStackViewDistributionFillEqually;
+    [_tabPill addSubview:_tabStack];
+    [NSLayoutConstraint activateConstraints:@[
+        [_tabStack.topAnchor constraintEqualToAnchor:_tabPill.topAnchor constant:6],
+        [_tabStack.bottomAnchor constraintEqualToAnchor:_tabPill.bottomAnchor constant:-6],
+        [_tabStack.leadingAnchor constraintEqualToAnchor:_tabPill.leadingAnchor constant:8],
+        [_tabStack.trailingAnchor constraintEqualToAnchor:_tabPill.trailingAnchor constant:-8],
+    ]];
     for (NSUInteger i = 0; i < 5; i++) {
         UIButton *btn = [UIButton buttonWithType:UIButtonTypeSystem];
-        btn.translatesAutoresizingMaskIntoConstraints = NO;
         btn.tag = i;
         UIImage *img = [UIImage systemImageNamed:icons[i]];
         [btn setImage:img forState:UIControlStateNormal];
@@ -84,33 +100,83 @@
         [btn setImageEdgeInsets:UIEdgeInsetsMake(-12, 0, 0, -30)];
         [btn setTitleEdgeInsets:UIEdgeInsetsMake(16, -28, 0, 0)];
         [btn addTarget:self action:@selector(tabTapped:) forControlEvents:UIControlEventTouchUpInside];
-        [_tabPill addSubview:btn];
+        [_tabStack addArrangedSubview:btn];
         [_tabButtons addObject:btn];
-        [NSLayoutConstraint activateConstraints:@[
-            [btn.topAnchor constraintEqualToAnchor:_tabPill.topAnchor constant:6],
-            [btn.bottomAnchor constraintEqualToAnchor:_tabPill.bottomAnchor constant:-6],
-            [btn.widthAnchor constraintEqualToConstant:64],
-        ]];
-        if (prev) {
-            [btn.leadingAnchor constraintEqualToAnchor:prev.trailingAnchor constant:2].active = YES;
-        } else {
-            [btn.leadingAnchor constraintEqualToAnchor:_tabPill.leadingAnchor constant:8].active = YES;
-        }
-        prev = btn;
     }
-    [prev.trailingAnchor constraintEqualToAnchor:_tabPill.trailingAnchor constant:-8].active = YES;
 
-    [NSLayoutConstraint activateConstraints:@[
-        [_cardHost.topAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.topAnchor constant:8],
-        [_cardHost.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor constant:12],
-        [_cardHost.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor constant:-12],
-        [_cardHost.bottomAnchor constraintEqualToAnchor:_tabPill.topAnchor constant:-8],
-        [_tabPill.centerXAnchor constraintEqualToAnchor:self.view.centerXAnchor],
-        [_tabPill.bottomAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.bottomAnchor constant:-8],
-        [_tabPill.heightAnchor constraintEqualToConstant:64],
-    ]];
+    [self applyTabPosition:[self tabPosition] animate:NO];
     [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(onTheme) name:ThemeDidChangeNotification object:nil];
     [self selectTab:0];
+}
+
+#pragma mark - Tab pill position (left / top / bottom, default left)
+
+- (NSString *)tabPosition {
+    NSString *pos = getPrefObject(@"profile.tabbar_position");
+    if ([pos isEqualToString:@"top"] || [pos isEqualToString:@"bottom"] || [pos isEqualToString:@"left"]) return pos;
+    return @"left";
+}
+
+- (void)cycleTabPosition {
+    NSString *pos = [self tabPosition];
+    NSString *next = [pos isEqualToString:@"left"] ? @"top" : [pos isEqualToString:@"top"] ? @"bottom" : @"left";
+    setPrefObject(@"profile.tabbar_position", next);
+    [HapticManager.shared play:HapticTypeSelection];
+    [self applyTabPosition:next animate:YES];
+}
+
+- (void)applyTabPosition:(NSString *)pos animate:(BOOL)animate {
+    if (_chromeConstraints) [NSLayoutConstraint deactivateConstraints:_chromeConstraints];
+    _tabStack.axis = [pos isEqualToString:@"left"] ? UILayoutConstraintAxisVertical : UILayoutConstraintAxisHorizontal;
+    NSMutableArray *c = [NSMutableArray array];
+    if ([pos isEqualToString:@"left"]) {
+        [c addObjectsFromArray:@[
+            [_tabPill.topAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.topAnchor constant:8],
+            [_tabPill.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor constant:12],
+            [_tabPill.bottomAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.bottomAnchor constant:-8],
+            [_tabPill.widthAnchor constraintEqualToConstant:76],
+            [_cardHost.topAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.topAnchor constant:8],
+            [_cardHost.leadingAnchor constraintEqualToAnchor:_tabPill.trailingAnchor constant:8],
+            [_cardHost.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor constant:-12],
+            [_cardHost.bottomAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.bottomAnchor constant:-8],
+        ]];
+    } else if ([pos isEqualToString:@"top"]) {
+        [c addObjectsFromArray:@[
+            [_tabPill.topAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.topAnchor constant:8],
+            [_tabPill.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor constant:12],
+            [_tabPill.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor constant:-12],
+            [_tabPill.heightAnchor constraintEqualToConstant:64],
+            [_cardHost.topAnchor constraintEqualToAnchor:_tabPill.bottomAnchor constant:8],
+            [_cardHost.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor constant:12],
+            [_cardHost.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor constant:-12],
+            [_cardHost.bottomAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.bottomAnchor constant:-8],
+        ]];
+    } else {
+        [c addObjectsFromArray:@[
+            [_cardHost.topAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.topAnchor constant:8],
+            [_cardHost.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor constant:12],
+            [_cardHost.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor constant:-12],
+            [_cardHost.bottomAnchor constraintEqualToAnchor:_tabPill.topAnchor constant:-8],
+            [_tabPill.centerXAnchor constraintEqualToAnchor:self.view.centerXAnchor],
+            [_tabPill.bottomAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.bottomAnchor constant:-8],
+            [_tabPill.heightAnchor constraintEqualToConstant:64],
+        ]];
+    }
+    _chromeConstraints = c;
+    void (^apply)(void) = ^{
+        [NSLayoutConstraint activateConstraints:c];
+        [self.view layoutIfNeeded];
+    };
+    if (animate) {
+        [UIView animateWithDuration:0.28 delay:0 usingSpringWithDamping:0.85 initialSpringVelocity:0.6 options:0 animations:apply completion:nil];
+    } else {
+        apply();
+    }
+}
+
+- (void)doneTapped {
+    [HapticManager.shared play:HapticTypeLight];
+    [self dismissViewControllerAnimated:YES completion:nil];
 }
 
 - (void)onTheme {

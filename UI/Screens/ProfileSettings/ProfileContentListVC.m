@@ -726,6 +726,7 @@ typedef NS_ENUM(NSInteger, ProfileListFilter) {
         @"iconURL": ([item[@"icon_url"] isKindOfClass:[NSString class]] ? item[@"icon_url"] : @""),
         @"source": itemSource,
         @"recordCategory": self.category ?: InstalledItemCategoryMod,
+        @"projectType": ([item[@"project_type"] isKindOfClass:[NSString class]] ? item[@"project_type"] : @"mod"),
     }];
     for (NSDictionary *dep in deps) {
         if (![dep isKindOfClass:[NSDictionary class]]) continue;
@@ -750,6 +751,7 @@ typedef NS_ENUM(NSInteger, ProfileListFilter) {
             @"iconURL": ([dep[@"icon_url"] isKindOfClass:[NSString class]] ? dep[@"icon_url"] : @""),
             @"source": depSource,
             @"recordCategory": InstalledItemCategoryMod,
+            @"projectType": @"mod",
         }];
     }
     [self downloadJobQueue:[jobs copy] index:0 done:done];
@@ -812,6 +814,7 @@ typedef NS_ENUM(NSInteger, ProfileListFilter) {
                                                   category:recordCategory
                                                  mcVersion:[weakSelf profileMcVersion]
                                                     loader:[weakSelf profileLoader]
+                                               projectType:job[@"projectType"]
                                                    profile:weakSelf.profile];
             if (completion) completion(YES);
         });
