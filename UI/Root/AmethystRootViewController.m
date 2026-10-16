@@ -682,7 +682,7 @@
     }
 }
 
-- (NSArray *)tableView:(UITableView *)tableView trailingSwipeActionsForRowAtIndexPath:(NSIndexPath *)indexPath {
+- (UISwipeActionsConfiguration *)tableView:(UITableView *)tableView trailingSwipeActionsConfigurationForRowAtIndexPath:(NSIndexPath *)indexPath {
     if (tableView != _quickTable || indexPath.row >= (NSInteger)_quickVersions.count) return nil;
     NSString *ver = _quickVersions[indexPath.row];
     UIContextualAction *edit = [UIContextualAction contextualActionWithStyle:UIContextualActionStyleNormal title:localize(@"Edit", nil) handler:^(UIContextualAction *a, UIView *v, void(^done)(BOOL)) {
@@ -696,7 +696,9 @@
         done(YES);
     }];
     del.image = [UIImage systemImageNamed:@"trash"];
-    return @[del, edit];
+    UISwipeActionsConfiguration *config = [UISwipeActionsConfiguration configurationWithActions:@[del, edit]];
+    config.performsFirstActionWithFullSwipe = NO;
+    return config;
 }
 
 #pragma mark - Portrait floating launch

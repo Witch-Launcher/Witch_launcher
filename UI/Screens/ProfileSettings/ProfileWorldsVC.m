@@ -192,18 +192,21 @@
     [self showWorldDetail:_worlds[indexPath.row]];
 }
 
-- (NSArray *)tableView:(UITableView *)tableView trailingSwipeActionsForRowAtIndexPath:(NSIndexPath *)indexPath {
+- (UISwipeActionsConfiguration *)tableView:(UITableView *)tableView trailingSwipeActionsConfigurationForRowAtIndexPath:(NSIndexPath *)indexPath {
+    if (indexPath.row >= (NSInteger)_worlds.count) return nil;
     NSDictionary *w = _worlds[indexPath.row];
     __weak typeof(self) weakSelf = self;
-    UIContextualAction *share = [UIContextualAction contextualActionWithStyle:UIContextualActionStyleNormal title:@"Share" handler:^(UIContextualAction *a, UIView *v, void(^done)(BOOL)) {
+    UIContextualAction *share = [UIContextualAction contextualActionWithStyle:UIContextualActionStyleNormal title:localize(@"Share", nil) handler:^(UIContextualAction *a, UIView *v, void(^done)(BOOL)) {
         [weakSelf shareWorld:w]; done(YES);
     }];
     share.image = [UIImage systemImageNamed:@"square.and.arrow.up"];
-    UIContextualAction *del = [UIContextualAction contextualActionWithStyle:UIContextualActionStyleDestructive title:@"Delete" handler:^(UIContextualAction *a, UIView *v, void(^done)(BOOL)) {
+    UIContextualAction *del = [UIContextualAction contextualActionWithStyle:UIContextualActionStyleDestructive title:localize(@"Delete", nil) handler:^(UIContextualAction *a, UIView *v, void(^done)(BOOL)) {
         [weakSelf deleteWorld:w]; done(YES);
     }];
     del.image = [UIImage systemImageNamed:@"trash"];
-    return @[del, share];
+    UISwipeActionsConfiguration *config = [UISwipeActionsConfiguration configurationWithActions:@[del, share]];
+    config.performsFirstActionWithFullSwipe = NO;
+    return config;
 }
 
 #pragma mark - Detail (datapacks inside world)

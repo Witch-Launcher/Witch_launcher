@@ -79,6 +79,30 @@
         [MinecraftResourceUtils refreshLocalVersionList];
     });
     [MinecraftResourceUtils refreshRemoteVersionList];
+    [self showPendingObjcCrashReportIfNeeded];
+}
+
+// If the previous run died on an ObjC exception, the handler in main.m wrote
+// crash-reports/objc_last_crash.txt (name+reason+stack — the .ips never has
+// the message). Surface it once with Copy so it can be sent to the dev.
+- (void)showPendingObjcCrashReportIfNeeded {
+    const char *home = getenv("POJAV_HOME");
+    if (!home) return;
+    NSString *reportPath = [[NSString stringWithUTF8String:home] stringByAppendingPathComponent:@"crash-reports/objc_last_crash.txt"];
+    NSString *report = [NSString stringWithContentsOfFile:reportPath encoding:NSUTF8StringEncoding error:nil];
+    if (![report isKindOfClass:[NSString class]] || report.length == 0) return;
+    // Show once: remove so it doesn't nag every launch.
+    [[NSFileManager defaultManager] removeItemAtPath:reportPath error:nil];
+    NSString *shown = report.length > 1500 ? [[report substringToIndex:1500] stringByAppendingString:@"\n…(full report kept in crash-reports/)"] : report;
+    [ErrorPresenter showWithKind:AppErrorKindError
+                           title:@"Previous crash detected"
+                         message:shown
+                    primaryTitle:@"OK"
+                  secondaryTitle:@"Copy"
+                       onPrimary:nil
+                     onSecondary:^{
+                         UIPasteboard.generalPasteboard.string = report;
+                     }];
 }
 
 - (void)accountDidChange {

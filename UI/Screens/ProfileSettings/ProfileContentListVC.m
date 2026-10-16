@@ -441,23 +441,26 @@ typedef NS_ENUM(NSInteger, ProfileListFilter) {
     [self detailForItem:_visibleItems[indexPath.row]];
 }
 
-- (NSArray *)tableView:(UITableView *)tableView trailingSwipeActionsForRowAtIndexPath:(NSIndexPath *)indexPath {
+- (UISwipeActionsConfiguration *)tableView:(UITableView *)tableView trailingSwipeActionsConfigurationForRowAtIndexPath:(NSIndexPath *)indexPath {
+    if (indexPath.row >= (NSInteger)_visibleItems.count) return nil;
     NSDictionary *item = _visibleItems[indexPath.row];
     __weak typeof(self) weakSelf = self;
-    UIContextualAction *share = [UIContextualAction contextualActionWithStyle:UIContextualActionStyleNormal title:@"Share" handler:^(UIContextualAction *a, UIView *v, void(^done)(BOOL)) {
+    UIContextualAction *share = [UIContextualAction contextualActionWithStyle:UIContextualActionStyleNormal title:localize(@"Share", nil) handler:^(UIContextualAction *a, UIView *v, void(^done)(BOOL)) {
         [weakSelf shareItem:item]; done(YES);
     }];
     share.image = [UIImage systemImageNamed:@"square.and.arrow.up"];
-    UIContextualAction *rename = [UIContextualAction contextualActionWithStyle:UIContextualActionStyleNormal title:@"Rename" handler:^(UIContextualAction *a, UIView *v, void(^done)(BOOL)) {
+    UIContextualAction *rename = [UIContextualAction contextualActionWithStyle:UIContextualActionStyleNormal title:localize(@"Rename", nil) handler:^(UIContextualAction *a, UIView *v, void(^done)(BOOL)) {
         [weakSelf renameItem:item]; done(YES);
     }];
     rename.image = [UIImage systemImageNamed:@"pencil"];
     rename.backgroundColor = ThemeManager.shared.warningColor;
-    UIContextualAction *del = [UIContextualAction contextualActionWithStyle:UIContextualActionStyleDestructive title:@"Delete" handler:^(UIContextualAction *a, UIView *v, void(^done)(BOOL)) {
+    UIContextualAction *del = [UIContextualAction contextualActionWithStyle:UIContextualActionStyleDestructive title:localize(@"Delete", nil) handler:^(UIContextualAction *a, UIView *v, void(^done)(BOOL)) {
         [weakSelf deleteItem:item]; done(YES);
     }];
     del.image = [UIImage systemImageNamed:@"trash"];
-    return @[del, rename, share];
+    UISwipeActionsConfiguration *config = [UISwipeActionsConfiguration configurationWithActions:@[del, rename, share]];
+    config.performsFirstActionWithFullSwipe = NO;
+    return config;
 }
 
 #pragma mark - Search
