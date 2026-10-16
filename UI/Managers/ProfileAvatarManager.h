@@ -7,7 +7,5 @@
 
 - (UIImage *)avatarImageForKey:(NSString *)key;
 - (UIImage *)avatarImageForProfile:(NSDictionary *)profile;
-- (void)updateAppIconForCurrentProfile;
-- (NSString *)alternateIconNameForKey:(NSString *)key;
 
 @end

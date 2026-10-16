@@ -215,8 +215,7 @@
 
 #pragma mark - Sidebar position (per orientation)
 
-- (NSString *)sidebarPositionForPortrait:(BOOL)isPortrait {
-    // Stored under "general" so PLPreferences actually persists it.
+- (NSString *)sidebarPositionForPortrait:(BOOL)isPortrait {    // Stored under "general" so PLPreferences actually persists it.
     NSString *key = isPortrait ? @"general.mainsidebar_portrait" : @"general.mainsidebar_landscape";
     NSString *pos = getPrefObject(key);
     if ([pos isKindOfClass:[NSString class]] &&
@@ -252,6 +251,43 @@
         return CGRectMake(frameX + innerGap, contentTop, frameW - rail - rightPanelWidth - innerGap * 2, contentHeight);
     }
     return CGRectMake(frameX + rail + innerGap, contentTop, frameW - rail - rightPanelWidth - innerGap * 2, contentHeight);
+}
+
+#pragma mark - Orientation lock enforcement
+
+// System sheets (share, document picker, image picker) don't honor our
+// orientation mask, so presenting one can tip the app into the locked-out
+// orientation. Whatever caused it, force the setting back (throttled).
+- (void)enforceOrientationLockForSize:(CGSize)size {
+    if (size.width == 0 || size.height == 0) return;
+    id modeObj = getPrefObject(@"general.orientation_lock");
+    NSString *mode = [modeObj isKindOfClass:[NSString class]] ? modeObj : @"";
+    BOOL wantLandscape = [mode isEqualToString:@"landscape"];
+    BOOL wantPortrait = [mode isEqualToString:@"portrait"];
+    if (!wantLandscape && !wantPortrait) {
+        if (mode.length > 0 && ![mode isEqualToString:@"off"]) {
+            wantLandscape = getPrefBool(@"general.lock_landscape");
+        }
+    }
+    if (!wantLandscape && !wantPortrait) return;
+    BOOL isPortrait = size.width < size.height;
+    if ((wantLandscape && !isPortrait) || (wantPortrait && isPortrait)) return;
+    static NSTimeInterval lastEnforce = 0;
+    NSTimeInterval now = [[NSDate date] timeIntervalSince1970];
+    if (now - lastEnforce < 1.5) return;
+    lastEnforce = now;
+    if (@available(iOS 16.0, *)) {
+        UIWindowScene *ws = (UIWindowScene *)self.view.window.windowScene;
+        if ([ws isKindOfClass:[UIWindowScene class]]) {
+            UIInterfaceOrientationMask mask = wantLandscape ? UIInterfaceOrientationMaskLandscape : UIInterfaceOrientationMaskPortrait;
+            UIWindowSceneGeometryPreferencesIOS *prefs = [[UIWindowSceneGeometryPreferencesIOS alloc] initWithInterfaceOrientations:mask];
+            [ws requestGeometryUpdateWithPreferences:prefs errorHandler:^(NSError *error) {
+                NSLog(@"[OrientationLock] enforce error: %@", error);
+            }];
+            return;
+        }
+    }
+    [UIViewController attemptRotationToDeviceOrientation];
 }
 
 - (void)viewDidLayoutSubviews {
@@ -349,6 +385,8 @@
     }
 
     [self updateShellBorderPath];
+
+    [self enforceOrientationLockForSize:bounds.size];
 
     if (!self.didInitialLayout) {
         self.didInitialLayout = YES;

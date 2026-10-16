@@ -27,6 +27,9 @@ NSString * const ThemeDidChangeNotification = @"ThemeDidChangeNotification";
         _colorOverrides = [NSMutableDictionary dictionary];
         _backgroundBlurIntensity = 0;
         _uiOpacity = 1.0;
+        // Manual Dark/Light must stick on windows created later (sheets,
+        // pickers, dialogs) — they default to Unspecified (follow system).
+        [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(windowBecameKey:) name:UIWindowDidBecomeKeyNotification object:nil];
         [[NSUserDefaults standardUserDefaults] registerDefaults:@{
             @"amethyst_ui_opacity": @1.0,
             @"amethyst_ui_border_enabled": @NO,
@@ -396,6 +399,14 @@ NSString * const ThemeDidChangeNotification = @"ThemeDidChangeNotification";
         window.overrideUserInterfaceStyle = _interfaceStyle;
     }
     [self broadcastThemeChange];
+}
+
+- (void)windowBecameKey:(NSNotification *)note {
+    if (_interfaceStyle == UIUserInterfaceStyleUnspecified) return;
+    UIWindow *window = note.object;
+    if ([window isKindOfClass:[UIWindow class]]) {
+        window.overrideUserInterfaceStyle = _interfaceStyle;
+    }
 }
 
 - (void)broadcastThemeChange {

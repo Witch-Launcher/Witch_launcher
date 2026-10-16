@@ -43,7 +43,6 @@ static const NSTimeInterval NewsRefreshInterval = 300.0; // 5 minutes
     [self setup];
     [CreditsService.shared refreshIfNeeded];
     [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(updateColors) name:ThemeDidChangeNotification object:nil];
-    [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(logoDidChange) name:@"LauncherLogoDidChangeNotification" object:nil];
     [self updateColors];
     [self loadNews];
     [self startNewsRefreshTimer];
@@ -276,22 +275,16 @@ static const NSTimeInterval NewsRefreshInterval = 300.0; // 5 minutes
     return [NSString stringWithFormat:@"#%02X%02X%02X", (int)(r * 255), (int)(g * 255), (int)(b * 255)];
 }
 
-// The menu logo follows the launcher.theme logo setting (launcher.logo_style):
-// "purple" uses the purple pair, "blue" the official blue pair, "dev" the
-// development logo. Until the user picks one, the build type decides the
-// default: release builds use purple, development builds use the dev logo.
+// The menu logo is fixed at build time (matches the APP_ICON asset baked
+// into the bundle): release builds use the purple pair, dev builds the dev
+// logo. No runtime switching — the old pref-driven switch referenced icon
+// names missing from Info.plist and fell back to the wrong default.
 - (NSString *)logoImageName {
-    NSString *style = getPrefObject(@"launcher.logo_style");
-    if (style == nil) {
-        style = CONFIG_RELEASE ? @"purple" : @"dev";
-    }
-    if ([style isEqualToString:@"dev"]) {
-        return @"logo-dev";
-    }
-    if ([style isEqualToString:@"blue"]) {
-        return ThemeManager.shared.isDarkMode ? @"logo-main-dark" : @"logo-main-light";
-    }
+#if CONFIG_RELEASE
     return ThemeManager.shared.isDarkMode ? @"logo-dark" : @"logo-light";
+#else
+    return @"logo-dev";
+#endif
 }
 
 - (void)logoDidChange {

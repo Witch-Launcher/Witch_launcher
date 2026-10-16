@@ -177,44 +177,9 @@ UIInterfaceOrientationMask amethyst_orientation_mask(void) {
     return UIInterfaceOrientationMaskAllButUpsideDown;
 }
 
-// Switch the home-screen app icon. "blue" reverts to the build's primary icon
-// (AppIcon-Light); "purple"/"dev" use their alternate icon sets. Not supported
-// on every sideload setup, so failures are only logged.
-static void applyLauncherAppIconAttempt(NSString *iconName, int attempt) {
-    UIApplication *app = UIApplication.sharedApplication;
-    NSString *current = app.alternateIconName;
-    BOOL same = (current == nil && iconName == nil) || (current != nil && [current isEqualToString:iconName]);
-    if (same) {
-        NSLog(@"[AppIcon] alternate icon already set to %@, skipping", iconName ?: @"primary");
-        return;
-    }
-    [app setAlternateIconName:iconName completionHandler:^(NSError *error) {
-        if (error) {
-            NSLog(@"[AppIcon] setAlternateIconName(%@) failed: %@", iconName ?: @"primary", error.localizedDescription);
-            // FBSOpenApplicationErrorDomain "The operation was cancelled" is
-            // returned when the call happens before the app is fully active
-            // (e.g. at launch). Retry with a delay rather than giving up.
-            if (attempt < 3) {
-                dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.8 * (attempt + 1) * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-                    applyLauncherAppIconAttempt(iconName, attempt + 1);
-                });
-            }
-        } else {
-            NSLog(@"[AppIcon] setAlternateIconName(%@) OK", iconName ?: @"primary");
-        }
-    }];
-}
-
-void applyLauncherAppIcon(void) {
-    NSString *style = getPrefObject(@"launcher.logo_style");
-    NSString *iconName = nil; // nil = primary AppIcon-Light
-    if ([style isEqualToString:@"purple"]) {
-        iconName = @"AppIcon-Purple";
-    } else if ([style isEqualToString:@"dev"]) {
-        iconName = @"AppIcon-Development";
-    }
-    applyLauncherAppIconAttempt(iconName, 0);
-}
+// Home-screen icon is fixed at build time (APP_ICON / asset catalog).
+// The runtime switchers below were removed: the alternate names they used
+// were never in Info.plist, so iOS fell back to the wrong default icon.
 
 void UIKit_returnToSplitView() {
     dispatch_async(dispatch_get_main_queue(), ^{

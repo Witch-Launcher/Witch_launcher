@@ -65,11 +65,6 @@
                 @{@"key": @"Dark", @"name": localize(@"theme.dark", nil)},
                 @{@"key": @"Light", @"name": localize(@"theme.light", nil)},
             ], @"default": @"System"},
-            @{@"type": @"picker", @"label": localize(@"preference.title.launcher_logo", nil), @"key": @"launcher.logo_style", @"options": @[
-                @{@"key": @"purple", @"name": localize(@"logo.purple", nil)},
-                @{@"key": @"blue", @"name": localize(@"logo.blue", nil)},
-                @{@"key": @"dev", @"name": localize(@"logo.dev", nil)},
-            ], @"default": (CONFIG_RELEASE ? @"purple" : @"dev"), @"preview": @YES},
             @{@"type": @"picker", @"label": localize(@"preference.title.screen_orientation", nil), @"key": @"general.orientation_lock", @"options": @[
                 @{@"key": @"off", @"name": localize(@"orientation.off", nil)},
                 @{@"key": @"portrait", @"name": localize(@"orientation.portrait", nil)},
@@ -465,13 +460,13 @@
         [_settingsSearchBar.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor constant:-8],
         [_settingsSearchBar.heightAnchor constraintEqualToConstant:36],
 
-        [_tabBarScroll.topAnchor constraintEqualToAnchor:_settingsSearchBar.bottomAnchor constant:4],
-        [_tabBarScroll.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor],
-        [_tabBarScroll.bottomAnchor constraintEqualToAnchor:self.view.bottomAnchor],
+        [_tabBarScroll.topAnchor constraintEqualToAnchor:_settingsSearchBar.bottomAnchor constant:8],
+        [_tabBarScroll.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor constant:8],
+        [_tabBarScroll.bottomAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.bottomAnchor constant:-8],
         _tabWidthConstraint,
 
         [_pageScroll.topAnchor constraintEqualToAnchor:_settingsSearchBar.bottomAnchor constant:4],
-        [_pageScroll.leadingAnchor constraintEqualToAnchor:_tabBarScroll.trailingAnchor],
+        [_pageScroll.leadingAnchor constraintEqualToAnchor:_tabBarScroll.trailingAnchor constant:8],
         [_pageScroll.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor],
         [_pageScroll.bottomAnchor constraintEqualToAnchor:self.view.bottomAnchor],
 
@@ -487,7 +482,12 @@
     _tabBarScroll.translatesAutoresizingMaskIntoConstraints = NO;
     _tabBarScroll.showsHorizontalScrollIndicator = NO;
     _tabBarScroll.showsVerticalScrollIndicator = NO;
-    _tabBarScroll.backgroundColor = [UIColor clearColor];
+    // Floating rail card, same language as the profile/main bars.
+    _tabBarScroll.backgroundColor = ThemeManager.shared.cardBackgroundColor;
+    _tabBarScroll.layer.cornerRadius = 16;
+    _tabBarScroll.clipsToBounds = YES;
+    _tabBarScroll.layer.borderWidth = 1;
+    _tabBarScroll.layer.borderColor = [ThemeManager.shared.accentColor colorWithAlphaComponent:0.25].CGColor;
     [self.view addSubview:_tabBarScroll];
 
     _tabButtons = [NSMutableArray array];
@@ -519,7 +519,7 @@
     CGFloat y = 8;
     for (NSUInteger i = 0; i < _tabButtons.count; i++) {
         UIButton *btn = _tabButtons[i];
-        btn.frame = CGRectMake(0, y, sideWidth, 40);
+        btn.frame = CGRectMake(6, y, MAX(sideWidth - 12, 0), 40);
         y += 46;
     }
     _tabBarScroll.contentSize = CGSizeMake(sideWidth, y + 8);
@@ -632,6 +632,9 @@
     BOOL selected = btn.tag == _currentPage;
     ThemeManager *theme = ThemeManager.shared;
     [btn setTitleColor:selected ? theme.accentColor : theme.secondaryTextColor forState:UIControlStateNormal];
+    btn.backgroundColor = selected ? [theme.accentColor colorWithAlphaComponent:0.12] : [UIColor clearColor];
+    btn.layer.cornerRadius = 10;
+    btn.clipsToBounds = YES;
     UIView *indicator = [btn viewWithTag:99];
     indicator.backgroundColor = theme.accentColor;
     indicator.hidden = !selected;
@@ -776,17 +779,22 @@
 
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {
     if (tableView == _searchResultsTable) {
-        UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:@"SearchCell" forIndexPath:indexPath];
+        // Always subtitle style (the registered default-style cell has no
+        // detail label, which is why the path row never showed).
+        UITableViewCell *cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:@"SearchCell"];
         NSDictionary *entry = self.searchResults[indexPath.row];
         NSDictionary *item = entry[@"item"];
         NSString *tab = entry[@"tab"];
         cell.textLabel.text = item[@"label"] ?: @"";
-        cell.detailTextLabel.text = tab;
-        if (!cell.detailTextLabel.text) {
-            cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:@"SearchCell"];
-            cell.textLabel.text = item[@"label"] ?: @"";
-            cell.detailTextLabel.text = tab;
+        // Path below: tab plus live value for switches.
+        NSString *detail = tab ?: @"";
+        if ([item[@"type"] isEqualToString:@"switch"] && [item[@"key"] isKindOfClass:[NSString class]]) {
+            BOOL on = [item[@"key"] isEqualToString:@"amethyst_ui_border_enabled"]
+                ? [[NSUserDefaults standardUserDefaults] boolForKey:item[@"key"]]
+                : getPrefBool(item[@"key"]);
+            detail = [detail stringByAppendingFormat:@" • %@", on ? @"On" : @"Off"];
         }
+        cell.detailTextLabel.text = detail;
         cell.textLabel.font = [UIFont systemFontOfSize:15];
         cell.detailTextLabel.font = [UIFont systemFontOfSize:12];
         cell.detailTextLabel.textColor = ThemeManager.shared.secondaryTextColor;
@@ -982,18 +990,7 @@
             }
         }
         cell.detailTextLabel.text = display;
-        if ([item[@"preview"] boolValue]) {
-            UIImageView *preview = [[UIImageView alloc] initWithFrame:CGRectMake(0, 0, 44, 44)];
-            preview.contentMode = UIViewContentModeScaleAspectFit;
-            preview.layer.cornerRadius = 9;
-            preview.layer.masksToBounds = YES;
-            preview.layer.borderWidth = 1;
-            preview.layer.borderColor = ThemeManager.shared.separatorColor.CGColor;
-            preview.image = [UIImage imageNamed:[self logoImageNameForStyle:value]];
-            cell.accessoryView = preview;
-        } else {
-            cell.accessoryView = nil;
-        }
+        cell.accessoryView = nil;
     } else if ([type isEqualToString:@"switch"]) {
         UISwitch *sw = (UISwitch *)cell.accessoryView;
         if ([item[@"key"] isEqualToString:@"amethyst_ui_border_enabled"]) {
@@ -1059,16 +1056,6 @@
     return cell;
 }
 
-- (NSString *)logoImageNameForStyle:(NSString *)style {
-    if ([style isEqualToString:@"blue"]) {
-        return ThemeManager.shared.isDarkMode ? @"logo-main-dark" : @"logo-main-light";
-    }
-    if ([style isEqualToString:@"dev"]) {
-        return @"logo-dev";
-    }
-    return ThemeManager.shared.isDarkMode ? @"logo-dark" : @"logo-light";
-}
-
 - (UIColor *)colorForKey:(NSString *)key {
     ThemeManager *theme = ThemeManager.shared;
     UIColor *override = [theme colorOverrideForKey:key];
@@ -1103,25 +1090,49 @@
     if (tableView == _searchResultsTable) {
         [tableView deselectRowAtIndexPath:indexPath animated:YES];
         NSDictionary *entry = self.searchResults[indexPath.row];
-        NSInteger tabIdx = [entry[@"tabIndex"] integerValue];
-        NSInteger row = [entry[@"row"] integerValue];
-        // Hide search and jump to tab
-        _settingsSearchBar.text = @"";
-        [self searchBar:_settingsSearchBar textDidChange:@""];
-        [_settingsSearchBar resignFirstResponder];
-        [self setPage:tabIdx animated:YES];
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.35 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-            UITableView *targetTable = self.pageTables[tabIdx];
-            NSIndexPath *targetPath = [NSIndexPath indexPathForRow:row inSection:0];
-            [targetTable scrollToRowAtIndexPath:targetPath atScrollPosition:UITableViewScrollPositionMiddle animated:YES];
-            // Flash cell
-            UITableViewCell *cell = [targetTable cellForRowAtIndexPath:targetPath];
-            UIColor *orig = cell.backgroundColor;
-            cell.backgroundColor = [ThemeManager.shared.accentColor colorWithAlphaComponent:0.3];
-            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.8 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-                cell.backgroundColor = orig;
-            });
-        });
+        NSDictionary *item = entry[@"item"];
+        NSString *type = item[@"type"];
+        // Direct inline edit: dialog-based types open right here, no page jump.
+        if ([type isEqualToString:@"picker"]) {
+            [self showPickerForItem:item fromTable:_searchResultsTable];
+        } else if ([type isEqualToString:@"color"]) {
+            if ([item[@"key"] isEqualToString:@"amethyst_reset_appearance"]) [self resetAppearance];
+            else [self showColorPickerForKey:item[@"key"] label:item[@"label"]];
+        } else if ([type isEqualToString:@"image"]) {
+            [self showImagePicker];
+        } else if ([type isEqualToString:@"export"]) {
+            [self exportAppearance];
+        } else if ([type isEqualToString:@"import"]) {
+            [self importAppearance];
+        } else if ([type isEqualToString:@"link"]) {
+            NSString *urlString = item[@"url"];
+            if (urlString.length > 0) {
+                NSURL *url = [NSURL URLWithString:urlString];
+                if (url) [UIApplication.sharedApplication openURL:url options:@{} completionHandler:nil];
+            }
+        } else if ([type isEqualToString:@"credit"]) {
+            UIAlertController *alert = [UIAlertController alertControllerWithTitle:item[@"label"] message:item[@"license"] preferredStyle:UIAlertControllerStyleAlert];
+            if ([item[@"licenseUrl"] length] > 0) {
+                [alert addAction:[UIAlertAction actionWithTitle:localize(@"credits.open_license", nil) style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
+                    NSURL *url = [NSURL URLWithString:item[@"licenseUrl"]];
+                    if (url) [UIApplication.sharedApplication openURL:url options:@{} completionHandler:nil];
+                }]];
+            } else if ([item[@"url"] length] > 0) {
+                [alert addAction:[UIAlertAction actionWithTitle:localize(@"credits.open_project", nil) style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
+                    NSURL *url = [NSURL URLWithString:item[@"url"]];
+                    if (url) [UIApplication.sharedApplication openURL:url options:@{} completionHandler:nil];
+                }]];
+            }
+            [alert addAction:[UIAlertAction actionWithTitle:localize(@"Done", nil) style:UIAlertActionStyleCancel handler:nil]];
+            [self presentViewController:alert animated:YES completion:nil];
+        } else if ([type isEqualToString:@"navigate"]) {
+            [self navigateToVC:item[@"vc"] title:item[@"label"]];
+        } else if ([type isEqualToString:@"switch"]) {
+            [self toggleSearchResultSwitch:item atIndexPath:indexPath];
+        } else {
+            // Inline controls (text/slider) still need their page: jump + flash.
+            [self jumpToSearchResult:entry];
+        }
         return;
     }
     [tableView deselectRowAtIndexPath:indexPath animated:YES];
@@ -1169,6 +1180,57 @@
 }
 
 #pragma mark - Actions
+
+// Inline switch toggle for search results (no page jump).
+- (void)toggleSearchResultSwitch:(NSDictionary *)item atIndexPath:(NSIndexPath *)indexPath {
+    NSString *key = item[@"key"];
+    if (![key isKindOfClass:[NSString class]] || key.length == 0) return;
+    // Settings that need side effects stay on their page.
+    if ([key isEqualToString:@"java.auto_ram"]) {
+        [self jumpToSearchResult:self.searchResults[indexPath.row]];
+        return;
+    }
+    BOOL nowOn;
+    if ([key isEqualToString:@"amethyst_ui_border_enabled"]) {
+        nowOn = ![[NSUserDefaults standardUserDefaults] boolForKey:key];
+        ThemeManager.shared.uiBorderEnabled = nowOn;
+        [[NSUserDefaults standardUserDefaults] synchronize];
+        [[NSNotificationCenter defaultCenter] postNotificationName:ThemeDidChangeNotification object:nil];
+    } else {
+        nowOn = !getPrefBool(key);
+        setPrefBool(key, nowOn);
+        if ([key isEqualToString:@"general.liquid_glass"]) {
+            [[NSNotificationCenter defaultCenter] postNotificationName:@"LiquidGlassDidChangeNotification" object:nil];
+        }
+    }
+    [HapticManager.shared play:HapticTypeLight];
+    [_searchResultsTable reloadRowsAtIndexPaths:@[indexPath] withRowAnimation:UITableViewRowAnimationNone];
+    [self reloadTables];
+    (void)nowOn;
+}
+
+// Fallback for inline-control rows (text/slider): jump to page + flash.
+- (void)jumpToSearchResult:(NSDictionary *)entry {
+    NSInteger tabIdx = [entry[@"tabIndex"] integerValue];
+    NSInteger row = [entry[@"row"] integerValue];
+    // Hide search and jump to tab
+    _settingsSearchBar.text = @"";
+    [self searchBar:_settingsSearchBar textDidChange:@""];
+    [_settingsSearchBar resignFirstResponder];
+    [self setPage:tabIdx animated:YES];
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.35 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        UITableView *targetTable = self.pageTables[tabIdx];
+        NSIndexPath *targetPath = [NSIndexPath indexPathForRow:row inSection:0];
+        [targetTable scrollToRowAtIndexPath:targetPath atScrollPosition:UITableViewScrollPositionMiddle animated:YES];
+        // Flash cell
+        UITableViewCell *cell = [targetTable cellForRowAtIndexPath:targetPath];
+        UIColor *orig = cell.backgroundColor;
+        cell.backgroundColor = [ThemeManager.shared.accentColor colorWithAlphaComponent:0.3];
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.8 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            cell.backgroundColor = orig;
+        });
+    });
+}
 
 - (UITableView *)tableForCell:(UITableViewCell *)cell {
     UIView *view = cell.superview;
@@ -1234,12 +1296,12 @@
     } else if ([item[@"key"] isEqualToString:@"amethyst_ui_border_radius"]) {
         ThemeManager.shared.uiBorderCornerRadius = val;
         [[NSUserDefaults standardUserDefaults] synchronize];
-        [[NSNotificationCenter defaultCenter] postNotificationName:ThemeDidChangeNotification object:nil];
+        [self broadcastThemeDebounced];
     } else if ([item[@"key"] isEqualToString:@"amethyst_shell_gap"] ||
                [item[@"key"] isEqualToString:@"amethyst_shell_inner_gap"]) {
         [[NSUserDefaults standardUserDefaults] setFloat:val forKey:item[@"key"]];
         [[NSUserDefaults standardUserDefaults] synchronize];
-        [[NSNotificationCenter defaultCenter] postNotificationName:ThemeDidChangeNotification object:nil];
+        [self broadcastThemeDebounced];
     } else if ([item[@"key"] hasPrefix:@"amethyst_"] && [item[@"key"] hasSuffix:@"_blur"]) {
         // Save UI panel blur to NSUserDefaults — the store AmethystBlurView
         // actually reads. setPrefFloat would write the launcher plist and the
@@ -1260,12 +1322,25 @@
         // Any *_blur slider drives realtime frosted surfaces; let them refresh.
         BOOL isBlurSlider = [item[@"key"] hasPrefix:@"amethyst_"] && [item[@"key"] hasSuffix:@"_blur"];
         BOOL isBorderWidth = [item[@"key"] isEqualToString:@"amethyst_bar_border_width"];
-        if (isBlurSlider || isBorderWidth) {
+        if (isBorderWidth) {
+            [self broadcastThemeDebounced];
+        } else if (isBlurSlider) {
             [[NSNotificationCenter defaultCenter] postNotificationName:AmethystBlurIntensityDidChangeNotification object:nil];
         }
     }
     UILabel *valLabel = (UILabel *)[cell.contentView viewWithTag:101];
     valLabel.text = [NSString stringWithFormat:@"%.0f%@", val, item[@"suffix"] ?: @""];
+}
+
+// Coalesce rapid slider drags into one theme broadcast (a full shell
+// relayout per tick saturates main and feels stuck).
+- (void)broadcastThemeDebounced {
+    [NSObject cancelPreviousPerformRequestsWithTarget:self selector:@selector(fireThemeBroadcast) object:nil];
+    [self performSelector:@selector(fireThemeBroadcast) withObject:nil afterDelay:0.15];
+}
+
+- (void)fireThemeBroadcast {
+    [[NSNotificationCenter defaultCenter] postNotificationName:ThemeDidChangeNotification object:nil];
 }
 
 - (void)textFieldChanged:(UITextField *)sender {
@@ -1309,12 +1384,11 @@
                 setPrefObject(item[@"key"], key);
                 if ([item[@"key"] isEqualToString:@"general.orientation_lock"]) {
                     [self applyOrientationLock];
+                } else if ([item[@"key"] isEqualToString:@"launcher.theme"]) {
+                    [self handleThemeChange:key];
                 } else if ([item[@"key"] isEqualToString:@"launcher.language"]) {
                     [self applyLanguageChange];
                     return;
-                } else if ([item[@"key"] isEqualToString:@"launcher.logo_style"]) {
-                    applyLauncherAppIcon();
-                    [[NSNotificationCenter defaultCenter] postNotificationName:@"LauncherLogoDidChangeNotification" object:nil];
                 }
                 [self reloadTables];
             }]];

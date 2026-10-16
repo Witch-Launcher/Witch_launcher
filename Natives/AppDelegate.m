@@ -13,11 +13,9 @@ extern dispatch_group_t fatalExitGroup;
 
 
 - (BOOL)application:(UIApplication *)application didFinishLaunchingWithOptions:(NSDictionary *)launchOptions {
-    // Re-apply the chosen home-screen icon on every launch; keeps the icon in
-    // sync with the launcher.logo_style preference (and flushes stale caches).
-    dispatch_async(dispatch_get_main_queue(), ^{
-        applyLauncherAppIcon();
-    });
+    // Home-screen icon is fixed at build time (APP_ICON / asset catalog).
+    // No runtime icon switching: setAlternateIconName with names missing
+    // from Info.plist silently reverted to the wrong default icon.
     // Tạo flag file để phát hiện crash ra màn hình chính (nếu app crash, file sẽ còn lại)
     const char *home = getenv("POJAV_HOME");
     if (home) {

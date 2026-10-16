@@ -79,42 +79,4 @@
     return [self avatarImageForKey:avatarKey];
 }
 
-- (NSString *)alternateIconNameForKey:(NSString *)key {
-    if ([key isEqualToString:@"fabric"]) return @"AppIcon-Fabric";
-    if ([key isEqualToString:@"forge"]) return @"AppIcon-Forge";
-    if ([key isEqualToString:@"neoforge"]) return @"AppIcon-NeoForge";
-    if ([key isEqualToString:@"quilt"]) return @"AppIcon-Quilt";
-    if ([key isEqualToString:@"modpack"]) return @"AppIcon-Modpack";
-    if ([key isEqualToString:@"vanilla"]) return @"AppIcon-Vanilla";
-    if ([key isEqualToString:@"optifine"]) return @"AppIcon-Dark";
-    if ([key isEqualToString:@"iris"]) return @"AppIcon-Iris";
-    return nil; // Use primary icon
-}
-
-- (void)updateAppIconForCurrentProfile {
-    NSDictionary *currentProfile = PLProfiles.current.selectedProfile;
-    if (!currentProfile) return;
-    
-    NSString *avatarKey = currentProfile[@"avatar"] ?: @"fabric";
-    NSString *alternateIconName = [self alternateIconNameForKey:avatarKey];
-    
-    dispatch_async(dispatch_get_main_queue(), ^{
-        if (@available(iOS 10.3, *)) {
-            if ([UIApplication sharedApplication].supportsAlternateIcons) {
-                NSError *error = nil;
-                [[UIApplication sharedApplication] setAlternateIconName:alternateIconName completionHandler:^(NSError * _Nullable error) {
-                    if (error) {
-                        NSLog(@"[ProfileAvatarManager] Failed to change app icon: %@", error);
-                    } else {
-                        NSLog(@"[ProfileAvatarManager] App icon changed to: %@", alternateIconName ?: @"Primary");
-                    }
-                }];
-            }
-        }
-    });
-    
-    // Post notification for UI to refresh
-    [[NSNotificationCenter defaultCenter] postNotificationName:@"ProfileAvatarDidChange" object:nil userInfo:@{@"avatarKey": avatarKey}];
-}
-
 @end

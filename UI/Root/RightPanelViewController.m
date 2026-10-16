@@ -348,26 +348,26 @@
         [row addSubview:delBtn];
 
         // Layout: icon | label (flex, truncates middle) | [tag] | gear | del.
-        // Nothing overlaps the version text anymore.
+        // Nothing overlaps the version text anymore. Compact 26pt rows.
         NSMutableArray *constraints = [NSMutableArray arrayWithArray:@[
-            [iconView.leadingAnchor constraintEqualToAnchor:row.leadingAnchor constant:6],
+            [iconView.leadingAnchor constraintEqualToAnchor:row.leadingAnchor constant:8],
             [iconView.centerYAnchor constraintEqualToAnchor:row.centerYAnchor],
-            [iconView.widthAnchor constraintEqualToConstant:16],
-            [iconView.heightAnchor constraintEqualToConstant:16],
+            [iconView.widthAnchor constraintEqualToConstant:15],
+            [iconView.heightAnchor constraintEqualToConstant:15],
 
             [label.leadingAnchor constraintEqualToAnchor:iconView.trailingAnchor constant:6],
             [label.centerYAnchor constraintEqualToAnchor:row.centerYAnchor],
 
             [settingsBtn.centerYAnchor constraintEqualToAnchor:row.centerYAnchor],
-            [settingsBtn.widthAnchor constraintEqualToConstant:24],
-            [settingsBtn.heightAnchor constraintEqualToConstant:24],
+            [settingsBtn.widthAnchor constraintEqualToConstant:22],
+            [settingsBtn.heightAnchor constraintEqualToConstant:22],
 
             [delBtn.trailingAnchor constraintEqualToAnchor:row.trailingAnchor constant:-4],
             [delBtn.centerYAnchor constraintEqualToAnchor:row.centerYAnchor],
-            [delBtn.widthAnchor constraintEqualToConstant:24],
-            [delBtn.heightAnchor constraintEqualToConstant:24],
+            [delBtn.widthAnchor constraintEqualToConstant:22],
+            [delBtn.heightAnchor constraintEqualToConstant:22],
 
-            [row.heightAnchor constraintEqualToConstant:30],
+            [row.heightAnchor constraintEqualToConstant:26],
         ]];
         if (loaderTag) {
             [constraints addObjectsFromArray:@[
