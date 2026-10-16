@@ -266,6 +266,8 @@
             @{@"type": @"slider", @"label": localize(@"appearance.border_radius", nil), @"key": @"amethyst_ui_border_radius", @"min": @0, @"max": @24, @"suffix": @" pt"},
             @{@"type": @"slider", @"label": localize(@"appearance.shell_gap", nil), @"key": @"amethyst_shell_gap", @"min": @0, @"max": @12, @"suffix": @" pt"},
             @{@"type": @"slider", @"label": localize(@"appearance.shell_inner_gap", nil), @"key": @"amethyst_shell_inner_gap", @"min": @0, @"max": @12, @"suffix": @" pt"},
+            @{@"type": @"picker", @"label": localize(@"appearance.mainbar_portrait", nil), @"key": @"general.mainsidebar_portrait", @"default": @"bottom", @"options": @[@"left", @"right", @"bottom"]},
+            @{@"type": @"picker", @"label": localize(@"appearance.mainbar_landscape", nil), @"key": @"general.mainsidebar_landscape", @"default": @"left", @"options": @[@"left", @"right", @"bottom"]},
             @{@"type": @"export", @"label": localize(@"appearance.export_theme", nil)},
             @{@"type": @"import", @"label": localize(@"appearance.import_theme", nil)},
             @{@"type": @"color", @"label": localize(@"appearance.reset", nil), @"key": @"amethyst_reset_appearance"},
@@ -1329,6 +1331,10 @@
                 setPrefObject(item[@"key"], opt);
                 if ([item[@"key"] isEqualToString:@"launcher.theme"]) {
                     [self handleThemeChange:opt];
+                } else if ([item[@"key"] isEqualToString:@"general.mainsidebar_portrait"] ||
+                           [item[@"key"] isEqualToString:@"general.mainsidebar_landscape"]) {
+                    // Main sidebar dock change: re-layout the root shell.
+                    [[NSNotificationCenter defaultCenter] postNotificationName:ThemeDidChangeNotification object:nil];
                 }
                 [self reloadTables];
             }]];

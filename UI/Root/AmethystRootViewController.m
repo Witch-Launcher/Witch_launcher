@@ -213,11 +213,51 @@
     [self.view.layer addSublayer:_shellBorder];
 }
 
+#pragma mark - Sidebar position (per orientation)
+
+- (NSString *)sidebarPositionForPortrait:(BOOL)isPortrait {
+    // Stored under "general" so PLPreferences actually persists it.
+    NSString *key = isPortrait ? @"general.mainsidebar_portrait" : @"general.mainsidebar_landscape";
+    NSString *pos = getPrefObject(key);
+    if ([pos isKindOfClass:[NSString class]] &&
+        ([pos isEqualToString:@"left"] || [pos isEqualToString:@"right"] || [pos isEqualToString:@"bottom"])) {
+        return pos;
+    }
+    // Defaults: side rail in landscape, bottom bar in portrait.
+    return isPortrait ? @"bottom" : @"left";
+}
+
+- (CGRect)sidebarFrameForPosition:(NSString *)pos frameX:(CGFloat)frameX frameW:(CGFloat)frameW contentTop:(CGFloat)contentTop contentHeight:(CGFloat)contentHeight safeArea:(UIEdgeInsets)safeArea bounds:(CGRect)bounds {
+    const CGFloat rail = 48.0;
+    const CGFloat barH = 64.0;
+    BOOL bottom = [pos isEqualToString:@"bottom"];
+    _sidebarVC.horizontal = bottom;
+    if (bottom) {
+        return CGRectMake(frameX, bounds.size.height - safeArea.bottom - barH, frameW, barH);
+    }
+    if ([pos isEqualToString:@"right"]) {
+        return CGRectMake(frameX + frameW - rail, contentTop, rail, contentHeight);
+    }
+    return CGRectMake(frameX, contentTop, rail, contentHeight);
+}
+
+- (CGRect)contentFrameForSidebarPosition:(NSString *)pos frameX:(CGFloat)frameX frameW:(CGFloat)frameW contentTop:(CGFloat)contentTop contentHeight:(CGFloat)contentHeight rightPanelWidth:(CGFloat)rightPanelWidth innerGap:(CGFloat)innerGap safeArea:(UIEdgeInsets)safeArea bounds:(CGRect)bounds {
+    const CGFloat rail = 48.0;
+    const CGFloat barH = 64.0;
+    if ([pos isEqualToString:@"bottom"]) {
+        CGFloat h = contentHeight - barH - innerGap;
+        return CGRectMake(frameX + innerGap, contentTop, frameW - rightPanelWidth - innerGap * 2, MAX(h, 0));
+    }
+    if ([pos isEqualToString:@"right"]) {
+        return CGRectMake(frameX + innerGap, contentTop, frameW - rail - rightPanelWidth - innerGap * 2, contentHeight);
+    }
+    return CGRectMake(frameX + rail + innerGap, contentTop, frameW - rail - rightPanelWidth - innerGap * 2, contentHeight);
+}
+
 - (void)viewDidLayoutSubviews {
     [super viewDidLayoutSubviews];
 
     CGFloat topBarHeight = 44.0;
-    CGFloat sidebarWidth = 48.0;
     // Portrait: collapse the 180pt right panel (it squeezes content down to
     // ~150pt on phones) and show the floating circular launch button instead.
     // Landscape keeps the exact current layout.
@@ -260,33 +300,46 @@
     _backgroundVideoView.frame = bounds;
     _backgroundVideoLayer.frame = _backgroundVideoView.bounds;
 
-    _sidebarVC.view.frame = CGRectMake(frameX, contentTop, sidebarWidth, contentHeight);
+    _sidebarVC.view.frame = [self sidebarFrameForPosition:[self sidebarPositionForPortrait:isPortrait]
+                                                                                 frameX:frameX frameW:frameW
+                                                                              contentTop:contentTop contentHeight:contentHeight
+                                                                                 safeArea:safeArea bounds:bounds];
     // Square top corners: the bar sits flush under the top bar — rounding the
-    // T-junction leaves ugly notches. Only the bottom outer corner is rounded.
-    [self styleFloatingView:_sidebarVC.view corners:kCALayerMinXMaxYCorner];
+    // T-junction leaves ugly notches.
+    if ([[self sidebarPositionForPortrait:isPortrait] isEqualToString:@"right"]) {
+        [self styleFloatingView:_sidebarVC.view corners:kCALayerMaxXMinYCorner | kCALayerMaxXMaxYCorner];
+    } else if ([[self sidebarPositionForPortrait:isPortrait] isEqualToString:@"bottom"]) {
+        [self styleFloatingView:_sidebarVC.view corners:kCALayerMinXMaxYCorner | kCALayerMaxXMaxYCorner];
+    } else {
+        [self styleFloatingView:_sidebarVC.view corners:kCALayerMinXMinYCorner | kCALayerMinXMaxYCorner];
+    }
     _sidebarBorder.hidden = YES;
 
     _rightPanelVC.view.frame = CGRectMake(frameX + frameW - rightPanelWidth, contentTop, rightPanelWidth, contentHeight);
     [self styleFloatingView:_rightPanelVC.view corners:kCALayerMaxXMaxYCorner];
 
-    _contentContainer.frame = CGRectMake(frameX + sidebarWidth + innerGap,
-                                         contentTop,
-                                         frameW - sidebarWidth - rightPanelWidth - innerGap * 2,
-                                         contentHeight);
+    _contentContainer.frame = [self contentFrameForSidebarPosition:[self sidebarPositionForPortrait:isPortrait]
+                                                           frameX:frameX frameW:frameW
+                                                       contentTop:contentTop contentHeight:contentHeight
+                                                  rightPanelWidth:rightPanelWidth innerGap:innerGap
+                                                         safeArea:safeArea bounds:bounds];
 
     if (self.currentContentVC) {
         self.currentContentVC.view.frame = _contentContainer.bounds;
     }
 
-    // Portrait floating launch circle, bottom-right above the home indicator.
+    // Portrait floating buttons, bottom-right above the home indicator
+    // (and above the bottom sidebar bar when docked there).
     if (isPortrait) {
         CGFloat btnSize = 64.0;
         CGFloat margin = 16.0;
+        BOOL sideBottom = [[self sidebarPositionForPortrait:YES] isEqualToString:@"bottom"];
+        CGFloat bottomPad = safeArea.bottom + margin + (sideBottom ? (64.0 + 8.0) : 0.0);
         _floatingLaunchBtn.frame = CGRectMake(bounds.size.width - rightInset - margin - btnSize,
-                                              bounds.size.height - safeArea.bottom - margin - btnSize,
+                                              bounds.size.height - bottomPad - btnSize,
                                               btnSize, btnSize);
         _quickPanelBtn.frame = CGRectMake(bounds.size.width - rightInset - margin - 48,
-                                          bounds.size.height - safeArea.bottom - margin - btnSize - 12 - 48,
+                                          bounds.size.height - bottomPad - btnSize - 12 - 48,
                                           48, 48);
         [self.view bringSubviewToFront:_quickDim];
         [self.view bringSubviewToFront:_quickPanel];
@@ -318,7 +371,7 @@
 
     CGRect outer = CGRectMake(_topBar.frame.origin.x, _topBar.frame.origin.y,
                               _topBar.frame.size.width,
-                              CGRectGetMaxY(_rightPanelVC.view.frame) - _topBar.frame.origin.y);
+                              MAX(CGRectGetMaxY(_rightPanelVC.view.frame), CGRectGetMaxY(_sidebarVC.view.frame)) - _topBar.frame.origin.y);
     UIBezierPath *outerPath = [UIBezierPath bezierPathWithRoundedRect:outer
                                                    byRoundingCorners:UIRectCornerTopLeft | UIRectCornerTopRight | UIRectCornerBottomRight | UIRectCornerBottomLeft
                                                          cornerRadii:CGSizeMake(16, 16)];

@@ -110,52 +110,57 @@
     [self selectTab:0];
 }
 
-#pragma mark - Tab pill position (left / top / right / bottom, default left)
+#pragma mark - Tab pill position (per orientation: bottom portrait / left landscape)
 
-- (NSString *)tabPosition {
-    // NOTE: must live under an existing pref section ("general") — keys under
-    // unknown sections are silently dropped by PLPreferences and never persist.
-    NSString *pos = getPrefObject(@"general.profile_tabbar");
-    if ([pos isKindOfClass:[NSString class]] &&
-        ([pos isEqualToString:@"top"] || [pos isEqualToString:@"bottom"] ||
-         [pos isEqualToString:@"left"] || [pos isEqualToString:@"right"])) return pos;
-    // Migrate the old (never-persisted) key if present in memory.
-    NSString *legacy = getPrefObject(@"profile.tabbar_position");
-    if ([legacy isKindOfClass:[NSString class]] &&
-        ([legacy isEqualToString:@"top"] || [legacy isEqualToString:@"bottom"] ||
-         [legacy isEqualToString:@"left"] || [legacy isEqualToString:@"right"])) {
-        setPrefObject(@"general.profile_tabbar", legacy);
-        return legacy;
-    }
-    // No explicit choice yet: portrait defaults to bottom, landscape to left.
+- (BOOL)isPortraitNow {
     CGSize size = self.view.bounds.size;
-    if (size.width > 0 && size.width < size.height) return @"bottom";
-    return @"left";
+    return size.width > 0 && size.width < size.height;
 }
 
-- (BOOL)hasExplicitTabPosition {
-    NSString *pos = getPrefObject(@"general.profile_tabbar");
-    return [pos isKindOfClass:[NSString class]] && pos.length > 0;
+- (NSString *)prefKeyForPortrait:(BOOL)isPortrait {
+    return isPortrait ? @"general.profile_tabbar_portrait" : @"general.profile_tabbar_landscape";
+}
+
+- (BOOL)isValidTabPosition:(NSString *)pos {
+    return [pos isKindOfClass:[NSString class]] &&
+        ([pos isEqualToString:@"top"] || [pos isEqualToString:@"bottom"] ||
+         [pos isEqualToString:@"left"] || [pos isEqualToString:@"right"]);
+}
+
+- (NSString *)tabPosition {
+    // Stored under "general" so PLPreferences actually persists it.
+    NSString *pos = getPrefObject([self prefKeyForPortrait:[self isPortraitNow]]);
+    if ([self isValidTabPosition:pos]) return pos;
+    // Migrate legacy single keys if present.
+    for (NSString *k in @[@"general.profile_tabbar", @"profile.tabbar_position"]) {
+        NSString *legacy = getPrefObject(k);
+        if ([self isValidTabPosition:legacy]) {
+            setPrefObject([self prefKeyForPortrait:[self isPortraitNow]], legacy);
+            return legacy;
+        }
+    }
+    return [self isPortraitNow] ? @"bottom" : @"left";
 }
 
 - (void)viewWillTransitionToSize:(CGSize)size withTransitionCoordinator:(id<UIViewControllerTransitionCoordinator>)coordinator {
     [super viewWillTransitionToSize:size withTransitionCoordinator:coordinator];
-    // Auto-follow orientation until the user picks a position explicitly.
-    if (![self hasExplicitTabPosition]) {
-        NSString *next = (size.width > 0 && size.width < size.height) ? @"bottom" : @"left";
-        [coordinator animateAlongsideTransition:^(id<UIViewControllerTransitionCoordinatorContext> ctx) {
-            [self applyTabPosition:next animate:NO];
-        } completion:nil];
-    }
+    // Each orientation remembers its own position; apply on rotation.
+    BOOL toPortrait = size.width > 0 && size.width < size.height;
+    NSString *pos = getPrefObject([self prefKeyForPortrait:toPortrait]);
+    if (![self isValidTabPosition:pos]) pos = toPortrait ? @"bottom" : @"left";
+    [coordinator animateAlongsideTransition:^(id<UIViewControllerTransitionCoordinatorContext> ctx) {
+        [self applyTabPosition:pos animate:NO];
+    } completion:nil];
 }
 
 - (void)cycleTabPosition {
+    BOOL portrait = [self isPortraitNow];
     NSString *pos = [self tabPosition];
     NSString *next = @"left";
     if ([pos isEqualToString:@"left"]) next = @"top";
     else if ([pos isEqualToString:@"top"]) next = @"right";
     else if ([pos isEqualToString:@"right"]) next = @"bottom";
-    setPrefObject(@"general.profile_tabbar", next);
+    setPrefObject([self prefKeyForPortrait:portrait], next);
     [HapticManager.shared play:HapticTypeSelection];
     [self applyTabPosition:next animate:YES];
 }

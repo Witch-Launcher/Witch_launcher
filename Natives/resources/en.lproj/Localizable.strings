@@ -1120,3 +1120,5 @@
 "appearance.shell_inner_gap" = "Panel spacing";
 "profile.saved" = "Profile saved.";
 "quickpanel.title" = "Versions & Account";
+"appearance.mainbar_portrait" = "Main bar (portrait)";
+"appearance.mainbar_landscape" = "Main bar (landscape)";

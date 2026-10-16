@@ -1030,3 +1030,5 @@
 "appearance.shell_inner_gap" = "Khoảng cách panel";
 "profile.saved" = "Đã lưu profile.";
 "quickpanel.title" = "Phiên bản & Tài khoản";
+"appearance.mainbar_portrait" = "Thanh chính (dọc)";
+"appearance.mainbar_landscape" = "Thanh chính (ngang)";

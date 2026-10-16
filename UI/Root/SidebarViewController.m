@@ -9,6 +9,8 @@
 @property (nonatomic) UILabel *titleLabel;
 @property (nonatomic) UIView *indicatorView;
 @property (nonatomic) BOOL isSelected;
+@property (nonatomic) BOOL indicatorHorizontal;
+@property (nonatomic) NSArray<NSLayoutConstraint *> *indicatorConstraints;
 @property (nonatomic, copy) void (^tapHandler)(void);
 @end
 
@@ -36,6 +38,7 @@
         _indicatorView.layer.cornerRadius = 1.5;
         _indicatorView.hidden = YES;
         [self addSubview:_indicatorView];
+        [self applyIndicatorConstraints];
 
         _iconView.translatesAutoresizingMaskIntoConstraints = NO;
         [NSLayoutConstraint activateConstraints:@[
@@ -48,17 +51,38 @@
             [_titleLabel.centerXAnchor constraintEqualToAnchor:self.centerXAnchor],
             [_titleLabel.leadingAnchor constraintGreaterThanOrEqualToAnchor:self.leadingAnchor constant:2],
             [_titleLabel.trailingAnchor constraintLessThanOrEqualToAnchor:self.trailingAnchor constant:-2],
-
-            [_indicatorView.leadingAnchor constraintEqualToAnchor:self.leadingAnchor constant:2],
-            [_indicatorView.centerYAnchor constraintEqualToAnchor:self.centerYAnchor],
-            [_indicatorView.widthAnchor constraintEqualToConstant:3],
-            [_indicatorView.heightAnchor constraintEqualToConstant:16],
         ]];
 
         UITapGestureRecognizer *tap = [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(didTap)];
         [self addGestureRecognizer:tap];
     }
     return self;
+}
+
+- (void)applyIndicatorConstraints {
+    if (_indicatorConstraints) [NSLayoutConstraint deactivateConstraints:_indicatorConstraints];
+    if (_indicatorHorizontal) {
+        _indicatorConstraints = @[
+            [_indicatorView.centerXAnchor constraintEqualToAnchor:self.centerXAnchor],
+            [_indicatorView.bottomAnchor constraintEqualToAnchor:self.bottomAnchor constant:-3],
+            [_indicatorView.widthAnchor constraintEqualToConstant:16],
+            [_indicatorView.heightAnchor constraintEqualToConstant:3],
+        ];
+    } else {
+        _indicatorConstraints = @[
+            [_indicatorView.leadingAnchor constraintEqualToAnchor:self.leadingAnchor constant:2],
+            [_indicatorView.centerYAnchor constraintEqualToAnchor:self.centerYAnchor],
+            [_indicatorView.widthAnchor constraintEqualToConstant:3],
+            [_indicatorView.heightAnchor constraintEqualToConstant:16],
+        ];
+    }
+    [NSLayoutConstraint activateConstraints:_indicatorConstraints];
+}
+
+- (void)setIndicatorHorizontal:(BOOL)indicatorHorizontal {
+    if (_indicatorHorizontal == indicatorHorizontal) return;
+    _indicatorHorizontal = indicatorHorizontal;
+    [self applyIndicatorConstraints];
 }
 
 - (void)didTap {
@@ -75,6 +99,8 @@
 @interface SidebarViewController ()
 @property (nonatomic) NSArray<SidebarTabItem *> *items;
 @property (nonatomic) UIView *stackContainer;
+@property (nonatomic) NSArray<NSDictionary *> *tabConfig;
+@property (nonatomic) NSArray<NSLayoutConstraint *> *itemConstraints;
 @end
 
 @implementation SidebarViewController
@@ -94,9 +120,9 @@
         @{@"icon": @"paintbrush.fill", @"title": @"Resource Pack"},
         @{@"icon": @"map", @"title": @"Maps"},
     ];
+    _tabConfig = tabConfig;
 
     NSMutableArray *itemArray = [NSMutableArray array];
-    SidebarTabItem *prevItem = nil;
     for (int i = 0; i < tabConfig.count; i++) {
         NSDictionary *config = tabConfig[i];
         SidebarTabItem *item = [[SidebarTabItem alloc] initWithIcon:config[@"icon"] title:config[@"title"]];
@@ -108,21 +134,8 @@
         };
         [self.stackContainer addSubview:item];
         [itemArray addObject:item];
-
-        [NSLayoutConstraint activateConstraints:@[
-            [item.leadingAnchor constraintEqualToAnchor:self.stackContainer.leadingAnchor],
-            [item.trailingAnchor constraintEqualToAnchor:self.stackContainer.trailingAnchor],
-            [item.heightAnchor constraintEqualToAnchor:self.stackContainer.heightAnchor multiplier:1.0/tabConfig.count],
-        ]];
-
-        if (prevItem) {
-            [item.topAnchor constraintEqualToAnchor:prevItem.bottomAnchor].active = YES;
-        } else {
-            [item.topAnchor constraintEqualToAnchor:self.stackContainer.topAnchor].active = YES;
-        }
-        prevItem = item;
     }
-    [prevItem.bottomAnchor constraintEqualToAnchor:self.stackContainer.bottomAnchor].active = YES;
+    [self rebuildItemConstraints];
 
     [NSLayoutConstraint activateConstraints:@[
         [self.stackContainer.centerXAnchor constraintEqualToAnchor:self.view.centerXAnchor],
@@ -138,6 +151,52 @@
     [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(updateColors) name:AmethystBlurIntensityDidChangeNotification object:nil];
         [self updateColors];
     }
+
+// Rebuilds item layout for vertical (side rails) vs horizontal (bottom bar).
+- (void)rebuildItemConstraints {
+    if (_itemConstraints) [NSLayoutConstraint deactivateConstraints:_itemConstraints];
+    NSMutableArray *c = [NSMutableArray array];
+    NSUInteger n = self.items.count;
+    if (_horizontal) {
+        SidebarTabItem *prev = nil;
+        for (SidebarTabItem *item in self.items) {
+            [c addObjectsFromArray:@[
+                [item.topAnchor constraintEqualToAnchor:self.stackContainer.topAnchor],
+                [item.bottomAnchor constraintEqualToAnchor:self.stackContainer.bottomAnchor],
+                [item.widthAnchor constraintEqualToAnchor:self.stackContainer.widthAnchor multiplier:1.0/n],
+            ]];
+            if (prev) [c addObject:[item.leadingAnchor constraintEqualToAnchor:prev.trailingAnchor]];
+            else [c addObject:[item.leadingAnchor constraintEqualToAnchor:self.stackContainer.leadingAnchor]];
+            prev = item;
+        }
+        if (prev) [c addObject:[prev.trailingAnchor constraintEqualToAnchor:self.stackContainer.trailingAnchor]];
+    } else {
+        SidebarTabItem *prev = nil;
+        for (SidebarTabItem *item in self.items) {
+            [c addObjectsFromArray:@[
+                [item.leadingAnchor constraintEqualToAnchor:self.stackContainer.leadingAnchor],
+                [item.trailingAnchor constraintEqualToAnchor:self.stackContainer.trailingAnchor],
+                [item.heightAnchor constraintEqualToAnchor:self.stackContainer.heightAnchor multiplier:1.0/n],
+            ]];
+            if (prev) [c addObject:[item.topAnchor constraintEqualToAnchor:prev.bottomAnchor]];
+            else [c addObject:[item.topAnchor constraintEqualToAnchor:self.stackContainer.topAnchor]];
+            prev = item;
+        }
+        if (prev) [c addObject:[prev.bottomAnchor constraintEqualToAnchor:self.stackContainer.bottomAnchor]];
+    }
+    _itemConstraints = c;
+    [NSLayoutConstraint activateConstraints:c];
+    for (SidebarTabItem *item in self.items) {
+        item.indicatorHorizontal = _horizontal;
+    }
+}
+
+- (void)setHorizontal:(BOOL)horizontal {
+    if (_horizontal == horizontal && _itemConstraints) return;
+    _horizontal = horizontal;
+    if (!self.items) return;
+    [self rebuildItemConstraints];
+}
 
 - (void)updateColors {
     ThemeManager *theme = ThemeManager.shared;
