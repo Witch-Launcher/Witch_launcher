@@ -44,10 +44,10 @@ typedef NS_ENUM(NSInteger, ProfileListFilter) {
     if (self) {
         _profile = profile ?: [NSMutableDictionary dictionary];
         _category = [category copy];
-        NSString *title = @"Mods";
+        NSString *title = localize(@"profiles.tab_mods", nil);
         NSString *icon = @"puzzlepiece.extension";
-        if ([category isEqualToString:InstalledItemCategoryShaderPack]) { title = @"Shaders"; icon = @"paintbrush.pointed"; }
-        else if ([category isEqualToString:InstalledItemCategoryResourcePack]) { title = @"Resources"; icon = @"paintpalette"; }
+        if ([category isEqualToString:InstalledItemCategoryShaderPack]) { title = localize(@"profiles.tab_shader", nil); icon = @"paintbrush.pointed"; }
+        else if ([category isEqualToString:InstalledItemCategoryResourcePack]) { title = localize(@"profiles.tab_resourcepack", nil); icon = @"paintpalette"; }
         self.title = title;
         self.tabBarItem = [[UITabBarItem alloc] initWithTitle:title
                                                        image:[UIImage systemImageNamed:icon]

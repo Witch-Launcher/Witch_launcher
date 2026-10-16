@@ -162,7 +162,7 @@
     AccountViewController *vc = [[AccountViewController alloc] init];
     vc.coordinator = self;
     UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:vc];
-    vc.navigationItem.rightBarButtonItem = [[UIBarButtonItem alloc] initWithTitle:@"Xong" style:UIBarButtonItemStyleDone target:self action:@selector(dismissTopSheet)];
+    vc.navigationItem.rightBarButtonItem = [[UIBarButtonItem alloc] initWithTitle:localize(@"Done", nil) style:UIBarButtonItemStyleDone target:self action:@selector(dismissTopSheet)];
     [self.rootVC presentContentAsSheet:nav];
 }
 

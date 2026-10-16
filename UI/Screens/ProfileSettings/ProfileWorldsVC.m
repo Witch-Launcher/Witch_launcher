@@ -22,8 +22,8 @@
     self = [super init];
     if (self) {
         _profile = profile ?: [NSMutableDictionary dictionary];
-        self.title = @"Worlds";
-        self.tabBarItem = [[UITabBarItem alloc] initWithTitle:@"Worlds"
+        self.title = localize(@"profiles.tab_worlds", nil);
+        self.tabBarItem = [[UITabBarItem alloc] initWithTitle:localize(@"profiles.tab_worlds", nil)
                                                        image:[UIImage systemImageNamed:@"globe"]
                                                selectedImage:[UIImage systemImageNamed:@"globe.fill"]];
     }

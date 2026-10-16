@@ -26,7 +26,22 @@
         }
         if (!host) host = scene.windows.firstObject;
         if (!host) return;
+        // Walk to the topmost presented view (sheets / fullscreen pages live
+        // above the root view — a toast on the root would hide underneath).
+        UIViewController *top = host.rootViewController;
+        while (top.presentedViewController) top = top.presentedViewController;
+        UIView *topView = top.view;
+        if (!topView) return;
         [HapticManager.shared play:success ? HapticTypeSuccess : HapticTypeWarning];
+
+        // Pill container gives the text breathing room (padding on all sides).
+        UIView *pill = [[UIView alloc] init];
+        pill.backgroundColor = [UIColor colorWithWhite:0.08 alpha:0.88];
+        pill.layer.cornerRadius = 18;
+        pill.clipsToBounds = YES;
+        pill.alpha = 0;
+        pill.translatesAutoresizingMaskIntoConstraints = NO;
+        [topView addSubview:pill];
 
         UILabel *toast = [[UILabel alloc] init];
         toast.text = message;
@@ -34,22 +49,22 @@
         toast.textColor = UIColor.whiteColor;
         toast.textAlignment = NSTextAlignmentCenter;
         toast.numberOfLines = 2;
-        toast.backgroundColor = [UIColor colorWithWhite:0.08 alpha:0.88];
-        toast.layer.cornerRadius = 14;
-        toast.clipsToBounds = YES;
-        toast.alpha = 0;
         toast.translatesAutoresizingMaskIntoConstraints = NO;
-        [host.rootViewController.view addSubview:toast];
+        [pill addSubview:toast];
         [NSLayoutConstraint activateConstraints:@[
-            [toast.centerXAnchor constraintEqualToAnchor:host.rootViewController.view.centerXAnchor],
-            [toast.bottomAnchor constraintEqualToAnchor:host.rootViewController.view.safeAreaLayoutGuide.bottomAnchor constant:-90],
-            [toast.leadingAnchor constraintGreaterThanOrEqualToAnchor:host.rootViewController.view.leadingAnchor constant:40],
-            [toast.trailingAnchor constraintLessThanOrEqualToAnchor:host.rootViewController.view.trailingAnchor constant:-40],
+            [toast.topAnchor constraintEqualToAnchor:pill.topAnchor constant:12],
+            [toast.bottomAnchor constraintEqualToAnchor:pill.bottomAnchor constant:-12],
+            [toast.leadingAnchor constraintEqualToAnchor:pill.leadingAnchor constant:20],
+            [toast.trailingAnchor constraintEqualToAnchor:pill.trailingAnchor constant:-20],
+            [pill.centerXAnchor constraintEqualToAnchor:topView.centerXAnchor],
+            [pill.bottomAnchor constraintEqualToAnchor:topView.safeAreaLayoutGuide.bottomAnchor constant:-90],
+            [pill.leadingAnchor constraintGreaterThanOrEqualToAnchor:topView.leadingAnchor constant:40],
+            [pill.trailingAnchor constraintLessThanOrEqualToAnchor:topView.trailingAnchor constant:-40],
         ]];
-        [UIView animateWithDuration:0.25 animations:^{ toast.alpha = 1; } completion:^(BOOL f) {
+        [UIView animateWithDuration:0.25 animations:^{ pill.alpha = 1; } completion:^(BOOL f) {
             dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.6 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-                [UIView animateWithDuration:0.3 animations:^{ toast.alpha = 0; } completion:^(BOOL f2) {
-                    [toast removeFromSuperview];
+                [UIView animateWithDuration:0.3 animations:^{ pill.alpha = 0; } completion:^(BOOL f2) {
+                    [pill removeFromSuperview];
                 }];
             });
         }];

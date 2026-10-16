@@ -154,6 +154,7 @@ NSString * const ThemeDidChangeNotification = @"ThemeDidChangeNotification";
 - (void)setUiBorderEnabled:(BOOL)uiBorderEnabled {
     _uiBorderEnabled = uiBorderEnabled;
     [[NSUserDefaults standardUserDefaults] setBool:uiBorderEnabled forKey:@"amethyst_ui_border_enabled"];
+    [[NSUserDefaults standardUserDefaults] synchronize];
     [self broadcastThemeChange];
 }
 
@@ -164,12 +165,14 @@ NSString * const ThemeDidChangeNotification = @"ThemeDidChangeNotification";
 - (void)setUiBorderWidth:(CGFloat)uiBorderWidth {
     _uiBorderWidth = MAX(0.5, MIN(uiBorderWidth, 4.0));
     [[NSUserDefaults standardUserDefaults] setFloat:_uiBorderWidth forKey:@"amethyst_ui_border_width"];
+    [[NSUserDefaults standardUserDefaults] synchronize];
     [self broadcastThemeChange];
 }
 
 - (void)setUiBorderCornerRadius:(CGFloat)uiBorderCornerRadius {
     _uiBorderCornerRadius = MAX(0, MIN(uiBorderCornerRadius, 28.0));
     [[NSUserDefaults standardUserDefaults] setFloat:_uiBorderCornerRadius forKey:@"amethyst_ui_border_radius"];
+    [[NSUserDefaults standardUserDefaults] synchronize];
     [self broadcastThemeChange];
 }
 
@@ -260,8 +263,10 @@ NSString * const ThemeDidChangeNotification = @"ThemeDidChangeNotification";
 }
 
 - (UIColor *)accentColor {
+    // Default look is monochrome: black buttons in light mode, white in dark.
+    // Any saved custom color still wins over this fallback.
     return [self colorOverrideForKey:@"amethyst_accent_color"]
-        ?: [UIColor colorWithRed:0.067 green:0.235 blue:0.522 alpha:1.0];
+        ?: ([self isDarkMode] ? [UIColor whiteColor] : [UIColor blackColor]);
 }
 
 - (UIColor *)accentHoverColor {
@@ -330,7 +335,14 @@ NSString * const ThemeDidChangeNotification = @"ThemeDidChangeNotification";
 }
 
 - (UIColor *)buttonTextColor {
-    return [UIColor whiteColor];
+    // Contrast against the (possibly custom) accent so text stays readable
+    // on both black/white defaults and user-picked colors.
+    CGFloat r, g, b, a;
+    if ([self.accentColor getRed:&r green:&g blue:&b alpha:&a]) {
+        CGFloat luminance = 0.299 * r + 0.587 * g + 0.114 * b;
+        return luminance > 0.55 ? [UIColor blackColor] : [UIColor whiteColor];
+    }
+    return [self isDarkMode] ? [UIColor blackColor] : [UIColor whiteColor];
 }
 
 - (void)applyAccentColor:(UIColor *)color {
@@ -371,6 +383,15 @@ NSString * const ThemeDidChangeNotification = @"ThemeDidChangeNotification";
 }
 
 - (void)applyThemeToAllWindows {
+    // Iterate scenes: sharedApplication.windows can miss the key window,
+    // which left manual Dark/Light switches with no visible effect.
+    for (UIScene *scene in UIApplication.sharedApplication.connectedScenes) {
+        if (![scene isKindOfClass:[UIWindowScene class]]) continue;
+        for (UIWindow *window in ((UIWindowScene *)scene).windows) {
+            window.overrideUserInterfaceStyle = _interfaceStyle;
+        }
+    }
+    // Fallback for any window not attached to a scene yet.
     for (UIWindow *window in UIApplication.sharedApplication.windows) {
         window.overrideUserInterfaceStyle = _interfaceStyle;
     }

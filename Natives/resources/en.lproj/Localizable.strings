@@ -1109,3 +1109,14 @@
 "preference.title.tglmt_frames_in_flight" = "TGLMT Frames in Flight";
 "preference.title.tglmt_buf_pool_slots" = "TGLMT Buffer Pool Slots";
 "preference.title.tglmt_pool_mb" = "TGLMT Pool Budget";
+
+/* Profile floating tabs + shell settings (Witch custom UI) */
+"profiles.tab_overview" = "Overview";
+"profiles.tab_worlds" = "Worlds";
+"profiles.tab_packs_short" = "Packs";
+"appearance.ui_border" = "UI Border";
+"appearance.border_radius" = "Border radius";
+"appearance.shell_gap" = "Shell edge margin";
+"appearance.shell_inner_gap" = "Panel spacing";
+"profile.saved" = "Profile saved.";
+"quickpanel.title" = "Versions & Account";

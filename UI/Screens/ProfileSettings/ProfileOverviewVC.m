@@ -39,8 +39,8 @@
         _profile = profile ?: [NSMutableDictionary dictionary];
         _isNewProfile = isNew;
         _originalName = [profile[@"name"] copy];
-        self.title = @"Overview";
-        self.tabBarItem = [[UITabBarItem alloc] initWithTitle:@"Overview"
+        self.title = localize(@"profiles.tab_overview", nil);
+        self.tabBarItem = [[UITabBarItem alloc] initWithTitle:localize(@"profiles.tab_overview", nil)
                                                        image:[UIImage systemImageNamed:@"person.crop.circle"]
                                                selectedImage:[UIImage systemImageNamed:@"person.crop.circle.fill"]];
     }
@@ -575,7 +575,7 @@
     _originalName = [name copy];
     _isNewProfile = NO;
     // Non-modal toast: never steals the key window, so saving can never hang UI.
-    [ErrorPresenter showToast:@"Profile saved."];
+    [ErrorPresenter showToast:localize(@"profile.saved", nil)];
     [[NSNotificationCenter defaultCenter] postNotificationName:@"VersionDidChangeNotification" object:nil userInfo:@{}];
     [self refreshHeader];
     return YES;

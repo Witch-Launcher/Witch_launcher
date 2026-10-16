@@ -1019,3 +1019,14 @@
 "preference.title.tglmt_frames_in_flight" = "TGLMT - Số frame đang bay";
 "preference.title.tglmt_buf_pool_slots" = "TGLMT - Số slot đệm buffer";
 "preference.title.tglmt_pool_mb" = "TGLMT - Trần bộ nhớ pool (RAM)";
+
+/* Profile floating tabs + shell settings (Witch custom UI) */
+"profiles.tab_overview" = "Tổng quan";
+"profiles.tab_worlds" = "Thế giới";
+"profiles.tab_packs_short" = "Gói";
+"appearance.ui_border" = "Viền giao diện";
+"appearance.border_radius" = "Độ cong viền";
+"appearance.shell_gap" = "Lề khung ngoài";
+"appearance.shell_inner_gap" = "Khoảng cách panel";
+"profile.saved" = "Đã lưu profile.";
+"quickpanel.title" = "Phiên bản & Tài khoản";

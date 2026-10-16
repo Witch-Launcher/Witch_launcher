@@ -262,10 +262,10 @@
             @{@"type": @"slider", @"label": localize(@"appearance.left_bar_blur", nil), @"key": @"amethyst_sidebar_blur", @"min": @0, @"max": @100, @"suffix": @"%"},
             @{@"type": @"slider", @"label": localize(@"appearance.right_panel_blur", nil), @"key": @"amethyst_rightpanel_blur", @"min": @0, @"max": @100, @"suffix": @"%"},
             @{@"type": @"slider", @"label": localize(@"appearance.bar_border_thickness", nil), @"key": @"amethyst_bar_border_width", @"min": @0, @"max": @4, @"suffix": @" pt"},
-            @{@"type": @"switch", @"label": @"UI Border", @"key": @"amethyst_ui_border_enabled"},
-            @{@"type": @"slider", @"label": @"Border radius", @"key": @"amethyst_ui_border_radius", @"min": @0, @"max": @24, @"suffix": @" pt"},
-            @{@"type": @"slider", @"label": @"Shell edge margin", @"key": @"amethyst_shell_gap", @"min": @0, @"max": @12, @"suffix": @" pt"},
-            @{@"type": @"slider", @"label": @"Panel spacing", @"key": @"amethyst_shell_inner_gap", @"min": @0, @"max": @12, @"suffix": @" pt"},
+            @{@"type": @"switch", @"label": localize(@"appearance.ui_border", nil), @"key": @"amethyst_ui_border_enabled"},
+            @{@"type": @"slider", @"label": localize(@"appearance.border_radius", nil), @"key": @"amethyst_ui_border_radius", @"min": @0, @"max": @24, @"suffix": @" pt"},
+            @{@"type": @"slider", @"label": localize(@"appearance.shell_gap", nil), @"key": @"amethyst_shell_gap", @"min": @0, @"max": @12, @"suffix": @" pt"},
+            @{@"type": @"slider", @"label": localize(@"appearance.shell_inner_gap", nil), @"key": @"amethyst_shell_inner_gap", @"min": @0, @"max": @12, @"suffix": @" pt"},
             @{@"type": @"export", @"label": localize(@"appearance.export_theme", nil)},
             @{@"type": @"import", @"label": localize(@"appearance.import_theme", nil)},
             @{@"type": @"color", @"label": localize(@"appearance.reset", nil), @"key": @"amethyst_reset_appearance"},
@@ -1231,10 +1231,12 @@
         ThemeManager.shared.uiOpacity = val / 100.0;
     } else if ([item[@"key"] isEqualToString:@"amethyst_ui_border_radius"]) {
         ThemeManager.shared.uiBorderCornerRadius = val;
+        [[NSUserDefaults standardUserDefaults] synchronize];
         [[NSNotificationCenter defaultCenter] postNotificationName:ThemeDidChangeNotification object:nil];
     } else if ([item[@"key"] isEqualToString:@"amethyst_shell_gap"] ||
                [item[@"key"] isEqualToString:@"amethyst_shell_inner_gap"]) {
         [[NSUserDefaults standardUserDefaults] setFloat:val forKey:item[@"key"]];
+        [[NSUserDefaults standardUserDefaults] synchronize];
         [[NSNotificationCenter defaultCenter] postNotificationName:ThemeDidChangeNotification object:nil];
     } else if ([item[@"key"] hasPrefix:@"amethyst_"] && [item[@"key"] hasSuffix:@"_blur"]) {
         // Save UI panel blur to NSUserDefaults — the store AmethystBlurView

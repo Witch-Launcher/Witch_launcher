@@ -12,6 +12,7 @@
 #import "PLProfiles.h"
 #import "VersionDirectoryManager.h"
 #import "authenticator/BaseAuthenticator.h"
+#import "utils.h"
 #import <AVFoundation/AVFoundation.h>
 #import <QuartzCore/QuartzCore.h>
 
@@ -154,7 +155,7 @@
 
     UILabel *quickTitle = [[UILabel alloc] init];
     quickTitle.translatesAutoresizingMaskIntoConstraints = NO;
-    quickTitle.text = @"Versions & Account";
+    quickTitle.text = localize(@"quickpanel.title", nil);
     quickTitle.font = [UIFont systemFontOfSize:16 weight:UIFontWeightBold];
     quickTitle.textColor = ThemeManager.shared.primaryTextColor;
     quickTitle.tag = 9001;
@@ -576,7 +577,7 @@
     [[HapticManager shared] play:HapticTypeLight];
     [self quickVersionsChanged];
     NSString *name = BaseAuthenticator.current.authData[@"username"];
-    [_quickAccountBtn setTitle:(name.length > 0 ? name : @"Add account") forState:UIControlStateNormal];
+    [_quickAccountBtn setTitle:(name.length > 0 ? name : localize(@"account.add", nil)) forState:UIControlStateNormal];
     [_quickAccountBtn setTitleColor:ThemeManager.shared.accentColor forState:UIControlStateNormal];
     _quickPanelOpen = YES;
     _quickDim.hidden = NO;
@@ -662,7 +663,7 @@
         cell.accessoryType = isCurrent ? UITableViewCellAccessoryCheckmark : UITableViewCellAccessoryNone;
         cell.textLabel.textColor = isCurrent ? ThemeManager.shared.accentColor : ThemeManager.shared.primaryTextColor;
     } else {
-        cell.textLabel.text = @"Add version";
+        cell.textLabel.text = localize(@"version.add", nil);
         cell.textLabel.textColor = ThemeManager.shared.accentColor;
         cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
     }
@@ -684,13 +685,13 @@
 - (NSArray *)tableView:(UITableView *)tableView trailingSwipeActionsForRowAtIndexPath:(NSIndexPath *)indexPath {
     if (tableView != _quickTable || indexPath.row >= (NSInteger)_quickVersions.count) return nil;
     NSString *ver = _quickVersions[indexPath.row];
-    UIContextualAction *edit = [UIContextualAction contextualActionWithStyle:UIContextualActionStyleNormal title:@"Setting" handler:^(UIContextualAction *a, UIView *v, void(^done)(BOOL)) {
+    UIContextualAction *edit = [UIContextualAction contextualActionWithStyle:UIContextualActionStyleNormal title:localize(@"Edit", nil) handler:^(UIContextualAction *a, UIView *v, void(^done)(BOOL)) {
         [self hideQuickPanel];
         [self.coordinator editVersion:ver];
         done(YES);
     }];
     edit.image = [UIImage systemImageNamed:@"gearshape.fill"];
-    UIContextualAction *del = [UIContextualAction contextualActionWithStyle:UIContextualActionStyleDestructive title:@"Delete" handler:^(UIContextualAction *a, UIView *v, void(^done)(BOOL)) {
+    UIContextualAction *del = [UIContextualAction contextualActionWithStyle:UIContextualActionStyleDestructive title:localize(@"Delete", nil) handler:^(UIContextualAction *a, UIView *v, void(^done)(BOOL)) {
         [self.coordinator removeVersion:ver];
         done(YES);
     }];

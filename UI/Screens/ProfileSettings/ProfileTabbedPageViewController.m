@@ -7,6 +7,7 @@
 #import "HapticManager.h"
 #import "InstalledModsManager.h"
 #import "LauncherPreferences.h"
+#import "utils.h"
 
 @interface ProfileTabbedPageViewController ()
 @property (nonatomic) UIView *cardHost;
@@ -35,7 +36,7 @@
     [super viewDidLoad];
     NSString *name = self.profile[@"name"];
     self.navigationItem.title = ([name isKindOfClass:[NSString class]] && name.length > 0) ? name : @"Profile";
-    self.navigationItem.leftBarButtonItem = [[UIBarButtonItem alloc] initWithTitle:@"Xong" style:UIBarButtonItemStyleDone target:self action:@selector(doneTapped)];
+    self.navigationItem.leftBarButtonItem = [[UIBarButtonItem alloc] initWithTitle:localize(@"Done", nil) style:UIBarButtonItemStyleDone target:self action:@selector(doneTapped)];
     self.navigationItem.rightBarButtonItems = @[
         [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemSave target:self action:@selector(saveTapped)],
         [[UIBarButtonItem alloc] initWithImage:[UIImage systemImageNamed:@"rectangle.3.group"] style:UIBarButtonItemStylePlain target:self action:@selector(cycleTabPosition)],
@@ -73,7 +74,7 @@
     [AmethystBlurView installInView:_tabPill];
 
     NSArray *icons = @[@"person.crop.circle", @"puzzlepiece.extension", @"paintbrush.pointed", @"paintpalette", @"globe"];
-    NSArray *labels = @[@"Home", @"Mods", @"Shader", @"Packs", @"Worlds"];
+    NSArray *labels = @[localize(@"profiles.tab_overview", nil), localize(@"profiles.tab_mods", nil), localize(@"profiles.tab_shader", nil), localize(@"profiles.tab_packs_short", nil), localize(@"profiles.tab_worlds", nil)];
     _tabButtons = [NSMutableArray array];
     _tabStack = [[UIStackView alloc] init];
     _tabStack.translatesAutoresizingMaskIntoConstraints = NO;
@@ -109,25 +110,42 @@
     [self selectTab:0];
 }
 
-#pragma mark - Tab pill position (left / top / bottom, default left)
+#pragma mark - Tab pill position (left / top / right / bottom, default left)
 
 - (NSString *)tabPosition {
-    NSString *pos = getPrefObject(@"profile.tabbar_position");
-    if ([pos isEqualToString:@"top"] || [pos isEqualToString:@"bottom"] || [pos isEqualToString:@"left"]) return pos;
+    // NOTE: must live under an existing pref section ("general") — keys under
+    // unknown sections are silently dropped by PLPreferences and never persist.
+    NSString *pos = getPrefObject(@"general.profile_tabbar");
+    if ([pos isKindOfClass:[NSString class]] &&
+        ([pos isEqualToString:@"top"] || [pos isEqualToString:@"bottom"] ||
+         [pos isEqualToString:@"left"] || [pos isEqualToString:@"right"])) return pos;
+    // Migrate the old (never-persisted) key if present in memory.
+    NSString *legacy = getPrefObject(@"profile.tabbar_position");
+    if ([legacy isKindOfClass:[NSString class]] &&
+        ([legacy isEqualToString:@"top"] || [legacy isEqualToString:@"bottom"] ||
+         [legacy isEqualToString:@"left"] || [legacy isEqualToString:@"right"])) {
+        setPrefObject(@"general.profile_tabbar", legacy);
+        return legacy;
+    }
     return @"left";
 }
 
 - (void)cycleTabPosition {
     NSString *pos = [self tabPosition];
-    NSString *next = [pos isEqualToString:@"left"] ? @"top" : [pos isEqualToString:@"top"] ? @"bottom" : @"left";
-    setPrefObject(@"profile.tabbar_position", next);
+    NSString *next = @"left";
+    if ([pos isEqualToString:@"left"]) next = @"top";
+    else if ([pos isEqualToString:@"top"]) next = @"right";
+    else if ([pos isEqualToString:@"right"]) next = @"bottom";
+    setPrefObject(@"general.profile_tabbar", next);
     [HapticManager.shared play:HapticTypeSelection];
     [self applyTabPosition:next animate:YES];
 }
 
 - (void)applyTabPosition:(NSString *)pos animate:(BOOL)animate {
+    if (![pos isKindOfClass:[NSString class]]) pos = @"left";
     if (_chromeConstraints) [NSLayoutConstraint deactivateConstraints:_chromeConstraints];
-    _tabStack.axis = [pos isEqualToString:@"left"] ? UILayoutConstraintAxisVertical : UILayoutConstraintAxisHorizontal;
+    BOOL vertical = [pos isEqualToString:@"left"] || [pos isEqualToString:@"right"];
+    _tabStack.axis = vertical ? UILayoutConstraintAxisVertical : UILayoutConstraintAxisHorizontal;
     NSMutableArray *c = [NSMutableArray array];
     if ([pos isEqualToString:@"left"]) {
         [c addObjectsFromArray:@[
@@ -138,6 +156,17 @@
             [_cardHost.topAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.topAnchor constant:8],
             [_cardHost.leadingAnchor constraintEqualToAnchor:_tabPill.trailingAnchor constant:8],
             [_cardHost.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor constant:-12],
+            [_cardHost.bottomAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.bottomAnchor constant:-8],
+        ]];
+    } else if ([pos isEqualToString:@"right"]) {
+        [c addObjectsFromArray:@[
+            [_tabPill.topAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.topAnchor constant:8],
+            [_tabPill.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor constant:-12],
+            [_tabPill.bottomAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.bottomAnchor constant:-8],
+            [_tabPill.widthAnchor constraintEqualToConstant:62],
+            [_cardHost.topAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.topAnchor constant:8],
+            [_cardHost.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor constant:12],
+            [_cardHost.trailingAnchor constraintEqualToAnchor:_tabPill.leadingAnchor constant:-8],
             [_cardHost.bottomAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.bottomAnchor constant:-8],
         ]];
     } else if ([pos isEqualToString:@"top"]) {
