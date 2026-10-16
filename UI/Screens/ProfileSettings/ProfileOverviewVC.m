@@ -200,6 +200,7 @@
 - (void)persistAvatarKey:(NSString *)key {
     self.profile[@"avatar"] = key;
     [self persistProfileObject];
+    [[NSNotificationCenter defaultCenter] postNotificationName:@"VersionDidChangeNotification" object:nil userInfo:@{}];
     [self refreshHeader];
 }
 
@@ -272,6 +273,7 @@
     }
     self.profile[@"avatar"] = dest;
     [self persistProfileObject];
+    [[NSNotificationCenter defaultCenter] postNotificationName:@"VersionDidChangeNotification" object:nil userInfo:@{}];
     [HapticManager.shared play:HapticTypeSuccess];
     [self refreshHeader];
 }
@@ -574,6 +576,7 @@
     _isNewProfile = NO;
     // Non-modal toast: never steals the key window, so saving can never hang UI.
     [ErrorPresenter showToast:@"Profile saved."];
+    [[NSNotificationCenter defaultCenter] postNotificationName:@"VersionDidChangeNotification" object:nil userInfo:@{}];
     [self refreshHeader];
     return YES;
 }

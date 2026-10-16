@@ -7,6 +7,7 @@
 #import "utils.h"
 #import "AmethystBlurView.h"
 #import "DownloadManager.h"
+#import "ProfileAvatarManager.h"
 #import <objc/runtime.h>
 
 @interface RightPanelViewController ()
@@ -260,7 +261,7 @@
     for (NSString *ver in _installedVersions) {
         UIView *row = [[UIView alloc] init];
         row.translatesAutoresizingMaskIntoConstraints = NO;
-        row.layer.cornerRadius = 4;
+        row.layer.cornerRadius = 6;
         row.clipsToBounds = YES;
         objc_setAssociatedObject(row, @selector(versionTapped:), ver, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
 
@@ -272,11 +273,13 @@
         }
 
         VersionProfile *profile = [VersionProfile profileWithVersionId:ver];
-        NSString *displayName;
+        NSString *displayName = nil;
+        NSString *avatarKey = nil;
         for (NSString *key in PLProfiles.current.profiles) {
             NSDictionary *p = PLProfiles.current.profiles[key];
             if ([p[@"lastVersionId"] isEqualToString:ver]) {
-                displayName = p[@"name"];
+                if ([p[@"name"] isKindOfClass:[NSString class]]) displayName = p[@"name"];
+                if ([p[@"avatar"] isKindOfClass:[NSString class]]) avatarKey = p[@"avatar"];
                 break;
             }
         }
@@ -294,37 +297,36 @@
         iconView.translatesAutoresizingMaskIntoConstraints = NO;
         iconView.contentMode = UIViewContentModeScaleAspectFit;
         iconView.tintColor = isCurrent ? ThemeManager.shared.accentColor : ThemeManager.shared.secondaryTextColor;
-        iconView.image = [UIImage systemImageNamed:profile.iconName];
+        // Profile avatar wins (user-changeable); loader icon is the fallback.
+        UIImage *avatarImg = avatarKey ? [ProfileAvatarManager.shared avatarImageForKey:avatarKey] : nil;
+        iconView.image = avatarImg ?: [UIImage systemImageNamed:profile.iconName];
         [row addSubview:iconView];
 
         UILabel *label = [[UILabel alloc] init];
         label.translatesAutoresizingMaskIntoConstraints = NO;
         label.text = isCurrent ? [NSString stringWithFormat:@"► %@", displayName] : displayName;
-        label.font = [UIFont systemFontOfSize:10 weight:isCurrent ? UIFontWeightBold : UIFontWeightMedium];
+        label.font = [UIFont systemFontOfSize:11 weight:isCurrent ? UIFontWeightBold : UIFontWeightMedium];
         label.textColor = isCurrent ? ThemeManager.shared.accentColor : ThemeManager.shared.primaryTextColor;
+        label.lineBreakMode = NSLineBreakByTruncatingMiddle;
         label.userInteractionEnabled = YES;
         UITapGestureRecognizer *tap = [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(versionTapped:)];
         [label addGestureRecognizer:tap];
         [row addSubview:label];
 
+        UILabel *loaderTag = nil;
         if (isLoader) {
-            UILabel *loaderTag = [[UILabel alloc] init];
+            loaderTag = [[UILabel alloc] init];
             loaderTag.translatesAutoresizingMaskIntoConstraints = NO;
-            loaderTag.text = profile.modLoader;
-            loaderTag.font = [UIFont systemFontOfSize:7 weight:UIFontWeightBold];
+            loaderTag.text = [NSString stringWithFormat:@" %@ ", profile.modLoader];
+            loaderTag.font = [UIFont systemFontOfSize:8 weight:UIFontWeightBold];
             loaderTag.textColor = ThemeManager.shared.accentColor;
             loaderTag.backgroundColor = [ThemeManager.shared.accentColor colorWithAlphaComponent:0.12];
-            loaderTag.layer.cornerRadius = 3;
+            loaderTag.layer.cornerRadius = 4;
             loaderTag.clipsToBounds = YES;
             loaderTag.textAlignment = NSTextAlignmentCenter;
+            [loaderTag setContentHuggingPriority:UILayoutPriorityRequired forAxis:UILayoutConstraintAxisHorizontal];
+            [loaderTag setContentCompressionResistancePriority:UILayoutPriorityRequired forAxis:UILayoutConstraintAxisHorizontal];
             [row addSubview:loaderTag];
-
-            [NSLayoutConstraint activateConstraints:@[
-                [loaderTag.leadingAnchor constraintEqualToAnchor:iconView.trailingAnchor constant:2],
-                [loaderTag.centerYAnchor constraintEqualToAnchor:row.centerYAnchor],
-                [loaderTag.widthAnchor constraintEqualToConstant:32],
-                [loaderTag.heightAnchor constraintEqualToConstant:14],
-            ]];
         }
 
         UIButton *settingsBtn = [UIButton buttonWithType:UIButtonTypeSystem];
@@ -333,6 +335,7 @@
         settingsBtn.tintColor = ThemeManager.shared.secondaryTextColor;
         settingsBtn.imageView.contentMode = UIViewContentModeScaleAspectFit;
         [settingsBtn addTarget:self action:@selector(settingsTapped:) forControlEvents:UIControlEventTouchUpInside];
+        [settingsBtn setContentHuggingPriority:UILayoutPriorityRequired forAxis:UILayoutConstraintAxisHorizontal];
         [row addSubview:settingsBtn];
 
         UIButton *delBtn = [UIButton buttonWithType:UIButtonTypeSystem];
@@ -341,30 +344,44 @@
         delBtn.tintColor = ThemeManager.shared.errorColor;
         delBtn.imageView.contentMode = UIViewContentModeScaleAspectFit;
         [delBtn addTarget:self action:@selector(deleteTapped:) forControlEvents:UIControlEventTouchUpInside];
+        [delBtn setContentHuggingPriority:UILayoutPriorityRequired forAxis:UILayoutConstraintAxisHorizontal];
         [row addSubview:delBtn];
 
+        // Layout: icon | label (flex, truncates middle) | [tag] | gear | del.
+        // Nothing overlaps the version text anymore.
         NSMutableArray *constraints = [NSMutableArray arrayWithArray:@[
-            [iconView.leadingAnchor constraintEqualToAnchor:row.leadingAnchor constant:3],
+            [iconView.leadingAnchor constraintEqualToAnchor:row.leadingAnchor constant:6],
             [iconView.centerYAnchor constraintEqualToAnchor:row.centerYAnchor],
-            [iconView.widthAnchor constraintEqualToConstant:12],
-            [iconView.heightAnchor constraintEqualToConstant:12],
+            [iconView.widthAnchor constraintEqualToConstant:16],
+            [iconView.heightAnchor constraintEqualToConstant:16],
 
-            [label.leadingAnchor constraintEqualToAnchor:iconView.trailingAnchor constant:isLoader ? 38 : 4],
+            [label.leadingAnchor constraintEqualToAnchor:iconView.trailingAnchor constant:6],
             [label.centerYAnchor constraintEqualToAnchor:row.centerYAnchor],
-            [label.trailingAnchor constraintEqualToAnchor:settingsBtn.leadingAnchor constant:-2],
 
-            [settingsBtn.trailingAnchor constraintEqualToAnchor:delBtn.leadingAnchor constant:-2],
             [settingsBtn.centerYAnchor constraintEqualToAnchor:row.centerYAnchor],
-            [settingsBtn.widthAnchor constraintEqualToConstant:16],
-            [settingsBtn.heightAnchor constraintEqualToConstant:16],
+            [settingsBtn.widthAnchor constraintEqualToConstant:24],
+            [settingsBtn.heightAnchor constraintEqualToConstant:24],
 
-            [delBtn.trailingAnchor constraintEqualToAnchor:row.trailingAnchor constant:-2],
+            [delBtn.trailingAnchor constraintEqualToAnchor:row.trailingAnchor constant:-4],
             [delBtn.centerYAnchor constraintEqualToAnchor:row.centerYAnchor],
-            [delBtn.widthAnchor constraintEqualToConstant:18],
-            [delBtn.heightAnchor constraintEqualToConstant:18],
+            [delBtn.widthAnchor constraintEqualToConstant:24],
+            [delBtn.heightAnchor constraintEqualToConstant:24],
 
-            [row.heightAnchor constraintEqualToConstant:24],
+            [row.heightAnchor constraintEqualToConstant:30],
         ]];
+        if (loaderTag) {
+            [constraints addObjectsFromArray:@[
+                [loaderTag.leadingAnchor constraintEqualToAnchor:label.trailingAnchor constant:4],
+                [loaderTag.centerYAnchor constraintEqualToAnchor:row.centerYAnchor],
+                [loaderTag.trailingAnchor constraintEqualToAnchor:settingsBtn.leadingAnchor constant:-4],
+                [settingsBtn.trailingAnchor constraintEqualToAnchor:delBtn.leadingAnchor constant:-2],
+            ]];
+        } else {
+            [constraints addObjectsFromArray:@[
+                [label.trailingAnchor constraintEqualToAnchor:settingsBtn.leadingAnchor constant:-4],
+                [settingsBtn.trailingAnchor constraintEqualToAnchor:delBtn.leadingAnchor constant:-2],
+            ]];
+        }
         [NSLayoutConstraint activateConstraints:constraints];
 
         [_versionsStack addArrangedSubview:row];

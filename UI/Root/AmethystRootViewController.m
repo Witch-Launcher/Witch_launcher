@@ -681,6 +681,23 @@
     }
 }
 
+- (NSArray *)tableView:(UITableView *)tableView trailingSwipeActionsForRowAtIndexPath:(NSIndexPath *)indexPath {
+    if (tableView != _quickTable || indexPath.row >= (NSInteger)_quickVersions.count) return nil;
+    NSString *ver = _quickVersions[indexPath.row];
+    UIContextualAction *edit = [UIContextualAction contextualActionWithStyle:UIContextualActionStyleNormal title:@"Setting" handler:^(UIContextualAction *a, UIView *v, void(^done)(BOOL)) {
+        [self hideQuickPanel];
+        [self.coordinator editVersion:ver];
+        done(YES);
+    }];
+    edit.image = [UIImage systemImageNamed:@"gearshape.fill"];
+    UIContextualAction *del = [UIContextualAction contextualActionWithStyle:UIContextualActionStyleDestructive title:@"Delete" handler:^(UIContextualAction *a, UIView *v, void(^done)(BOOL)) {
+        [self.coordinator removeVersion:ver];
+        done(YES);
+    }];
+    del.image = [UIImage systemImageNamed:@"trash"];
+    return @[del, edit];
+}
+
 #pragma mark - Portrait floating launch
 
 - (void)floatingLaunchTapped {
