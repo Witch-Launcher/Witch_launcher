@@ -89,8 +89,6 @@
         host.view.backgroundColor = [UIColor clearColor];
         window.rootViewController = host;
         window.hidden = NO;
-        // Retain while visible; released on dismiss.
-        objc_setAssociatedObject(host, "errorDialogWindow", window, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
         UIView *root = host.view;
 
         ThemeManager *theme = ThemeManager.shared;
@@ -105,6 +103,12 @@
         UIView *overlay = [[UIView alloc] initWithFrame:UIScreen.mainScreen.bounds];
         overlay.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
         [root addSubview:overlay];
+        // The overlay retains its own window directly. (Do NOT look the window
+        // up later via the responder chain: host.view.superview IS the window,
+        // whose nextResponder is UIApplication, so that lookup always fails
+        // and the transparent Alert+1 window would stay up forever eating all
+        // touches — app renders but nothing responds after OK.)
+        objc_setAssociatedObject(overlay, "errorDialogWindow", window, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
         // Pin to host edges so rotation is handled.
         overlay.translatesAutoresizingMaskIntoConstraints = NO;
         [NSLayoutConstraint activateConstraints:@[
@@ -252,19 +256,12 @@
 @implementation UIView (AppErrorDialogTap)
 
 - (void)appErrorDialog_teardownWindow {
-    // overlay -> host.view -> host: walk up to the host view controller.
-    UIView *v = self;
-    while (v.superview) v = v.superview;
-    UIResponder *r = v.nextResponder;
-    while (r && ![r isKindOfClass:[UIViewController class]]) r = r.nextResponder;
-    UIViewController *host = (UIViewController *)r;
-    UIWindow *window = objc_getAssociatedObject(host, "errorDialogWindow");
+    UIWindow *window = objc_getAssociatedObject(self, "errorDialogWindow");
     [self removeFromSuperview];
     if (window) {
-        // Just hide: the main window was never dethroned, so interaction
-        // continues exactly where it was. No key-window restore needed.
+        // Hide FIRST so no touch can slip through during dealloc, then release.
         window.hidden = YES;
-        objc_setAssociatedObject(host, "errorDialogWindow", nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+        objc_setAssociatedObject(self, "errorDialogWindow", nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     }
 }
 
