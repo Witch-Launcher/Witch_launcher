@@ -2,6 +2,7 @@
 #import "ThemeManager.h"
 #import "AmethystBlurView.h"
 #import "HapticManager.h"
+#import "utils.h"
 #import <objc/runtime.h>
 
 typedef NS_ENUM(NSUInteger, AppSheetMode) {
@@ -30,7 +31,9 @@ typedef NS_ENUM(NSUInteger, AppSheetMode) {
 @property (nonatomic) UITextField *textField2;
 @property (nonatomic) UIView *dimView;
 @property (nonatomic) UIView *cardView;
+@property (nonatomic) NSLayoutConstraint *cardBottomConstraint;
 @property (nonatomic) UITableView *tableView;
+@property (nonatomic) NSLayoutConstraint *tableHeightConstraint;
 @property (nonatomic) UITextField *textField;
 @property (nonatomic) BOOL didAnimateEntrance;
 @end
@@ -106,6 +109,11 @@ typedef NS_ENUM(NSUInteger, AppSheetMode) {
         [msgLabel.leadingAnchor constraintEqualToAnchor:_cardView.leadingAnchor constant:20],
         [msgLabel.trailingAnchor constraintEqualToAnchor:_cardView.trailingAnchor constant:-20],
         nil];
+    // The card is always pinned to the bottom safe area; its height comes
+    // from the content (list height is capped, see below). Rotation can
+    // never strand it mid-screen, and the keyboard pushes it up.
+    _cardBottomConstraint = [_cardView.bottomAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.bottomAnchor constant:-8];
+    [c addObject:_cardBottomConstraint];
     UIView *lastView = msgLabel;
     if (_sheetTitle.length == 0 && _sheetMessage.length == 0) {
         // Anchor content directly under the grabber.
@@ -122,21 +130,48 @@ typedef NS_ENUM(NSUInteger, AppSheetMode) {
         _tableView.rowHeight = 54;
         _tableView.showsVerticalScrollIndicator = NO;
         [_cardView addSubview:_tableView];
-        CGFloat tableH = MIN(_options.count * 54, 340);
-        UIView *cancelBtn = [self makeButtonWithTitle:@"Cancel" primary:NO destructive:NO action:@selector(dismissCancelled)];
+        UIView *cancelBtn = [self makeButtonWithTitle:localize(@"Cancel", nil) primary:NO destructive:NO action:@selector(dismissCancelled)];
         [_cardView addSubview:cancelBtn];
         cancelBtn.translatesAutoresizingMaskIntoConstraints = NO;
         NSLayoutAnchor *contentTop = ([lastView isEqual:grabber] ? (NSLayoutAnchor *)grabber.bottomAnchor : ([lastView isEqual:msgLabel] && _sheetMessage.length > 0 ? (NSLayoutAnchor *)msgLabel.bottomAnchor : (NSLayoutAnchor *)titleLabel.bottomAnchor));
+        _tableHeightConstraint = [_tableView.heightAnchor constraintEqualToConstant:[self cappedOptionsHeight]];
         [c addObjectsFromArray:@[
             [_tableView.topAnchor constraintEqualToAnchor:contentTop constant:8],
             [_tableView.leadingAnchor constraintEqualToAnchor:_cardView.leadingAnchor constant:8],
             [_tableView.trailingAnchor constraintEqualToAnchor:_cardView.trailingAnchor constant:-8],
-            [_tableView.heightAnchor constraintEqualToConstant:tableH],
+            _tableHeightConstraint,
             [cancelBtn.topAnchor constraintEqualToAnchor:_tableView.bottomAnchor constant:8],
             [cancelBtn.leadingAnchor constraintEqualToAnchor:_cardView.leadingAnchor constant:16],
             [cancelBtn.trailingAnchor constraintEqualToAnchor:_cardView.trailingAnchor constant:-16],
             [cancelBtn.heightAnchor constraintEqualToConstant:46],
             [cancelBtn.bottomAnchor constraintEqualToAnchor:_cardView.safeAreaLayoutGuide.bottomAnchor constant:-12],
+        ]];
+    } else if (_mode == AppSheetModeConfirm) {
+        UIView *row = [[UIView alloc] init];
+        row.translatesAutoresizingMaskIntoConstraints = NO;
+        [_cardView addSubview:row];
+        UIView *cancelBtn = [self makeButtonWithTitle:localize(@"Cancel", nil) primary:NO destructive:NO action:@selector(dismissCancelled)];
+        NSString *okTitle = (_confirmTitle.length > 0) ? _confirmTitle : localize(@"OK", nil);
+        UIView *okBtn = [self makeButtonWithTitle:okTitle primary:YES destructive:_destructive action:@selector(confirmTapped)];
+        [row addSubview:cancelBtn];
+        [row addSubview:okBtn];
+        cancelBtn.translatesAutoresizingMaskIntoConstraints = NO;
+        okBtn.translatesAutoresizingMaskIntoConstraints = NO;
+        NSLayoutAnchor *rowTop = ([lastView isEqual:grabber] ? (NSLayoutAnchor *)grabber.bottomAnchor : ([lastView isEqual:msgLabel] && _sheetMessage.length > 0 ? (NSLayoutAnchor *)msgLabel.bottomAnchor : (NSLayoutAnchor *)titleLabel.bottomAnchor));
+        [c addObjectsFromArray:@[
+            [row.topAnchor constraintEqualToAnchor:rowTop constant:12],
+            [row.leadingAnchor constraintEqualToAnchor:_cardView.leadingAnchor constant:16],
+            [row.trailingAnchor constraintEqualToAnchor:_cardView.trailingAnchor constant:-16],
+            [row.heightAnchor constraintEqualToConstant:46],
+            [row.bottomAnchor constraintEqualToAnchor:_cardView.safeAreaLayoutGuide.bottomAnchor constant:-12],
+            [cancelBtn.topAnchor constraintEqualToAnchor:row.topAnchor],
+            [cancelBtn.bottomAnchor constraintEqualToAnchor:row.bottomAnchor],
+            [cancelBtn.leadingAnchor constraintEqualToAnchor:row.leadingAnchor],
+            [cancelBtn.trailingAnchor constraintEqualToAnchor:row.centerXAnchor constant:-6],
+            [okBtn.topAnchor constraintEqualToAnchor:row.topAnchor],
+            [okBtn.bottomAnchor constraintEqualToAnchor:row.bottomAnchor],
+            [okBtn.leadingAnchor constraintEqualToAnchor:row.centerXAnchor constant:6],
+            [okBtn.trailingAnchor constraintEqualToAnchor:row.trailingAnchor],
         ]];
     } else if (_mode == AppSheetModePrompt || _mode == AppSheetModePrompt2) {
         _textField = [[UITextField alloc] init];
@@ -155,8 +190,8 @@ typedef NS_ENUM(NSUInteger, AppSheetMode) {
         UIView *row = [[UIView alloc] init];
         row.translatesAutoresizingMaskIntoConstraints = NO;
         [_cardView addSubview:row];
-        UIView *cancelBtn = [self makeButtonWithTitle:@"Cancel" primary:NO destructive:NO action:@selector(dismissCancelled)];
-        UIView *okBtn = [self makeButtonWithTitle:(_confirmTitle.length ? _confirmTitle : @"OK") primary:YES destructive:NO action:@selector(promptConfirmed)];
+        UIView *cancelBtn = [self makeButtonWithTitle:localize(@"Cancel", nil) primary:NO destructive:NO action:@selector(dismissCancelled)];
+        UIView *okBtn = [self makeButtonWithTitle:(_confirmTitle.length ? _confirmTitle : localize(@"OK", nil)) primary:YES destructive:NO action:@selector(promptConfirmed)];
         [row addSubview:cancelBtn];
         [row addSubview:okBtn];
         cancelBtn.translatesAutoresizingMaskIntoConstraints = NO;
@@ -208,6 +243,55 @@ typedef NS_ENUM(NSUInteger, AppSheetMode) {
         [c addObjectsFromArray:pc];
     }
     [NSLayoutConstraint activateConstraints:c];
+    [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(keyboardWillChange:) name:UIKeyboardWillChangeFrameNotification object:nil];
+    [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(keyboardWillHide:) name:UIKeyboardWillHideNotification object:nil];
+}
+
+- (void)dealloc {
+    [[NSNotificationCenter defaultCenter] removeObserver:self];
+}
+
+// The option list never takes more than ~45% of the safe-area height;
+// the rest scrolls inside the table so 3 options and 60 options both
+// keep the Cancel button on screen.
+- (CGFloat)cappedOptionsHeight {
+    CGFloat safeH = self.view.safeAreaLayoutGuide.layoutFrame.size.height;
+    if (safeH < 1) safeH = UIScreen.mainScreen.bounds.size.height;
+    CGFloat maxH = safeH * 0.45;
+    CGFloat want = _options.count * 54;
+    return MAX(MIN(want, maxH), 0);
+}
+
+- (void)viewDidLayoutSubviews {
+    [super viewDidLayoutSubviews];
+    if (_tableHeightConstraint) {
+        CGFloat h = [self cappedOptionsHeight];
+        if (fabs(_tableHeightConstraint.constant - h) > 0.5) {
+            _tableHeightConstraint.constant = h;
+        }
+    }
+}
+
+- (void)keyboardWillChange:(NSNotification *)note {
+    CGRect endFrame = [note.userInfo[UIKeyboardFrameEndUserInfoKey] CGRectValue];
+    CGRect inView = [self.view convertRect:endFrame fromView:nil];
+    CGFloat overlap = CGRectGetMaxY(self.view.bounds) - CGRectGetMinY(inView);
+    if (overlap < 0) overlap = 0;
+    _cardBottomConstraint.constant = -(8 + overlap);
+    NSTimeInterval d = [note.userInfo[UIKeyboardAnimationDurationUserInfoKey] doubleValue];
+    UIViewAnimationCurve curve = [note.userInfo[UIKeyboardAnimationCurveUserInfoKey] integerValue];
+    [UIView animateWithDuration:d delay:0 options:(curve << 16) animations:^{
+        [self.view layoutIfNeeded];
+    } completion:nil];
+}
+
+- (void)keyboardWillHide:(NSNotification *)note {
+    _cardBottomConstraint.constant = -8;
+    NSTimeInterval d = [note.userInfo[UIKeyboardAnimationDurationUserInfoKey] doubleValue];
+    UIViewAnimationCurve curve = [note.userInfo[UIKeyboardAnimationCurveUserInfoKey] integerValue];
+    [UIView animateWithDuration:d delay:0 options:(curve << 16) animations:^{
+        [self.view layoutIfNeeded];
+    } completion:nil];
 }
 
 - (void)viewDidAppear:(BOOL)animated {

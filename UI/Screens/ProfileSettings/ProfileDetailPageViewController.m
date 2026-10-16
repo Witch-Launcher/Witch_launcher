@@ -236,7 +236,7 @@
 
 - (void)setActionTitle:(NSString *)title color:(UIColor *)color {
     [_actionButton setTitle:title forState:UIControlStateNormal];
-    [_actionButton setTitleColor:UIColor.whiteColor forState:UIControlStateNormal];
+    [_actionButton setTitleColor:[ThemeManager.shared contrastTextColorForBackground:color] forState:UIControlStateNormal];
     _actionButton.backgroundColor = color;
 }
 
@@ -423,6 +423,7 @@ typedef NS_ENUM(NSInteger, ProfileContentFilter) {
     _tabControl = [[UISegmentedControl alloc] initWithItems:@[@"Overview", @"Mods", @"Shaders", @"Resources"]];
     _tabControl.translatesAutoresizingMaskIntoConstraints = NO;
     _tabControl.selectedSegmentIndex = 0;
+    [ThemeManager.shared styleSegmentedControl:_tabControl];
     [_tabControl addTarget:self action:@selector(tabChanged) forControlEvents:UIControlEventValueChanged];
     [_scrollRoot addSubview:_tabControl];
 
@@ -436,6 +437,7 @@ typedef NS_ENUM(NSInteger, ProfileContentFilter) {
     _filterControl = [[UISegmentedControl alloc] initWithItems:@[@"All", @"On", @"Off", @"Outdated"]];
     _filterControl.translatesAutoresizingMaskIntoConstraints = NO;
     _filterControl.selectedSegmentIndex = 0;
+    [ThemeManager.shared styleSegmentedControl:_filterControl];
     [_filterControl addTarget:self action:@selector(filterChanged) forControlEvents:UIControlEventValueChanged];
     [_scrollRoot addSubview:_filterControl];
 
@@ -560,6 +562,8 @@ typedef NS_ENUM(NSInteger, ProfileContentFilter) {
     _avatarView.tintColor = theme.accentColor;
     _avatarButton.tintColor = theme.accentColor;
     _emptyLabel.textColor = theme.secondaryTextColor;
+    [theme styleSegmentedControl:_tabControl];
+    [theme styleSegmentedControl:_filterControl];
     [_overviewTable reloadData];
     [_contentTable reloadData];
 }

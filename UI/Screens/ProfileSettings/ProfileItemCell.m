@@ -190,7 +190,7 @@
 
 - (void)setActionTitle:(NSString *)title color:(UIColor *)color {
     [_actionButton setTitle:title forState:UIControlStateNormal];
-    [_actionButton setTitleColor:UIColor.whiteColor forState:UIControlStateNormal];
+    [_actionButton setTitleColor:[ThemeManager.shared contrastTextColorForBackground:color] forState:UIControlStateNormal];
     _actionButton.backgroundColor = color;
 }
 

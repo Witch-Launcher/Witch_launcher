@@ -501,7 +501,12 @@
     }
     _chromeConstraints = c;
     [NSLayoutConstraint activateConstraints:c];
+    // Pages/contentSize/offset must be measured AFTER the new chrome has
+    // taken effect. Measuring from the old bounds left both pages stacked
+    // in portrait (transparent overlap until another rotation fixed it).
+    [self.view layoutIfNeeded];
     [self layoutTabButtons];
+    [self layoutPagesForCurrentBounds];
 }
 
 - (void)setupTabBar {
@@ -509,6 +514,7 @@
     _tabBarScroll.translatesAutoresizingMaskIntoConstraints = NO;
     _tabBarScroll.showsHorizontalScrollIndicator = NO;
     _tabBarScroll.showsVerticalScrollIndicator = NO;
+    _tabBarScroll.alwaysBounceHorizontal = YES;
     // Floating rail card, same language as the profile/main bars.
     _tabBarScroll.backgroundColor = ThemeManager.shared.cardBackgroundColor;
     _tabBarScroll.layer.cornerRadius = 16;
@@ -543,6 +549,7 @@
 
 - (void)layoutTabButtons {
     if (_chromeIsPortrait) {
+        // Bottom rail: fixed 120pt pills in a smooth horizontal strip.
         CGFloat x = 8;
         for (NSUInteger i = 0; i < _tabButtons.count; i++) {
             UIButton *btn = _tabButtons[i];
@@ -553,6 +560,7 @@
         return;
     }
     CGFloat sideWidth = _tabBarScroll.bounds.size.width;
+    if (sideWidth < 1) sideWidth = _tabWidthConstraint.constant;
     CGFloat y = 8;
     for (NSUInteger i = 0; i < _tabButtons.count; i++) {
         UIButton *btn = _tabButtons[i];
@@ -592,15 +600,27 @@
     BOOL portrait = self.view.bounds.size.width < self.view.bounds.size.height;
     if (portrait != _chromeIsPortrait) {
         _chromeIsPortrait = portrait;
+        // rebuildChromeConstraints lays out immediately and re-pages, so
+        // the new bounds are used — never the stale pre-rotation ones.
         [self rebuildChromeConstraints];
+        return;
     }
     CGFloat sideWidth = MAX(110, MIN(190, self.view.bounds.size.width * 0.24));
-    if (!portrait && _tabWidthConstraint.constant != sideWidth) {
+    if (!portrait && fabs(_tabWidthConstraint.constant - sideWidth) > 0.5) {
         _tabWidthConstraint.constant = sideWidth;
         [self.view layoutIfNeeded];
+        [self layoutTabButtons];
+    } else {
+        [self layoutTabButtons];
     }
-    [self layoutTabButtons];
+    [self layoutPagesForCurrentBounds];
+}
 
+// Single place that sizes pages from live bounds and restores the current
+// page offset. Setting scroll-subview frames/contentSize here does not
+// re-trigger our own layout, so no layout loop.
+- (void)layoutPagesForCurrentBounds {
+    if (!_pageScroll || _pageTables.count == 0) return;
     CGFloat pageW = MAX(_pageScroll.bounds.size.width, 1);
     CGFloat pageH = _pageScroll.bounds.size.height;
     _pageScroll.contentSize = CGSizeMake(pageW * _pageTables.count, pageH);

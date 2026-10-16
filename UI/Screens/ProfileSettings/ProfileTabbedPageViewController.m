@@ -13,11 +13,78 @@
 @property (nonatomic) UIView *cardHost;
 @property (nonatomic) UIView *tabPill;
 @property (nonatomic) UIStackView *tabStack;
-@property (nonatomic) NSMutableArray<UIButton *> *tabButtons;
+@property (nonatomic) NSMutableArray<UIControl *> *tabButtons;
 @property (nonatomic) NSArray<UIViewController *> *tabs;
 @property (nonatomic) ProfileOverviewVC *overviewVC;
 @property (nonatomic) NSInteger selectedIndex;
 @property (nonatomic) NSArray<NSLayoutConstraint *> *chromeConstraints;
+@end
+
+// A rail tab: SF-symbol icon centered above the label in a vertical stack.
+// No edge-inset hacks, so long/Vietnamese titles stay centered in every
+// rail position (left/right/top/bottom) and every language.
+@interface ProfileRailTabButton : UIControl
+@property (nonatomic, readonly) UIImageView *iconView;
+@property (nonatomic, readonly) UILabel *titleLabel;
+- (instancetype)initWithIconName:(NSString *)iconName title:(NSString *)title;
+- (void)setActive:(BOOL)active;
+@end
+
+@implementation ProfileRailTabButton
+
+- (instancetype)initWithIconName:(NSString *)iconName title:(NSString *)title {
+    self = [super initWithFrame:CGRectZero];
+    if (self) {
+        self.isAccessibilityElement = YES;
+        self.accessibilityLabel = title;
+
+        _iconView = [[UIImageView alloc] initWithImage:[UIImage systemImageNamed:iconName ?: @""]];
+        _iconView.translatesAutoresizingMaskIntoConstraints = NO;
+        _iconView.contentMode = UIViewContentModeScaleAspectFit;
+        _iconView.preferredSymbolConfiguration = [UIImageSymbolConfiguration configurationWithPointSize:22 weight:UIImageSymbolWeightRegular];
+
+        _titleLabel = [[UILabel alloc] init];
+        _titleLabel.translatesAutoresizingMaskIntoConstraints = NO;
+        _titleLabel.text = title ?: @"";
+        _titleLabel.font = [UIFont systemFontOfSize:9 weight:UIFontWeightMedium];
+        _titleLabel.textAlignment = NSTextAlignmentCenter;
+        _titleLabel.numberOfLines = 1;
+        _titleLabel.adjustsFontSizeToFitWidth = YES;
+        _titleLabel.minimumScaleFactor = 0.8;
+        _titleLabel.lineBreakMode = NSLineBreakByTruncatingTail;
+
+        UIStackView *stack = [[UIStackView alloc] initWithArrangedSubviews:@[_iconView, _titleLabel]];
+        stack.translatesAutoresizingMaskIntoConstraints = NO;
+        stack.axis = UILayoutConstraintAxisVertical;
+        stack.alignment = UIStackViewAlignmentCenter;
+        stack.spacing = 3;
+        stack.userInteractionEnabled = NO;
+        [self addSubview:stack];
+        [NSLayoutConstraint activateConstraints:@[
+            [_iconView.widthAnchor constraintEqualToConstant:22],
+            [_iconView.heightAnchor constraintEqualToConstant:22],
+            [stack.centerXAnchor constraintEqualToAnchor:self.centerXAnchor],
+            [stack.centerYAnchor constraintEqualToAnchor:self.centerYAnchor],
+            [stack.leadingAnchor constraintGreaterThanOrEqualToAnchor:self.leadingAnchor constant:2],
+            [stack.trailingAnchor constraintLessThanOrEqualToAnchor:self.trailingAnchor constant:-2],
+            [_titleLabel.leadingAnchor constraintGreaterThanOrEqualToAnchor:stack.leadingAnchor],
+            [_titleLabel.trailingAnchor constraintLessThanOrEqualToAnchor:stack.trailingAnchor],
+        ]];
+    }
+    return self;
+}
+
+- (void)setActive:(BOOL)active {
+    UIColor *c = active ? ThemeManager.shared.accentColor : ThemeManager.shared.secondaryTextColor;
+    _iconView.tintColor = c;
+    _titleLabel.textColor = c;
+}
+
+- (void)setHighlighted:(BOOL)highlighted {
+    [super setHighlighted:highlighted];
+    self.alpha = highlighted ? 0.6 : 1.0;
+}
+
 @end
 
 @implementation ProfileTabbedPageViewController
@@ -41,6 +108,7 @@
         [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemSave target:self action:@selector(saveTapped)],
         [[UIBarButtonItem alloc] initWithImage:[UIImage systemImageNamed:@"rectangle.3.group"] style:UIBarButtonItemStylePlain target:self action:@selector(cycleTabPosition)],
     ];
+    self.view.backgroundColor = ThemeManager.shared.contentBackgroundColor;
     [AmethystBlurView installInView:self.view];
 
     _overviewVC = [[ProfileOverviewVC alloc] initWithProfile:self.profile isNew:_isNewProfile];
@@ -88,18 +156,8 @@
         [_tabStack.trailingAnchor constraintEqualToAnchor:_tabPill.trailingAnchor constant:-6],
     ]];
     for (NSUInteger i = 0; i < 5; i++) {
-        UIButton *btn = [UIButton buttonWithType:UIButtonTypeSystem];
+        ProfileRailTabButton *btn = [[ProfileRailTabButton alloc] initWithIconName:icons[i] title:labels[i]];
         btn.tag = i;
-        UIImage *img = [UIImage systemImageNamed:icons[i]];
-        [btn setImage:img forState:UIControlStateNormal];
-        [btn setTitle:labels[i] forState:UIControlStateNormal];
-        btn.titleLabel.font = [UIFont systemFontOfSize:8 weight:UIFontWeightMedium];
-        btn.tintColor = ThemeManager.shared.secondaryTextColor;
-        [btn setTitleColor:ThemeManager.shared.secondaryTextColor forState:UIControlStateNormal];
-        // Stack image above label
-        btn.contentHorizontalAlignment = UIControlContentHorizontalAlignmentCenter;
-        [btn setImageEdgeInsets:UIEdgeInsetsMake(-12, 0, 0, -30)];
-        [btn setTitleEdgeInsets:UIEdgeInsetsMake(16, -28, 0, 0)];
         [btn addTarget:self action:@selector(tabTapped:) forControlEvents:UIControlEventTouchUpInside];
         [_tabStack addArrangedSubview:btn];
         [_tabButtons addObject:btn];
@@ -233,13 +291,14 @@
 }
 
 - (void)onTheme {
+    self.view.backgroundColor = ThemeManager.shared.contentBackgroundColor;
     _tabPill.layer.borderColor = [ThemeManager.shared.accentColor colorWithAlphaComponent:0.30].CGColor;
     [self refreshTabColors];
 }
 
 - (void)dealloc { [[NSNotificationCenter defaultCenter] removeObserver:self]; }
 
-- (void)tabTapped:(UIButton *)sender {
+- (void)tabTapped:(ProfileRailTabButton *)sender {
     [HapticManager.shared play:HapticTypeSelection];
     [self selectTab:sender.tag];
 }
@@ -273,11 +332,8 @@
 
 - (void)refreshTabColors {
     for (NSUInteger i = 0; i < _tabButtons.count; i++) {
-        UIButton *btn = _tabButtons[i];
-        BOOL sel = ((NSInteger)i == _selectedIndex);
-        UIColor *c = sel ? ThemeManager.shared.accentColor : ThemeManager.shared.secondaryTextColor;
-        btn.tintColor = c;
-        [btn setTitleColor:c forState:UIControlStateNormal];
+        ProfileRailTabButton *btn = _tabButtons[i];
+        [btn setActive:((NSInteger)i == _selectedIndex)];
     }
 }
 

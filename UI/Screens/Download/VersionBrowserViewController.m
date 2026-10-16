@@ -114,7 +114,7 @@ static NSArray *kLoaders;
 - (void)updateColors {
     ThemeManager *theme = ThemeManager.shared;
     self.view.backgroundColor = theme.contentBackgroundColor;
-    _typeFilter.selectedSegmentTintColor = theme.accentColor;
+    [theme styleSegmentedControl:_typeFilter];
     _loaderButton.tintColor = theme.primaryTextColor;
     _loaderButton.backgroundColor = theme.cardBackgroundColor;
     _loaderButton.layer.borderColor = theme.separatorColor.CGColor;

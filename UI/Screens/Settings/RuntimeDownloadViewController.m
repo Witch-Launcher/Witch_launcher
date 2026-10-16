@@ -43,12 +43,18 @@ typedef NS_ENUM(NSInteger, RuntimeSection) {
         _nameLabel.translatesAutoresizingMaskIntoConstraints = NO;
         _nameLabel.font = [UIFont systemFontOfSize:15 weight:UIFontWeightSemibold];
         _nameLabel.textColor = ThemeManager.shared.primaryTextColor;
+        _nameLabel.numberOfLines = 1;
+        _nameLabel.lineBreakMode = NSLineBreakByTruncatingMiddle;
+        [_nameLabel setContentCompressionResistancePriority:UILayoutPriorityDefaultLow forAxis:UILayoutConstraintAxisHorizontal];
         [self.contentView addSubview:_nameLabel];
 
         _detailLabel = [[UILabel alloc] init];
         _detailLabel.translatesAutoresizingMaskIntoConstraints = NO;
         _detailLabel.font = [UIFont systemFontOfSize:12 weight:UIFontWeightRegular];
         _detailLabel.textColor = ThemeManager.shared.secondaryTextColor;
+        _detailLabel.numberOfLines = 1;
+        _detailLabel.lineBreakMode = NSLineBreakByTruncatingTail;
+        [_detailLabel setContentCompressionResistancePriority:UILayoutPriorityDefaultLow forAxis:UILayoutConstraintAxisHorizontal];
         [self.contentView addSubview:_detailLabel];
 
         _statusBadge = [[UILabel alloc] init];
@@ -58,6 +64,11 @@ typedef NS_ENUM(NSInteger, RuntimeSection) {
         _statusBadge.textAlignment = NSTextAlignmentCenter;
         _statusBadge.layer.cornerRadius = 4;
         _statusBadge.clipsToBounds = YES;
+        _statusBadge.numberOfLines = 1;
+        _statusBadge.adjustsFontSizeToFitWidth = YES;
+        _statusBadge.minimumScaleFactor = 0.85;
+        [_statusBadge setContentCompressionResistancePriority:UILayoutPriorityRequired forAxis:UILayoutConstraintAxisHorizontal];
+        [_statusBadge setContentHuggingPriority:UILayoutPriorityRequired forAxis:UILayoutConstraintAxisHorizontal];
         [self.contentView addSubview:_statusBadge];
 
         _sizeLabel = [[UILabel alloc] init];
@@ -70,12 +81,18 @@ typedef NS_ENUM(NSInteger, RuntimeSection) {
         _actionButton = [UIButton buttonWithType:UIButtonTypeSystem];
         _actionButton.translatesAutoresizingMaskIntoConstraints = NO;
         _actionButton.titleLabel.font = [UIFont systemFontOfSize:13 weight:UIFontWeightSemibold];
+        _actionButton.titleLabel.adjustsFontSizeToFitWidth = YES;
+        _actionButton.titleLabel.minimumScaleFactor = 0.85;
         _actionButton.layer.cornerRadius = 8;
         _actionButton.contentEdgeInsets = UIEdgeInsetsMake(6, 12, 6, 12);
+        [_actionButton setContentCompressionResistancePriority:UILayoutPriorityRequired forAxis:UILayoutConstraintAxisHorizontal];
+        [_actionButton setContentHuggingPriority:UILayoutPriorityRequired forAxis:UILayoutConstraintAxisHorizontal];
         [_actionButton addTarget:self action:@selector(buttonTapped) forControlEvents:UIControlEventTouchUpInside];
         [self.contentView addSubview:_actionButton];
 
-        // Fixed two-line layout: nothing overlaps, nothing clips.
+        // Fixed two-line layout: badge (64) and action button (88) never
+        // shrink — long names/details truncate instead. Every row is the
+        // same height with the same two lines.
         [NSLayoutConstraint activateConstraints:@[
             [_dotView.leadingAnchor constraintEqualToAnchor:self.contentView.leadingAnchor constant:14],
             [_dotView.topAnchor constraintEqualToAnchor:self.contentView.topAnchor constant:16],
@@ -94,7 +111,7 @@ typedef NS_ENUM(NSInteger, RuntimeSection) {
             [_statusBadge.centerYAnchor constraintEqualToAnchor:_nameLabel.centerYAnchor],
             [_statusBadge.trailingAnchor constraintEqualToAnchor:_actionButton.leadingAnchor constant:-8],
             [_statusBadge.heightAnchor constraintEqualToConstant:18],
-            [_statusBadge.widthAnchor constraintGreaterThanOrEqualToConstant:56],
+            [_statusBadge.widthAnchor constraintEqualToConstant:64],
 
             [_sizeLabel.centerYAnchor constraintEqualToAnchor:_detailLabel.centerYAnchor],
             [_sizeLabel.trailingAnchor constraintEqualToAnchor:_actionButton.leadingAnchor constant:-8],
@@ -102,6 +119,7 @@ typedef NS_ENUM(NSInteger, RuntimeSection) {
             [_actionButton.trailingAnchor constraintEqualToAnchor:self.contentView.trailingAnchor constant:-12],
             [_actionButton.centerYAnchor constraintEqualToAnchor:self.contentView.centerYAnchor],
             [_actionButton.heightAnchor constraintEqualToConstant:32],
+            [_actionButton.widthAnchor constraintEqualToConstant:88],
         ]];
         [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(updateTheme) name:ThemeDidChangeNotification object:nil];
     }
@@ -138,23 +156,24 @@ typedef NS_ENUM(NSInteger, RuntimeSection) {
 
     if (item.installed) {
         if (item.updateAvailable) {
-            _statusBadge.text = @"  Cập nhật  ";
+            _statusBadge.text = @"Cập nhật";
             _statusBadge.backgroundColor = ThemeManager.shared.warningColor;
         } else {
-            _statusBadge.text = @"  Đã cài  ";
+            _statusBadge.text = @"Đã cài";
             _statusBadge.backgroundColor = ThemeManager.shared.successColor;
         }
     } else {
-        _statusBadge.text = @"  Chưa cài  ";
+        _statusBadge.text = @"Chưa cài";
         _statusBadge.backgroundColor = [UIColor grayColor];
     }
+    _statusBadge.textColor = [ThemeManager.shared contrastTextColorForBackground:_statusBadge.backgroundColor];
     _sizeLabel.text = item.remoteSize > 0 ? [NSByteCountFormatter stringFromByteCount:item.remoteSize countStyle:NSByteCountFormatterCountStyleMemory] : @"";
 
     NSString *action = (item.installed && !item.updateAvailable) ? @"Xóa" : (item.updateAvailable ? @"Cập nhật" : @"Tải");
+    UIColor *actionBg = ([action isEqualToString:@"Xóa"] ? ThemeManager.shared.errorColor : ThemeManager.shared.accentColor);
     [_actionButton setTitle:action forState:UIControlStateNormal];
-    [_actionButton setTitleColor:UIColor.whiteColor forState:UIControlStateNormal];
-    _actionButton.backgroundColor = ([action isEqualToString:@"Xóa"] ? ThemeManager.shared.errorColor : ThemeManager.shared.accentColor);
-    [_actionButton setTitleColor:ThemeManager.shared.buttonTextColor forState:UIControlStateNormal];
+    [_actionButton setTitleColor:[ThemeManager.shared contrastTextColorForBackground:actionBg] forState:UIControlStateNormal];
+    _actionButton.backgroundColor = actionBg;
     BOOL enabled = item.remoteURL.length > 0 || item.installed;
     _actionButton.enabled = enabled;
     _actionButton.alpha = enabled ? 1.0 : 0.5;
@@ -188,6 +207,9 @@ typedef NS_ENUM(NSInteger, RuntimeSection) {
 - (void)viewDidLoad {
     [super viewDidLoad];
     self.title = self.onboardingMode ? @"Tải Runtime" : @"Runtime JDK / LWJGL";
+    // Opaque base under the frost: without this the previous screen shows
+    // through the pushed page.
+    self.view.backgroundColor = ThemeManager.shared.contentBackgroundColor;
     [AmethystBlurView installInView:self.view];
 
     _tableView = [[UITableView alloc] initWithFrame:CGRectZero style:UITableViewStyleInsetGrouped];
@@ -196,7 +218,7 @@ typedef NS_ENUM(NSInteger, RuntimeSection) {
     _tableView.dataSource = self;
     _tableView.backgroundColor = [UIColor clearColor];
     _tableView.separatorStyle = UITableViewCellSeparatorStyleNone;
-    _tableView.rowHeight = 76;
+    _tableView.rowHeight = 80;
     _tableView.alwaysBounceVertical = YES;
     [_tableView registerClass:[RuntimeItemCell class] forCellReuseIdentifier:@"RuntimeItemCell"];
     [self.view addSubview:_tableView];
@@ -243,6 +265,7 @@ typedef NS_ENUM(NSInteger, RuntimeSection) {
 }
 
 - (void)onTheme {
+    self.view.backgroundColor = ThemeManager.shared.contentBackgroundColor;
     _emptyLabel.textColor = ThemeManager.shared.secondaryTextColor;
     [_tableView reloadData];
 }

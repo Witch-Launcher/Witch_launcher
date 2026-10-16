@@ -265,6 +265,7 @@ extern NSString *ELY_OAUTH_REDIRECT_URI;
     _addTypeControl = [[UISegmentedControl alloc] initWithItems:@[localize(@"Premium (Microsoft)", nil), localize(@"Local (Offline)", nil), @"Ely.by"]];
     _addTypeControl.translatesAutoresizingMaskIntoConstraints = NO;
     _addTypeControl.selectedSegmentIndex = 1;
+    [ThemeManager.shared styleSegmentedControl:_addTypeControl];
     [_addTypeControl addTarget:self action:@selector(addTypeChanged) forControlEvents:UIControlEventValueChanged];
     [_addFormView addSubview:_addTypeControl];
 
@@ -300,7 +301,7 @@ extern NSString *ELY_OAUTH_REDIRECT_URI;
     _addActionBtn = [UIButton buttonWithType:UIButtonTypeSystem];
     _addActionBtn.translatesAutoresizingMaskIntoConstraints = NO;
     [_addActionBtn setTitle:localize(@"account.login_ms", nil) forState:UIControlStateNormal];
-    [_addActionBtn setTitleColor:UIColor.whiteColor forState:UIControlStateNormal];
+    [_addActionBtn setTitleColor:ThemeManager.shared.buttonTextColor forState:UIControlStateNormal];
     _addActionBtn.backgroundColor = ThemeManager.shared.accentColor;
     _addActionBtn.layer.cornerRadius = 8;
     _addActionBtn.titleLabel.font = [UIFont systemFontOfSize:14 weight:UIFontWeightSemibold];
@@ -433,6 +434,9 @@ extern NSString *ELY_OAUTH_REDIRECT_URI;
     _tableView.backgroundColor = theme.contentBackgroundColor;
     _addFormView.backgroundColor = theme.cardBackgroundColor;
     _addFormView.layer.borderColor = theme.separatorColor.CGColor;
+    [theme styleSegmentedControl:_addTypeControl];
+    [_addActionBtn setTitleColor:theme.buttonTextColor forState:UIControlStateNormal];
+    _addActionBtn.backgroundColor = theme.accentColor;
 }
 
 - (void)loadAccounts {
@@ -766,7 +770,7 @@ extern NSString *ELY_OAUTH_REDIRECT_URI;
     UIButton *changeSkinBtn = [UIButton buttonWithType:UIButtonTypeSystem];
     changeSkinBtn.translatesAutoresizingMaskIntoConstraints = NO;
     [changeSkinBtn setTitle:localize(@"skin.change", nil) forState:UIControlStateNormal];
-    [changeSkinBtn setTitleColor:UIColor.whiteColor forState:UIControlStateNormal];
+    [changeSkinBtn setTitleColor:ThemeManager.shared.buttonTextColor forState:UIControlStateNormal];
     changeSkinBtn.backgroundColor = ThemeManager.shared.accentColor;
     changeSkinBtn.layer.cornerRadius = 8;
     changeSkinBtn.titleLabel.font = [UIFont systemFontOfSize:14 weight:UIFontWeightMedium];
@@ -779,7 +783,7 @@ extern NSString *ELY_OAUTH_REDIRECT_URI;
     UIButton *changeCapeBtn = [UIButton buttonWithType:UIButtonTypeSystem];
     changeCapeBtn.translatesAutoresizingMaskIntoConstraints = NO;
     [changeCapeBtn setTitle:localize(@"cape.change", nil) forState:UIControlStateNormal];
-    [changeCapeBtn setTitleColor:UIColor.whiteColor forState:UIControlStateNormal];
+    [changeCapeBtn setTitleColor:ThemeManager.shared.buttonTextColor forState:UIControlStateNormal];
     changeCapeBtn.backgroundColor = ThemeManager.shared.accentColor;
     changeCapeBtn.layer.cornerRadius = 8;
     changeCapeBtn.titleLabel.font = [UIFont systemFontOfSize:14 weight:UIFontWeightMedium];

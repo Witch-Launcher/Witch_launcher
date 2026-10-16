@@ -196,6 +196,7 @@ static const NSUInteger kMaxSearchHits = 2000;
     ]];
     _fileSegments.translatesAutoresizingMaskIntoConstraints = NO;
     _fileSegments.selectedSegmentIndex = 0;
+    [ThemeManager.shared styleSegmentedControl:_fileSegments];
     [_fileSegments addTarget:self action:@selector(actionSwitchFile) forControlEvents:UIControlEventValueChanged];
     [self.view addSubview:_fileSegments];
 
@@ -334,6 +335,7 @@ static const NSUInteger kMaxSearchHits = 2000;
     _categoryLabel.textColor = theme.secondaryTextColor;
     _versionLabel.textColor = theme.secondaryTextColor;
     _loadingIndicator.color = theme.accentColor;
+    [theme styleSegmentedControl:_fileSegments];
     _logTable.backgroundColor = [UIColor colorWithWhite:0.08 alpha:1.0];
     [_logTable reloadData];
 }

@@ -130,7 +130,7 @@
         _downloadBtn = [UIButton buttonWithType:UIButtonTypeSystem];
         _downloadBtn.translatesAutoresizingMaskIntoConstraints = NO;
         [_downloadBtn setTitle:localize(@"Download", nil) forState:UIControlStateNormal];
-        [_downloadBtn setTitleColor:UIColor.whiteColor forState:UIControlStateNormal];
+        [_downloadBtn setTitleColor:ThemeManager.shared.buttonTextColor forState:UIControlStateNormal];
         _downloadBtn.backgroundColor = ThemeManager.shared.accentColor;
         _downloadBtn.layer.cornerRadius = 6;
         _downloadBtn.titleLabel.font = [UIFont systemFontOfSize:9 weight:UIFontWeightSemibold];
@@ -263,14 +263,15 @@
     if ([_installState isEqualToString:@"installed"]) {
         [_downloadBtn setTitle:localize(@"Installed", nil) forState:UIControlStateNormal];
         _downloadBtn.backgroundColor = theme.successColor;
+        [_downloadBtn setTitleColor:[theme contrastTextColorForBackground:theme.successColor] forState:UIControlStateNormal];
     } else if ([_installState isEqualToString:@"update"]) {
         [_downloadBtn setTitle:localize(@"Update", nil) forState:UIControlStateNormal];
         _downloadBtn.backgroundColor = theme.warningColor;
-        [_downloadBtn setTitleColor:[UIColor blackColor] forState:UIControlStateNormal];
+        [_downloadBtn setTitleColor:[theme contrastTextColorForBackground:theme.warningColor] forState:UIControlStateNormal];
     } else {
         [_downloadBtn setTitle:localize(@"Download", nil) forState:UIControlStateNormal];
         _downloadBtn.backgroundColor = theme.accentColor;
-        [_downloadBtn setTitleColor:UIColor.whiteColor forState:UIControlStateNormal];
+        [_downloadBtn setTitleColor:theme.buttonTextColor forState:UIControlStateNormal];
     }
 }
 
@@ -538,7 +539,7 @@
     _sourceControl.layer.cornerRadius = 8;
     _sourceControl.clipsToBounds = YES;
     [_sourceControl setTitleTextAttributes:@{NSForegroundColorAttributeName: ThemeManager.shared.primaryTextColor, NSFontAttributeName: [UIFont systemFontOfSize:11 weight:UIFontWeightMedium]} forState:UIControlStateNormal];
-    [_sourceControl setTitleTextAttributes:@{NSForegroundColorAttributeName: UIColor.whiteColor, NSFontAttributeName: [UIFont systemFontOfSize:11 weight:UIFontWeightSemibold]} forState:UIControlStateSelected];
+    [_sourceControl setTitleTextAttributes:@{NSForegroundColorAttributeName: ThemeManager.shared.buttonTextColor, NSFontAttributeName: [UIFont systemFontOfSize:11 weight:UIFontWeightSemibold]} forState:UIControlStateSelected];
     [_sourceControl addTarget:self action:@selector(sourceChanged) forControlEvents:UIControlEventValueChanged];
     [self.view addSubview:_sourceControl];
 
@@ -609,7 +610,7 @@
     _errorLabel.textColor = theme.errorColor;
     _sourceControl.selectedSegmentTintColor = theme.accentColor;
     [_sourceControl setTitleTextAttributes:@{NSForegroundColorAttributeName: theme.primaryTextColor, NSFontAttributeName: [UIFont systemFontOfSize:11 weight:UIFontWeightMedium]} forState:UIControlStateNormal];
-    [_sourceControl setTitleTextAttributes:@{NSForegroundColorAttributeName: UIColor.whiteColor, NSFontAttributeName: [UIFont systemFontOfSize:11 weight:UIFontWeightSemibold]} forState:UIControlStateSelected];
+    [_sourceControl setTitleTextAttributes:@{NSForegroundColorAttributeName: theme.buttonTextColor, NSFontAttributeName: [UIFont systemFontOfSize:11 weight:UIFontWeightSemibold]} forState:UIControlStateSelected];
 }
 
 - (NSString *)selectedVersion {

@@ -78,13 +78,14 @@
     _sourceControl.layer.cornerRadius = 8;
     _sourceControl.clipsToBounds = YES;
     [_sourceControl setTitleTextAttributes:@{NSForegroundColorAttributeName: ThemeManager.shared.primaryTextColor, NSFontAttributeName: [UIFont systemFontOfSize:11 weight:UIFontWeightMedium]} forState:UIControlStateNormal];
-    [_sourceControl setTitleTextAttributes:@{NSForegroundColorAttributeName: UIColor.whiteColor, NSFontAttributeName: [UIFont systemFontOfSize:11 weight:UIFontWeightSemibold]} forState:UIControlStateSelected];
+    [_sourceControl setTitleTextAttributes:@{NSForegroundColorAttributeName: ThemeManager.shared.buttonTextColor, NSFontAttributeName: [UIFont systemFontOfSize:11 weight:UIFontWeightSemibold]} forState:UIControlStateSelected];
     [_sourceControl addTarget:self action:@selector(sourceChanged) forControlEvents:UIControlEventValueChanged];
     [self.view addSubview:_sourceControl];
 
     _typeControl = [[UISegmentedControl alloc] initWithItems:@[localize(@"All", nil), @"Iris", @"Optifine"]];
     _typeControl.translatesAutoresizingMaskIntoConstraints = NO;
     _typeControl.selectedSegmentIndex = 0;
+    [ThemeManager.shared styleSegmentedControl:_typeControl];
     [_typeControl addTarget:self action:@selector(typeChanged) forControlEvents:UIControlEventValueChanged];
     [self.view addSubview:_typeControl];
 
@@ -161,9 +162,10 @@
     _searchBar.searchTextField.textColor = theme.primaryTextColor;
     _searchBar.tintColor = theme.accentColor;
     _typeControl.selectedSegmentTintColor = theme.accentColor;
+    [theme styleSegmentedControl:_typeControl];
     _sourceControl.selectedSegmentTintColor = theme.accentColor;
     [_sourceControl setTitleTextAttributes:@{NSForegroundColorAttributeName: theme.primaryTextColor, NSFontAttributeName: [UIFont systemFontOfSize:11 weight:UIFontWeightMedium]} forState:UIControlStateNormal];
-    [_sourceControl setTitleTextAttributes:@{NSForegroundColorAttributeName: UIColor.whiteColor, NSFontAttributeName: [UIFont systemFontOfSize:11 weight:UIFontWeightSemibold]} forState:UIControlStateSelected];
+    [_sourceControl setTitleTextAttributes:@{NSForegroundColorAttributeName: theme.buttonTextColor, NSFontAttributeName: [UIFont systemFontOfSize:11 weight:UIFontWeightSemibold]} forState:UIControlStateSelected];
     _emptyLabel.textColor = theme.secondaryTextColor;
 }
 

@@ -191,6 +191,7 @@ typedef NS_ENUM(NSInteger, ProfileListFilter) {
     _filterControl.selectedSegmentIndex = 0;
     _filterControl.layer.cornerRadius = 10;
     _filterControl.clipsToBounds = YES;
+    [ThemeManager.shared styleSegmentedControl:_filterControl];
     _filterControl.translatesAutoresizingMaskIntoConstraints = NO;
     [_filterControl addTarget:self action:@selector(filterChanged) forControlEvents:UIControlEventValueChanged];
     [wrap addSubview:_filterControl];
@@ -221,6 +222,7 @@ typedef NS_ENUM(NSInteger, ProfileListFilter) {
 - (void)onTheme {
     self.view.backgroundColor = [UIColor clearColor];
     _emptyLabel.textColor = ThemeManager.shared.secondaryTextColor;
+    [ThemeManager.shared styleSegmentedControl:_filterControl];
     [_tableView reloadData];
 }
 

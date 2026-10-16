@@ -337,15 +337,38 @@ NSString * const ThemeDidChangeNotification = @"ThemeDidChangeNotification";
     return [UIColor colorWithRed:1.0 green:0.388 blue:0.357 alpha:1.0];
 }
 
-- (UIColor *)buttonTextColor {
-    // Contrast against the (possibly custom) accent so text stays readable
-    // on both black/white defaults and user-picked colors.
+- (UIColor *)contrastTextColorForBackground:(UIColor *)background {
+    // Contrast against the given background so text stays readable on
+    // both black/white defaults and user-picked colors.
     CGFloat r, g, b, a;
-    if ([self.accentColor getRed:&r green:&g blue:&b alpha:&a]) {
+    if ([background getRed:&r green:&g blue:&b alpha:&a]) {
         CGFloat luminance = 0.299 * r + 0.587 * g + 0.114 * b;
         return luminance > 0.55 ? [UIColor blackColor] : [UIColor whiteColor];
     }
     return [self isDarkMode] ? [UIColor blackColor] : [UIColor whiteColor];
+}
+
+- (UIColor *)buttonTextColor {
+    return [self contrastTextColorForBackground:self.accentColor];
+}
+
+- (void)styleSegmentedControl:(UISegmentedControl *)seg {
+    if (!seg) return;
+    UIColor *selBg = self.accentColor;
+    seg.selectedSegmentTintColor = selBg;
+    UIColor *selText = [self contrastTextColorForBackground:selBg];
+    NSDictionary *normal = [seg titleTextAttributesForState:UIControlStateNormal];
+    NSDictionary *selected = [seg titleTextAttributesForState:UIControlStateSelected];
+    UIFont *normalFont = normal[NSFontAttributeName];
+    UIFont *selectedFont = selected[NSFontAttributeName];
+    if (![normalFont isKindOfClass:[UIFont class]]) {
+        normalFont = [UIFont systemFontOfSize:13 weight:UIFontWeightRegular];
+    }
+    if (![selectedFont isKindOfClass:[UIFont class]]) {
+        selectedFont = [UIFont systemFontOfSize:13 weight:UIFontWeightSemibold];
+    }
+    [seg setTitleTextAttributes:@{NSForegroundColorAttributeName: self.primaryTextColor, NSFontAttributeName: normalFont} forState:UIControlStateNormal];
+    [seg setTitleTextAttributes:@{NSForegroundColorAttributeName: selText, NSFontAttributeName: selectedFont} forState:UIControlStateSelected];
 }
 
 - (void)applyAccentColor:(UIColor *)color {

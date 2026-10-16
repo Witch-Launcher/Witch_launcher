@@ -28,6 +28,9 @@ typedef NS_ENUM(NSInteger, UpdateSection) {
 - (void)viewDidLoad {
     [super viewDidLoad];
     self.title = @"Cập nhật Launcher";
+    // Opaque base under the frost: without this the previous screen shows
+    // through the pushed page.
+    self.view.backgroundColor = ThemeManager.shared.contentBackgroundColor;
     [AmethystBlurView installInView:self.view];
     self.selectedChannel = WitchUpdateService.shared.selectedChannel;
     self.selectedVariant = WitchAppVariantFull;
@@ -61,6 +64,7 @@ typedef NS_ENUM(NSInteger, UpdateSection) {
 }
 
 - (void)onTheme {
+    self.view.backgroundColor = ThemeManager.shared.contentBackgroundColor;
     [_tableView reloadData];
 }
 
@@ -147,8 +151,7 @@ typedef NS_ENUM(NSInteger, UpdateSection) {
 }
 
 - (UITableViewCell *)cardCellForTableView:(UITableView *)tableView {
-    UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:@"UpdateCell" forIndexPath:[NSIndexPath indexPathForRow:0 inSection:0]];
-    cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:@"UpdateCell"];
+    UITableViewCell *cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:@"UpdateCell"];
     cell.selectionStyle = UITableViewCellSelectionStyleNone;
     cell.backgroundColor = ThemeManager.shared.cardBackgroundColor;
     cell.layer.cornerRadius = 14;
