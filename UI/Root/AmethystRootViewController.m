@@ -660,7 +660,8 @@
         NSString *ver = _quickVersions[indexPath.row];
         cell.textLabel.text = [self displayNameForVersion:ver];
         BOOL isCurrent = [ver isEqualToString:VersionDirectoryManager.shared.currentVersion];
-        cell.accessoryType = isCurrent ? UITableViewCellAccessoryCheckmark : UITableViewCellAccessoryNone;
+        cell.accessoryType = UITableViewCellAccessoryDetailButton;
+        cell.tintColor = ThemeManager.shared.accentColor;
         cell.textLabel.textColor = isCurrent ? ThemeManager.shared.accentColor : ThemeManager.shared.primaryTextColor;
     } else {
         cell.textLabel.text = localize(@"version.add", nil);
@@ -668,6 +669,14 @@
         cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
     }
     return cell;
+}
+
+- (void)tableView:(UITableView *)tableView accessoryButtonTappedForRowWithIndexPath:(NSIndexPath *)indexPath {
+    if (tableView != _quickTable) return;
+    if (indexPath.row < (NSInteger)_quickVersions.count) {
+        [self hideQuickPanel];
+        [self.coordinator editVersion:_quickVersions[indexPath.row]];
+    }
 }
 
 - (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)indexPath {

@@ -127,7 +127,26 @@
         setPrefObject(@"general.profile_tabbar", legacy);
         return legacy;
     }
+    // No explicit choice yet: portrait defaults to bottom, landscape to left.
+    CGSize size = self.view.bounds.size;
+    if (size.width > 0 && size.width < size.height) return @"bottom";
     return @"left";
+}
+
+- (BOOL)hasExplicitTabPosition {
+    NSString *pos = getPrefObject(@"general.profile_tabbar");
+    return [pos isKindOfClass:[NSString class]] && pos.length > 0;
+}
+
+- (void)viewWillTransitionToSize:(CGSize)size withTransitionCoordinator:(id<UIViewControllerTransitionCoordinator>)coordinator {
+    [super viewWillTransitionToSize:size withTransitionCoordinator:coordinator];
+    // Auto-follow orientation until the user picks a position explicitly.
+    if (![self hasExplicitTabPosition]) {
+        NSString *next = (size.width > 0 && size.width < size.height) ? @"bottom" : @"left";
+        [coordinator animateAlongsideTransition:^(id<UIViewControllerTransitionCoordinatorContext> ctx) {
+            [self applyTabPosition:next animate:NO];
+        } completion:nil];
+    }
 }
 
 - (void)cycleTabPosition {
