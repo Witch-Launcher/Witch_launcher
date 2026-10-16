@@ -12,6 +12,7 @@
 #import "CurseForgeService.h"
 #import "ModSourceService.h"
 #import "LauncherPreferences.h"
+#import "AppSheet.h"
 
 @interface MapListViewController () <UITableViewDelegate, UITableViewDataSource, UISearchBarDelegate>
 @property (nonatomic) UISearchBar *searchBar;
@@ -349,35 +350,35 @@
             return;
         }
 
-        UIAlertController *sheet = [UIAlertController alertControllerWithTitle:map[@"title"]
-                                                                       message:localize(@"mod.select_dl", nil)
-                                                                preferredStyle:UIAlertControllerStyleActionSheet];
+        NSMutableArray *opts = [NSMutableArray array];
+        NSMutableArray *vers = [NSMutableArray array];
         for (NSDictionary *ver in versions) {
             NSString *label = [NSString stringWithFormat:@"%@  [%@]", ver[@"name"], [ver[@"game_versions"] componentsJoinedByString:@", "]];
-            [sheet addAction:[UIAlertAction actionWithTitle:label style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
-                NSString *filename = ver[@"filename"] ?: @"world.zip";
-                NSString *url = ver[@"url"];
-                if (url.length > 0) {
-                    [self installMap:url name:filename];
-                    return;
-                }
-                // CurseForge files sometimes hide the direct link: resolve it.
-                if ([ModSourceService isCurseForgeMod:map]) {
-                    DownloadProgressOverlay *resolving = [DownloadProgressOverlay showInView:self.view title:localize(@"progress.resolving", nil)];
-                    [resolving updateProgress:0 message:localize(@"progress.msg.contact_cf", nil)];
-                    [CurseForgeService.shared resolveDownloadURLForProject:map[@"project_id"] fileId:ver[@"_cfFileId"] completion:^(NSString *resolved, NSError *resolveError) {
-                        [resolving dismiss];
-                        if (resolved.length > 0) {
-                            [self installMap:resolved name:filename];
-                        } else {
-                            showDialog(@"Error", resolveError.localizedDescription ?: @"Could not resolve download URL");
-                        }
-                    }];
-                }
-            }]];
+            [opts addObject:@{@"title": label}];
+            [vers addObject:ver];
         }
-        [sheet addAction:[UIAlertAction actionWithTitle:localize(@"Cancel", nil) style:UIAlertActionStyleCancel handler:nil]];
-        [self presentViewController:sheet animated:YES completion:nil];
+        [AppSheet showOptionsWithTitle:map[@"title"] message:localize(@"mod.select_dl", nil) options:opts selectedIndex:NSNotFound selection:^(NSInteger idx) {
+            NSDictionary *ver = vers[idx];
+            NSString *filename = ver[@"filename"] ?: @"world.zip";
+            NSString *url = ver[@"url"];
+            if (url.length > 0) {
+                [self installMap:url name:filename];
+                return;
+            }
+            // CurseForge files sometimes hide the direct link: resolve it.
+            if ([ModSourceService isCurseForgeMod:map]) {
+                DownloadProgressOverlay *resolving = [DownloadProgressOverlay showInView:self.view title:localize(@"progress.resolving", nil)];
+                [resolving updateProgress:0 message:localize(@"progress.msg.contact_cf", nil)];
+                [CurseForgeService.shared resolveDownloadURLForProject:map[@"project_id"] fileId:ver[@"_cfFileId"] completion:^(NSString *resolved, NSError *resolveError) {
+                    [resolving dismiss];
+                    if (resolved.length > 0) {
+                        [self installMap:resolved name:filename];
+                    } else {
+                        showDialog(@"Error", resolveError.localizedDescription ?: @"Could not resolve download URL");
+                    }
+                }];
+            }
+        }];
     }];
 }
 

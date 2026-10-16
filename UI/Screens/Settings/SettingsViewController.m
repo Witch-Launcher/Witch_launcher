@@ -9,6 +9,7 @@
 #import "config.h"
 #import "CustomControlsViewController.h"
 #import "AmethystBlurView.h"
+#import "AppSheet.h"
 #import <PhotosUI/PhotosUI.h>
 #import <UniformTypeIdentifiers/UniformTypeIdentifiers.h>
 
@@ -16,6 +17,8 @@
 @property (nonatomic) NSArray *sections;
 @property (nonatomic) UIScrollView *tabBarScroll;
 @property (nonatomic) NSLayoutConstraint *tabWidthConstraint;
+@property (nonatomic) NSArray<NSLayoutConstraint *> *chromeConstraints;
+@property (nonatomic) BOOL chromeIsPortrait;
 @property (nonatomic) NSMutableArray *tabButtons;
 @property (nonatomic) UIScrollView *pageScroll;
 @property (nonatomic) NSMutableArray *pageTables;
@@ -454,27 +457,51 @@
     [self setupBackgroundBlur];
 
     _tabWidthConstraint = [_tabBarScroll.widthAnchor constraintEqualToConstant:132];
-    [NSLayoutConstraint activateConstraints:@[
+    _chromeIsPortrait = NO;
+    [self rebuildChromeConstraints];
+}
+
+// Portrait puts the section rail at the bottom (horizontal strip);
+// landscape keeps the left rail. Same floating-card language either way.
+- (void)rebuildChromeConstraints {
+    if (_chromeConstraints) [NSLayoutConstraint deactivateConstraints:_chromeConstraints];
+    NSMutableArray *c = [NSMutableArray arrayWithObjects:
         [_settingsSearchBar.topAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.topAnchor constant:4],
         [_settingsSearchBar.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor constant:8],
         [_settingsSearchBar.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor constant:-8],
         [_settingsSearchBar.heightAnchor constraintEqualToConstant:36],
 
-        [_tabBarScroll.topAnchor constraintEqualToAnchor:_settingsSearchBar.bottomAnchor constant:8],
-        [_tabBarScroll.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor constant:8],
-        [_tabBarScroll.bottomAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.bottomAnchor constant:-8],
-        _tabWidthConstraint,
-
-        [_pageScroll.topAnchor constraintEqualToAnchor:_settingsSearchBar.bottomAnchor constant:4],
-        [_pageScroll.leadingAnchor constraintEqualToAnchor:_tabBarScroll.trailingAnchor constant:8],
-        [_pageScroll.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor],
-        [_pageScroll.bottomAnchor constraintEqualToAnchor:self.view.bottomAnchor],
-
         [_searchResultsTable.topAnchor constraintEqualToAnchor:_settingsSearchBar.bottomAnchor constant:4],
         [_searchResultsTable.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor],
         [_searchResultsTable.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor],
         [_searchResultsTable.bottomAnchor constraintEqualToAnchor:self.view.bottomAnchor],
-    ]];
+        nil];
+    if (_chromeIsPortrait) {
+        [c addObjectsFromArray:@[
+            [_pageScroll.topAnchor constraintEqualToAnchor:_settingsSearchBar.bottomAnchor constant:4],
+            [_pageScroll.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor],
+            [_pageScroll.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor],
+            [_pageScroll.bottomAnchor constraintEqualToAnchor:_tabBarScroll.topAnchor constant:-8],
+            [_tabBarScroll.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor constant:8],
+            [_tabBarScroll.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor constant:-8],
+            [_tabBarScroll.bottomAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.bottomAnchor constant:-8],
+            [_tabBarScroll.heightAnchor constraintEqualToConstant:56],
+        ]];
+    } else {
+        [c addObjectsFromArray:@[
+            [_tabBarScroll.topAnchor constraintEqualToAnchor:_settingsSearchBar.bottomAnchor constant:8],
+            [_tabBarScroll.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor constant:8],
+            [_tabBarScroll.bottomAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.bottomAnchor constant:-8],
+            _tabWidthConstraint,
+            [_pageScroll.topAnchor constraintEqualToAnchor:_settingsSearchBar.bottomAnchor constant:4],
+            [_pageScroll.leadingAnchor constraintEqualToAnchor:_tabBarScroll.trailingAnchor constant:8],
+            [_pageScroll.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor],
+            [_pageScroll.bottomAnchor constraintEqualToAnchor:self.view.bottomAnchor],
+        ]];
+    }
+    _chromeConstraints = c;
+    [NSLayoutConstraint activateConstraints:c];
+    [self layoutTabButtons];
 }
 
 - (void)setupTabBar {
@@ -515,6 +542,16 @@
 }
 
 - (void)layoutTabButtons {
+    if (_chromeIsPortrait) {
+        CGFloat x = 8;
+        for (NSUInteger i = 0; i < _tabButtons.count; i++) {
+            UIButton *btn = _tabButtons[i];
+            btn.frame = CGRectMake(x, 8, 120, 40);
+            x += 128;
+        }
+        _tabBarScroll.contentSize = CGSizeMake(x + 8, 56);
+        return;
+    }
     CGFloat sideWidth = _tabBarScroll.bounds.size.width;
     CGFloat y = 8;
     for (NSUInteger i = 0; i < _tabButtons.count; i++) {
@@ -552,8 +589,13 @@
 - (void)viewDidLayoutSubviews {
     [super viewDidLayoutSubviews];
 
+    BOOL portrait = self.view.bounds.size.width < self.view.bounds.size.height;
+    if (portrait != _chromeIsPortrait) {
+        _chromeIsPortrait = portrait;
+        [self rebuildChromeConstraints];
+    }
     CGFloat sideWidth = MAX(110, MIN(190, self.view.bounds.size.width * 0.24));
-    if (_tabWidthConstraint.constant != sideWidth) {
+    if (!portrait && _tabWidthConstraint.constant != sideWidth) {
         _tabWidthConstraint.constant = sideWidth;
         [self.view layoutIfNeeded];
     }
@@ -1021,7 +1063,8 @@
             val = [[NSUserDefaults standardUserDefaults] floatForKey:item[@"key"]];
         } else if ([item[@"key"] isEqualToString:@"amethyst_ui_border_radius"] ||
                    [item[@"key"] isEqualToString:@"amethyst_shell_gap"] ||
-                   [item[@"key"] isEqualToString:@"amethyst_shell_inner_gap"]) {
+                   [item[@"key"] isEqualToString:@"amethyst_shell_inner_gap"] ||
+                   [item[@"key"] isEqualToString:@"amethyst_bar_border_width"]) {
             val = [[NSUserDefaults standardUserDefaults] floatForKey:item[@"key"]];
         } else {
             val = getPrefFloat(item[@"key"]);
@@ -1031,7 +1074,7 @@
                 setPrefFloat(@"java.allocated_memory", val);
             }
         }
-        if (val == 0 && ![item[@"key"] isEqualToString:@"amethyst_bg_blur"] && ![item[@"key"] isEqualToString:@"amethyst_ui_opacity"] && !([item[@"key"] hasPrefix:@"amethyst_"] && [item[@"key"] hasSuffix:@"_blur"]) && ![item[@"key"] isEqualToString:@"general.widget_bg_opacity"] && !disabled) val = [item[@"min"] floatValue] + ([item[@"max"] floatValue] - [item[@"min"] floatValue]) / 2;
+        if (val == 0 && ![item[@"key"] isEqualToString:@"amethyst_bg_blur"] && ![item[@"key"] isEqualToString:@"amethyst_ui_opacity"] && !([item[@"key"] hasPrefix:@"amethyst_"] && [item[@"key"] hasSuffix:@"_blur"]) && ![item[@"key"] isEqualToString:@"general.widget_bg_opacity"] && ![item[@"key"] isEqualToString:@"amethyst_ui_border_radius"] && ![item[@"key"] isEqualToString:@"amethyst_shell_gap"] && ![item[@"key"] isEqualToString:@"amethyst_shell_inner_gap"] && ![item[@"key"] isEqualToString:@"amethyst_bar_border_width"] && ![item[@"key"] isEqualToString:@"amethyst_ui_border_enabled"] && !disabled) val = [item[@"min"] floatValue] + ([item[@"max"] floatValue] - [item[@"min"] floatValue]) / 2;
         sl.minimumValue = [item[@"min"] floatValue];
         sl.maximumValue = [item[@"max"] floatValue];
         sl.value = val;
@@ -1111,20 +1154,7 @@
                 if (url) [UIApplication.sharedApplication openURL:url options:@{} completionHandler:nil];
             }
         } else if ([type isEqualToString:@"credit"]) {
-            UIAlertController *alert = [UIAlertController alertControllerWithTitle:item[@"label"] message:item[@"license"] preferredStyle:UIAlertControllerStyleAlert];
-            if ([item[@"licenseUrl"] length] > 0) {
-                [alert addAction:[UIAlertAction actionWithTitle:localize(@"credits.open_license", nil) style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
-                    NSURL *url = [NSURL URLWithString:item[@"licenseUrl"]];
-                    if (url) [UIApplication.sharedApplication openURL:url options:@{} completionHandler:nil];
-                }]];
-            } else if ([item[@"url"] length] > 0) {
-                [alert addAction:[UIAlertAction actionWithTitle:localize(@"credits.open_project", nil) style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
-                    NSURL *url = [NSURL URLWithString:item[@"url"]];
-                    if (url) [UIApplication.sharedApplication openURL:url options:@{} completionHandler:nil];
-                }]];
-            }
-            [alert addAction:[UIAlertAction actionWithTitle:localize(@"Done", nil) style:UIAlertActionStyleCancel handler:nil]];
-            [self presentViewController:alert animated:YES completion:nil];
+            [self showCreditForItem:item];
         } else if ([type isEqualToString:@"navigate"]) {
             [self navigateToVC:item[@"vc"] title:item[@"label"]];
         } else if ([type isEqualToString:@"switch"]) {
@@ -1148,20 +1178,7 @@
             if (url) [UIApplication.sharedApplication openURL:url options:@{} completionHandler:nil];
         }
     } else if ([type isEqualToString:@"credit"]) {
-        UIAlertController *alert = [UIAlertController alertControllerWithTitle:item[@"label"] message:item[@"license"] preferredStyle:UIAlertControllerStyleAlert];
-        if ([item[@"licenseUrl"] length] > 0) {
-            [alert addAction:[UIAlertAction actionWithTitle:localize(@"credits.open_license", nil) style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
-                NSURL *url = [NSURL URLWithString:item[@"licenseUrl"]];
-                if (url) [UIApplication.sharedApplication openURL:url options:@{} completionHandler:nil];
-            }]];
-        } else if ([item[@"url"] length] > 0) {
-            [alert addAction:[UIAlertAction actionWithTitle:localize(@"credits.open_project", nil) style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
-                NSURL *url = [NSURL URLWithString:item[@"url"]];
-                if (url) [UIApplication.sharedApplication openURL:url options:@{} completionHandler:nil];
-            }]];
-        }
-        [alert addAction:[UIAlertAction actionWithTitle:localize(@"Done", nil) style:UIAlertActionStyleCancel handler:nil]];
-        [self presentViewController:alert animated:YES completion:nil];
+        [self showCreditForItem:item];
     } else if ([type isEqualToString:@"navigate"]) {
         [self navigateToVC:item[@"vc"] title:item[@"label"]];
     } else if ([type isEqualToString:@"color"]) {
@@ -1180,6 +1197,23 @@
 }
 
 #pragma mark - Actions
+
+- (void)showCreditForItem:(NSDictionary *)item {
+    NSMutableArray *opts = [NSMutableArray array];
+    if ([item[@"licenseUrl"] length] > 0) {
+        [opts addObject:@{@"title": localize(@"credits.open_license", nil), @"icon": @"doc.text"}];
+    } else if ([item[@"url"] length] > 0) {
+        [opts addObject:@{@"title": localize(@"credits.open_project", nil), @"icon": @"safari"}];
+    }
+    [opts addObject:@{@"title": localize(@"Done", nil), @"icon": @"checkmark"}];
+    [AppSheet showOptionsWithTitle:item[@"label"] message:item[@"license"] options:opts selectedIndex:NSNotFound selection:^(NSInteger idx) {
+        if (idx == 0 && opts.count > 1) {
+            NSString *urlString = [item[@"licenseUrl"] length] > 0 ? item[@"licenseUrl"] : item[@"url"];
+            NSURL *url = [NSURL URLWithString:urlString];
+            if (url) [UIApplication.sharedApplication openURL:url options:@{} completionHandler:nil];
+        }
+    }];
+}
 
 // Inline switch toggle for search results (no page jump).
 - (void)toggleSearchResultSwitch:(NSDictionary *)item atIndexPath:(NSIndexPath *)indexPath {
@@ -1297,6 +1331,12 @@
         ThemeManager.shared.uiBorderCornerRadius = val;
         [[NSUserDefaults standardUserDefaults] synchronize];
         [self broadcastThemeDebounced];
+    } else if ([item[@"key"] isEqualToString:@"amethyst_bar_border_width"]) {
+        // NOTE: layout reads this from NSUserDefaults (updateShellBorderPath),
+        // NOT the launcher plist — route it there or drags never take effect.
+        [[NSUserDefaults standardUserDefaults] setFloat:val forKey:@"amethyst_bar_border_width"];
+        [[NSUserDefaults standardUserDefaults] synchronize];
+        [self broadcastThemeDebounced];
     } else if ([item[@"key"] isEqualToString:@"amethyst_shell_gap"] ||
                [item[@"key"] isEqualToString:@"amethyst_shell_inner_gap"]) {
         [[NSUserDefaults standardUserDefaults] setFloat:val forKey:item[@"key"]];
@@ -1372,56 +1412,45 @@
     id currentValueObj = getPrefObject(item[@"key"]) ?: item[@"default"];
     NSString *currentValue = [currentValueObj isKindOfClass:[NSString class]] ? currentValueObj : [currentValueObj description];
 
-    UIAlertController *sheet = [UIAlertController alertControllerWithTitle:item[@"label"] message:nil preferredStyle:UIAlertControllerStyleActionSheet];
-
+    NSMutableArray *opts = [NSMutableArray array];
+    NSMutableArray *keys = [NSMutableArray array];
+    NSInteger sel = NSNotFound;
     if ([options.firstObject isKindOfClass:[NSDictionary class]]) {
         for (NSDictionary *opt in options) {
             NSString *key = opt[@"key"];
             NSString *name = opt[@"name"];
-            BOOL isSelected = [currentValue isEqualToString:key];
-            NSString *label = isSelected ? [NSString stringWithFormat:@"✓ %@", name] : name;
-            [sheet addAction:[UIAlertAction actionWithTitle:label style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
-                setPrefObject(item[@"key"], key);
-                if ([item[@"key"] isEqualToString:@"general.orientation_lock"]) {
-                    [self applyOrientationLock];
-                } else if ([item[@"key"] isEqualToString:@"launcher.theme"]) {
-                    [self handleThemeChange:key];
-                } else if ([item[@"key"] isEqualToString:@"launcher.language"]) {
-                    [self applyLanguageChange];
-                    return;
-                }
-                [self reloadTables];
-            }]];
+            if (![key isKindOfClass:[NSString class]]) continue;
+            [opts addObject:@{@"title": ([name isKindOfClass:[NSString class]] ? name : key)}];
+            [keys addObject:key];
+            if ([currentValue isEqualToString:key]) sel = keys.count - 1;
         }
     } else {
         for (NSString *opt in options) {
             if (![opt isKindOfClass:[NSString class]]) continue;
-            NSString *display = opt;
-            NSString *cap = [opt stringByReplacingCharactersInRange:NSMakeRange(0,1) withString:[[opt substringToIndex:1] capitalizedString]];
-            display = cap;
-            BOOL isSelected = [currentValue isEqualToString:opt];
-            NSString *label = isSelected ? [NSString stringWithFormat:@"✓ %@", display] : display;
-            [sheet addAction:[UIAlertAction actionWithTitle:label style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
-                setPrefObject(item[@"key"], opt);
-                if ([item[@"key"] isEqualToString:@"launcher.theme"]) {
-                    [self handleThemeChange:opt];
-                } else if ([item[@"key"] isEqualToString:@"general.mainsidebar_portrait"] ||
-                           [item[@"key"] isEqualToString:@"general.mainsidebar_landscape"]) {
-                    // Main sidebar dock change: re-layout the root shell.
-                    [[NSNotificationCenter defaultCenter] postNotificationName:ThemeDidChangeNotification object:nil];
-                }
-                [self reloadTables];
-            }]];
+            NSString *display = [opt stringByReplacingCharactersInRange:NSMakeRange(0,1) withString:[[opt substringToIndex:1] capitalizedString]];
+            [opts addObject:@{@"title": display}];
+            [keys addObject:opt];
+            if ([currentValue isEqualToString:opt]) sel = keys.count - 1;
         }
     }
-    [sheet addAction:[UIAlertAction actionWithTitle:localize(@"Cancel", nil) style:UIAlertActionStyleCancel handler:nil]];
-
-    if (UIDevice.currentDevice.userInterfaceIdiom == UIUserInterfaceIdiomPad) {
-        sheet.popoverPresentationController.sourceView = table;
-        sheet.popoverPresentationController.sourceRect = CGRectMake(CGRectGetMidX(table.bounds), CGRectGetMidY(table.bounds), 0, 0);
-    }
-
-    [self presentViewController:sheet animated:YES completion:nil];
+    [AppSheet showOptionsWithTitle:item[@"label"] message:nil options:opts selectedIndex:sel selection:^(NSInteger idx) {
+        NSString *key = keys[idx];
+        setPrefObject(item[@"key"], key);
+        if ([item[@"key"] isEqualToString:@"general.orientation_lock"]) {
+            [self applyOrientationLock];
+        } else if ([item[@"key"] isEqualToString:@"launcher.theme"]) {
+            [self handleThemeChange:key];
+        } else if ([item[@"key"] isEqualToString:@"launcher.language"]) {
+            [self applyLanguageChange];
+            return;
+        } else if ([item[@"key"] isEqualToString:@"general.mainsidebar_portrait"] ||
+                   [item[@"key"] isEqualToString:@"general.mainsidebar_landscape"]) {
+            // Main sidebar dock change: re-layout the root shell.
+            [[NSNotificationCenter defaultCenter] postNotificationName:ThemeDidChangeNotification object:nil];
+        }
+        [self reloadTables];
+    }];
+    (void)table;
 }
 
 - (void)handleThemeChange:(NSString *)themeValue {
@@ -1674,19 +1703,15 @@
 }
 
 - (void)showImagePicker {
-    UIAlertController *sheet = [UIAlertController alertControllerWithTitle:localize(@"Background", nil) message:nil preferredStyle:UIAlertControllerStyleActionSheet];
-
-    [sheet addAction:[UIAlertAction actionWithTitle:localize(@"Choose Image from Library", nil) style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
-        [self openPhotoLibraryWithFilter:[PHPickerFilter imagesFilter]];
-    }]];
-    [sheet addAction:[UIAlertAction actionWithTitle:localize(@"Choose Video from Library", nil) style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
-        [self openPhotoLibraryWithFilter:[PHPickerFilter videosFilter]];
-    }]];
-    [sheet addAction:[UIAlertAction actionWithTitle:localize(@"Remove Background", nil) style:UIAlertActionStyleDestructive handler:^(UIAlertAction *action) {
-        [self removeBackgroundImage];
-    }]];
-    [sheet addAction:[UIAlertAction actionWithTitle:localize(@"Cancel", nil) style:UIAlertActionStyleCancel handler:nil]];
-    [self presentViewController:sheet animated:YES completion:nil];
+    [AppSheet showOptionsWithTitle:localize(@"Background", nil) message:nil options:@[
+        @{@"title": localize(@"Choose Image from Library", nil), @"icon": @"photo"},
+        @{@"title": localize(@"Choose Video from Library", nil), @"icon": @"video"},
+        @{@"title": localize(@"Remove Background", nil), @"icon": @"trash", @"destructive": @YES},
+    ] selectedIndex:NSNotFound selection:^(NSInteger idx) {
+        if (idx == 0) [self openPhotoLibraryWithFilter:[PHPickerFilter imagesFilter]];
+        else if (idx == 1) [self openPhotoLibraryWithFilter:[PHPickerFilter videosFilter]];
+        else [self removeBackgroundImage];
+    }];
 }
 
 - (void)openPhotoLibraryWithFilter:(PHPickerFilter *)filter {
@@ -1862,9 +1887,7 @@
 }
 
 - (void)resetSettings {
-    UIAlertController *alert = [UIAlertController alertControllerWithTitle:localize(@"Reset Settings", nil) message:localize(@"Are you sure you want to reset all settings to default?", nil) preferredStyle:UIAlertControllerStyleAlert];
-    [alert addAction:[UIAlertAction actionWithTitle:localize(@"Cancel", nil) style:UIAlertActionStyleCancel handler:nil]];
-    [alert addAction:[UIAlertAction actionWithTitle:localize(@"Reset", nil) style:UIAlertActionStyleDestructive handler:^(UIAlertAction *action) {
+    [AppSheet showConfirmWithTitle:localize(@"Reset Settings", nil) message:localize(@"Are you sure you want to reset all settings to default?", nil) confirmTitle:localize(@"Reset", nil) destructive:YES onConfirm:^{
         loadPreferences(YES);
         loadPreferences(NO);
         [ThemeManager.shared applyInterfaceStyle:UIUserInterfaceStyleUnspecified];
@@ -1872,8 +1895,7 @@
         [self resetAppearance];
         [self buildSections];
         [self reloadTables];
-    }]];
-    [self presentViewController:alert animated:YES completion:nil];
+    }];
 }
 
 - (void)dealloc {

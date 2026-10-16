@@ -7,6 +7,7 @@
 #import "VersionDirectoryManager.h"
 #import "ProfileAvatarManager.h"
 #import "FileBrowserViewController.h"
+#import "AppSheet.h"
 #import "PLProfiles.h"
 #import "LauncherPreferences.h"
 #import "MinecraftResourceUtils.h"
@@ -182,19 +183,19 @@
 
 - (void)changeAvatarTapped {
     [HapticManager.shared play:HapticTypeLight];
-    UIAlertController *sheet = [UIAlertController alertControllerWithTitle:@"Profile Icon" message:nil preferredStyle:UIAlertControllerStyleActionSheet];
-    for (NSString *key in @[@"fabric", @"forge", @"neoforge", @"quilt", @"modpack", @"vanilla", @"custom"]) {
-        [sheet addAction:[UIAlertAction actionWithTitle:[key capitalizedString] style:UIAlertActionStyleDefault handler:^(UIAlertAction *a) {
-            if ([key isEqualToString:@"custom"]) [self pickCustomAvatar];
-            else [self persistAvatarKey:key];
-        }]];
+    NSArray *keys = @[@"fabric", @"forge", @"neoforge", @"quilt", @"modpack", @"vanilla", @"custom"];
+    NSString *current = self.profile[@"avatar"];
+    if (![current isKindOfClass:[NSString class]]) current = @"fabric";
+    NSMutableArray *opts = [NSMutableArray array];
+    for (NSString *key in keys) {
+        [opts addObject:@{@"title": [key capitalizedString], @"icon": @"person.crop.circle"}];
     }
-    [sheet addAction:[UIAlertAction actionWithTitle:localize(@"Cancel", nil) style:UIAlertActionStyleCancel handler:nil]];
-    if (UIDevice.currentDevice.userInterfaceIdiom == UIUserInterfaceIdiomPad) {
-        sheet.popoverPresentationController.sourceView = _avatarButton;
-        sheet.popoverPresentationController.sourceRect = _avatarButton.bounds;
-    }
-    [self presentViewController:sheet animated:YES completion:nil];
+    NSInteger sel = [keys indexOfObject:current];
+    [AppSheet showOptionsWithTitle:@"Profile Icon" message:nil options:opts selectedIndex:(sel == NSNotFound ? NSNotFound : (NSInteger)sel) selection:^(NSInteger idx) {
+        NSString *key = keys[idx];
+        if ([key isEqualToString:@"custom"]) [self pickCustomAvatar];
+        else [self persistAvatarKey:key];
+    }];
 }
 
 - (void)persistAvatarKey:(NSString *)key {
@@ -460,47 +461,42 @@
         [ErrorPresenter showInfo:@"No Options" message:@"No options available for this setting."];
         return;
     }
-    UIAlertController *sheet = [UIAlertController alertControllerWithTitle:item[@"label"] message:nil preferredStyle:UIAlertControllerStyleActionSheet];
+    NSString *current = [self profileValueForKey:item[@"key"]];
+    NSMutableArray *opts = [NSMutableArray array];
+    NSMutableArray *keys = [NSMutableArray array];
+    NSInteger sel = NSNotFound;
     if ([options.firstObject isKindOfClass:[NSDictionary class]]) {
         for (NSDictionary *opt in options) {
             NSString *key = opt[@"key"];
             NSString *name = opt[@"name"];
-            [sheet addAction:[UIAlertAction actionWithTitle:name style:UIAlertActionStyleDefault handler:^(UIAlertAction *a) {
-                [self setProfileValue:key forKey:item[@"key"]];
-                [self.tableView reloadData];
-            }]];
+            if (![key isKindOfClass:[NSString class]]) continue;
+            [opts addObject:@{@"title": ([name isKindOfClass:[NSString class]] ? name : key)}];
+            [keys addObject:key];
+            if ([current isEqualToString:key]) sel = keys.count - 1;
         }
     } else {
         for (id opt in options) {
             if (![opt isKindOfClass:[NSString class]]) continue;
-            [sheet addAction:[UIAlertAction actionWithTitle:opt style:UIAlertActionStyleDefault handler:^(UIAlertAction *a) {
-                [self setProfileValue:opt forKey:item[@"key"]];
-                [self.tableView reloadData];
-            }]];
+            [opts addObject:@{@"title": opt}];
+            [keys addObject:opt];
+            if ([current isEqualToString:opt]) sel = keys.count - 1;
         }
     }
-    [sheet addAction:[UIAlertAction actionWithTitle:localize(@"Cancel", nil) style:UIAlertActionStyleCancel handler:nil]];
-    if (UIDevice.currentDevice.userInterfaceIdiom == UIUserInterfaceIdiomPad) {
-        sheet.popoverPresentationController.sourceView = self.view;
-        sheet.popoverPresentationController.sourceRect = CGRectMake(CGRectGetMidX(self.view.bounds), CGRectGetMidY(self.view.bounds), 0, 0);
-    }
-    [self presentViewController:sheet animated:YES completion:nil];
+    [AppSheet showOptionsWithTitle:item[@"label"] message:nil options:opts selectedIndex:sel selection:^(NSInteger idx) {
+        [self setProfileValue:keys[idx] forKey:item[@"key"]];
+        [self.tableView reloadData];
+    }];
 }
 
 - (void)showVersionPicker {
     NSArray *types = @[@"installed", @"release", @"snapshot", @"old_beta", @"old_alpha"];
-    UIAlertController *sheet = [UIAlertController alertControllerWithTitle:localize(@"Select Version", nil) message:nil preferredStyle:UIAlertControllerStyleActionSheet];
+    NSMutableArray *opts = [NSMutableArray array];
     for (NSString *t in types) {
-        [sheet addAction:[UIAlertAction actionWithTitle:t style:UIAlertActionStyleDefault handler:^(UIAlertAction *a) {
-            [self showVersionSubPicker:t];
-        }]];
+        [opts addObject:@{@"title": t, @"icon": @"archivebox"}];
     }
-    [sheet addAction:[UIAlertAction actionWithTitle:localize(@"Cancel", nil) style:UIAlertActionStyleCancel handler:nil]];
-    if (UIDevice.currentDevice.userInterfaceIdiom == UIUserInterfaceIdiomPad) {
-        sheet.popoverPresentationController.sourceView = self.view;
-        sheet.popoverPresentationController.sourceRect = CGRectMake(CGRectGetMidX(self.view.bounds), CGRectGetMidY(self.view.bounds), 0, 0);
-    }
-    [self presentViewController:sheet animated:YES completion:nil];
+    [AppSheet showOptionsWithTitle:localize(@"Select Version", nil) message:nil options:opts selectedIndex:NSNotFound selection:^(NSInteger idx) {
+        [self showVersionSubPicker:types[idx]];
+    }];
 }
 
 - (void)showVersionSubPicker:(NSString *)type {
@@ -511,25 +507,23 @@
         [ErrorPresenter showInfo:@"No Versions" message:[NSString stringWithFormat:@"No %@ versions found.", type]];
         return;
     }
-    UIAlertController *sub = [UIAlertController alertControllerWithTitle:type message:nil preferredStyle:UIAlertControllerStyleActionSheet];
+    NSMutableArray *opts = [NSMutableArray array];
+    NSMutableArray *ids = [NSMutableArray array];
     NSInteger max = MIN((NSInteger)list.count, 60);
     for (NSInteger i = 0; i < max; i++) {
         NSObject *obj = list[i];
         NSString *verId = [obj isKindOfClass:[NSString class]] ? (NSString *)obj : [obj valueForKey:@"id"];
         if (verId.length == 0) continue;
-        [sub addAction:[UIAlertAction actionWithTitle:verId style:UIAlertActionStyleDefault handler:^(UIAlertAction *a) {
-            self.pendingVersion = verId;
-            [self setProfileValue:verId forKey:@"lastVersionId"];
-            [self.tableView reloadData];
-            [self refreshHeader];
-        }]];
+        [opts addObject:@{@"title": verId}];
+        [ids addObject:verId];
     }
-    [sub addAction:[UIAlertAction actionWithTitle:localize(@"Cancel", nil) style:UIAlertActionStyleCancel handler:nil]];
-    if (UIDevice.currentDevice.userInterfaceIdiom == UIUserInterfaceIdiomPad) {
-        sub.popoverPresentationController.sourceView = self.view;
-        sub.popoverPresentationController.sourceRect = CGRectMake(CGRectGetMidX(self.view.bounds), CGRectGetMidY(self.view.bounds), 0, 0);
-    }
-    [self presentViewController:sub animated:YES completion:nil];
+    NSInteger sel = [ids indexOfObject:self.pendingVersion];
+    [AppSheet showOptionsWithTitle:type message:nil options:opts selectedIndex:(sel == NSNotFound ? NSNotFound : (NSInteger)sel) selection:^(NSInteger idx) {
+        self.pendingVersion = ids[idx];
+        [self setProfileValue:ids[idx] forKey:@"lastVersionId"];
+        [self.tableView reloadData];
+        [self refreshHeader];
+    }];
 }
 
 #pragma mark - Save

@@ -223,7 +223,11 @@ BOOL JIT26ExecPreflight(void) {
         NSLog(@"[JIT26] preflight: vm_remap failed: 0x%x", ret);
         return NO;
     }
-    ret = vm_protect(mach_task_self(), mirrored, len, FALSE, VM_PROT_READ | VM_PROT_WRITE | VM_PROT_COPY);
+    // Keep this alias shared with RX. VM_PROT_COPY makes writes private (COW),
+    // so the stub would be written to a different backing page than the one
+    // executed below. The debugger has already prepared the RX mapping; this
+    // alias only needs ordinary RW protection, matching write_rx_u32 above.
+    ret = vm_protect(mach_task_self(), mirrored, len, FALSE, VM_PROT_READ | VM_PROT_WRITE);
     if (ret != KERN_SUCCESS) {
         NSLog(@"[JIT26] preflight: vm_protect(RW) failed: 0x%x", ret);
         vm_deallocate(mach_task_self(), mirrored, len);
@@ -234,12 +238,13 @@ BOOL JIT26ExecPreflight(void) {
     sys_icache_invalidate(rx, sizeof(stub));
     NSLog(@"[JIT26] preflight: stub written, calling it under fault guard");
 
-    struct sigaction sa = {0}, oldBus, oldSegv, oldTrap;
+    struct sigaction sa = {0}, oldBus, oldSegv, oldTrap, oldIll;
     sa.sa_handler = jit_preflight_fault;
     sigemptyset(&sa.sa_mask);
     sigaction(SIGBUS, &sa, &oldBus);
     sigaction(SIGSEGV, &sa, &oldSegv);
     sigaction(SIGTRAP, &sa, &oldTrap);
+    sigaction(SIGILL, &sa, &oldIll);
 
     volatile int result = -1;
     g_jitPreflightArmed = 1;
@@ -254,6 +259,7 @@ BOOL JIT26ExecPreflight(void) {
     sigaction(SIGBUS, &oldBus, NULL);
     sigaction(SIGSEGV, &oldSegv, NULL);
     sigaction(SIGTRAP, &oldTrap, NULL);
+    sigaction(SIGILL, &oldIll, NULL);
     vm_deallocate(mach_task_self(), mirrored, len);
     // NOTE: the 2 RX pages stay reserved (debugger-owned); negligible and keeps
     // the debugger allocator state intact for the JVM's own requests.

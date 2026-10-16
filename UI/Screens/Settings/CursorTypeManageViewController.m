@@ -9,6 +9,7 @@
 #import "utils.h"
 #import <PhotosUI/PhotosUI.h>
 #import <UniformTypeIdentifiers/UniformTypeIdentifiers.h>
+#import "AppSheet.h"
 
 @interface CursorTypeManageViewController () <UITableViewDelegate, UITableViewDataSource, PHPickerViewControllerDelegate, UIDocumentPickerDelegate>
 
@@ -63,21 +64,13 @@
 
 - (void)showImportOptions {
     [HapticManager.shared play:HapticTypeLight];
-    UIAlertController *sheet = [UIAlertController alertControllerWithTitle:localize(@"cursor.manage.import_title", nil)
-                                                                   message:localize(@"cursor.manage.import_message", nil)
-                                                            preferredStyle:UIAlertControllerStyleActionSheet];
-    [sheet addAction:[UIAlertAction actionWithTitle:localize(@"cursor.manage.photo_library", nil) style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
-        [self openPhotoPicker];
-    }]];
-    [sheet addAction:[UIAlertAction actionWithTitle:localize(@"cursor.manage.files", nil) style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
-        [self openDocumentPicker];
-    }]];
-    [sheet addAction:[UIAlertAction actionWithTitle:localize(@"cursor.detail.cancel", nil) style:UIAlertActionStyleCancel handler:nil]];
-
-    if (UIDevice.currentDevice.userInterfaceIdiom == UIUserInterfaceIdiomPad) {
-        sheet.popoverPresentationController.barButtonItem = _addButton;
-    }
-    [self presentViewController:sheet animated:YES completion:nil];
+    [AppSheet showOptionsWithTitle:localize(@"cursor.manage.import_title", nil) message:localize(@"cursor.manage.import_message", nil) options:@[
+        @{@"title": localize(@"cursor.manage.photo_library", nil), @"icon": @"photo"},
+        @{@"title": localize(@"cursor.manage.files", nil), @"icon": @"folder"},
+    ] selectedIndex:NSNotFound selection:^(NSInteger idx) {
+        if (idx == 0) [self openPhotoPicker];
+        else [self openDocumentPicker];
+    }];
 }
 
 - (void)openPhotoPicker {
@@ -193,81 +186,73 @@
     NSString *currentCursor = [CursorManager currentCursorName];
     BOOL isEnabled = [CursorTypeManager isEnabledForType:typeId];
 
-UIAlertController *alert = [UIAlertController alertControllerWithTitle:typeDef[kCursorTypeName]
-                                                                   message:typeDef[kCursorTypeDescription]
-                                                            preferredStyle:UIAlertControllerStyleActionSheet];
-
+    // Build one option list (order preserved for index mapping).
+    NSMutableArray *opts = [NSMutableArray array];
+    NSMutableArray *acts = [NSMutableArray array]; // NSNumber action codes
     // Toggle enable/disable (cannot disable "normal")
     if (![typeId isEqualToString:@"normal"]) {
         NSString *toggleTitle = isEnabled ? localize(@"Disable", nil) : localize(@"Enable", nil);
-        [alert addAction:[UIAlertAction actionWithTitle:toggleTitle style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
-            [CursorTypeManager setEnabled:!isEnabled forType:typeId];
-            [self reloadData];
-        }]];
+        [opts addObject:@{@"title": toggleTitle, @"icon": isEnabled ? @"pause.circle" : @"play.circle"}];
+        [acts addObject:@0];
     }
-
     // Section: Choose cursor
-    [alert addAction:[UIAlertAction actionWithTitle:localize(@"cursor.manage.choose_cursor", nil) style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
-        [self showCursorPickerForType:typeId];
-    }]];
-
+    [opts addObject:@{@"title": localize(@"cursor.manage.choose_cursor", nil), @"icon": @"cursorarrow.click"}];
+    [acts addObject:@1];
     // Section: Set to default
     if (![[CursorTypeManager cursorForType:typeId] isEqualToString:[CursorManager defaultCursorName]]) {
-        [alert addAction:[UIAlertAction actionWithTitle:localize(@"cursor.manage.reset_default", nil) style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
-            [CursorTypeManager setCursor:[CursorManager defaultCursorName] forType:typeId];
-            [self reloadData];
-        }]];
+        [opts addObject:@{@"title": localize(@"cursor.manage.reset_default", nil), @"icon": @"arrow.counterclockwise"}];
+        [acts addObject:@2];
     }
-
     // Section: Import new
-    [alert addAction:[UIAlertAction actionWithTitle:localize(@"cursor.manage.import_new", nil) style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
-        [self showImportOptions];
-    }]];
-
+    [opts addObject:@{@"title": localize(@"cursor.manage.import_new", nil), @"icon": @"tray.and.arrow.down"}];
+    [acts addObject:@3];
     // Edit hitbox for assigned cursor
     NSString *assignedCursor = [CursorTypeManager cursorForType:typeId];
     if (![CursorManager isDefaultCursor:assignedCursor]) {
-        [alert addAction:[UIAlertAction actionWithTitle:localize(@"cursor.manage.edit_hitbox", nil) style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
-            [self openHitboxEditorForCursor:assignedCursor];
-        }]];
+        [opts addObject:@{@"title": localize(@"cursor.manage.edit_hitbox", nil), @"icon": @"viewfinder"}];
+        [acts addObject:@4];
     }
-
-    [alert addAction:[UIAlertAction actionWithTitle:localize(@"cursor.detail.cancel", nil) style:UIAlertActionStyleCancel handler:nil]];
-
-    if (UIDevice.currentDevice.userInterfaceIdiom == UIUserInterfaceIdiomPad) {
-        alert.popoverPresentationController.sourceView = self.view;
-        alert.popoverPresentationController.sourceRect = CGRectMake(self.view.bounds.size.width / 2, self.view.bounds.size.height / 2, 0, 0);
-    }
-    [self presentViewController:alert animated:YES completion:nil];
+    [AppSheet showOptionsWithTitle:typeDef[kCursorTypeName] message:typeDef[kCursorTypeDescription] options:opts selectedIndex:NSNotFound selection:^(NSInteger idx) {
+        switch ([acts[idx] integerValue]) {
+            case 0:
+                [CursorTypeManager setEnabled:!isEnabled forType:typeId];
+                [self reloadData];
+                break;
+            case 1:
+                [self showCursorPickerForType:typeId];
+                break;
+            case 2:
+                [CursorTypeManager setCursor:[CursorManager defaultCursorName] forType:typeId];
+                [self reloadData];
+                break;
+            case 3:
+                [self showImportOptions];
+                break;
+            case 4:
+                [self openHitboxEditorForCursor:assignedCursor];
+                break;
+            default:
+                break;
+        }
+    }];
 }
 
 - (void)showCursorPickerForType:(NSString *)typeId {
     NSString *currentCursor = [CursorTypeManager cursorForType:typeId];
 
-UIAlertController *picker = [UIAlertController alertControllerWithTitle:localize(@"cursor.manage.select_title", nil)
-                                                                    message:localize(@"cursor.manage.select_message", nil)
-                                                             preferredStyle:UIAlertControllerStyleActionSheet];
-
+    NSMutableArray *opts = [NSMutableArray array];
+    NSMutableArray *names = [NSMutableArray array];
+    NSInteger sel = NSNotFound;
     for (NSString *cursorName in _cursorNames) {
-        BOOL isCurrent = [cursorName isEqualToString:currentCursor];
         NSString *title = [CursorManager isDefaultCursor:cursorName] ? localize(@"cursor.detail.default_builtin", nil) : cursorName;
-        if (isCurrent) {
-            title = [title stringByAppendingString:@"  ✓"];
-        }
-
-        [picker addAction:[UIAlertAction actionWithTitle:title style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
-            [CursorTypeManager setCursor:cursorName forType:typeId];
-            [self reloadData];
-        }]];
+        [opts addObject:@{@"title": title, @"icon": @"cursorarrow"}];
+        [names addObject:cursorName];
+        if ([cursorName isEqualToString:currentCursor]) sel = names.count - 1;
     }
-
-    [picker addAction:[UIAlertAction actionWithTitle:localize(@"cursor.detail.cancel", nil) style:UIAlertActionStyleCancel handler:nil]];
-
-    if (UIDevice.currentDevice.userInterfaceIdiom == UIUserInterfaceIdiomPad) {
-        picker.popoverPresentationController.sourceView = self.view;
-        picker.popoverPresentationController.sourceRect = CGRectMake(self.view.bounds.size.width / 2, self.view.bounds.size.height / 2, 0, 0);
-    }
-    [self presentViewController:picker animated:YES completion:nil];
+    [AppSheet showOptionsWithTitle:localize(@"cursor.manage.select_title", nil) message:localize(@"cursor.manage.select_message", nil) options:opts selectedIndex:sel selection:^(NSInteger idx) {
+        [CursorTypeManager setCursor:names[idx] forType:typeId];
+        [self reloadData];
+    }];
 }
 
 #pragma mark - TableView
@@ -388,11 +373,11 @@ UIAlertController *picker = [UIAlertController alertControllerWithTitle:localize
 }
 
 - (void)confirmDeleteCursor:(NSString *)name {
-    UIAlertController *alert = [UIAlertController alertControllerWithTitle:localize(@"cursor.detail.delete_title", nil)
-                                                                  message:[NSString stringWithFormat:@"Delete cursor \"%@\"?", name]
-                                                           preferredStyle:UIAlertControllerStyleAlert];
-    [alert addAction:[UIAlertAction actionWithTitle:localize(@"Cancel", nil) style:UIAlertActionStyleCancel handler:nil]];
-    [alert addAction:[UIAlertAction actionWithTitle:localize(@"Delete", nil) style:UIAlertActionStyleDestructive handler:^(UIAlertAction *action) {
+    [AppSheet showConfirmWithTitle:localize(@"cursor.detail.delete_title", nil)
+                           message:[NSString stringWithFormat:@"Delete cursor \"%@\"?", name]
+                      confirmTitle:localize(@"Delete", nil)
+                       destructive:YES
+                         onConfirm:^{
         // Reset any type using this cursor to default
         for (NSDictionary *typeDef in self.cursorTypes) {
             if ([[CursorTypeManager cursorForType:typeDef[kCursorTypeId]] isEqualToString:name]) {
@@ -401,8 +386,7 @@ UIAlertController *picker = [UIAlertController alertControllerWithTitle:localize
         }
         [CursorManager deleteCursor:name];
         [self reloadData];
-    }]];
-    [self presentViewController:alert animated:YES completion:nil];
+    }];
 }
 
 - (void)toggleChanged:(UISwitch *)sender {

@@ -19,6 +19,7 @@
 #import "FileBrowserViewController.h"
 #import "ProfileTabbedPageViewController.h"
 #import "ErrorPresenter.h"
+#import "AppSheet.h"
 
 #import "PLProfiles.h"
 #import "MinecraftResourceDownloadTask.h"
@@ -209,32 +210,27 @@
 }
 
 - (void)showVersionPicker {
-    UIAlertController *alert = [UIAlertController alertControllerWithTitle:localize(@"Select Version", nil) message:nil preferredStyle:UIAlertControllerStyleAlert];
-    [alert addTextFieldWithConfigurationHandler:^(UITextField *field) {
-        field.placeholder = @"e.g. 1.21.4";
-        field.text = VersionDirectoryManager.shared.currentVersion;
-    }];
-    [alert addAction:[UIAlertAction actionWithTitle:localize(@"Cancel", nil) style:UIAlertActionStyleCancel handler:nil]];
-    [alert addAction:[UIAlertAction actionWithTitle:localize(@"Set", nil) style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
-        NSString *ver = alert.textFields[0].text;
+    __weak typeof(self) weakSelf = self;
+    [AppSheet showPromptWithTitle:localize(@"Select Version", nil) message:nil placeholder:@"e.g. 1.21.4" initialText:VersionDirectoryManager.shared.currentVersion onConfirm:^(NSString *ver) {
         if (ver.length > 0) {
             VersionDirectoryManager.shared.currentVersion = ver;
-            [self.rootVC.rightPanelVC refreshVersions];
+            [weakSelf.rootVC.rightPanelVC refreshVersions];
         }
-    }]];
-    [self.rootVC presentViewController:alert animated:YES completion:nil];
+    }];
 }
 
 - (void)showModLoaderPicker {
-    UIAlertController *sheet = [UIAlertController alertControllerWithTitle:localize(@"Mod Loader", nil) message:nil preferredStyle:UIAlertControllerStyleActionSheet];
     NSArray *loaders = @[@"Vanilla", @"Fabric", @"Forge", @"Quilt", @"NeoForge"];
+    NSString *current = getPrefObject(@"internal.mod_loader");
+    if (![current isKindOfClass:[NSString class]]) current = @"";
+    NSMutableArray *opts = [NSMutableArray array];
     for (NSString *loader in loaders) {
-        [sheet addAction:[UIAlertAction actionWithTitle:loader style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
-            setPrefObject(@"internal.mod_loader", loader);
-        }]];
+        [opts addObject:@{@"title": loader, @"icon": @"cpu"}];
     }
-    [sheet addAction:[UIAlertAction actionWithTitle:localize(@"Cancel", nil) style:UIAlertActionStyleCancel handler:nil]];
-    [self.rootVC presentViewController:sheet animated:YES completion:nil];
+    NSInteger sel = [loaders indexOfObject:current];
+    [AppSheet showOptionsWithTitle:localize(@"Mod Loader", nil) message:nil options:opts selectedIndex:(sel == NSNotFound ? NSNotFound : (NSInteger)sel) selection:^(NSInteger idx) {
+        setPrefObject(@"internal.mod_loader", loaders[idx]);
+    }];
 }
 
 - (void)showDownloadHub {
@@ -255,16 +251,15 @@
 }
 
 - (void)removeVersion:(NSString *)versionName {
-    UIAlertController *alert = [UIAlertController alertControllerWithTitle:[NSString stringWithFormat:localize(@"Delete %@?", nil), versionName]
-                                                                    message:localize(@"This will permanently delete this profile and version. This action cannot be undone.", nil)
-                                                             preferredStyle:UIAlertControllerStyleAlert];
-    [alert addAction:[UIAlertAction actionWithTitle:localize(@"Cancel", nil) style:UIAlertActionStyleCancel handler:nil]];
-    [alert addAction:[UIAlertAction actionWithTitle:localize(@"Delete", nil) style:UIAlertActionStyleDestructive handler:^(UIAlertAction *action) {
+    [AppSheet showConfirmWithTitle:[NSString stringWithFormat:localize(@"Delete %@?", nil), versionName]
+                           message:localize(@"This will permanently delete this profile and version. This action cannot be undone.", nil)
+                      confirmTitle:localize(@"Delete", nil)
+                       destructive:YES
+                         onConfirm:^{
         NSString *path = [VersionDirectoryManager.shared versionPathForVersion:versionName];
         [[NSFileManager defaultManager] removeItemAtPath:path error:nil];
         [self.rootVC.rightPanelVC refreshVersions];
-    }]];
-    [self.rootVC presentViewController:alert animated:YES completion:nil];
+    }];
 }
 
 - (void)selectVersion:(NSString *)versionName {
@@ -680,12 +675,12 @@
     if (players) {
         info = [NSString stringWithFormat:@"%@\n\nPlayers: %@/%@", desc, players[@"online"] ?: @"?", players[@"max"] ?: @"?"];
     }
-    UIAlertController *alert = [UIAlertController alertControllerWithTitle:name message:info preferredStyle:UIAlertControllerStyleAlert];
-    [alert addAction:[UIAlertAction actionWithTitle:localize(@"common.connect", nil) style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
-        [self launchWithServer:serverData];
-    }]];
-    [alert addAction:[UIAlertAction actionWithTitle:localize(@"Cancel", nil) style:UIAlertActionStyleCancel handler:nil]];
-    [self.rootVC presentViewController:alert animated:YES completion:nil];
+    [AppSheet showOptionsWithTitle:name message:info options:@[
+        @{@"title": localize(@"common.connect", nil), @"icon": @"cable.connector"},
+        @{@"title": localize(@"Cancel", nil), @"icon": @"xmark"},
+    ] selectedIndex:NSNotFound selection:^(NSInteger idx) {
+        if (idx == 0) [self launchWithServer:serverData];
+    }];
 }
 
 #pragma mark - UIViewControllerTransitioningDelegate

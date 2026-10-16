@@ -7,6 +7,7 @@
 #import "UIImageView+AFNetworking.h"
 #import "ios_uikit_bridge.h"
 #import "utils.h"
+#import "AppSheet.h"
 
 @interface AccountListViewController()<ASWebAuthenticationPresentationContextProviding>
 
@@ -141,57 +142,38 @@
 }
 
 - (void)actionAddAccount:(UITableViewCell *)sender {
-    UIAlertController *picker = [UIAlertController alertControllerWithTitle:nil message:nil preferredStyle:UIAlertControllerStyleActionSheet];
-    UIAlertAction *actionMicrosoft = [UIAlertAction actionWithTitle:localize(@"login.option.microsoft", nil) style:UIAlertActionStyleDefault handler:^(UIAlertAction * _Nonnull action) {
-        [self actionLoginMicrosoft:sender];
+    [AppSheet showOptionsWithTitle:nil message:nil options:@[
+        @{@"title": localize(@"login.option.microsoft", nil), @"icon": @"globe"},
+        @{@"title": localize(@"login.option.local", nil), @"icon": @"person"},
+    ] selectedIndex:NSNotFound selection:^(NSInteger idx) {
+        if (idx == 0) [self actionLoginMicrosoft:sender];
+        else [self actionLoginLocal:sender];
     }];
-    [picker addAction:actionMicrosoft];
-    UIAlertAction *actionLocal = [UIAlertAction actionWithTitle:localize(@"login.option.local", nil) style:UIAlertActionStyleDefault handler:^(UIAlertAction * _Nonnull action) {
-        [self actionLoginLocal:sender];
-    }];
-    [picker addAction:actionLocal];
-    UIAlertAction *cancel = [UIAlertAction actionWithTitle:localize(@"Cancel", nil) style:UIAlertActionStyleCancel handler:nil];
-    [picker addAction:cancel];
-
-    picker.popoverPresentationController.sourceView = sender;
-    picker.popoverPresentationController.sourceRect = sender.bounds;
-
-    [self presentViewController:picker animated:YES completion:nil];
 }
 
 - (void)actionLoginLocal:(UIView *)sender {
     if (getPrefBool(@"warnings.local_warn")) {
         setPrefBool(@"warnings.local_warn", NO);
-        UIAlertController *alert = [UIAlertController alertControllerWithTitle:localize(@"login.warn.title.localmode", nil) message:localize(@"login.warn.message.localmode", nil) preferredStyle:UIAlertControllerStyleActionSheet];
-        alert.popoverPresentationController.sourceView = sender;
-        alert.popoverPresentationController.sourceRect = sender.bounds;
-        UIAlertAction *ok = [UIAlertAction actionWithTitle:localize(@"OK", nil) style:UIAlertActionStyleDefault handler:^(UIAlertAction * _Nonnull action) {[self actionLoginLocal:sender];}];
-        [alert addAction:ok];
-        [self presentViewController:alert animated:YES completion:nil];
+        [AppSheet showConfirmWithTitle:localize(@"login.warn.title.localmode", nil)
+                               message:localize(@"login.warn.message.localmode", nil)
+                          confirmTitle:localize(@"OK", nil)
+                           destructive:NO
+                             onConfirm:^{
+            [self actionLoginLocal:sender];
+        }];
         return;
     }
-    UIAlertController *controller = [UIAlertController alertControllerWithTitle:localize(@"Sign in", nil) message:localize(@"login.option.local", nil) preferredStyle:UIAlertControllerStyleAlert];
-    [controller addTextFieldWithConfigurationHandler:^(UITextField *textField) {
-        textField.placeholder = localize(@"login.alert.field.username", nil);
-        textField.clearButtonMode = UITextFieldViewModeWhileEditing;
-        textField.borderStyle = UITextBorderStyleRoundedRect;
-    }];
-    [controller addAction:[UIAlertAction actionWithTitle:localize(@"OK", nil) style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
-        NSArray *textFields = controller.textFields;
-        UITextField *usernameField = textFields[0];
-        if (usernameField.text.length < 3 || usernameField.text.length > 16) {
-            controller.message = localize(@"login.error.username.outOfRange", nil);
-            [self presentViewController:controller animated:YES completion:nil];
-        } else {
-            id callback = ^(id status, BOOL success) {
-                self.whenItemSelected();
-                [self dismissViewControllerAnimated:YES completion:nil];
-            };
-            [[[LocalAuthenticator alloc] initWithInput:usernameField.text] loginWithCallback:callback];
+    [AppSheet showPromptWithTitle:localize(@"Sign in", nil) message:localize(@"login.option.local", nil) placeholder:localize(@"login.alert.field.username", nil) initialText:@"" onConfirm:^(NSString *username) {
+        if (username.length < 3 || username.length > 16) {
+            showDialog(localize(@"Error", nil), localize(@"login.error.username.outOfRange", nil));
+            return;
         }
-    }]];
-    [controller addAction:[UIAlertAction actionWithTitle:localize(@"Cancel", nil) style:UIAlertActionStyleCancel handler:nil]];
-    [self presentViewController:controller animated:YES completion:nil];
+        id callback = ^(id status, BOOL success) {
+            self.whenItemSelected();
+            [self dismissViewControllerAnimated:YES completion:nil];
+        };
+        [[[LocalAuthenticator alloc] initWithInput:username] loginWithCallback:callback];
+    }];
 }
 
 - (void)actionLoginMicrosoft:(UITableViewCell *)sender {

@@ -806,6 +806,11 @@ static void nbtSkipPayload(NBTCursor *c, uint8_t type) {
         [category isEqualToString:InstalledItemCategoryShaderPack] ||
         [category isEqualToString:ModContentKindDatapack]) {
         NSData *packPng = [archive extractDataFromFile:@"pack.png" error:nil];
+        if (!packPng) {
+            // Case-insensitive fallback (Pack.png, PACK.PNG, ...).
+            NSString *found = [self findEntry:archive named:@"pack.png"];
+            if (found) packPng = [archive extractDataFromFile:found error:nil];
+        }
         if (packPng) {
             UIImage *img = [UIImage imageWithData:packPng];
             if (img) return img;

@@ -17,6 +17,7 @@
 #import "AFImageDownloader.h"
 #import "AmethystBlurView.h"
 #import "utils.h"
+#import "AppSheet.h"
 
 @interface ModTagView : UIView
 @property (nonatomic) UILabel *label;
@@ -1233,19 +1234,13 @@ static const NSInteger kModActionLoadingTag = 9001;
     BOOL isInstalled = [self isModInstalled:version];
     NSString *installTitle = isInstalled ? localize(@"mod.reinstall", nil) : localize(@"mod.install_to_profile", nil);
     
-    UIAlertController *alert = [UIAlertController alertControllerWithTitle:modTitle message:message preferredStyle:UIAlertControllerStyleAlert];
-    
-    [alert addAction:[UIAlertAction actionWithTitle:installTitle style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
-        [weakSelf installModWithDependencies:version];
-    }]];
-    
-    [alert addAction:[UIAlertAction actionWithTitle:localize(@"mod.download_only", nil) style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
-        [weakSelf downloadModOnly:version];
-    }]];
-    
-    [alert addAction:[UIAlertAction actionWithTitle:localize(@"Cancel", nil) style:UIAlertActionStyleCancel handler:nil]];
-    
-    [self presentViewController:alert animated:YES completion:nil];
+    [AppSheet showOptionsWithTitle:modTitle message:message options:@[
+        @{@"title": installTitle, @"icon": @"tray.and.arrow.down"},
+        @{@"title": localize(@"mod.download_only", nil), @"icon": @"arrow.down.circle"},
+    ] selectedIndex:NSNotFound selection:^(NSInteger idx) {
+        if (idx == 0) [weakSelf installModWithDependencies:version];
+        else [weakSelf downloadModOnly:version];
+    }];
 }
 
 - (BOOL)isModInstalled:(NSDictionary *)version {

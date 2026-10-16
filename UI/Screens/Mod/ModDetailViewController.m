@@ -18,6 +18,7 @@
 #import "MrpackInstaller.h"
 #import "utils.h"
 #import "AmethystBlurView.h"
+#import "AppSheet.h"
 
 static NSString *readInstallerVersionId(NSString *jarPath) {
     NSError *uzError;
@@ -461,33 +462,30 @@ static NSString *const kVerCell = @"VerCell";
 
 - (void)pickMcVersion {
     if (_availableMcVersions.count == 0) return;
-    UIAlertController *sheet = [UIAlertController alertControllerWithTitle:localize(@"common.select_mc_version", nil) message:nil preferredStyle:UIAlertControllerStyleActionSheet];
+    NSMutableArray *opts = [NSMutableArray array];
     for (NSString *mcVer in _availableMcVersions) {
-        NSString *label = mcVer;
-        if ([mcVer isEqualToString:_selectedMcVersion]) {
-            label = [@"✓ " stringByAppendingString:mcVer];
-        }
-        [sheet addAction:[UIAlertAction actionWithTitle:label style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
-            _selectedMcVersion = mcVer;
-            [_mcVersionBtn setTitle:[@"  " stringByAppendingString:mcVer] forState:UIControlStateNormal];
-
-            NSMutableArray *filtered = [NSMutableArray array];
-            for (NSDictionary *ver in _versions) {
-                if ([ver[@"game_versions"] containsObject:mcVer]) {
-                    [filtered addObject:ver];
-                }
-            }
-            self.versions = filtered;
-            _selectedVersionIndex = -1;
-            _actionsContainer.hidden = YES;
-            _depsContainer.hidden = YES;
-            self.versionTable.hidden = NO;
-            [self updateVersionTableHeight];
-            [self.versionTable reloadData];
-        }]];
+        [opts addObject:@{@"title": mcVer}];
     }
-    [sheet addAction:[UIAlertAction actionWithTitle:localize(@"Cancel", nil) style:UIAlertActionStyleCancel handler:nil]];
-    [self presentViewController:sheet animated:YES completion:nil];
+    NSInteger sel = [_availableMcVersions indexOfObject:_selectedMcVersion];
+    [AppSheet showOptionsWithTitle:localize(@"common.select_mc_version", nil) message:nil options:opts selectedIndex:(sel == NSNotFound ? NSNotFound : (NSInteger)sel) selection:^(NSInteger idx) {
+        NSString *mcVer = self->_availableMcVersions[idx];
+        self->_selectedMcVersion = mcVer;
+        [self->_mcVersionBtn setTitle:[@"  " stringByAppendingString:mcVer] forState:UIControlStateNormal];
+
+        NSMutableArray *filtered = [NSMutableArray array];
+        for (NSDictionary *ver in self->_versions) {
+            if ([ver[@"game_versions"] containsObject:mcVer]) {
+                [filtered addObject:ver];
+            }
+        }
+        self.versions = filtered;
+        self->_selectedVersionIndex = -1;
+        self->_actionsContainer.hidden = YES;
+        self->_depsContainer.hidden = YES;
+        self.versionTable.hidden = NO;
+        [self updateVersionTableHeight];
+        [self.versionTable reloadData];
+    }];
 }
 
 - (void)toggleVersions {
@@ -620,12 +618,9 @@ static NSString *const kVerCell = @"VerCell";
         if (!loaderCompatible)
             [issues addObject:[NSString stringWithFormat:@"Mod doesn't support %@ loader", currentLoader]];
 
-        UIAlertController *alert = [UIAlertController alertControllerWithTitle:localize(@"mod.compat_warning", nil) message:[issues componentsJoinedByString:@"\n"] preferredStyle:UIAlertControllerStyleAlert];
-        [alert addAction:[UIAlertAction actionWithTitle:localize(@"Cancel", nil) style:UIAlertActionStyleCancel handler:nil]];
-        [alert addAction:[UIAlertAction actionWithTitle:localize(@"mod.download_anyway", nil) style:UIAlertActionStyleDestructive handler:^(UIAlertAction *action) {
+        [AppSheet showConfirmWithTitle:localize(@"mod.compat_warning", nil) message:[issues componentsJoinedByString:@"\n"] confirmTitle:localize(@"mod.download_anyway", nil) destructive:YES onConfirm:^{
             [self doInstallToProfile:ver];
-        }]];
-        [self presentViewController:alert animated:YES completion:nil];
+        }];
         return;
     }
 

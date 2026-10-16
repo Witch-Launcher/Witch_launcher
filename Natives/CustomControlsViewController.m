@@ -3,6 +3,7 @@
 #import "FileListViewController.h"
 #import "LauncherPreferences.h"
 #import "ios_uikit_bridge.h"
+#import "AppSheet.h"
 
 #import "customcontrols/ControlDrawer.h"
 #import "customcontrols/ControlJoystick.h"
@@ -260,25 +261,34 @@
 }
 
 - (void)actionMenuSaveWithExit:(BOOL)exit {
-    UIAlertController *controller = [UIAlertController alertControllerWithTitle: localize(@"custom_controls.control_menu.save", nil)
-        message:exit?localize(@"custom_controls.control_menu.exit.warn", nil):@""
-        preferredStyle:UIAlertControllerStyleAlert];
-    [controller addTextFieldWithConfigurationHandler:^(UITextField *textField) {
-        textField.placeholder = @"Name";
-        textField.text = self.currentFileName;
-        textField.clearButtonMode = UITextFieldViewModeWhileEditing;
-        textField.borderStyle = UITextBorderStyleRoundedRect;
-    }];
-    [controller addAction:[UIAlertAction actionWithTitle:localize(@"OK", nil) style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
-        NSArray *textFields = controller.textFields;
-        UITextField *field = textFields[0];
+    if (exit) {
+        [AppSheet showOptionsWithTitle:localize(@"custom_controls.control_menu.save", nil)
+                               message:localize(@"custom_controls.control_menu.exit.warn", nil)
+                               options:@[
+            @{@"title": localize(@"OK", nil), @"icon": @"square.and.arrow.down"},
+            @{@"title": localize(@"custom_controls.control_menu.discard_changes", nil), @"icon": @"trash", @"destructive": @YES},
+        ] selectedIndex:NSNotFound selection:^(NSInteger idx) {
+            if (idx == 0) [self promptSaveNameWithExit:YES];
+            else [self dismissViewControllerAnimated:!isInGame completion:nil];
+        }];
+        return;
+    }
+    [self promptSaveNameWithExit:NO];
+}
+
+- (void)promptSaveNameWithExit:(BOOL)exit {
+    [AppSheet showPromptWithTitle:localize(@"custom_controls.control_menu.save", nil)
+                          message:exit ? localize(@"custom_controls.control_menu.exit.warn", nil) : @""
+                      placeholder:@"Name"
+                      initialText:self.currentFileName
+                        onConfirm:^(NSString *name) {
         NSError *error;
         NSData *jsonData = [NSJSONSerialization dataWithJSONObject:self.ctrlView.layoutDictionary options:NSJSONWritingPrettyPrinted error:&error];
         if (jsonData == nil) {
             showDialog(localize(@"custom_controls.control_menu.save.error.json", nil), error.localizedDescription);
             return;
         }
-        BOOL success = [jsonData writeToFile:[NSString stringWithFormat:@"%s/controlmap/%@.json", getenv("POJAV_HOME"), field.text] options:NSDataWritingAtomic error:&error];
+        BOOL success = [jsonData writeToFile:[NSString stringWithFormat:@"%s/controlmap/%@.json", getenv("POJAV_HOME"), name] options:NSDataWritingAtomic error:&error];
         if (!success) {
             showDialog(localize(@"custom_controls.control_menu.save.error.write", nil), error.localizedDescription);
             return;
@@ -288,16 +298,9 @@
             [self dismissViewControllerAnimated:!isInGame completion:nil];
         }
 
-        self.currentFileName = field.text;
+        self.currentFileName = name;
         [self.undoManager removeAllActions];
-    }]];
-    if (exit) {
-        [controller addAction:[UIAlertAction actionWithTitle:localize(@"custom_controls.control_menu.discard_changes", nil) style:UIAlertActionStyleDestructive handler:^(UIAlertAction *action) {
-            [self dismissViewControllerAnimated:!isInGame completion:nil];
-        }]];
-    }
-    [controller addAction:[UIAlertAction actionWithTitle:localize(@"Cancel", nil) style:UIAlertActionStyleCancel handler:nil]];
-    [self presentViewController:controller animated:YES completion:nil];
+    }];
 }
 
 - (void)actionMenuSave {

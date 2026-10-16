@@ -944,15 +944,14 @@ int launchJVMWithArgs(NSString *username, id launchTarget, int width, int height
     margv[++margc] = "-XX:+UseParallelGC";
     margv[++margc] = "-XX:ParallelGCThreads=2";
 
-    // JIT mode for iOS 26+: classic-first. Field evidence (main-branch 2.1.3 boots
-    // and runs MC 26.2 on iPhone 14 Pro / iOS 27.0.1 TXM with NO mirror flag and
-    // NO script dance) shows plain StikDebug attach blesses MAP_JIT natively, so
-    // the custom mirror allocator is opt-in, not mandatory. The old theory that
-    // "flag off always SIGBUSes in call_stub" was never confirmed on device and
-    // contradicts that run — the device round decides, not the theory.
-    // debug.debug_mirror_mapped_code_cache: -1 = auto (classic), 0 = off, 1 = on.
-    // If a device SIGBUSes in StubRoutines::call_stub on classic, set it to 1
-    // (mirror path, needs a live script + passing preflight, enforced below).
+    // iOS 26+ mirror-capable runtimes need the paired writable/executable
+    // CodeCache mapping. The iPhone 13 / iOS 27 device log confirmed that the
+    // standalone JIT preflight succeeds while the classic CodeCache later
+    // SIGBUSes in StubRoutines::call_stub, so auto now selects mirror for a
+    // runtime carrying the verified mirror marker. Set 0 to force classic for
+    // diagnosis; set 1 to force mirror. A mirror launch still requires a live
+    // StikDebug script and a passing executable-memory preflight (gated below).
+    // debug.debug_mirror_mapped_code_cache: -1 = auto, 0 = classic, 1 = mirror.
     BOOL mirrorEnabled;
     id mirrorOverrideObj = getPrefObject(@"debug.debug_mirror_mapped_code_cache");
     NSInteger mirrorOverride = mirrorOverrideObj ? [mirrorOverrideObj integerValue] : -1;
@@ -960,8 +959,10 @@ int launchJVMWithArgs(NSString *username, id launchTarget, int width, int height
         mirrorEnabled = mirrorOverride > 0;
         NSLog(@"[JavaLauncher] MirrorMappedCodeCache override set to %s", mirrorEnabled ? "ON" : "OFF");
     } else {
-        mirrorEnabled = NO;
-        NSLog(@"[JavaLauncher] MirrorMappedCodeCache auto: OFF (classic-first; set debug.debug_mirror_mapped_code_cache=1 to force mirror)");
+        mirrorEnabled = jit26Handshake && RuntimeSupportsDebugJITMapping(javaHome);
+        NSLog(@"[JavaLauncher] MirrorMappedCodeCache auto: %s (iOS26=%d mirrorRuntime=%d)",
+            mirrorEnabled ? "ON" : "OFF", jit26Handshake,
+            RuntimeSupportsDebugJITMapping(javaHome));
     }
     JITReportLine(@"mirror=%d script_alive=%d preflight=%d", mirrorEnabled, jitScriptAlive, preflightOK);
     // Single enforcement point: the mirror path NEEDS a live script (0x6a/prepare)

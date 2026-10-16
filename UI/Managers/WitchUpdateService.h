@@ -19,6 +19,8 @@ typedef NS_ENUM(NSInteger, WitchAppVariant) {
 
 @interface WitchReleaseInfo : NSObject
 @property (nonatomic, copy) NSString *tagName;
+@property (nonatomic, copy) NSString *name;
+@property (nonatomic, copy) NSString *publishedAt;
 @property (nonatomic, copy) NSString *htmlURL;
 @property (nonatomic, copy) NSString *body;
 @property (nonatomic, strong) NSArray<WitchReleaseAsset *> *assets;
@@ -39,11 +41,18 @@ typedef NS_ENUM(NSInteger, WitchAppVariant) {
 - (BOOL)isBetaBuild;
 
 - (void)checkForUpdateForce:(BOOL)force
-                 completion:(void(^)(WitchReleaseInfo *info, BOOL hasUpdate, NSError *error))completion;
+                  completion:(void(^)(WitchReleaseInfo *info, BOOL hasUpdate, NSError *error))completion;
+// Full release list (newest first) so users can reinstall older builds.
+- (void)fetchAllReleasesWithLimit:(NSInteger)limit
+                       completion:(void(^)(NSArray<WitchReleaseInfo *> *releases, NSError *error))completion;
 - (void)downloadAsset:(WitchReleaseAsset *)asset
              progress:(void(^)(float progress))progress
            completion:(void(^)(NSURL *fileURL, NSError *error))completion;
 - (void)installFileAtURL:(NSURL *)fileURL fromViewController:(UIViewController *)vc;
+// Direct store install without downloading first:
+// TrollStore via trollstore:// / apple-magnifier://, otherwise SideStore via
+// sidestore://install?url=<https asset url>. Returns YES if handed off.
+- (BOOL)installAssetRemotely:(WitchReleaseAsset *)asset fromViewController:(UIViewController *)vc;
 
 // Auto-check once per launch (respects witch.update_last_prompt + 3 days for "later")
 - (void)autoCheckFromViewController:(UIViewController *)vc;

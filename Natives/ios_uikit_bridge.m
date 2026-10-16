@@ -12,6 +12,7 @@
 
 #include <objc/runtime.h>
 #include "ios_uikit_bridge.h"
+#import "AppSheet.h"
 #include "utils.h"
 #import "AppErrorDialog.h"
 
@@ -50,34 +51,18 @@ JNIEXPORT void JNICALL Java_net_kdt_pojavlaunch_uikit_UIKit_showError(JNIEnv* en
 
 dispatch_async(dispatch_get_main_queue(), ^{
 
-    UIAlertController* alert = [UIAlertController
-        alertControllerWithTitle:title_o message:message_o
-        preferredStyle:UIAlertControllerStyleAlert];
-    NSMutableParagraphStyle *style = [[NSMutableParagraphStyle alloc] init];
-    style.alignment = NSTextAlignmentLeft;
-
-    NSMutableAttributedString *atrStr = [[NSMutableAttributedString alloc] initWithString:message_o attributes:@{NSParagraphStyleAttributeName:style,NSFontAttributeName:[UIFont systemFontOfSize:13.0]}];
-
-    [alert setValue:atrStr forKey:@"attributedMessage"];
-
-    UIAlertAction* okAction = [UIAlertAction actionWithTitle:localize(@"OK", nil) style:UIAlertActionStyleDefault
-        handler:^(UIAlertAction * action) {
-            if (exitIfOk == JNI_TRUE) {
-                exit(-1);
-            }
-        }];
-    [alert addAction:okAction];
-    
-    UIAlertAction* copyAction = [UIAlertAction actionWithTitle:localize(@"Copy", nil) style:UIAlertActionStyleDefault
-        handler:^(UIAlertAction * action) {
+    // Launcher-styled sheet (Copy / OK) instead of a raw system alert.
+    [AppSheet showOptionsWithTitle:title_o message:message_o options:@[
+        @{@"title": localize(@"Copy", nil), @"icon": @"doc.on.doc"},
+        @{@"title": localize(@"OK", nil), @"icon": @"checkmark"},
+    ] selectedIndex:NSNotFound selection:^(NSInteger idx) {
+        if (idx == 0) {
             UIPasteboard.generalPasteboard.string = message_o;
-            if (exitIfOk == JNI_TRUE) {
-                exit(-1);
-            }
-        }];
-    [alert addAction:copyAction];
-    
-    [currentVC() presentViewController:alert animated:YES completion:nil];
+        }
+        if (exitIfOk == JNI_TRUE) {
+            exit(-1);
+        }
+    }];
 });
 }
 

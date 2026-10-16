@@ -347,6 +347,7 @@ egl_bridge.m
    ../UI/Common/BlurredDialog.m
    ../UI/Common/AppErrorDialog.m
    ../UI/Common/ErrorPresenter.m
+   ../UI/Common/AppSheet.m
     ../UI/Root/AmethystRootViewController.m
    ../UI/Root/TopBarView.m
    ../UI/Root/SidebarViewController.m

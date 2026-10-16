@@ -5,6 +5,7 @@
 #import "LauncherPreferences.h"
 #import "config.h"
 #import "AmethystBlurView.h"
+#import "AppSheet.h"
 #import "utils.h"
 #import "WitchUpdateService.h"
 
@@ -80,19 +81,19 @@ static const NSTimeInterval NewsRefreshInterval = 300.0; // 5 minutes
         return;
     }
     setPrefObject(@"witch.runtime_onboarded", @YES);
-    UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Bản Simple: chưa có Runtime"
-        message:@"Bản Simple không kèm JDK/LWJGL để nhẹ. Bạn muốn mở bảng tải ngay (có đánh dấu [quan trọng]) hay để sau trong Settings → Tải Runtime JDK/LWJGL?"
-        preferredStyle:UIAlertControllerStyleAlert];
-    [alert addAction:[UIAlertAction actionWithTitle:@"Để sau" style:UIAlertActionStyleCancel handler:nil]];
-    [alert addAction:[UIAlertAction actionWithTitle:@"Mở bảng tải" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a) {
+    __weak typeof(self) weakSelf = self;
+    [AppSheet showConfirmWithTitle:@"Bản Simple: chưa có Runtime"
+                           message:@"Bản Simple không kèm JDK/LWJGL để nhẹ. Bạn muốn mở bảng tải ngay (có đánh dấu [quan trọng]) hay để sau trong Settings → Tải Runtime JDK/LWJGL?"
+                      confirmTitle:@"Mở bảng tải"
+                       destructive:NO
+                         onConfirm:^{
         Class cls = NSClassFromString(@"RuntimeDownloadViewController");
         if (!cls) return;
         UIViewController *vc = [[cls alloc] init];
         [vc setValue:@YES forKey:@"onboardingMode"];
         UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:vc];
-        [self presentViewController:nav animated:YES completion:nil];
-    }]];
-    [self presentViewController:alert animated:YES completion:nil];
+        [weakSelf presentViewController:nav animated:YES completion:nil];
+    }];
 }
 
 - (void)viewWillAppear:(BOOL)animated {

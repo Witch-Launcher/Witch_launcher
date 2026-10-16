@@ -1,6 +1,10 @@
 #import "RuntimeDownloadViewController.h"
 #import "WitchRuntimeService.h"
 #import "ThemeManager.h"
+#import "AmethystBlurView.h"
+#import "HapticManager.h"
+#import "ErrorPresenter.h"
+#import "AppSheet.h"
 
 typedef NS_ENUM(NSInteger, RuntimeSection) {
     RuntimeSectionJDK = 0,
@@ -8,460 +12,388 @@ typedef NS_ENUM(NSInteger, RuntimeSection) {
     RuntimeSectionCount
 };
 
-@interface RuntimeDownloadViewController () <UITableViewDelegate, UITableViewDataSource>
-@property (nonatomic) UITableView *tableView;
-@property (nonatomic) NSArray<WitchRuntimeItem *> *jdkItems;
-@property (nonatomic) NSArray<WitchRuntimeItem *> *lwjglItems;
-@property (nonatomic) UIActivityIndicatorView *spinner;
-@property (nonatomic) UILabel *headerLabel;
-@property (nonatomic) UILabel *footerLabel;
-@property (nonatomic) BOOL isLoading;
-@property (nonatomic) NSError *loadError;
+@interface RuntimeItemCell : UITableViewCell
+@property (nonatomic) UIView *dotView;
+@property (nonatomic) UILabel *nameLabel;
+@property (nonatomic) UILabel *detailLabel;
+@property (nonatomic) UILabel *statusBadge;
+@property (nonatomic) UILabel *sizeLabel;
+@property (nonatomic) UIButton *actionButton;
+@property (nonatomic, copy) void(^onAction)(void);
 @end
 
-@implementation RuntimeDownloadViewController
+@implementation RuntimeItemCell
 
-- (void)viewDidLoad {
-    [super viewDidLoad];
-    self.title = self.onboardingMode ? @"Tải Runtime (bản Simple)" : @"Quản lý Runtime JDK / LWJGL";
-    self.view.backgroundColor = ThemeManager.shared.contentBackgroundColor;
-    
-    [self setupTableView];
-    [self setupHeaderAndFooter];
-    [self setupNavigationItems];
-    [self reload];
+- (instancetype)initWithStyle:(UITableViewCellStyle)style reuseIdentifier:(NSString *)reuseIdentifier {
+    self = [super initWithStyle:style reuseIdentifier:reuseIdentifier];
+    if (self) {
+        self.selectionStyle = UITableViewCellSelectionStyleNone;
+        self.backgroundColor = [UIColor clearColor];
+        self.contentView.backgroundColor = ThemeManager.shared.cardBackgroundColor;
+        self.contentView.layer.cornerRadius = 14;
+        self.contentView.clipsToBounds = YES;
+
+        _dotView = [[UIView alloc] init];
+        _dotView.translatesAutoresizingMaskIntoConstraints = NO;
+        _dotView.layer.cornerRadius = 5;
+        _dotView.clipsToBounds = YES;
+        [self.contentView addSubview:_dotView];
+
+        _nameLabel = [[UILabel alloc] init];
+        _nameLabel.translatesAutoresizingMaskIntoConstraints = NO;
+        _nameLabel.font = [UIFont systemFontOfSize:15 weight:UIFontWeightSemibold];
+        _nameLabel.textColor = ThemeManager.shared.primaryTextColor;
+        [self.contentView addSubview:_nameLabel];
+
+        _detailLabel = [[UILabel alloc] init];
+        _detailLabel.translatesAutoresizingMaskIntoConstraints = NO;
+        _detailLabel.font = [UIFont systemFontOfSize:12 weight:UIFontWeightRegular];
+        _detailLabel.textColor = ThemeManager.shared.secondaryTextColor;
+        [self.contentView addSubview:_detailLabel];
+
+        _statusBadge = [[UILabel alloc] init];
+        _statusBadge.translatesAutoresizingMaskIntoConstraints = NO;
+        _statusBadge.font = [UIFont systemFontOfSize:10 weight:UIFontWeightMedium];
+        _statusBadge.textColor = UIColor.whiteColor;
+        _statusBadge.textAlignment = NSTextAlignmentCenter;
+        _statusBadge.layer.cornerRadius = 4;
+        _statusBadge.clipsToBounds = YES;
+        [self.contentView addSubview:_statusBadge];
+
+        _sizeLabel = [[UILabel alloc] init];
+        _sizeLabel.translatesAutoresizingMaskIntoConstraints = NO;
+        _sizeLabel.font = [UIFont systemFontOfSize:11 weight:UIFontWeightRegular];
+        _sizeLabel.textColor = ThemeManager.shared.secondaryTextColor;
+        _sizeLabel.textAlignment = NSTextAlignmentRight;
+        [self.contentView addSubview:_sizeLabel];
+
+        _actionButton = [UIButton buttonWithType:UIButtonTypeSystem];
+        _actionButton.translatesAutoresizingMaskIntoConstraints = NO;
+        _actionButton.titleLabel.font = [UIFont systemFontOfSize:13 weight:UIFontWeightSemibold];
+        _actionButton.layer.cornerRadius = 8;
+        _actionButton.contentEdgeInsets = UIEdgeInsetsMake(6, 12, 6, 12);
+        [_actionButton addTarget:self action:@selector(buttonTapped) forControlEvents:UIControlEventTouchUpInside];
+        [self.contentView addSubview:_actionButton];
+
+        // Fixed two-line layout: nothing overlaps, nothing clips.
+        [NSLayoutConstraint activateConstraints:@[
+            [_dotView.leadingAnchor constraintEqualToAnchor:self.contentView.leadingAnchor constant:14],
+            [_dotView.topAnchor constraintEqualToAnchor:self.contentView.topAnchor constant:16],
+            [_dotView.widthAnchor constraintEqualToConstant:10],
+            [_dotView.heightAnchor constraintEqualToConstant:10],
+
+            [_nameLabel.topAnchor constraintEqualToAnchor:self.contentView.topAnchor constant:10],
+            [_nameLabel.leadingAnchor constraintEqualToAnchor:_dotView.trailingAnchor constant:8],
+            [_nameLabel.trailingAnchor constraintLessThanOrEqualToAnchor:_statusBadge.leadingAnchor constant:-8],
+
+            [_detailLabel.topAnchor constraintEqualToAnchor:_nameLabel.bottomAnchor constant:3],
+            [_detailLabel.leadingAnchor constraintEqualToAnchor:_nameLabel.leadingAnchor],
+            [_detailLabel.trailingAnchor constraintLessThanOrEqualToAnchor:_sizeLabel.leadingAnchor constant:-8],
+            [_detailLabel.bottomAnchor constraintLessThanOrEqualToAnchor:self.contentView.bottomAnchor constant:-10],
+
+            [_statusBadge.centerYAnchor constraintEqualToAnchor:_nameLabel.centerYAnchor],
+            [_statusBadge.trailingAnchor constraintEqualToAnchor:_actionButton.leadingAnchor constant:-8],
+            [_statusBadge.heightAnchor constraintEqualToConstant:18],
+            [_statusBadge.widthAnchor constraintGreaterThanOrEqualToConstant:56],
+
+            [_sizeLabel.centerYAnchor constraintEqualToAnchor:_detailLabel.centerYAnchor],
+            [_sizeLabel.trailingAnchor constraintEqualToAnchor:_actionButton.leadingAnchor constant:-8],
+
+            [_actionButton.trailingAnchor constraintEqualToAnchor:self.contentView.trailingAnchor constant:-12],
+            [_actionButton.centerYAnchor constraintEqualToAnchor:self.contentView.centerYAnchor],
+            [_actionButton.heightAnchor constraintEqualToConstant:32],
+        ]];
+        [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(updateTheme) name:ThemeDidChangeNotification object:nil];
+    }
+    return self;
 }
 
-- (void)setupTableView {
-    _tableView = [[UITableView alloc] initWithFrame:CGRectZero style:UITableViewStyleInsetGrouped];
-    _tableView.delegate = self;
-    _tableView.dataSource = self;
-    _tableView.backgroundColor = UIColor.clearColor;
-    _tableView.separatorColor = ThemeManager.shared.separatorColor;
-    _tableView.translatesAutoresizingMaskIntoConstraints = NO;
-    _tableView.alwaysBounceVertical = YES;
-    _tableView.estimatedRowHeight = 72;
-    _tableView.rowHeight = UITableViewAutomaticDimension;
-    _tableView.sectionHeaderHeight = UITableViewAutomaticDimension;
-    _tableView.estimatedSectionHeaderHeight = 40;
-    [self.view addSubview:_tableView];
-    
-    _spinner = [[UIActivityIndicatorView alloc] initWithActivityIndicatorStyle:UIActivityIndicatorViewStyleMedium];
-    _spinner.hidesWhenStopped = YES;
-    _spinner.translatesAutoresizingMaskIntoConstraints = NO;
-    [self.view addSubview:_spinner];
-    
-    [NSLayoutConstraint activateConstraints:@[
-        [_tableView.topAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.topAnchor],
-        [_tableView.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor],
-        [_tableView.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor],
-        [_tableView.bottomAnchor constraintEqualToAnchor:self.view.bottomAnchor],
-        [_spinner.centerXAnchor constraintEqualToAnchor:self.view.centerXAnchor],
-        [_spinner.centerYAnchor constraintEqualToAnchor:self.view.centerYAnchor]
-    ]];
+- (void)updateTheme {
+    self.contentView.backgroundColor = ThemeManager.shared.cardBackgroundColor;
+    _nameLabel.textColor = ThemeManager.shared.primaryTextColor;
+    _detailLabel.textColor = ThemeManager.shared.secondaryTextColor;
+    _sizeLabel.textColor = ThemeManager.shared.secondaryTextColor;
 }
 
-- (void)setupHeaderAndFooter {
-    _headerLabel = [[UILabel alloc] init];
-    _headerLabel.numberOfLines = 0;
-    _headerLabel.font = [UIFont systemFontOfSize:14];
-    _headerLabel.textColor = ThemeManager.shared.secondaryTextColor;
-    _headerLabel.textAlignment = NSTextAlignmentCenter;
-    _headerLabel.translatesAutoresizingMaskIntoConstraints = NO;
-    
-    if (self.onboardingMode) {
-        _headerLabel.text = @"Bản Simple không kèm sẵn JDK/LWJGL.\nChọn các runtime cần thiết (đánh dấu 🔴 = quan trọng) rồi bấm Tải.\nCó thể mở lại màn này sau trong Settings → Quản lý Runtime.";
+- (void)buttonTapped {
+    if (_onAction) _onAction();
+}
+
+- (void)configureWithItem:(WitchRuntimeItem *)item {
+    _nameLabel.text = item.displayName;
+    // Important marker as a colored dot (no emoji).
+    _dotView.backgroundColor = (item.important && !item.installed) ? ThemeManager.shared.errorColor : [UIColor clearColor];
+
+    NSMutableArray *parts = [NSMutableArray array];
+    if (item.installed) {
+        [parts addObject:[NSString stringWithFormat:@"Đã cài%@", item.localVersion.length > 0 ? [@" • " stringByAppendingString:item.localVersion] : @""]];
+        if (item.updateAvailable && item.remoteVersion.length > 0) {
+            [parts addObject:[NSString stringWithFormat:@"Có update (%@)", item.remoteVersion]];
+        }
     } else {
-        _headerLabel.text = @"Quản lý JDK và LWJGL. Bản Full đã kèm sẵn; bản Simple cần tải thêm.\n🔴 = khuyến nghị tải. Bấm vào từng dòng để Tải/Cập nhật/Xóa.";
+        [parts addObject:item.remoteVersion.length > 0 ? [NSString stringWithFormat:@"Chưa cài • Mới: %@", item.remoteVersion] : @"Chưa cài"];
     }
-    
-    _footerLabel = [[UILabel alloc] init];
-    _footerLabel.numberOfLines = 0;
-    _footerLabel.font = [UIFont systemFontOfSize:12];
-    _footerLabel.textColor = ThemeManager.shared.secondaryTextColor;
-    _footerLabel.textAlignment = NSTextAlignmentCenter;
-    _footerLabel.text = @"Nguồn: Witch-Launcher/JDK-Java_iOS (runtimes-latest). JDK: .tar.xz cần giải nén trong Manage Runtime. LWJGL: tự ghi marker, dùng ngay.";
-    _footerLabel.translatesAutoresizingMaskIntoConstraints = NO;
-    
-    UIView *headerView = [[UIView alloc] init];
-    headerView.translatesAutoresizingMaskIntoConstraints = NO;
-    [headerView addSubview:_headerLabel];
-    [NSLayoutConstraint activateConstraints:@[
-        [_headerLabel.topAnchor constraintEqualToAnchor:headerView.topAnchor constant:16],
-        [_headerLabel.leadingAnchor constraintEqualToAnchor:headerView.leadingAnchor constant:16],
-        [_headerLabel.trailingAnchor constraintEqualToAnchor:headerView.trailingAnchor constant:-16],
-        [_headerLabel.bottomAnchor constraintEqualToAnchor:headerView.bottomAnchor constant:-16]
-    ]];
-    _tableView.tableHeaderView = headerView;
-    
-    UIView *footerView = [[UIView alloc] init];
-    footerView.translatesAutoresizingMaskIntoConstraints = NO;
-    [footerView addSubview:_footerLabel];
-    [NSLayoutConstraint activateConstraints:@[
-        [_footerLabel.topAnchor constraintEqualToAnchor:footerView.topAnchor constant:16],
-        [_footerLabel.leadingAnchor constraintEqualToAnchor:footerView.leadingAnchor constant:16],
-        [_footerLabel.trailingAnchor constraintEqualToAnchor:footerView.trailingAnchor constant:-16],
-        [_footerLabel.bottomAnchor constraintEqualToAnchor:footerView.bottomAnchor constant:-16]
-    ]];
-    _tableView.tableFooterView = footerView;
-    
-    // Force layout
-    [headerView setNeedsLayout];
-    [headerView layoutIfNeeded];
-    _tableView.tableHeaderView = headerView;
-    [footerView setNeedsLayout];
-    [footerView layoutIfNeeded];
-    _tableView.tableFooterView = footerView;
+    _detailLabel.text = [parts componentsJoinedByString:@"  •  "];
+    _detailLabel.textColor = (item.important && !item.installed) ? ThemeManager.shared.errorColor : ThemeManager.shared.secondaryTextColor;
+
+    if (item.installed) {
+        if (item.updateAvailable) {
+            _statusBadge.text = @"  Cập nhật  ";
+            _statusBadge.backgroundColor = ThemeManager.shared.warningColor;
+        } else {
+            _statusBadge.text = @"  Đã cài  ";
+            _statusBadge.backgroundColor = ThemeManager.shared.successColor;
+        }
+    } else {
+        _statusBadge.text = @"  Chưa cài  ";
+        _statusBadge.backgroundColor = [UIColor grayColor];
+    }
+    _sizeLabel.text = item.remoteSize > 0 ? [NSByteCountFormatter stringFromByteCount:item.remoteSize countStyle:NSByteCountFormatterCountStyleMemory] : @"";
+
+    NSString *action = (item.installed && !item.updateAvailable) ? @"Xóa" : (item.updateAvailable ? @"Cập nhật" : @"Tải");
+    [_actionButton setTitle:action forState:UIControlStateNormal];
+    [_actionButton setTitleColor:UIColor.whiteColor forState:UIControlStateNormal];
+    _actionButton.backgroundColor = ([action isEqualToString:@"Xóa"] ? ThemeManager.shared.errorColor : ThemeManager.shared.accentColor);
+    [_actionButton setTitleColor:ThemeManager.shared.buttonTextColor forState:UIControlStateNormal];
+    BOOL enabled = item.remoteURL.length > 0 || item.installed;
+    _actionButton.enabled = enabled;
+    _actionButton.alpha = enabled ? 1.0 : 0.5;
 }
 
-- (void)setupNavigationItems {
-    if (self.onboardingMode) {
-        self.navigationItem.rightBarButtonItem = [[UIBarButtonItem alloc] initWithTitle:@"Bỏ qua" style:UIBarButtonItemStylePlain target:self action:@selector(dismissSelf)];
-    }
-    UIBarButtonItem *refresh = [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemRefresh target:self action:@selector(reload)];
-    self.navigationItem.leftBarButtonItem = refresh;
-}
-
-- (void)dismissSelf {
-    [self dismissViewControllerAnimated:YES completion:nil];
+- (void)prepareForReuse {
+    [super prepareForReuse];
+    _onAction = nil;
+    _nameLabel.text = nil;
+    _detailLabel.text = nil;
 }
 
 - (void)dealloc {
     [[NSNotificationCenter defaultCenter] removeObserver:self];
 }
 
+@end
+
+@interface RuntimeDownloadViewController () <UITableViewDelegate, UITableViewDataSource>
+@property (nonatomic) UITableView *tableView;
+@property (nonatomic) NSArray<WitchRuntimeItem *> *jdkItems;
+@property (nonatomic) NSArray<WitchRuntimeItem *> *lwjglItems;
+@property (nonatomic) UIActivityIndicatorView *spinner;
+@property (nonatomic) UILabel *emptyLabel;
+@property (nonatomic) BOOL isLoading;
+@property (nonatomic) BOOL isWorking;
+@end
+
+@implementation RuntimeDownloadViewController
+
+- (void)viewDidLoad {
+    [super viewDidLoad];
+    self.title = self.onboardingMode ? @"Tải Runtime" : @"Runtime JDK / LWJGL";
+    [AmethystBlurView installInView:self.view];
+
+    _tableView = [[UITableView alloc] initWithFrame:CGRectZero style:UITableViewStyleInsetGrouped];
+    _tableView.translatesAutoresizingMaskIntoConstraints = NO;
+    _tableView.delegate = self;
+    _tableView.dataSource = self;
+    _tableView.backgroundColor = [UIColor clearColor];
+    _tableView.separatorStyle = UITableViewCellSeparatorStyleNone;
+    _tableView.rowHeight = 76;
+    _tableView.alwaysBounceVertical = YES;
+    [_tableView registerClass:[RuntimeItemCell class] forCellReuseIdentifier:@"RuntimeItemCell"];
+    [self.view addSubview:_tableView];
+
+    UIRefreshControl *rc = [[UIRefreshControl alloc] init];
+    [rc addTarget:self action:@selector(reload) forControlEvents:UIControlEventValueChanged];
+    _tableView.refreshControl = rc;
+
+    _spinner = [[UIActivityIndicatorView alloc] initWithActivityIndicatorStyle:UIActivityIndicatorViewStyleMedium];
+    _spinner.translatesAutoresizingMaskIntoConstraints = NO;
+    _spinner.hidesWhenStopped = YES;
+    [self.view addSubview:_spinner];
+
+    _emptyLabel = [[UILabel alloc] init];
+    _emptyLabel.translatesAutoresizingMaskIntoConstraints = NO;
+    _emptyLabel.numberOfLines = 0;
+    _emptyLabel.textAlignment = NSTextAlignmentCenter;
+    _emptyLabel.font = [UIFont systemFontOfSize:14];
+    _emptyLabel.textColor = ThemeManager.shared.secondaryTextColor;
+    _emptyLabel.hidden = YES;
+    [self.view addSubview:_emptyLabel];
+
+    // Header as section 0 content (plain label row) + footer note.
+    [NSLayoutConstraint activateConstraints:@[
+        [_tableView.topAnchor constraintEqualToAnchor:self.view.topAnchor],
+        [_tableView.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor],
+        [_tableView.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor],
+        [_tableView.bottomAnchor constraintEqualToAnchor:self.view.bottomAnchor],
+        [_spinner.centerXAnchor constraintEqualToAnchor:self.view.centerXAnchor],
+        [_spinner.centerYAnchor constraintEqualToAnchor:self.view.centerYAnchor],
+        [_emptyLabel.centerXAnchor constraintEqualToAnchor:self.view.centerXAnchor],
+        [_emptyLabel.centerYAnchor constraintEqualToAnchor:self.view.centerYAnchor],
+        [_emptyLabel.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor constant:40],
+        [_emptyLabel.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor constant:-40],
+    ]];
+
+    if (self.onboardingMode) {
+        self.navigationItem.rightBarButtonItem = [[UIBarButtonItem alloc] initWithTitle:@"Bỏ qua" style:UIBarButtonItemStylePlain target:self action:@selector(dismissSelf)];
+    }
+    UIBarButtonItem *refresh = [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemRefresh target:self action:@selector(reload)];
+    self.navigationItem.leftBarButtonItem = refresh;
+    [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(onTheme) name:ThemeDidChangeNotification object:nil];
+    [self reload];
+}
+
+- (void)onTheme {
+    _emptyLabel.textColor = ThemeManager.shared.secondaryTextColor;
+    [_tableView reloadData];
+}
+
+- (void)dealloc {
+    [[NSNotificationCenter defaultCenter] removeObserver:self];
+}
+
+- (void)dismissSelf {
+    [self dismissViewControllerAnimated:YES completion:nil];
+}
+
 - (void)reload {
     if (self.isLoading) return;
     self.isLoading = YES;
-    self.loadError = nil;
     [_spinner startAnimating];
-    _tableView.tableHeaderView.hidden = YES;
-    
+    _emptyLabel.hidden = YES;
+    __weak typeof(self) weakSelf = self;
     [WitchRuntimeService.shared refreshStatuses:^(NSArray<WitchRuntimeItem *> *items, NSError *error) {
-        self.isLoading = NO;
-        self.loadError = error;
+        weakSelf.isLoading = NO;
         dispatch_async(dispatch_get_main_queue(), ^{
-            [_spinner stopAnimating];
-            _tableView.tableHeaderView.hidden = NO;
-            
-            if (error) {
-                _headerLabel.text = [NSString stringWithFormat:@"⚠️ Không tải được manifest (dùng cache local).\nLỗi: %@\nURL: %@", error.localizedDescription, WitchRuntimeService.shared.manifestURL];
-            } else {
-                _headerLabel.text = self.onboardingMode ? @"Bản Simple không kèm sẵn JDK/LWJGL.\nChọn các runtime cần thiết (🔴 = quan trọng) rồi bấm Tải." : @"Quản lý JDK và LWJGL. 🔴 = khuyến nghị tải. Bấm vào dòng để Tải/Cập nhật/Xóa.";
+            [weakSelf.spinner stopAnimating];
+            [weakSelf.tableView.refreshControl endRefreshing];
+            if (error && items.count == 0) {
+                weakSelf.emptyLabel.hidden = NO;
+                weakSelf.emptyLabel.text = [NSString stringWithFormat:@"Không tải được manifest.\n%@", error.localizedDescription];
+                return;
             }
-            
-            // Split items by kind
+            if (error) [ErrorPresenter showNetworkError:error message:@"Dùng cache local (không tải được manifest)."];
             NSMutableArray *jdk = [NSMutableArray array];
             NSMutableArray *lwjgl = [NSMutableArray array];
             for (WitchRuntimeItem *it in items) {
                 if (it.kind == WitchRuntimeKindJDK) [jdk addObject:it];
                 else [lwjgl addObject:it];
             }
-            self.jdkItems = jdk;
-            self.lwjglItems = lwjgl;
-            
-            [_tableView reloadData];
+            weakSelf.jdkItems = jdk;
+            weakSelf.lwjglItems = lwjgl;
+            [weakSelf.tableView reloadData];
         });
     }];
 }
 
-#pragma mark - UITableViewDataSource
+#pragma mark - Table
 
 - (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView {
-    return RuntimeSectionCount;
+    return RuntimeSectionCount + 1; // +1 intro section
 }
 
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section {
-    if (section == RuntimeSectionJDK) return self.jdkItems.count;
-    if (section == RuntimeSectionLWJGL) return self.lwjglItems.count;
-    return 0;
+    if (section == 0) return 1;
+    if (section == 1) return self.jdkItems.count;
+    return self.lwjglItems.count;
 }
 
-- (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {
-    static NSString *cellId = @"RuntimeCell";
-    UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:cellId];
-    if (!cell) {
-        cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:cellId];
-        cell.selectionStyle = UITableViewCellSelectionStyleNone;
-        cell.backgroundColor = ThemeManager.shared.cardBackgroundColor;
-        cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
-        
-        // Custom layout with status badge
-        UIView *statusContainer = [[UIView alloc] init];
-        statusContainer.translatesAutoresizingMaskIntoConstraints = NO;
-        statusContainer.tag = 10;
-        [cell.contentView addSubview:statusContainer];
-        
-        UILabel *statusLabel = [[UILabel alloc] init];
-        statusLabel.tag = 11;
-        statusLabel.font = [UIFont boldSystemFontOfSize:11];
-        statusLabel.textAlignment = NSTextAlignmentCenter;
-        statusLabel.layer.cornerRadius = 8;
-        statusLabel.clipsToBounds = YES;
-        statusLabel.translatesAutoresizingMaskIntoConstraints = NO;
-        [statusContainer addSubview:statusLabel];
-        
-        UILabel *sizeLabel = [[UILabel alloc] init];
-        sizeLabel.tag = 12;
-        sizeLabel.font = [UIFont systemFontOfSize:11];
-        sizeLabel.textColor = ThemeManager.shared.secondaryTextColor;
-        sizeLabel.textAlignment = NSTextAlignmentRight;
-        sizeLabel.translatesAutoresizingMaskIntoConstraints = NO;
-        [statusContainer addSubview:sizeLabel];
-        
-        UIButton *actionButton = [UIButton buttonWithType:UIButtonTypeSystem];
-        actionButton.tag = 13;
-        actionButton.titleLabel.font = [UIFont boldSystemFontOfSize:13];
-        actionButton.layer.cornerRadius = 6;
-        actionButton.clipsToBounds = YES;
-        actionButton.translatesAutoresizingMaskIntoConstraints = NO;
-        [actionButton addTarget:self action:@selector(actionButtonTapped:) forControlEvents:UIControlEventTouchUpInside];
-        [statusContainer addSubview:actionButton];
-        
-        NSArray *constraints = @[
-            [statusContainer.trailingAnchor constraintEqualToAnchor:cell.contentView.trailingAnchor constant:-12],
-            [statusContainer.centerYAnchor constraintEqualToAnchor:cell.contentView.centerYAnchor],
-            [statusContainer.widthAnchor constraintGreaterThanOrEqualToConstant:80],
-            [statusContainer.heightAnchor constraintEqualToConstant:28],
-            
-            [statusLabel.leadingAnchor constraintEqualToAnchor:statusContainer.leadingAnchor constant:8],
-            [statusLabel.centerYAnchor constraintEqualToAnchor:statusContainer.centerYAnchor],
-            [statusLabel.heightAnchor constraintEqualToConstant:20],
-            
-            [sizeLabel.leadingAnchor constraintEqualToAnchor:statusLabel.trailingAnchor constant:4],
-            [sizeLabel.trailingAnchor constraintEqualToAnchor:actionButton.leadingAnchor constant:-4],
-            [sizeLabel.centerYAnchor constraintEqualToAnchor:statusContainer.centerYAnchor],
-            [sizeLabel.widthAnchor constraintGreaterThanOrEqualToConstant:50],
-            
-            [actionButton.trailingAnchor constraintEqualToAnchor:statusContainer.trailingAnchor constant:-8],
-            [actionButton.centerYAnchor constraintEqualToAnchor:statusContainer.centerYAnchor],
-            [actionButton.widthAnchor constraintGreaterThanOrEqualToConstant:56],
-            [actionButton.heightAnchor constraintEqualToConstant:24]
-        ];
-        [NSLayoutConstraint activateConstraints:constraints];
-    }
-    
-    NSArray *items = (indexPath.section == RuntimeSectionJDK) ? self.jdkItems : self.lwjglItems;
-    WitchRuntimeItem *item = items[indexPath.row];
-    
-    // Main text
-    NSString *importantBadge = item.important ? @" 🔴" : @"";
-    cell.textLabel.text = [item.displayName stringByAppendingString:importantBadge];
-    cell.textLabel.font = [UIFont boldSystemFontOfSize:16];
-    cell.textLabel.textColor = ThemeManager.shared.primaryTextColor;
-    
-    // Detail text (version info)
-    NSString *detailText = @"";
-    if (item.installed) {
-        detailText = [NSString stringWithFormat:@"Đã cài • %@", item.localVersion ?: @"đang chạy"];
-        if (item.updateAvailable) {
-            detailText = [detailText stringByAppendingFormat:@" → Có update (%@)", item.remoteVersion];
-        }
-    } else {
-        detailText = item.remoteVersion ? [NSString stringWithFormat:@"Chưa cài • Mới: %@", item.remoteVersion] : @"Chưa cài • Không có thông tin remote";
-    }
-    cell.detailTextLabel.text = detailText;
-    cell.detailTextLabel.font = [UIFont systemFontOfSize:12];
-    cell.detailTextLabel.textColor = item.important && !item.installed ? ThemeManager.shared.errorColor : ThemeManager.shared.secondaryTextColor;
-    
-    // Status badge
-    UILabel *statusLabel = (UILabel *)[cell.contentView viewWithTag:11];
-    UIButton *actionButton = (UIButton *)[cell.contentView viewWithTag:13];
-    UILabel *sizeLabel = (UILabel *)[cell.contentView viewWithTag:12];
-    
-    // Configure status badge
-    if (item.installed) {
-        if (item.updateAvailable) {
-            statusLabel.text = @"  Cập nhật  ";
-            statusLabel.backgroundColor = ThemeManager.shared.warningColor;
-            statusLabel.textColor = UIColor.blackColor;
-        } else {
-            statusLabel.text = @"  Đã cài  ";
-            statusLabel.backgroundColor = ThemeManager.shared.successColor;
-            statusLabel.textColor = UIColor.whiteColor;
-        }
-    } else {
-        statusLabel.text = @"  Chưa cài  ";
-        statusLabel.backgroundColor = ThemeManager.shared.separatorColor;
-        statusLabel.textColor = ThemeManager.shared.secondaryTextColor;
-    }
-    
-    // Size
-    if (item.remoteSize > 0) {
-        sizeLabel.text = [NSByteCountFormatter stringFromByteCount:item.remoteSize countStyle:NSByteCountFormatterCountStyleMemory];
-    } else {
-        sizeLabel.text = @"";
-    }
-    
-    // Action button
-    if (item.installed && !item.updateAvailable) {
-        [actionButton setTitle:@"Xóa" forState:UIControlStateNormal];
-        actionButton.backgroundColor = ThemeManager.shared.errorColor;
-        [actionButton setTitleColor:ThemeManager.shared.buttonTextColor forState:UIControlStateNormal];
-    } else if (item.updateAvailable) {
-        [actionButton setTitle:@"Cập nhật" forState:UIControlStateNormal];
-        actionButton.backgroundColor = ThemeManager.shared.accentColor;
-        [actionButton setTitleColor:ThemeManager.shared.buttonTextColor forState:UIControlStateNormal];
-    } else {
-        [actionButton setTitle:@"Tải" forState:UIControlStateNormal];
-        actionButton.backgroundColor = ThemeManager.shared.accentColor;
-        [actionButton setTitleColor:ThemeManager.shared.buttonTextColor forState:UIControlStateNormal];
-    }
-    
-    actionButton.enabled = item.remoteURL.length > 0 || item.installed;
-    actionButton.alpha = actionButton.enabled ? 1.0 : 0.5;
-    actionButton.accessibilityIdentifier = item.identifier; // Store identifier for action
-    
-    return cell;
-}
-
-- (UIView *)tableView:(UITableView *)tableView viewForHeaderInSection:(NSInteger)section {
-    UIView *view = [[UIView alloc] init];
-    view.backgroundColor = UIColor.clearColor;
-    
-    UILabel *label = [[UILabel alloc] init];
-    label.font = [UIFont boldSystemFontOfSize:14];
-    label.textColor = ThemeManager.shared.primaryTextColor;
-    label.translatesAutoresizingMaskIntoConstraints = NO;
-    [view addSubview:label];
-    
-    if (section == RuntimeSectionJDK) {
-        label.text = @"  Java Development Kit (JDK)";
-    } else {
-        label.text = @"  LWJGL (Lightweight Java Game Library)";
-    }
-    
-    [NSLayoutConstraint activateConstraints:@[
-        [label.leadingAnchor constraintEqualToAnchor:view.leadingAnchor constant:16],
-        [label.trailingAnchor constraintEqualToAnchor:view.trailingAnchor constant:-16],
-        [label.topAnchor constraintEqualToAnchor:view.topAnchor constant:8],
-        [label.bottomAnchor constraintEqualToAnchor:view.bottomAnchor constant:-8]
-    ]];
-    
-    return view;
-}
-
-- (CGFloat)tableView:(UITableView *)tableView heightForHeaderInSection:(NSInteger)section {
-    return 40;
-}
-
-- (NSString *)tableView:(UITableView *)tableView titleForFooterInSection:(NSInteger)section {
-    if (section == RuntimeSectionJDK) {
-        return @"JDK 8 cho Minecraft ≤1.16.5. JDK 17/21 cho 1.17–1.21. JDK 25 cho 1.21+ (snapshot).";
-    }
-    if (section == RuntimeSectionLWJGL) {
-        return @"LWJGL 3.3.3 cho bản cũ. 3.3.6 cho bản trung gian. 3.4.1 cho mới nhất (khuyến nghị).";
-    }
+- (NSString *)tableView:(UITableView *)tableView titleForHeaderInSection:(NSInteger)section {
+    if (section == 1) return @"Java Development Kit (JDK)";
+    if (section == 2) return @"LWJGL (Java Game Library)";
     return nil;
 }
 
-#pragma mark - UITableViewDelegate
+- (NSString *)tableView:(UITableView *)tableView titleForFooterInSection:(NSInteger)section {
+    if (section == 1) return @"JDK 8 cho Minecraft ≤ 1.16.5 • 17/21 cho 1.17 – 1.21 • 25 cho bản mới.";
+    if (section == 2) return @"3.3.3 cho bản cũ • 3.3.6 trung gian • 3.4.1 mới nhất.";
+    return nil;
+}
+
+- (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {
+    if (indexPath.section == 0) {
+        UITableViewCell *cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleDefault reuseIdentifier:nil];
+        cell.selectionStyle = UITableViewCellSelectionStyleNone;
+        cell.backgroundColor = ThemeManager.shared.cardBackgroundColor;
+        cell.layer.cornerRadius = 14;
+        cell.clipsToBounds = YES;
+        cell.textLabel.numberOfLines = 0;
+        cell.textLabel.font = [UIFont systemFontOfSize:13];
+        cell.textLabel.textColor = ThemeManager.shared.secondaryTextColor;
+        cell.textLabel.textAlignment = NSTextAlignmentCenter;
+        cell.textLabel.text = self.onboardingMode
+            ? @"Bản Simple không kèm sẵn JDK/LWJGL. Chấm đỏ = quan trọng. Bấm Tải rồi dùng."
+            : @"Chấm đỏ = khuyến nghị tải. Bấm vào dòng để Tải / Cập nhật / Xóa.";
+        return cell;
+    }
+    RuntimeItemCell *cell = [tableView dequeueReusableCellWithIdentifier:@"RuntimeItemCell" forIndexPath:indexPath];
+    NSArray *items = (indexPath.section == 1) ? self.jdkItems : self.lwjglItems;
+    WitchRuntimeItem *item = items[indexPath.row];
+    [cell configureWithItem:item];
+    __weak typeof(self) weakSelf = self;
+    cell.onAction = ^{
+        [weakSelf performActionForItem:item];
+    };
+    return cell;
+}
 
 - (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)indexPath {
     [tableView deselectRowAtIndexPath:indexPath animated:YES];
-    
-    NSArray *items = (indexPath.section == RuntimeSectionJDK) ? self.jdkItems : self.lwjglItems;
-    WitchRuntimeItem *item = items[indexPath.row];
-    [self showActionSheetForItem:item];
-}
-
-- (void)actionButtonTapped:(UIButton *)sender {
-    NSString *identifier = sender.accessibilityIdentifier;
-    WitchRuntimeItem *item = nil;
-    for (WitchRuntimeItem *it in self.jdkItems) {
-        if ([it.identifier isEqualToString:identifier]) { item = it; break; }
-    }
-    if (!item) {
-        for (WitchRuntimeItem *it in self.lwjglItems) {
-            if ([it.identifier isEqualToString:identifier]) { item = it; break; }
-        }
-    }
-    if (item) {
-        [self performActionForItem:item];
-    }
+    if (indexPath.section == 0) return;
+    NSArray *items = (indexPath.section == 1) ? self.jdkItems : self.lwjglItems;
+    [self showActionSheetForItem:items[indexPath.row]];
 }
 
 - (void)showActionSheetForItem:(WitchRuntimeItem *)item {
-    UIAlertController *alert = [UIAlertController alertControllerWithTitle:item.displayName message:nil preferredStyle:UIAlertControllerStyleActionSheet];
-    
+    NSMutableArray *opts = [NSMutableArray array];
     if (item.installed && !item.updateAvailable) {
-        [alert addAction:[UIAlertAction actionWithTitle:@"Xóa" style:UIAlertActionStyleDestructive handler:^(UIAlertAction *action) {
-            [self performDelete:item];
-        }]];
-    } else if (item.updateAvailable) {
-        [alert addAction:[UIAlertAction actionWithTitle:@"Cập nhật" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
-            [self performDownload:item];
-        }]];
-        [alert addAction:[UIAlertAction actionWithTitle:@"Xóa bản cũ" style:UIAlertActionStyleDestructive handler:^(UIAlertAction *action) {
-            [self performDelete:item];
-        }]];
+        [opts addObject:@{@"title": @"Xóa", @"icon": @"trash", @"destructive": @YES}];
     } else {
-        [alert addAction:[UIAlertAction actionWithTitle:@"Tải về" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
-            [self performDownload:item];
-        }]];
+        if (item.updateAvailable) [opts addObject:@{@"title": @"Cập nhật", @"icon": @"arrow.triangle.2.circlepath"}];
+        else [opts addObject:@{@"title": @"Tải về", @"icon": @"tray.and.arrow.down"}];
+        if (item.installed) [opts addObject:@{@"title": @"Xóa bản cũ", @"icon": @"trash", @"destructive": @YES}];
     }
-    
-    [alert addAction:[UIAlertAction actionWithTitle:@"Hủy" style:UIAlertActionStyleCancel handler:nil]];
-    
-    if (UIDevice.currentDevice.userInterfaceIdiom == UIUserInterfaceIdiomPad) {
-        alert.popoverPresentationController.sourceView = self.view;
-        alert.popoverPresentationController.sourceRect = CGRectMake(self.view.bounds.size.width/2, self.view.bounds.size.height/2, 1, 1);
-    }
-    [self presentViewController:alert animated:YES completion:nil];
+    __weak typeof(self) weakSelf = self;
+    [AppSheet showOptionsWithTitle:item.displayName message:nil options:opts selectedIndex:NSNotFound selection:^(NSInteger idx) {
+        NSString *t = opts[idx][@"title"];
+        if ([t isEqualToString:@"Xóa"] || [t isEqualToString:@"Xóa bản cũ"]) [weakSelf confirmDelete:item];
+        else [weakSelf performDownload:item];
+    }];
 }
 
 - (void)performActionForItem:(WitchRuntimeItem *)item {
-    if (item.installed && !item.updateAvailable) {
-        [self performDelete:item];
-    } else {
-        [self performDownload:item];
-    }
+    if (item.installed && !item.updateAvailable) [self confirmDelete:item];
+    else [self performDownload:item];
 }
 
 - (void)performDownload:(WitchRuntimeItem *)item {
     if (!item.remoteURL.length) {
-        UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Không thể tải" message:@"Chưa có manifest runtimes.json trên JDK-Java_iOS (runtimes-latest). Hãy publish repo JDK trước, hoặc import tay file .tar.xz trong Manage Runtime." preferredStyle:UIAlertControllerStyleAlert];
-        [alert addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
-        [self presentViewController:alert animated:YES completion:nil];
+        [ErrorPresenter showInfo:@"Không thể tải" message:@"Chưa có manifest runtimes.json. Hãy publish repo JDK trước, hoặc import tay file .tar.xz trong Manage Runtime."];
         return;
     }
-    
-    UIAlertController *prog = [UIAlertController alertControllerWithTitle:[NSString stringWithFormat:@"Đang tải %@", item.displayName] message:@"Đang chuẩn bị..." preferredStyle:UIAlertControllerStyleAlert];
-    [self presentViewController:prog animated:YES completion:nil];
-    
-    [WitchRuntimeService.shared downloadItem:item progress:^(float p) {
-        dispatch_async(dispatch_get_main_queue(), ^{
-            prog.message = [NSString stringWithFormat:@"Đang tải... %.0f%%", p * 100];
-        });
-    } completion:^(BOOL ok, NSError *error) {
-        [prog dismissViewControllerAnimated:YES completion:^{
-            NSString *msg;
-            if (ok) {
-                msg = @"Đã tải xong và ghi nhận.\n• JDK: cần giải nén .tar.xz trong Manage Runtime (nếu chưa tự bung).\n• LWJGL: đã ghi marker, dùng ngay không cần restart.";
-            } else {
-                msg = [NSString stringWithFormat:@"Thất bại: %@", error.localizedDescription];
-            }
-            UIAlertController *done = [UIAlertController alertControllerWithTitle:item.displayName message:msg preferredStyle:UIAlertControllerStyleAlert];
-            [done addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
-            [self presentViewController:done animated:YES completion:nil];
-            [self reload];
-        }];
+    if (_isWorking) return;
+    _isWorking = YES;
+    [ErrorPresenter showToast:[NSString stringWithFormat:@"Đang tải %@…", item.displayName] success:YES];
+    __weak typeof(self) weakSelf = self;
+    [WitchRuntimeService.shared downloadItem:item progress:nil completion:^(BOOL ok, NSError *error) {
+        weakSelf.isWorking = NO;
+        if (ok) {
+            [ErrorPresenter showToast:@"Đã tải xong." success:YES];
+        } else {
+            [ErrorPresenter showNetworkError:error message:@"Tải thất bại."];
+        }
+        [weakSelf reload];
     }];
 }
 
-- (void)performDelete:(WitchRuntimeItem *)item {
-    UIAlertController *confirm = [UIAlertController alertControllerWithTitle:@"Xác nhận xóa" message:[NSString stringWithFormat:@"Bạn có chắc muốn xóa %@?", item.displayName] preferredStyle:UIAlertControllerStyleActionSheet];
-    [confirm addAction:[UIAlertAction actionWithTitle:@"Xóa" style:UIAlertActionStyleDestructive handler:^(UIAlertAction *action) {
+- (void)confirmDelete:(WitchRuntimeItem *)item {
+    __weak typeof(self) weakSelf = self;
+    [AppSheet showConfirmWithTitle:@"Xác nhận xóa" message:[NSString stringWithFormat:@"Bạn có chắc muốn xóa %@?", item.displayName] confirmTitle:@"Xóa" destructive:YES onConfirm:^{
         NSError *error = nil;
         BOOL ok = [WitchRuntimeService.shared deleteItem:item error:&error];
-        NSString *msg = ok ? @"Đã xóa." : [NSString stringWithFormat:@"Không xóa được: %@", error.localizedDescription];
-        UIAlertController *done = [UIAlertController alertControllerWithTitle:item.displayName message:msg preferredStyle:UIAlertControllerStyleAlert];
-        [done addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
-        [self presentViewController:done animated:YES completion:nil];
-        [self reload];
-    }]];
-    [confirm addAction:[UIAlertAction actionWithTitle:@"Hủy" style:UIAlertActionStyleCancel handler:nil]];
-    [self presentViewController:confirm animated:YES completion:nil];
+        if (ok) [ErrorPresenter showToast:@"Đã xóa." success:YES];
+        else [ErrorPresenter showFileError:@"Xóa" path:item.displayName error:error];
+        [weakSelf reload];
+    }];
 }
 
 @end

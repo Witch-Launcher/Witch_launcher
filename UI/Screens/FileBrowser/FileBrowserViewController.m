@@ -5,6 +5,7 @@
 #import <UniformTypeIdentifiers/UniformTypeIdentifiers.h>
 #import "AmethystBlurView.h"
 #import "utils.h"
+#import "AppSheet.h"
 
 @interface FileBrowserViewController ()
 @property (nonatomic) UILabel *pathLabel;
@@ -239,14 +240,7 @@
 }
 
 - (void)addFolderTapped {
-    UIAlertController *alert = [UIAlertController alertControllerWithTitle:localize(@"New Folder", nil)
-                                                                    message:localize(@"Enter folder name:", nil) preferredStyle:UIAlertControllerStyleAlert];
-    [alert addTextFieldWithConfigurationHandler:^(UITextField *field) {
-        field.placeholder = localize(@"filebrowser.folder_name.placeholder", nil);
-    }];
-    [alert addAction:[UIAlertAction actionWithTitle:localize(@"Cancel", nil) style:UIAlertActionStyleCancel handler:nil]];
-    [alert addAction:[UIAlertAction actionWithTitle:localize(@"Create", nil) style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
-        NSString *name = alert.textFields[0].text;
+    [AppSheet showPromptWithTitle:localize(@"New Folder", nil) message:localize(@"Enter folder name:", nil) placeholder:localize(@"filebrowser.folder_name.placeholder", nil) initialText:@"" onConfirm:^(NSString *name) {
         if (name.length == 0) return;
         NSString *currentPath = _pathStack.lastObject;
         NSString *newPath = [currentPath stringByAppendingPathComponent:name];
@@ -257,8 +251,7 @@
         } else {
             [self loadItems];
         }
-    }]];
-    [self presentViewController:alert animated:YES completion:nil];
+    }];
 }
 
 #pragma mark - UIDocumentPickerDelegate
@@ -340,39 +333,40 @@
         message = [NSString stringWithFormat:@"Size: %@\nModified: %@\nPath: %@", sizeStr, dateStr, fullPath];
     }
 
-    UIAlertController *info = [UIAlertController alertControllerWithTitle:name
-                                                                   message:message
-                                                            preferredStyle:UIAlertControllerStyleAlert];
-    [info addAction:[UIAlertAction actionWithTitle:localize(@"common.copy_path", nil) style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
-        [UIPasteboard generalPasteboard].string = fullPath;
-    }]];
-    [info addAction:[UIAlertAction actionWithTitle:localize(@"Copy", nil) style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
-        self.clipboardPath = fullPath;
-        self.isCutOperation = NO;
-        self.pasteBtn.hidden = NO;
-    }]];
-    [info addAction:[UIAlertAction actionWithTitle:localize(@"common.cut", nil) style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
-        self.clipboardPath = fullPath;
-        self.isCutOperation = YES;
-        self.pasteBtn.hidden = NO;
-    }]];
-    [info addAction:[UIAlertAction actionWithTitle:localize(@"Delete", nil) style:UIAlertActionStyleDestructive handler:^(UIAlertAction *action) {
-        NSError *delError = nil;
-        [[NSFileManager defaultManager] removeItemAtPath:fullPath error:&delError];
-        if (delError) {
-            showDialog(@"Error", delError.localizedDescription);
-        } else {
-            [self loadItems];
-        }
-    }]];
+    NSMutableArray *opts = [NSMutableArray arrayWithObjects:
+        @{@"title": localize(@"common.copy_path", nil), @"icon": @"link"},
+        @{@"title": localize(@"Copy", nil), @"icon": @"doc.on.doc"},
+        @{@"title": localize(@"common.cut", nil), @"icon": @"scissors"},
+        @{@"title": localize(@"Delete", nil), @"icon": @"trash", @"destructive": @YES},
+        nil];
     if (isDir) {
-        [info addAction:[UIAlertAction actionWithTitle:localize(@"common.open", nil) style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
+        [opts addObject:@{@"title": localize(@"common.open", nil), @"icon": @"folder"}];
+    }
+    [AppSheet showOptionsWithTitle:name message:message options:opts selectedIndex:NSNotFound selection:^(NSInteger idx) {
+        NSString *t = opts[idx][@"title"];
+        if ([t isEqualToString:localize(@"common.copy_path", nil)]) {
+            [UIPasteboard generalPasteboard].string = fullPath;
+        } else if ([t isEqualToString:localize(@"Copy", nil)]) {
+            self.clipboardPath = fullPath;
+            self.isCutOperation = NO;
+            self.pasteBtn.hidden = NO;
+        } else if ([t isEqualToString:localize(@"common.cut", nil)]) {
+            self.clipboardPath = fullPath;
+            self.isCutOperation = YES;
+            self.pasteBtn.hidden = NO;
+        } else if ([t isEqualToString:localize(@"Delete", nil)]) {
+            NSError *delError = nil;
+            [[NSFileManager defaultManager] removeItemAtPath:fullPath error:&delError];
+            if (delError) {
+                showDialog(@"Error", delError.localizedDescription);
+            } else {
+                [self loadItems];
+            }
+        } else {
             [_pathStack addObject:fullPath];
             [self loadItems];
-        }]];
-    }
-    [info addAction:[UIAlertAction actionWithTitle:localize(@"Close", nil) style:UIAlertActionStyleCancel handler:nil]];
-    [self presentViewController:info animated:YES completion:nil];
+        }
+    }];
 }
 
 - (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)indexPath {

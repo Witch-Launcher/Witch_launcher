@@ -10,6 +10,7 @@
 #import "utils.h"
 #import <PhotosUI/PhotosUI.h>
 #import <UniformTypeIdentifiers/UniformTypeIdentifiers.h>
+#import "AppSheet.h"
 
 @interface CursorTypeDetailViewController () <UITableViewDelegate, UITableViewDataSource, PHPickerViewControllerDelegate, UIDocumentPickerDelegate>
 
@@ -78,21 +79,13 @@
 #pragma mark - Import
 
 - (void)showImportOptions {
-    UIAlertController *sheet = [UIAlertController alertControllerWithTitle:localize(@"cursor.detail.add_cursor", nil)
-                                                                   message:localize(@"cursor.detail.choose_image", nil)
-                                                            preferredStyle:UIAlertControllerStyleActionSheet];
-    [sheet addAction:[UIAlertAction actionWithTitle:localize(@"cursor.detail.photo_library", nil) style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
-        [self openPhotoPicker];
-    }]];
-    [sheet addAction:[UIAlertAction actionWithTitle:localize(@"cursor.detail.files", nil) style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
-        [self openDocumentPicker];
-    }]];
-    [sheet addAction:[UIAlertAction actionWithTitle:localize(@"cursor.detail.cancel", nil) style:UIAlertActionStyleCancel handler:nil]];
-
-    if (UIDevice.currentDevice.userInterfaceIdiom == UIUserInterfaceIdiomPad) {
-        sheet.popoverPresentationController.barButtonItem = _addButton;
-    }
-    [self presentViewController:sheet animated:YES completion:nil];
+    [AppSheet showOptionsWithTitle:localize(@"cursor.detail.add_cursor", nil) message:localize(@"cursor.detail.choose_image", nil) options:@[
+        @{@"title": localize(@"cursor.detail.photo_library", nil), @"icon": @"photo"},
+        @{@"title": localize(@"cursor.detail.files", nil), @"icon": @"folder"},
+    ] selectedIndex:NSNotFound selection:^(NSInteger idx) {
+        if (idx == 0) [self openPhotoPicker];
+        else [self openDocumentPicker];
+    }];
 }
 
 - (void)openPhotoPicker {
@@ -338,18 +331,17 @@ UIContextualAction *delete = [UIContextualAction contextualActionWithStyle:UICon
 }
 
 - (void)confirmDeleteCursor:(NSString *)name {
-    UIAlertController *alert = [UIAlertController alertControllerWithTitle:localize(@"cursor.detail.delete_title", nil)
-                                                                    message:[NSString stringWithFormat:localize(@"cursor.detail.delete_confirm", nil), name]
-                                                             preferredStyle:UIAlertControllerStyleAlert];
-    [alert addAction:[UIAlertAction actionWithTitle:localize(@"cursor.detail.cancel", nil) style:UIAlertActionStyleCancel handler:nil]];
-    [alert addAction:[UIAlertAction actionWithTitle:localize(@"cursor.detail.delete", nil) style:UIAlertActionStyleDestructive handler:^(UIAlertAction *action) {
+    [AppSheet showConfirmWithTitle:localize(@"cursor.detail.delete_title", nil)
+                           message:[NSString stringWithFormat:localize(@"cursor.detail.delete_confirm", nil), name]
+                      confirmTitle:localize(@"cursor.detail.delete", nil)
+                       destructive:YES
+                         onConfirm:^{
         if ([[CursorTypeManager cursorForType:self.typeId] isEqualToString:name]) {
             [CursorTypeManager setCursor:[CursorManager defaultCursorName] forType:self.typeId];
         }
         [CursorManager deleteCursor:name inType:self.typeId];
         [self reloadData];
-    }]];
-    [self presentViewController:alert animated:YES completion:nil];
+    }];
 }
 
 - (NSString *)tableView:(UITableView *)tableView titleForHeaderInSection:(NSInteger)section {

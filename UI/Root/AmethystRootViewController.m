@@ -749,10 +749,12 @@
     }
     if (indexPath.row < (NSInteger)_quickVersions.count) {
         NSString *ver = _quickVersions[indexPath.row];
-        cell.textLabel.text = [self displayNameForVersion:ver];
         BOOL isCurrent = [ver isEqualToString:VersionDirectoryManager.shared.currentVersion];
+        NSString *name = [self displayNameForVersion:ver];
+        cell.textLabel.text = isCurrent ? [@"► " stringByAppendingString:name] : name;
         cell.accessoryType = UITableViewCellAccessoryDetailButton;
         cell.tintColor = ThemeManager.shared.accentColor;
+        cell.textLabel.font = [UIFont systemFontOfSize:15 weight:isCurrent ? UIFontWeightBold : UIFontWeightMedium];
         cell.textLabel.textColor = isCurrent ? ThemeManager.shared.accentColor : ThemeManager.shared.primaryTextColor;
     } else {
         cell.textLabel.text = localize(@"version.add", nil);

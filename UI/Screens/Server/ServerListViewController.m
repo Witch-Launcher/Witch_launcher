@@ -1,4 +1,5 @@
 #import "ServerListViewController.h"
+#import "AppSheet.h"
 #import "ThemeManager.h"
 #import "CustomButton.h"
 #import "MainCoordinator.h"
@@ -98,24 +99,13 @@ static NSString *kServersFilePath;
 
 - (void)addServerTapped {
     [HapticManager.shared play:HapticTypeLight];
-    UIAlertController *alert = [UIAlertController alertControllerWithTitle:localize(@"server.add.title", nil) message:nil preferredStyle:UIAlertControllerStyleAlert];
-    [alert addTextFieldWithConfigurationHandler:^(UITextField *field) {
-        field.placeholder = localize(@"server.name.placeholder", nil);
-    }];
-    [alert addTextFieldWithConfigurationHandler:^(UITextField *field) {
-        field.placeholder = localize(@"server.address.placeholder", nil);
-    }];
-    [alert addAction:[UIAlertAction actionWithTitle:localize(@"server.cancel", nil) style:UIAlertActionStyleCancel handler:nil]];
-    [alert addAction:[UIAlertAction actionWithTitle:localize(@"server.connect", nil) style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
-        NSString *name = alert.textFields[0].text;
-        NSString *address = alert.textFields[1].text;
+    [AppSheet showPrompt2WithTitle:localize(@"server.add.title", nil) message:nil placeholder1:localize(@"server.name.placeholder", nil) placeholder2:localize(@"server.address.placeholder", nil) onConfirm:^(NSString *name, NSString *address) {
         if (name.length > 0 && address.length > 0) {
             [self.servers addObject:@{@"name": name, @"address": address}];
             [self.tableView reloadData];
             [self saveServers];
         }
-    }]];
-    [self presentViewController:alert animated:YES completion:nil];
+    }];
 }
 
 #pragma mark - TableView

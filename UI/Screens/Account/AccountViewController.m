@@ -12,6 +12,7 @@
 #import "AFNetworking.h"
 #import "ElySkinHead.h"
 #import "AmethystBlurView.h"
+#import "AppSheet.h"
 
 @interface AccountViewController () <UIImagePickerControllerDelegate, UINavigationControllerDelegate>
 @property (nonatomic) NSDictionary *editingAccount;
@@ -630,19 +631,10 @@ extern NSString *ELY_OAUTH_REDIRECT_URI;
 }
 
 - (void)promptElyTOTPWithLogin:(NSString *)login password:(NSString *)password {
-    UIAlertController *alert = [UIAlertController alertControllerWithTitle:localize(@"account.2fa_title", nil)
-                                                                    message:localize(@"account.2fa_message", nil)
-                                                             preferredStyle:UIAlertControllerStyleAlert];
-    [alert addTextFieldWithConfigurationHandler:^(UITextField *textField) {
-        textField.placeholder = @"123456";
-        textField.keyboardType = UIKeyboardTypeNumberPad;
+    [AppSheet showPromptWithTitle:localize(@"account.2fa_title", nil) message:localize(@"account.2fa_message", nil) placeholder:@"123456" initialText:@"" onConfirm:^(NSString *code) {
+        NSString *trimmed = [code stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceCharacterSet];
+        [self elyLoginWithLogin:login password:password totp:trimmed];
     }];
-    [alert addAction:[UIAlertAction actionWithTitle:localize(@"Cancel", nil) style:UIAlertActionStyleCancel handler:nil]];
-    [alert addAction:[UIAlertAction actionWithTitle:localize(@"common.verify", nil) style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
-        NSString *code = [alert.textFields.firstObject.text stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceCharacterSet];
-        [self elyLoginWithLogin:login password:password totp:code];
-    }]];
-    [self presentViewController:alert animated:YES completion:nil];
 }
 
 - (void)addElyOAuthTapped {
@@ -928,14 +920,13 @@ extern NSString *ELY_OAUTH_REDIRECT_URI;
 - (void)confirmDelete:(UIButton *)sender {
     NSInteger index = sender.tag;
     NSDictionary *account = _accountsArray[index];
-    UIAlertController *confirm = [UIAlertController alertControllerWithTitle:localize(@"account.delete_title", nil)
-                                                                     message:[NSString stringWithFormat:@"Delete '%@'?", account[@"username"]]
-                                                              preferredStyle:UIAlertControllerStyleAlert];
-    [confirm addAction:[UIAlertAction actionWithTitle:localize(@"Cancel", nil) style:UIAlertActionStyleCancel handler:nil]];
-    [confirm addAction:[UIAlertAction actionWithTitle:localize(@"Delete", nil) style:UIAlertActionStyleDestructive handler:^(UIAlertAction *action) {
+    [AppSheet showConfirmWithTitle:localize(@"account.delete_title", nil)
+                           message:[NSString stringWithFormat:@"Delete '%@'?", account[@"username"]]
+                      confirmTitle:localize(@"Delete", nil)
+                       destructive:YES
+                         onConfirm:^{
         [self deleteAccountAtIndex:index];
-    }]];
-    [self presentViewController:confirm animated:YES completion:nil];
+    }];
 }
 
 - (void)editTapped:(UIButton *)sender {
@@ -982,21 +973,13 @@ extern NSString *ELY_OAUTH_REDIRECT_URI;
         return;
     }
 
-    UIAlertController *variantAlert = [UIAlertController alertControllerWithTitle:localize(@"skin.model_title", nil)
-                                                                          message:localize(@"skin.choose_model_hint", nil)
-                                                                   preferredStyle:UIAlertControllerStyleActionSheet];
-    [variantAlert addAction:[UIAlertAction actionWithTitle:localize(@"skin.model_classic", nil) style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
-        self.pendingSkinVariant = @"classic";
+    [AppSheet showOptionsWithTitle:localize(@"skin.model_title", nil) message:localize(@"skin.choose_model_hint", nil) options:@[
+        @{@"title": localize(@"skin.model_classic", nil), @"icon": @"person"},
+        @{@"title": localize(@"skin.model_slim", nil), @"icon": @"person.fill"},
+    ] selectedIndex:NSNotFound selection:^(NSInteger idx) {
+        self.pendingSkinVariant = (idx == 0) ? @"classic" : @"slim";
         [self presentImagePickerForCape:NO];
-    }]];
-    [variantAlert addAction:[UIAlertAction actionWithTitle:localize(@"skin.model_slim", nil) style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
-        self.pendingSkinVariant = @"slim";
-        [self presentImagePickerForCape:NO];
-    }]];
-    [variantAlert addAction:[UIAlertAction actionWithTitle:localize(@"Cancel", nil) style:UIAlertActionStyleCancel handler:nil]];
-    variantAlert.popoverPresentationController.sourceView = sender;
-    variantAlert.popoverPresentationController.sourceRect = sender.bounds;
-    [self presentViewController:variantAlert animated:YES completion:nil];
+    }];
 }
 
 - (void)changeCapeTapped:(UIButton *)sender {
@@ -1040,22 +1023,22 @@ extern NSString *ELY_OAUTH_REDIRECT_URI;
         return;
     }
 
-    UIAlertController *sheet = [UIAlertController alertControllerWithTitle:localize(@"cape.change", nil)
-                                                                   message:localize(@"cape.select_hint", nil)
-                                                            preferredStyle:UIAlertControllerStyleActionSheet];
+    NSMutableArray *opts = [NSMutableArray array];
+    NSMutableArray *ids = [NSMutableArray array];
+    NSMutableArray *actives = [NSMutableArray array];
+    NSInteger sel = NSNotFound;
     for (NSDictionary *cape in capes) {
         NSString *capeId = cape[@"id"];
         BOOL isActive = [cape[@"state"] isEqualToString:@"ACTIVE"];
         NSString *title = cape[@"alias"] ?: capeId;
-        if (isActive) title = [title stringByAppendingString:@"  ✓"];
-        [sheet addAction:[UIAlertAction actionWithTitle:title style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
-            [self equipCapeWithId:capeId isActive:isActive accessToken:accessToken];
-        }]];
+        [opts addObject:@{@"title": title}];
+        [ids addObject:capeId ?: @""];
+        [actives addObject:@(isActive)];
+        if (isActive) sel = ids.count - 1;
     }
-    [sheet addAction:[UIAlertAction actionWithTitle:localize(@"Cancel", nil) style:UIAlertActionStyleCancel handler:nil]];
-    sheet.popoverPresentationController.sourceView = sourceView;
-    sheet.popoverPresentationController.sourceRect = sourceView.bounds;
-    [self presentViewController:sheet animated:YES completion:nil];
+    [AppSheet showOptionsWithTitle:localize(@"cape.change", nil) message:localize(@"cape.select_hint", nil) options:opts selectedIndex:sel selection:^(NSInteger idx) {
+        [self equipCapeWithId:ids[idx] isActive:[actives[idx] boolValue] accessToken:accessToken];
+    }];
 }
 
 - (void)equipCapeWithId:(NSString *)capeId isActive:(BOOL)isActive accessToken:(NSString *)accessToken {

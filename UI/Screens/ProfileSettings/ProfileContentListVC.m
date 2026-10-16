@@ -13,6 +13,7 @@
 #import "DependencyResolver.h"
 #import "FileBrowserViewController.h"
 #import "LauncherPreferences.h"
+#import "AppSheet.h"
 #import "utils.h"
 
 typedef NS_ENUM(NSInteger, ProfileListFilter) {
@@ -129,6 +130,9 @@ typedef NS_ENUM(NSInteger, ProfileListFilter) {
     _tableView.backgroundColor = [UIColor clearColor];
     _tableView.separatorStyle = UITableViewCellSeparatorStyleNone;
     _tableView.rowHeight = 84;
+    // Keep the last rows clear of the bottom toolbar/home indicator.
+    _tableView.contentInset = UIEdgeInsetsMake(0, 0, 12, 0);
+    _tableView.scrollIndicatorInsets = _tableView.contentInset;
     [_tableView registerClass:[ProfileItemCell class] forCellReuseIdentifier:@"ProfileItemCell"];
     [self.view addSubview:_tableView];
 
@@ -569,14 +573,8 @@ typedef NS_ENUM(NSInteger, ProfileListFilter) {
     NSString *base = [[InstalledModsManager shared] baseNameForFilename:fn];
     NSString *ext = base.pathExtension.length > 0 ? [@"." stringByAppendingString:base.pathExtension] : @"";
     NSString *stem = [base stringByDeletingPathExtension];
-    UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Rename file" message:nil preferredStyle:UIAlertControllerStyleAlert];
-    [alert addTextFieldWithConfigurationHandler:^(UITextField *field) {
-        field.text = stem;
-    }];
-    [alert addAction:[UIAlertAction actionWithTitle:localize(@"Cancel", nil) style:UIAlertActionStyleCancel handler:nil]];
     __weak typeof(self) weakSelf = self;
-    [alert addAction:[UIAlertAction actionWithTitle:@"Rename" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a) {
-        NSString *newStem = alert.textFields.firstObject.text;
+    [AppSheet showPromptWithTitle:@"Rename file" message:fn placeholder:@"File name" initialText:stem onConfirm:^(NSString *newStem) {
         if (![newStem isKindOfClass:[NSString class]] || newStem.length == 0) {
             [ErrorPresenter showValidation:@"name" message:@"Enter a file name."];
             return;
@@ -598,8 +596,7 @@ typedef NS_ENUM(NSInteger, ProfileListFilter) {
             [[InstalledModsManager shared] updateFilename:newBase forProjectId:pid category:weakSelf.category profile:weakSelf.profile];
         }
         [weakSelf reloadContent];
-    }]];
-    [self presentViewController:alert animated:YES completion:nil];
+    }];
 }
 
 - (void)deleteItem:(NSDictionary *)item {
@@ -608,10 +605,8 @@ typedef NS_ENUM(NSInteger, ProfileListFilter) {
         [ErrorPresenter showFileError:@"Delete" path:item[@"filename"] error:nil];
         return;
     }
-    UIAlertController *confirm = [UIAlertController alertControllerWithTitle:@"Delete file?" message:path.lastPathComponent preferredStyle:UIAlertControllerStyleAlert];
-    [confirm addAction:[UIAlertAction actionWithTitle:localize(@"Cancel", nil) style:UIAlertActionStyleCancel handler:nil]];
     __weak typeof(self) weakSelf = self;
-    [confirm addAction:[UIAlertAction actionWithTitle:@"Delete" style:UIAlertActionStyleDestructive handler:^(UIAlertAction *a) {
+    [AppSheet showConfirmWithTitle:@"Delete file?" message:path.lastPathComponent confirmTitle:@"Delete" destructive:YES onConfirm:^{
         NSError *err = nil;
         if (![[NSFileManager defaultManager] removeItemAtPath:path error:&err]) {
             [ErrorPresenter showFileError:@"Delete" path:path.lastPathComponent error:err];
@@ -623,8 +618,7 @@ typedef NS_ENUM(NSInteger, ProfileListFilter) {
         }
         [HapticManager.shared play:HapticTypeSuccess];
         [weakSelf reloadContent];
-    }]];
-    [self presentViewController:confirm animated:YES completion:nil];
+    }];
 }
 
 - (void)browseTapped {
@@ -654,13 +648,13 @@ typedef NS_ENUM(NSInteger, ProfileListFilter) {
                      item[@"loader"] ?: @"?", item[@"source"] ?: @"local",
                      state, (latest.length > 0 ? [NSString stringWithFormat:@" (latest %@)", latest] : @""),
                      (desc.length > 0 ? desc : @"No description available.")];
-    UIAlertController *alert = [UIAlertController alertControllerWithTitle:item[@"title"] ?: fn message:msg preferredStyle:UIAlertControllerStyleAlert];
-    [alert addAction:[UIAlertAction actionWithTitle:localize(@"OK", nil) style:UIAlertActionStyleDefault handler:nil]];
     __weak typeof(self) weakSelf = self;
-    [alert addAction:[UIAlertAction actionWithTitle:@"Share file" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a) {
-        [weakSelf shareItem:item];
-    }]];
-    [self presentViewController:alert animated:YES completion:nil];
+    [AppSheet showOptionsWithTitle:item[@"title"] ?: fn message:msg options:@[
+        @{@"title": @"Share file", @"icon": @"square.and.arrow.up"},
+        @{@"title": localize(@"Done", nil), @"icon": @"checkmark"},
+    ] selectedIndex:NSNotFound selection:^(NSInteger idx) {
+        if (idx == 0) [weakSelf shareItem:item];
+    }];
 }
 
 #pragma mark - Update / reinstall
@@ -687,12 +681,9 @@ typedef NS_ENUM(NSInteger, ProfileListFilter) {
         return;
     }
     __weak typeof(self) weakSelf = self;
-    UIAlertController *confirm = [UIAlertController alertControllerWithTitle:@"Reinstall?" message:item[@"title"] preferredStyle:UIAlertControllerStyleAlert];
-    [confirm addAction:[UIAlertAction actionWithTitle:localize(@"Cancel", nil) style:UIAlertActionStyleCancel handler:nil]];
-    [confirm addAction:[UIAlertAction actionWithTitle:@"Reinstall" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a) {
+    [AppSheet showConfirmWithTitle:@"Reinstall?" message:item[@"title"] confirmTitle:@"Reinstall" destructive:NO onConfirm:^{
         [weakSelf installWithDependenciesForItem:item isUpdate:NO done:nil];
-    }]];
-    [self presentViewController:confirm animated:YES completion:nil];
+    }];
 }
 
 - (void)updateAllTapped {
@@ -715,12 +706,9 @@ typedef NS_ENUM(NSInteger, ProfileListFilter) {
         return;
     }
     __weak typeof(self) weakSelf = self;
-    UIAlertController *confirm = [UIAlertController alertControllerWithTitle:@"Update all?" message:[NSString stringWithFormat:@"%lu files", (unsigned long)pending.count] preferredStyle:UIAlertControllerStyleAlert];
-    [confirm addAction:[UIAlertAction actionWithTitle:localize(@"Cancel", nil) style:UIAlertActionStyleCancel handler:nil]];
-    [confirm addAction:[UIAlertAction actionWithTitle:@"Update" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a) {
+    [AppSheet showConfirmWithTitle:@"Update all?" message:[NSString stringWithFormat:@"%lu files", (unsigned long)pending.count] confirmTitle:@"Update" destructive:NO onConfirm:^{
         [weakSelf updateQueue:[pending copy]];
-    }]];
-    [self presentViewController:confirm animated:YES completion:nil];
+    }];
 }
 
 - (void)updateQueue:(NSArray *)queue {

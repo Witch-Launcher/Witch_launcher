@@ -1,6 +1,7 @@
 #import "WitchUpdateService.h"
 #import "LauncherPreferences.h"
 #import "config.h"
+#import "AppSheet.h"
 #import <objc/runtime.h>
 
 @implementation WitchReleaseAsset
@@ -128,20 +129,7 @@
             dispatch_async(dispatch_get_main_queue(), ^{ completion(nil, NO, e); });
             return;
         }
-        WitchReleaseInfo *info = [[WitchReleaseInfo alloc] init];
-        info.tagName = json[@"tag_name"] ?: tag;
-        info.htmlURL = json[@"html_url"] ?: @"";
-        info.body = json[@"body"] ?: @"";
-        NSMutableArray *assets = [NSMutableArray array];
-        for (NSDictionary *a in (NSArray *)json[@"assets"]) {
-            if (![a isKindOfClass:[NSDictionary class]]) continue;
-            WitchReleaseAsset *asset = [[WitchReleaseAsset alloc] init];
-            asset.name = a[@"name"] ?: @"";
-            asset.downloadURL = a[@"browser_download_url"] ?: @"";
-            asset.size = [a[@"size"] longLongValue];
-            if (asset.name.length && asset.downloadURL.length) [assets addObject:asset];
-        }
-        info.assets = assets;
+        WitchReleaseInfo *info = [self releaseInfoFromJSON:json fallbackTag:tag];
         // Heuristic hasUpdate: compare updated_at against last seen value. Store per-tag updated_at.
         // GitHub rolling tags (pre-release/release) keep same tag name, so compare published/updated_at
         // against last seen value. If they match, user already knows about this release.
@@ -160,6 +148,69 @@
         objc_setAssociatedObject(info, @selector(checkForUpdateForce:completion:), updatedAt, OBJC_ASSOCIATION_COPY_NONATOMIC);
         dispatch_async(dispatch_get_main_queue(), ^{ completion(info, hasUpdate, nil); });
     }] resume];
+}
+
+- (WitchReleaseInfo *)releaseInfoFromJSON:(NSDictionary *)json fallbackTag:(NSString *)tag {
+    WitchReleaseInfo *info = [[WitchReleaseInfo alloc] init];
+    info.tagName = ([json[@"tag_name"] isKindOfClass:[NSString class]] && [(NSString *)json[@"tag_name"] length] > 0) ? json[@"tag_name"] : tag;
+    info.name = [json[@"name"] isKindOfClass:[NSString class]] ? json[@"name"] : @"";
+    info.publishedAt = ([json[@"published_at"] isKindOfClass:[NSString class]] ? json[@"published_at"] : ([json[@"created_at"] isKindOfClass:[NSString class]] ? json[@"created_at"] : @""));
+    info.htmlURL = [json[@"html_url"] isKindOfClass:[NSString class]] ? json[@"html_url"] : @"";
+    info.body = [json[@"body"] isKindOfClass:[NSString class]] ? json[@"body"] : @"";
+    NSMutableArray *assets = [NSMutableArray array];
+    for (NSDictionary *a in (NSArray *)json[@"assets"]) {
+        if (![a isKindOfClass:[NSDictionary class]]) continue;
+        WitchReleaseAsset *asset = [[WitchReleaseAsset alloc] init];
+        asset.name = [a[@"name"] isKindOfClass:[NSString class]] ? a[@"name"] : @"";
+        asset.downloadURL = [a[@"browser_download_url"] isKindOfClass:[NSString class]] ? a[@"browser_download_url"] : @"";
+        asset.size = [a[@"size"] longLongValue];
+        if (asset.name.length && asset.downloadURL.length) [assets addObject:asset];
+    }
+    info.assets = assets;
+    return info;
+}
+
+- (void)fetchAllReleasesWithLimit:(NSInteger)limit
+                       completion:(void(^)(NSArray<WitchReleaseInfo *> *, NSError *))completion {
+    NSInteger n = limit > 0 ? MIN(limit, 50) : 20;
+    NSString *urlStr = [NSString stringWithFormat:@"https://api.github.com/repos/%@/releases?per_page=%ld", [self githubRepo], (long)n];
+    NSMutableURLRequest *req = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:urlStr]];
+    [req setValue:@"Witch-Launcher-iOS" forHTTPHeaderField:@"User-Agent"];
+    [req setValue:@"application/vnd.github+json" forHTTPHeaderField:@"Accept"];
+    [[_session dataTaskWithRequest:req completionHandler:^(NSData *data, NSURLResponse *resp, NSError *error) {
+        if (error) {
+            dispatch_async(dispatch_get_main_queue(), ^{ completion(nil, error); });
+            return;
+        }
+        NSError *je = nil;
+        id json = [NSJSONSerialization JSONObjectWithData:data options:0 error:&je];
+        if (je || ![json isKindOfClass:[NSArray class]]) {
+            dispatch_async(dispatch_get_main_queue(), ^{ completion(nil, je ?: [NSError errorWithDomain:@"WitchUpdate" code:-1 userInfo:@{NSLocalizedDescriptionKey: @"Invalid GitHub response"}]); });
+            return;
+        }
+        NSMutableArray *out = [NSMutableArray array];
+        for (NSDictionary *r in (NSArray *)json) {
+            if (![r isKindOfClass:[NSDictionary class]]) continue;
+            WitchReleaseInfo *info = [self releaseInfoFromJSON:r fallbackTag:@""];
+            if (info.assets.count > 0) [out addObject:info];
+        }
+        dispatch_async(dispatch_get_main_queue(), ^{ completion(out, nil); });
+    }] resume];
+}
+
+- (BOOL)installAssetRemotely:(WitchReleaseAsset *)asset fromViewController:(UIViewController *)vc {
+    NSString *https = asset.downloadURL;
+    if (![https isKindOfClass:[NSString class]] || https.length == 0) return NO;
+    // SideStore installs remotely hosted IPAs straight from a download URL:
+    // sidestore://install?url=<encoded https url> (same bundle ID = update).
+    NSString *enc = [https stringByAddingPercentEncodingWithAllowedCharacters:[NSCharacterSet URLQueryAllowedCharacterSet]];
+    NSURL *u = [NSURL URLWithString:[NSString stringWithFormat:@"sidestore://install?url=%@", enc]];
+    UIApplication *app = UIApplication.sharedApplication;
+    if (u && [app canOpenURL:u]) {
+        [app openURL:u options:@{} completionHandler:nil];
+        return YES;
+    }
+    return NO;
 }
 
 - (void)downloadAsset:(WitchReleaseAsset *)asset progress:(void(^)(float))progress completion:(void(^)(NSURL *, NSError *))completion {
@@ -255,13 +306,11 @@
         WitchReleaseAsset *any = [info assetForVariant:WitchAppVariantFull isTrollStore:[self isTrollStoreInstall]];
         if (!any) any = info.assets.firstObject;
         if (!any) return;
-        UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Có bản mới"
-            message:[NSString stringWithFormat:@"Kênh %@ (%@) có bản mới.\nMở màn hình Cập nhật để chọn Full/Simple và cài đặt.", [self channelDisplayName:[self selectedChannel]], [self effectiveTag]]
-            preferredStyle:UIAlertControllerStyleAlert];
-        [alert addAction:[UIAlertAction actionWithTitle:@"Để sau" style:UIAlertActionStyleCancel handler:^(UIAlertAction *a) {
-            setPrefObject(@"witch.update_last_prompt", @([[NSDate date] timeIntervalSince1970]));
-        }]];
-        [alert addAction:[UIAlertAction actionWithTitle:@"Cập nhật" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a) {
+        [AppSheet showConfirmWithTitle:@"Có bản mới"
+                               message:[NSString stringWithFormat:@"Kênh %@ (%@) có bản mới.\nMở màn hình Cập nhật để chọn bản và cài đặt.", [self channelDisplayName:[self selectedChannel]], [self effectiveTag]]
+                          confirmTitle:@"Cập nhật"
+                           destructive:NO
+                             onConfirm:^{
             setPrefObject(@"witch.update_last_prompt", @([[NSDate date] timeIntervalSince1970]));
             Class cls = NSClassFromString(@"LauncherUpdateViewController");
             if (cls) {
@@ -270,8 +319,8 @@
                 [vc.navigationController pushViewController:uvc animated:YES];
                 if (!vc.navigationController) [vc presentViewController:[[UINavigationController alloc] initWithRootViewController:uvc] animated:YES completion:nil];
             }
-        }]];
-        [vc presentViewController:alert animated:YES completion:nil];
+        }];
+        // "Later" = dismiss the sheet (timestamp updates on next explicit check).
     }];
 }
 

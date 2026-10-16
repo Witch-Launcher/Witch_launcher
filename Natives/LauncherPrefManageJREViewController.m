@@ -7,6 +7,8 @@
 #import "UIKit+hook.h"
 #import "ios_uikit_bridge.h"
 #import "utils.h"
+#import "AppSheet.h"
+#import "ErrorPresenter.h"
 
 #include <dlfcn.h>
 #include <lzma.h>
@@ -374,10 +376,7 @@ styleForMenuWithConfiguration:(UIContextMenuConfiguration *)configuration
     UITableViewCell *cell = [self.tableView cellForRowAtIndexPath:indexPath];
     NSString *title = localize(@"preference.title.confirm", nil);
     NSString *message = [NSString stringWithFormat:localize(@"preference.title.confirm.delete_runtime", nil), cell.textLabel.text];
-    UIAlertController *confirmAlert = [UIAlertController alertControllerWithTitle:title message:message preferredStyle:UIAlertControllerStyleActionSheet];
-    confirmAlert.popoverPresentationController.sourceView = cell;
-    confirmAlert.popoverPresentationController.sourceRect = cell.bounds;
-    UIAlertAction *ok = [UIAlertAction actionWithTitle:localize(@"OK", nil) style:UIAlertActionStyleDestructive handler:^(UIAlertAction * _Nonnull action) {
+    [AppSheet showConfirmWithTitle:title message:message confirmTitle:localize(@"OK", nil) destructive:YES onConfirm:^{
         NSError *error;
         NSString *directory = [NSString stringWithFormat:@"%s/java_runtimes/%@", getenv("POJAV_HOME"), cell.textLabel.text];
         [NSFileManager.defaultManager removeItemAtPath:directory error:&error];
@@ -388,10 +387,6 @@ styleForMenuWithConfiguration:(UIContextMenuConfiguration *)configuration
             showDialog(localize(@"Error", nil), error.localizedDescription);
         }
     }];
-    UIAlertAction *cancel = [UIAlertAction actionWithTitle:localize(@"Cancel", nil) style:UIAlertActionStyleCancel handler:nil];
-    [confirmAlert addAction:cancel];
-    [confirmAlert addAction:ok];
-    [self presentViewController:confirmAlert animated:YES completion:nil];
 }
 
 - (UITableViewCellEditingStyle)tableView:(UITableView *)tableView editingStyleForRowAtIndexPath:(NSIndexPath *)indexPath

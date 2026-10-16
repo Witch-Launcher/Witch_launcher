@@ -7,6 +7,7 @@
 #import "InstalledModsManager.h"
 #import "ModMetadataReader.h"
 #import "FileBrowserViewController.h"
+#import "AppSheet.h"
 #import "utils.h"
 
 @interface ProfileWorldsVC () <UITableViewDelegate, UITableViewDataSource, UIDocumentPickerDelegate>
@@ -240,16 +241,18 @@
     NSString *msg = [[lines arrayByAddingObject:[NSString stringWithFormat:@"\nDatapacks (%lu):\n%@",
                                                  (unsigned long)dpNames.count,
                                                  dpNames.count > 0 ? [dpNames componentsJoinedByString:@"\n"] : @"none"]] componentsJoinedByString:@"\n"];
-    UIAlertController *alert = [UIAlertController alertControllerWithTitle:w[@"title"] ?: @"World" message:msg preferredStyle:UIAlertControllerStyleAlert];
-    [alert addAction:[UIAlertAction actionWithTitle:localize(@"OK", nil) style:UIAlertActionStyleDefault handler:nil]];
     __weak typeof(self) weakSelf = self;
-    [alert addAction:[UIAlertAction actionWithTitle:@"Open folder" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a) {
-        FileBrowserViewController *vc = [[FileBrowserViewController alloc] init];
-        vc.rootPath = isDir ? path : [path stringByDeletingLastPathComponent];
-        vc.title = @"World files";
-        [weakSelf.navigationController pushViewController:vc animated:YES];
-    }]];
-    [self presentViewController:alert animated:YES completion:nil];
+    [AppSheet showOptionsWithTitle:w[@"title"] ?: @"World" message:msg options:@[
+        @{@"title": @"Open folder", @"icon": @"folder"},
+        @{@"title": localize(@"Done", nil), @"icon": @"checkmark"},
+    ] selectedIndex:NSNotFound selection:^(NSInteger idx) {
+        if (idx == 0) {
+            FileBrowserViewController *vc = [[FileBrowserViewController alloc] init];
+            vc.rootPath = isDir ? path : [path stringByDeletingLastPathComponent];
+            vc.title = @"World files";
+            [weakSelf.navigationController pushViewController:vc animated:YES];
+        }
+    }];
 }
 
 #pragma mark - Import / share / delete / browse
@@ -301,10 +304,8 @@
 
 - (void)deleteWorld:(NSDictionary *)w {
     NSString *path = w[@"path"];
-    UIAlertController *confirm = [UIAlertController alertControllerWithTitle:@"Delete world?" message:w[@"title"] preferredStyle:UIAlertControllerStyleAlert];
-    [confirm addAction:[UIAlertAction actionWithTitle:localize(@"Cancel", nil) style:UIAlertActionStyleCancel handler:nil]];
     __weak typeof(self) weakSelf = self;
-    [confirm addAction:[UIAlertAction actionWithTitle:@"Delete" style:UIAlertActionStyleDestructive handler:^(UIAlertAction *a) {
+    [AppSheet showConfirmWithTitle:@"Delete world?" message:w[@"title"] confirmTitle:localize(@"Delete", nil) destructive:YES onConfirm:^{
         NSError *err = nil;
         if (![[NSFileManager defaultManager] removeItemAtPath:path error:&err]) {
             [ErrorPresenter showFileError:@"Delete" path:path.lastPathComponent error:err];
@@ -312,8 +313,7 @@
         }
         [HapticManager.shared play:HapticTypeSuccess];
         [weakSelf reloadContent];
-    }]];
-    [self presentViewController:confirm animated:YES completion:nil];
+    }];
 }
 
 - (void)browseTapped {

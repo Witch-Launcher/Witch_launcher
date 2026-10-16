@@ -8,6 +8,8 @@
 #import "WitchLogReporter.h"
 #import "WitchLogIndex.h"
 #import <limits.h>
+#import "AppSheet.h"
+#import "ErrorPresenter.h"
 
 static NSString *categoryLocalizedKey(CrashLogCategory category) {
     switch (category) {
@@ -756,21 +758,13 @@ static const NSUInteger kMaxSearchHits = 2000;
 }
 - (void)actionGoLine {
     if (self.viewMode != LogViewModeFull || self.totalLines == 0) return;
-    UIAlertController *alert = [UIAlertController alertControllerWithTitle:localize(@"crash.screen.go_line", nil)
-                                                                   message:[NSString stringWithFormat:localize(@"crash.screen.go_line_msg", nil),
-                                                                            (unsigned long)self.totalLines]
-                                                            preferredStyle:UIAlertControllerStyleAlert];
-    [alert addTextFieldWithConfigurationHandler:^(UITextField *tf) {
-        tf.keyboardType = UIKeyboardTypeNumberPad;
-        tf.placeholder = @"1";
-    }];
-    [alert addAction:[UIAlertAction actionWithTitle:localize(@"Cancel", nil) style:UIAlertActionStyleCancel handler:nil]];
     __weak typeof(self) weakSelf = self;
-    [alert addAction:[UIAlertAction actionWithTitle:localize(@"OK", nil) style:UIAlertActionStyleDefault handler:^(UIAlertAction *a) {
-        NSInteger n = [alert.textFields.firstObject.text integerValue];
+    [AppSheet showPromptWithTitle:localize(@"crash.screen.go_line", nil)
+                          message:[NSString stringWithFormat:localize(@"crash.screen.go_line_msg", nil), (unsigned long)self.totalLines]
+                      placeholder:@"1" initialText:@"" onConfirm:^(NSString *text) {
+        NSInteger n = [text integerValue];
         if (n >= 1) [weakSelf jumpToLine:(NSUInteger)(n - 1)];
-    }]];
-    [self presentViewController:alert animated:YES completion:nil];
+    }];
 }
 
 #pragma mark - Search (debounced, background, capped)
@@ -910,14 +904,9 @@ static const NSUInteger kMaxSearchHits = 2000;
     if (!self.analysis) return;
     [CrashLogAnalyzer refreshPathsForResult:self.analysis];
     [self updateFileSegments];
-    UIAlertController *alert = [UIAlertController alertControllerWithTitle:localize(@"crash.screen.send_title", nil) message:localize(@"crash.screen.send_msg", nil) preferredStyle:UIAlertControllerStyleAlert];
-    [alert addTextFieldWithConfigurationHandler:^(UITextField *tf){
-        tf.placeholder = localize(@"crash.screen.send_note_placeholder", nil);
-    }];
-    [alert addAction:[UIAlertAction actionWithTitle:localize(@"Cancel", nil) style:UIAlertActionStyleCancel handler:nil]];
     __weak typeof(self) weakSelf = self;
-    [alert addAction:[UIAlertAction actionWithTitle:localize(@"crash.screen.send", nil) style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){
-        NSString *note = alert.textFields.firstObject.text ?: @"";
+    [AppSheet showPromptWithTitle:localize(@"crash.screen.send_title", nil) message:localize(@"crash.screen.send_msg", nil) placeholder:localize(@"crash.screen.send_note_placeholder", nil) initialText:@"" onConfirm:^(NSString *noteText) {
+        NSString *note = noteText ?: @"";
         UIAlertController *progress = [UIAlertController alertControllerWithTitle:localize(@"crash.screen.sending", nil)
                                                                           message:@"0%"
                                                                    preferredStyle:UIAlertControllerStyleAlert];
@@ -932,17 +921,17 @@ static const NSUInteger kMaxSearchHits = 2000;
         } completion:^(BOOL success, NSString *logId, NSError *error){
             dispatch_async(dispatch_get_main_queue(), ^{
                 [progress dismissViewControllerAnimated:YES completion:^{
-                    NSString *title = success ? localize(@"crash.screen.send_ok", nil) : localize(@"Error", nil);
-                    NSString *msg = success ? [NSString stringWithFormat:localize(@"crash.screen.send_ok_msg", nil), logId ?: @""] : error.localizedDescription;
-                    UIAlertController *res = [UIAlertController alertControllerWithTitle:title message:msg preferredStyle:UIAlertControllerStyleAlert];
-                    [res addAction:[UIAlertAction actionWithTitle:localize(@"OK", nil) style:UIAlertActionStyleDefault handler:nil]];
-                    [weakSelf presentViewController:res animated:YES completion:nil];
+                    if (success) {
+                        [ErrorPresenter showSuccess:localize(@"crash.screen.send_ok", nil)
+                                           message:[NSString stringWithFormat:localize(@"crash.screen.send_ok_msg", nil), logId ?: @""]];
+                    } else {
+                        [ErrorPresenter showNetworkError:error message:@"Send failed."];
+                    }
                 }];
             });
         }];
         (void)job;
-    }]];
-    [self presentViewController:alert animated:YES completion:nil];
+    }];
 }
 
 - (void)actionClose {

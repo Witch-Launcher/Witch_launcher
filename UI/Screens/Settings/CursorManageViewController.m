@@ -9,6 +9,7 @@
 #import <UniformTypeIdentifiers/UniformTypeIdentifiers.h>
 #import "AmethystBlurView.h"
 #import "utils.h"
+#import "AppSheet.h"
 
 @interface CursorManageViewController () <UITableViewDelegate, UITableViewDataSource, PHPickerViewControllerDelegate, UIDocumentPickerDelegate>
 
@@ -63,21 +64,13 @@
 
 - (void)showImportOptions {
     [HapticManager.shared play:HapticTypeLight];
-    UIAlertController *sheet = [UIAlertController alertControllerWithTitle:localize(@"cursor.detail.add_cursor", nil)
-                                                                   message:localize(@"Choose an image, GIF, or cursor file", nil)
-                                                            preferredStyle:UIAlertControllerStyleActionSheet];
-    [sheet addAction:[UIAlertAction actionWithTitle:localize(@"cursor.detail.photo_library", nil) style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
-        [self openPhotoPicker];
-    }]];
-    [sheet addAction:[UIAlertAction actionWithTitle:localize(@"cursor.detail.files", nil) style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
-        [self openDocumentPicker];
-    }]];
-    [sheet addAction:[UIAlertAction actionWithTitle:localize(@"cursor.detail.cancel", nil) style:UIAlertActionStyleCancel handler:nil]];
-
-    if (UIDevice.currentDevice.userInterfaceIdiom == UIUserInterfaceIdiomPad) {
-        sheet.popoverPresentationController.barButtonItem = _addButton;
-    }
-    [self presentViewController:sheet animated:YES completion:nil];
+    [AppSheet showOptionsWithTitle:localize(@"cursor.detail.add_cursor", nil) message:localize(@"Choose an image, GIF, or cursor file", nil) options:@[
+        @{@"title": localize(@"cursor.detail.photo_library", nil), @"icon": @"photo"},
+        @{@"title": localize(@"cursor.detail.files", nil), @"icon": @"folder"},
+    ] selectedIndex:NSNotFound selection:^(NSInteger idx) {
+        if (idx == 0) [self openPhotoPicker];
+        else [self openDocumentPicker];
+    }];
 }
 
 - (void)openPhotoPicker {
@@ -269,11 +262,11 @@ UIContextualAction *editHitbox = [UIContextualAction contextualActionWithStyle:U
 }
 
 - (void)confirmDeleteCursor:(NSString *)name {
-    UIAlertController *alert = [UIAlertController alertControllerWithTitle:localize(@"cursor.manage.delete_title", nil)
-                                                                    message:[NSString stringWithFormat:localize(@"cursor.manage.delete_confirm", nil), name]
-                                                             preferredStyle:UIAlertControllerStyleAlert];
-    [alert addAction:[UIAlertAction actionWithTitle:localize(@"cursor.detail.cancel", nil) style:UIAlertActionStyleCancel handler:nil]];
-    [alert addAction:[UIAlertAction actionWithTitle:localize(@"cursor.detail.delete", nil) style:UIAlertActionStyleDestructive handler:^(UIAlertAction *action) {
+    [AppSheet showConfirmWithTitle:localize(@"cursor.manage.delete_title", nil)
+                           message:[NSString stringWithFormat:localize(@"cursor.manage.delete_confirm", nil), name]
+                      confirmTitle:localize(@"cursor.detail.delete", nil)
+                       destructive:YES
+                         onConfirm:^{
         BOOL ok = [CursorManager deleteCursor:name];
         if (!ok) {
             showDialog(localize(@"Error", nil), localize(@"Failed to delete cursor.", nil));
@@ -283,8 +276,7 @@ UIContextualAction *editHitbox = [UIContextualAction contextualActionWithStyle:U
             [CursorManager setCurrentCursorName:[CursorManager defaultCursorName]];
         }
         [self reloadCursors];
-    }]];
-    [self presentViewController:alert animated:YES completion:nil];
+    }];
 }
 
 - (NSString *)tableView:(UITableView *)tableView titleForFooterInSection:(NSInteger)section {
