@@ -18,30 +18,6 @@
 	<string>Witch</string>
 	<key>CFBundleIcons</key>
 	<dict>
-		<key>CFBundleAlternateIcons</key>
-		<dict>
-			<key>AppIcon-Dark</key>
-			<dict>
-				<key>CFBundleIconFiles</key>
-				<array>
-					<string>AppIcon-Dark60x60</string>
-				</array>
-			</dict>
-			<key>AppIcon-Development</key>
-			<dict>
-				<key>CFBundleIconFiles</key>
-				<array>
-					<string>AppIcon-Development60x60</string>
-				</array>
-			</dict>
-			<key>AppIcon-Purple</key>
-			<dict>
-				<key>CFBundleIconFiles</key>
-				<array>
-					<string>AppIcon-Purple60x60</string>
-				</array>
-			</dict>
-		</dict>
 		<key>CFBundlePrimaryIcon</key>
 		<dict>
 			<key>CFBundleIconFiles</key>
@@ -54,33 +30,6 @@
 	</dict>
 	<key>CFBundleIcons~ipad</key>
 	<dict>
-		<key>CFBundleAlternateIcons</key>
-		<dict>
-			<key>AppIcon-Dark</key>
-			<dict>
-				<key>CFBundleIconFiles</key>
-				<array>
-					<string>AppIcon-Dark60x60</string>
-					<string>AppIcon-Dark76x76</string>
-				</array>
-			</dict>
-			<key>AppIcon-Development</key>
-			<dict>
-				<key>CFBundleIconFiles</key>
-				<array>
-					<string>AppIcon-Development60x60</string>
-					<string>AppIcon-Development76x76</string>
-				</array>
-			</dict>
-			<key>AppIcon-Purple</key>
-			<dict>
-				<key>CFBundleIconFiles</key>
-				<array>
-					<string>AppIcon-Purple60x60</string>
-					<string>AppIcon-Purple76x76</string>
-				</array>
-			</dict>
-		</dict>
 		<key>CFBundlePrimaryIcon</key>
 		<dict>
 			<key>CFBundleIconFiles</key>

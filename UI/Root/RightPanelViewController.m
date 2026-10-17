@@ -164,7 +164,11 @@
         [_versionsScroll.topAnchor constraintEqualToAnchor:_versionsLabel.bottomAnchor constant:4],
         [_versionsScroll.leadingAnchor constraintEqualToAnchor:contentView.leadingAnchor],
         [_versionsScroll.trailingAnchor constraintEqualToAnchor:contentView.trailingAnchor],
-        [_versionsScroll.heightAnchor constraintEqualToConstant:120],
+        // Flexible height: the panel chain is all fixed sizes, so a hard 120pt
+        // here over-constrains short (landscape) panels and Auto Layout breaks
+        // the top anchor instead, leaving a gap under the header. Letting the
+        // scroll absorb the slack keeps the list flush and scrollable.
+        [_versionsScroll.heightAnchor constraintGreaterThanOrEqualToConstant:80],
 
         // Pin to the content guide (not the frame) so short lists stay flush
         // under the header instead of being stretched/centred, and long lists

@@ -18,8 +18,17 @@ extern dispatch_group_t fatalExitGroup;
     // every UIFont created by the launcher respects the user font.
     [FontManager install];
     // Home-screen icon is fixed at build time (APP_ICON / asset catalog).
-    // No runtime icon switching: setAlternateIconName with names missing
-    // from Info.plist silently reverted to the wrong default icon.
+    // No runtime icon switching anymore: an alternate icon chosen by an older
+    // build stays memoized by SpringBoard across updates, so devices that used
+    // it (e.g. the purple Amethyst-looking one) must be reset to the primary
+    // icon declared in the current build.
+    if (@available(iOS 10.3, *)) {
+        if (UIApplication.sharedApplication.alternateIconName != nil) {
+            [UIApplication.sharedApplication setAlternateIconName:nil completionHandler:^(NSError *error) {
+                if (error) NSLog(@"[Icon] reset to primary failed: %@", error);
+            }];
+        }
+    }
     // Tạo flag file để phát hiện crash ra màn hình chính (nếu app crash, file sẽ còn lại)
     const char *home = getenv("POJAV_HOME");
     if (home) {

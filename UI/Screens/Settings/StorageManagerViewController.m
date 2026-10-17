@@ -46,8 +46,10 @@ typedef NS_ENUM(NSInteger, StorageRowKind) {
 
 - (void)viewDidLoad {
     [super viewDidLoad];
+    // Opaque base under the frost: without this the previous screen shows
+    // through the pushed page.
+    self.view.backgroundColor = ThemeManager.shared.contentBackgroundColor;
     [AmethystBlurView installInView:self.view];
-    self.view.backgroundColor = [UIColor clearColor];
     [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(onTheme) name:ThemeDidChangeNotification object:nil];
 
     _tableView = [[UITableView alloc] initWithFrame:CGRectZero style:UITableViewStyleInsetGrouped];
@@ -71,7 +73,7 @@ typedef NS_ENUM(NSInteger, StorageRowKind) {
 }
 
 - (void)onTheme {
-    self.view.backgroundColor = [UIColor clearColor];
+    self.view.backgroundColor = ThemeManager.shared.contentBackgroundColor;
     [_tableView reloadData];
 }
 
