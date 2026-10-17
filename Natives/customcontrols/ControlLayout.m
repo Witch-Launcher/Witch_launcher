@@ -24,7 +24,7 @@
 - (void)loadControlFile:(NSString *)name {
     [self removeAllButtons];
 
-    NSString *controlFilePath = [NSString stringWithFormat:@"%s/controlmap/%@", getenv("POJAV_HOME"), name];
+    NSString *controlFilePath = amethyst_hidden_path([NSString stringWithFormat:@"controlmap/%@", name]);
 
     self.layoutDictionary = parseJSONFromFile(controlFilePath);
     if (self.layoutDictionary[@"NSErrorObject"] != nil) {

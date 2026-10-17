@@ -2,6 +2,7 @@
 #import "LauncherPreferences.h"
 #import "config.h"
 #import "AppSheet.h"
+#import "utils.h"
 #import <objc/runtime.h>
 
 @implementation WitchReleaseAsset
@@ -225,19 +226,19 @@
             return;
         }
         NSString *ext = asset.name.pathExtension.length ? asset.name.pathExtension : @"ipa";
-        NSString *dest = [NSTemporaryDirectory() stringByAppendingPathComponent:[NSString stringWithFormat:@"Witch-update-%@.%@", [[NSUUID UUID] UUIDString], ext]];
-        // Move to a stable path keeping original filename for share sheet clarity
-        NSString *named = [NSTemporaryDirectory() stringByAppendingPathComponent:asset.name];
+        // Persistent hidden location: NSTemporaryDirectory gets purged, and the
+        // launcher-files page lists/re-shares these installers later, so store
+        // them in .amethyst/updates with the release filename intact.
+        NSString *updatesDir = amethyst_hidden_dir(@"updates");
+        NSString *named = asset.name.length > 0
+            ? [updatesDir stringByAppendingPathComponent:asset.name]
+            : [updatesDir stringByAppendingPathComponent:[NSString stringWithFormat:@"Witch-update-%@.%@", [[NSUUID UUID] UUIDString], ext]];
         [[NSFileManager defaultManager] removeItemAtPath:named error:nil];
         NSError *me = nil;
-        NSURL *srcURL = tmp;
-        // Prefer original filename
-        [[NSFileManager defaultManager] moveItemAtURL:srcURL toURL:[NSURL fileURLWithPath:named] error:&me];
-        NSURL *finalURL = me ? [NSURL fileURLWithPath:dest] : [NSURL fileURLWithPath:named];
-        if (me) {
-            [[NSFileManager defaultManager] moveItemAtURL:srcURL toURL:finalURL error:nil];
-        }
-        dispatch_async(dispatch_get_main_queue(), ^{ completion(finalURL, nil); });
+        [[NSFileManager defaultManager] moveItemAtURL:tmp toURL:[NSURL fileURLWithPath:named] error:&me];
+        NSURL *finalURL = me ? nil : [NSURL fileURLWithPath:named];
+        if (me) NSLog(@"[WitchUpdate] move download failed: %@", me);
+        dispatch_async(dispatch_get_main_queue(), ^{ completion(finalURL, me); });
     }];
     // Progress via KVO is overkill; poll countOfBytesReceived for UI that passes progress block.
     // Simple: report indeterminate 0.1 then 1.0 on completion; caller shows spinner.

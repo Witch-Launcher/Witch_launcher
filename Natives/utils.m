@@ -632,3 +632,78 @@ BOOL DeviceNeedsDebugJITMapping(void) {
 BOOL JIT26IsLikelyDebuggerKeepAttached(void) {
     return processIsCurrentlyDebugged();
 }
+
+#pragma mark - Hidden home (.amethyst)
+
+static NSString *amethyst_hidden_root(void) {
+    const char *home = getenv("POJAV_HOME");
+    if (!home) return nil;
+    NSString *root = [@(home) stringByAppendingPathComponent:@".amethyst"];
+    [[NSFileManager defaultManager] createDirectoryAtPath:root withIntermediateDirectories:YES attributes:nil error:nil];
+    return root;
+}
+
+NSString *amethyst_hidden_path(NSString *subpath) {
+    NSString *root = amethyst_hidden_root();
+    if (!root) return nil;
+    if (subpath.length == 0) return root;
+    return [root stringByAppendingPathComponent:subpath];
+}
+
+NSString *amethyst_hidden_dir(NSString *subpath) {
+    NSString *path = amethyst_hidden_path(subpath);
+    if (path.length > 0) {
+        [[NSFileManager defaultManager] createDirectoryAtPath:path withIntermediateDirectories:YES attributes:nil error:nil];
+    }
+    return path;
+}
+
+static void amethyst_move_legacy_item(NSString *root, NSString *hidden, NSString *name) {
+    NSFileManager *fm = [NSFileManager defaultManager];
+    NSString *from = [root stringByAppendingPathComponent:name];
+    NSString *to = [hidden stringByAppendingPathComponent:name];
+    if (![fm fileExistsAtPath:from]) return;
+    if ([fm fileExistsAtPath:to]) return; // new location already populated
+    NSError *error = nil;
+    if (![fm moveItemAtPath:from toPath:to error:&error]) {
+        NSLog(@"[AmethystHome] migrate %@ failed: %@", name, error);
+    } else {
+        NSLog(@"[AmethystHome] migrated %@ -> .amethyst/%@", name, name);
+    }
+}
+
+void amethyst_migrate_legacy_home(void) {
+    const char *home = getenv("POJAV_HOME");
+    if (!home) return;
+    NSString *root = @(home);
+    NSString *hidden = amethyst_hidden_root();
+    if (!hidden) return;
+    NSFileManager *fm = [NSFileManager defaultManager];
+
+    NSArray<NSString *> *items = @[
+        @"accounts", @"controlmap", @"cursors", @"cursor_types",
+        @"fontconfig", @"MG", @"dh_natives",
+        @"credits_cache.md", @"servers.json",
+        @"amethyst_bg.png", @"amethyst_bg.mp4",
+        @"launcher_preferences_v2.plist",
+    ];
+    for (NSString *name in items) {
+        amethyst_move_legacy_item(root, hidden, name);
+    }
+
+    // The background image preference stores an absolute path; repoint it at
+    // the migrated file so custom backgrounds keep loading.
+    NSString *bgPref = [[NSUserDefaults standardUserDefaults] stringForKey:@"amethyst_bg_image"];
+    if ([bgPref isKindOfClass:NSString.class] && bgPref.length > 0 && ![bgPref containsString:@"/.amethyst/"]) {
+        NSString *newPath = [hidden stringByAppendingPathComponent:bgPref.lastPathComponent];
+        if ([fm fileExistsAtPath:newPath]) {
+            [[NSUserDefaults standardUserDefaults] setObject:newPath forKey:@"amethyst_bg_image"];
+        }
+    }
+
+    // Obsolete staging folders: old runtime staging and JNA temp copies are
+    // recreated under their new hidden locations on demand.
+    for (NSString *name in @[@"runtimes", @"jna_tmp"]) {
+        [fm removeItemAtPath:[root stringByAppendingPathComponent:name] error:nil];
+    }
+}

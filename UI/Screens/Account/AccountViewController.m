@@ -441,9 +441,7 @@ extern NSString *ELY_OAUTH_REDIRECT_URI;
 
 - (void)loadAccounts {
     _accountsArray = [NSMutableArray array];
-    NSString *gameDir = [NSString stringWithUTF8String:getenv("POJAV_HOME")];
-    if (gameDir.length == 0) gameDir = NSTemporaryDirectory();
-    NSString *accountDir = [gameDir stringByAppendingPathComponent:@"accounts"];
+    NSString *accountDir = amethyst_hidden_dir(@"accounts");
     NSFileManager *fm = [NSFileManager defaultManager];
     NSArray *files = [fm contentsOfDirectoryAtPath:accountDir error:nil];
     for (NSString *file in files) {
@@ -654,9 +652,7 @@ extern NSString *ELY_OAUTH_REDIRECT_URI;
 
 - (void)deleteAccountAtIndex:(NSInteger)index {
     NSDictionary *account = _accountsArray[index];
-    NSString *gameDir2 = [NSString stringWithUTF8String:getenv("POJAV_HOME")];
-    if (gameDir2.length == 0) gameDir2 = NSTemporaryDirectory();
-    NSString *path = [gameDir2 stringByAppendingPathComponent:[NSString stringWithFormat:@"accounts/%@.json", account[@"username"]]];
+    NSString *path = amethyst_hidden_path([NSString stringWithFormat:@"accounts/%@.json", account[@"username"]]);
     [[NSFileManager defaultManager] removeItemAtPath:path error:nil];
 
     if ([account[@"username"] isEqualToString:getPrefObject(@"internal.selected_account")]) {

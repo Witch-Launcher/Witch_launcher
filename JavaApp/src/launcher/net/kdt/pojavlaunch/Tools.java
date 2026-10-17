@@ -938,8 +938,12 @@ createLibraryInfo(libItem);
             return null;
         }
 
-        // Extract library to app's Documents directory (persistent, signable)
-        File extractDir = new File(DIR_APP_DATA, "dh_natives");
+        // Extract library to the hidden app data directory (persistent, signable)
+        String hiddenHome = System.getenv("POJAV_HIDDEN_HOME");
+        if (hiddenHome == null || hiddenHome.isEmpty()) {
+            hiddenHome = DIR_APP_DATA + "/.amethyst";
+        }
+        File extractDir = new File(hiddenHome, "dh_natives");
         if (!extractDir.exists()) {
             extractDir.mkdirs();
         }

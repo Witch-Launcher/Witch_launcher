@@ -1,6 +1,11 @@
 #import <UIKit/UIKit.h>
 
 extern NSString * const ThemeDidChangeNotification;
+// Posted instead of ThemeDidChangeNotification while the user drags the
+// shell border sliders: only the root shell listens, so redrawing the
+// outline stays cheap. A coalesced full theme broadcast follows shortly
+// after the interaction settles.
+extern NSString * const ShellBorderDidChangeNotification;
 
 @interface ThemeManager : NSObject
 
@@ -54,6 +59,7 @@ extern NSString * const ThemeDidChangeNotification;
 - (void)applyThemeToAllWindows;
 - (void)resetAppearance;
 - (void)broadcastThemeChange;
+- (void)notifyShellBorderChange;
 - (void)updateBackgroundBlur;
 - (void)applyBorderStyleToAllWindows;
 - (BOOL)isDarkMode;

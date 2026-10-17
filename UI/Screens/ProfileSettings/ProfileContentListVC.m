@@ -178,7 +178,7 @@ typedef NS_ENUM(NSInteger, ProfileListFilter) {
         [_emptyLabel.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor constant:-40],
     ]];
     [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(onTheme) name:ThemeDidChangeNotification object:nil];
-    [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(onExternalChange) name:InstalledModsDidChangeNotification object:nil];
+    [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(onExternalChange:) name:InstalledModsDidChangeNotification object:nil];
     [self onTheme];
 }
 
@@ -226,7 +226,17 @@ typedef NS_ENUM(NSInteger, ProfileListFilter) {
     [_tableView reloadData];
 }
 
-- (void)onExternalChange { [self reloadContent]; }
+- (void)onExternalChange:(NSNotification *)note {
+    NSString *reason = note.userInfo[@"reason"];
+    if ([reason isEqualToString:@"enabled"]) {
+        // Toggle on/off: manifest, enrichment and update results are still
+        // valid — just re-evaluate visibility. Reloading here re-parsed every
+        // archive and froze the UI on large profiles.
+        [self applyFilter];
+        return;
+    }
+    [self reloadContent];
+}
 
 - (void)dealloc { [[NSNotificationCenter defaultCenter] removeObserver:self]; }
 
@@ -494,7 +504,8 @@ typedef NS_ENUM(NSInteger, ProfileListFilter) {
     if (!ok) {
         [ErrorPresenter showFileError:enabled ? @"Enable" : @"Disable" path:base error:nil];
     }
-    // setEnabled posts InstalledModsDidChangeNotification -> onExternalChange reloads.
+    // setEnabled posts InstalledModsDidChangeNotification (reason "enabled")
+    // -> onExternalChange skips the heavy reload and just re-applies the filter.
 }
 
 #pragma mark - Import / share / rename / delete / browse

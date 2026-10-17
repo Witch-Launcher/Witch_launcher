@@ -227,13 +227,12 @@ void init_redirectStdio() {
 }
 
 void init_setupAccounts() {
-    NSString *controlPath = [@(getenv("POJAV_HOME")) stringByAppendingPathComponent:@"accounts"];
+    NSString *controlPath = amethyst_hidden_dir(@"accounts");
     [fm createDirectoryAtPath:controlPath withIntermediateDirectories:NO attributes:nil error:nil];
 }
 
 void init_setupCustomControls() {
-    NSString *controlPath = [@(getenv("POJAV_HOME")) stringByAppendingPathComponent:@"controlmap"];
-    [fm createDirectoryAtPath:controlPath withIntermediateDirectories:NO attributes:nil error:nil];
+    NSString *controlPath = amethyst_hidden_dir(@"controlmap");
     generateAndSaveDefaultControl();
     NSString *gamepadControlPath = [controlPath stringByAppendingPathComponent:@"gamepads"];
     [fm createDirectoryAtPath:gamepadControlPath withIntermediateDirectories:NO attributes:nil error:nil];
@@ -330,6 +329,13 @@ int main(int argc, char *argv[]) {
     init_setupHomeDirectory();
     init_redirectStdio();
     init_logDeviceAndVer(argv[0]);
+
+    // Move launcher-owned files into POJAV_HOME/.amethyst before anything
+    // reads them (prefs, accounts, control maps, caches).
+    amethyst_migrate_legacy_home();
+    // The embedded JVM (JavaApp sources) derives jna_tmp/dh_natives from
+    // this env var; keep both sides on the same hidden location.
+    setenv("POJAV_HIDDEN_HOME", amethyst_hidden_dir(nil).UTF8String, 1);
 
     loadPreferences(NO);
     init_hookFunctions();

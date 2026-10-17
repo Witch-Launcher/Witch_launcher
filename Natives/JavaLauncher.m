@@ -108,7 +108,7 @@ void init_loadDefaultEnv() {
 
     // Point fontconfig to the app's bundled config directory so X11FontManager
     // doesn't search the macOS Fontconfig.framework path (which doesn't exist on iOS).
-    NSString *fcDir = [NSString stringWithFormat:@"%s/fontconfig", getenv("POJAV_HOME")];
+    NSString *fcDir = amethyst_hidden_dir(@"fontconfig");
     [fm createDirectoryAtPath:[fcDir stringByAppendingPathComponent:@"conf.d"]
         withIntermediateDirectories:YES attributes:nil error:nil];
     // Create a minimal fonts.conf so fontconfig initializes without errors
@@ -193,7 +193,7 @@ void init_loadMobileGluesConfig() {
         return;
     }
 
-    NSString *mgDirPath = [NSString stringWithFormat:@"%s/MG", getenv("POJAV_HOME")];
+    NSString *mgDirPath = amethyst_hidden_dir(@"MG");
     setenv("MG_DIR_PATH", mgDirPath.UTF8String, 1);
 
     NSMutableDictionary *config = [NSMutableDictionary dictionary];
@@ -1012,7 +1012,7 @@ int launchJVMWithArgs(NSString *username, id launchTarget, int width, int height
     // JNA on iOS must load libjnidispatch from jna.boot.library.path
     // (jna.nosys=true), so pre-copy the bundled 5.13.0 dylib into jna_tmp.
     // POJAV_HOME/jna_tmp is what PojavLauncher.main points jna.boot.library.path at.
-    NSString *jnaTmpDir = [NSString stringWithFormat:@"%s/jna_tmp", getenv("POJAV_HOME")];
+    NSString *jnaTmpDir = amethyst_hidden_dir(@"jna_tmp");
     [fm createDirectoryAtPath:jnaTmpDir withIntermediateDirectories:YES attributes:nil error:nil];
     NSString *jnidispatchSrc = [NSBundle.mainBundle.bundlePath stringByAppendingPathComponent:@"Frameworks/libjnidispatch.dylib"];
     NSString *jnidispatchDst = [jnaTmpDir stringByAppendingPathComponent:@"libjnidispatch.dylib"];
@@ -1342,7 +1342,7 @@ static BOOL instanceHasTouchControllerMod(NSString *gameDir) {
 static void checkAndAddDhNativeLibPath(NSString *versionId) {
     if (!versionId) return;
     
-    NSString *extractDir = [NSString stringWithFormat:@"%s/dh_natives", getenv("POJAV_HOME")];
+    NSString *extractDir = amethyst_hidden_path(@"dh_natives");
     NSString *targetLibPath = [extractDir stringByAppendingPathComponent:@"libzstd-jni_dh-1.5.7-6.dylib"];
     
     NSFileManager *fileManager = [NSFileManager defaultManager];

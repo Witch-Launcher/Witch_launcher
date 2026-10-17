@@ -1,6 +1,8 @@
 #import "DownloadManager.h"
 #import "VersionDirectoryManager.h"
 #import "AFNetworking.h"
+#import "UnzipKit.h"
+#import "utils.h"
 
 NSString * const DownloadTasksDidChangeNotification = @"DownloadTasksDidChangeNotification";
 
@@ -131,11 +133,48 @@ NSString * const DownloadTasksDidChangeNotification = @"DownloadTasksDidChangeNo
 
 - (void)downloadMap:(NSString *)url name:(NSString *)name version:(NSString *)version completion:(void(^)(BOOL, NSError *))completion {
     NSString *savesDir = [VersionDirectoryManager.shared savesPathForVersion:version];
-    NSString *targetPath = [savesDir stringByAppendingPathComponent:name];
-    if (![targetPath hasSuffix:@".zip"]) {
-        targetPath = [targetPath stringByAppendingPathExtension:@"zip"];
+    NSString *fileName = name.length > 0 ? name : @"world";
+    if (![fileName hasSuffix:@".zip"]) fileName = [fileName stringByAppendingPathExtension:@"zip"];
+    // Fixed destination: unlike downloadToPath we must know exactly where the
+    // zip landed so we can unpack and remove it afterwards.
+    NSString *zipPath = [savesDir stringByAppendingPathComponent:fileName];
+
+    NSURL *downloadURL = [NSURL URLWithString:url ?: @""];
+    if (!downloadURL) {
+        if (completion) completion(NO, [NSError errorWithDomain:@"DownloadManager" code:-1 userInfo:@{NSLocalizedDescriptionKey: @"Invalid URL"}]);
+        return;
     }
-    [self downloadToPath:url targetPath:targetPath completion:completion];
+
+    NSFileManager *fm = [NSFileManager defaultManager];
+    [fm createDirectoryAtPath:savesDir withIntermediateDirectories:YES attributes:nil error:nil];
+    [fm removeItemAtPath:zipPath error:nil];
+
+    NSURLRequest *request = [NSURLRequest requestWithURL:downloadURL];
+    NSURLSessionDownloadTask *task = [[AFHTTPSessionManager manager] downloadTaskWithRequest:request progress:nil destination:^NSURL *(NSURL *targetPath_, NSURLResponse *response) {
+        return [NSURL fileURLWithPath:zipPath];
+    } completionHandler:^(NSURLResponse *response, NSURL *filePath, NSError *error) {
+        if (error) {
+            if (completion) completion(NO, error);
+            return;
+        }
+        // Unpack off the main thread: large worlds would freeze the UI.
+        dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+            NSError *unpackError = nil;
+            NSString *fallback = [fileName stringByDeletingPathExtension];
+            BOOL ok = [DownloadManager installWorldArchiveAtPath:zipPath savesDir:savesDir fallbackName:fallback error:&unpackError];
+            if (!ok) {
+                NSLog(@"[DownloadManager] world unpack failed for %@: %@", zipPath, unpackError);
+                // Keep the zip so the user still has the download; surface why.
+                NSError *report = unpackError ?: [NSError errorWithDomain:@"DownloadManager" code:-3
+                                                                    userInfo:@{NSLocalizedDescriptionKey: localize(@"map.unpack_failed", nil)}];
+                dispatch_async(dispatch_get_main_queue(), ^{ if (completion) completion(NO, report); });
+                return;
+            }
+            [fm removeItemAtPath:zipPath error:nil];
+            dispatch_async(dispatch_get_main_queue(), ^{ if (completion) completion(YES, nil); });
+        });
+    }];
+    [task resume];
 }
 
 - (void)downloadToPath:(NSString *)urlString targetPath:(NSString *)targetPath completion:(void(^)(BOOL, NSError *))completion {
@@ -161,6 +200,95 @@ NSString * const DownloadTasksDidChangeNotification = @"DownloadTasksDidChangeNo
         }
     }];
     [task resume];
+}
+
+#pragma mark - World unpack
+
++ (NSString *)uniqueWorldDirInSaves:(NSString *)savesDir preferredName:(NSString *)preferred {
+    NSFileManager *fm = [NSFileManager defaultManager];
+    NSString *name = preferred.length > 0 ? preferred : @"World";
+    NSString *candidate = [savesDir stringByAppendingPathComponent:name];
+    NSInteger n = 2;
+    while ([fm fileExistsAtPath:candidate] && n <= 99) {
+        candidate = [savesDir stringByAppendingPathComponent:[NSString stringWithFormat:@"%@ (%ld)", name, (long)n]];
+        n++;
+    }
+    return candidate;
+}
+
++ (BOOL)installWorldArchiveAtPath:(NSString *)archivePath
+                         savesDir:(NSString *)savesDir
+                     fallbackName:(NSString *)fallbackName
+                            error:(NSError **)error {
+    if (archivePath.length == 0 || savesDir.length == 0) {
+        if (error) *error = [NSError errorWithDomain:@"DownloadManager" code:-2
+                                               userInfo:@{NSLocalizedDescriptionKey: localize(@"map.unpack_failed", nil)}];
+        return NO;
+    }
+    UZKArchive *archive = [[UZKArchive alloc] initWithPath:archivePath error:error];
+    if (!archive) return NO;
+    NSArray<NSString *> *names = [archive listFilenames:error];
+    if (![names isKindOfClass:[NSArray class]]) return NO;
+
+    // Find the shallowest level.dat (root or inside a wrapper folder).
+    NSString *levelEntry = nil;
+    NSInteger levelDepth = NSIntegerMax;
+    for (NSString *n in names) {
+        if ([n hasSuffix:@"/"]) continue;
+        if ([[n.lastPathComponent lowercaseString] isEqualToString:@"level.dat"]) {
+            NSInteger depth = [n componentsSeparatedByString:@"/"].count;
+            if (depth < levelDepth) {
+                levelDepth = depth;
+                levelEntry = n;
+            }
+        }
+    }
+    if (!levelEntry) {
+        if (error) *error = [NSError errorWithDomain:@"DownloadManager" code:-2
+                                               userInfo:@{NSLocalizedDescriptionKey: localize(@"map.unpack_no_level", nil)}];
+        return NO;
+    }
+
+    NSFileManager *fm = [NSFileManager defaultManager];
+    [fm createDirectoryAtPath:savesDir withIntermediateDirectories:YES attributes:nil error:nil];
+
+    if (levelDepth == 1) {
+        // level.dat at the archive root: the whole zip *is* the world.
+        NSString *name = [fallbackName stringByDeletingPathExtension];
+        name = [name stringByReplacingOccurrencesOfString:@"/" withString:@"-"];
+        NSString *dest = [self uniqueWorldDirInSaves:savesDir preferredName:name];
+        [fm createDirectoryAtPath:dest withIntermediateDirectories:YES attributes:nil error:nil];
+        if (![archive extractFilesTo:dest overwrite:YES error:error]) {
+            [fm removeItemAtPath:dest error:nil];
+            return NO;
+        }
+        return YES;
+    }
+
+    // Wrapped in a top-level folder: keep the folder's own name. When that
+    // name is taken, unpack to a temp dir and move the folder under a
+    // uniquified name.
+    NSString *topDir = [levelEntry componentsSeparatedByString:@"/"].firstObject;
+    NSString *topDest = [savesDir stringByAppendingPathComponent:topDir];
+    if (![fm fileExistsAtPath:topDest]) {
+        return [archive extractFilesTo:savesDir overwrite:YES error:error];
+    }
+    NSString *unique = [self uniqueWorldDirInSaves:savesDir preferredName:topDir];
+    NSString *tmpDir = [NSTemporaryDirectory() stringByAppendingPathComponent:
+                        [NSString stringWithFormat:@"amethyst-world-%@", NSUUID.UUID.UUIDString]];
+    [fm createDirectoryAtPath:tmpDir withIntermediateDirectories:YES attributes:nil error:nil];
+    if (![archive extractFilesTo:tmpDir overwrite:YES error:error]) {
+        [fm removeItemAtPath:tmpDir error:nil];
+        return NO;
+    }
+    NSError *moveError = nil;
+    if (![fm moveItemAtPath:[tmpDir stringByAppendingPathComponent:topDir] toPath:unique error:&moveError]) {
+        if (error) *error = moveError;
+        [fm removeItemAtPath:tmpDir error:nil];
+        return NO;
+    }
+    [fm removeItemAtPath:tmpDir error:nil];
+    return YES;
 }
 
 @end

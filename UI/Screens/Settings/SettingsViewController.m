@@ -10,10 +10,12 @@
 #import "CustomControlsViewController.h"
 #import "AmethystBlurView.h"
 #import "AppSheet.h"
+#import "FontManager.h"
 #import <PhotosUI/PhotosUI.h>
 #import <UniformTypeIdentifiers/UniformTypeIdentifiers.h>
 
 @interface SettingsViewController () <UITableViewDelegate, UITableViewDataSource, UIScrollViewDelegate, UIColorPickerViewControllerDelegate, UINavigationControllerDelegate, UIImagePickerControllerDelegate, PHPickerViewControllerDelegate, UIDocumentPickerDelegate, UISearchBarDelegate>
+@property (nonatomic) BOOL importingFont;
 @property (nonatomic) NSArray *sections;
 @property (nonatomic) UIScrollView *tabBarScroll;
 @property (nonatomic) NSLayoutConstraint *tabWidthConstraint;
@@ -77,6 +79,7 @@
             @{@"type": @"navigate", @"label": localize(@"preference.title.manage_runtime", nil) , @"vc": @"LauncherPrefManageJREViewController"},
             @{@"type": @"navigate", @"label": @"Cập nhật Launcher (Beta/Stable)", @"vc": @"LauncherUpdateViewController"},
             @{@"type": @"navigate", @"label": @"Tải Runtime JDK/LWJGL", @"vc": @"RuntimeDownloadViewController"},
+            @{@"type": @"navigate", @"label": localize(@"settings.storage", nil), @"vc": @"StorageManagerViewController"},
             @{@"type": @"picker", @"label": @"Kênh cập nhật", @"key": @"launcher.update_channel", @"options": @[
                 @{@"key": @"0", @"name": @"Tự động"},
                 @{@"key": @"1", @"name": @"Beta (pre-release)"},
@@ -253,6 +256,7 @@
             @{@"type": @"color", @"label": localize(@"appearance.right_panel_color", nil), @"key": @"amethyst_rightpanel_bg_color"},
             @{@"type": @"color", @"label": localize(@"appearance.content_card_color", nil), @"key": @"amethyst_card_bg_color"},
             @{@"type": @"image", @"label": localize(@"appearance.background", nil)},
+            @{@"type": @"font", @"label": localize(@"appearance.launcher_font", nil)},
             @{@"type": @"slider", @"label": localize(@"appearance.ui_opacity", nil), @"key": @"amethyst_ui_opacity", @"min": @0, @"max": @100, @"suffix": @"%"},
             @{@"type": @"slider", @"label": localize(@"appearance.background_blur", nil), @"key": @"amethyst_bg_blur", @"min": @0, @"max": @20, @"suffix": @""},
             @{@"type": @"slider", @"label": localize(@"appearance.ui_panels_blur", nil), @"key": @"amethyst_settings_blur", @"min": @0, @"max": @100, @"suffix": @"%"},
@@ -941,6 +945,14 @@
             cell.textLabel.textColor = ThemeManager.shared.primaryTextColor;
             cell.detailTextLabel.textColor = ThemeManager.shared.accentColor;
             cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
+        } else if ([type isEqualToString:@"font"]) {
+            cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleValue1 reuseIdentifier:cellId];
+            cell.textLabel.font = [UIFont systemFontOfSize:15];
+            cell.detailTextLabel.font = [UIFont systemFontOfSize:14];
+            cell.backgroundColor = ThemeManager.shared.cardBackgroundColor;
+            cell.textLabel.textColor = ThemeManager.shared.primaryTextColor;
+            cell.detailTextLabel.textColor = ThemeManager.shared.accentColor;
+            cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
         } else if ([type isEqualToString:@"text"]) {
             cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleDefault reuseIdentifier:cellId];
             cell.backgroundColor = ThemeManager.shared.cardBackgroundColor;
@@ -1034,7 +1046,7 @@
 
     cell.textLabel.text = nil;
     cell.detailTextLabel.text = nil;
-    if ([type isEqualToString:@"switch"] || [type isEqualToString:@"picker"] || [type isEqualToString:@"navigate"] || [type isEqualToString:@"color"] || [type isEqualToString:@"image"] || [type isEqualToString:@"export"] || [type isEqualToString:@"import"] || [type isEqualToString:@"credit"] || [type isEqualToString:@"author"] || [type isEqualToString:@"link"] || [type isEqualToString:@"label"]) {
+    if ([type isEqualToString:@"switch"] || [type isEqualToString:@"picker"] || [type isEqualToString:@"navigate"] || [type isEqualToString:@"color"] || [type isEqualToString:@"image"] || [type isEqualToString:@"export"] || [type isEqualToString:@"import"] || [type isEqualToString:@"credit"] || [type isEqualToString:@"author"] || [type isEqualToString:@"link"] || [type isEqualToString:@"label"] || [type isEqualToString:@"font"]) {
         cell.textLabel.text = item[@"label"];
     }
 
@@ -1053,6 +1065,9 @@
             }
         }
         cell.detailTextLabel.text = display;
+        cell.accessoryView = nil;
+    } else if ([type isEqualToString:@"font"]) {
+        cell.detailTextLabel.text = [FontManager shared].displayName;
         cell.accessoryView = nil;
     } else if ([type isEqualToString:@"switch"]) {
         UISwitch *sw = (UISwitch *)cell.accessoryView;
@@ -1162,6 +1177,8 @@
         // Direct inline edit: dialog-based types open right here, no page jump.
         if ([type isEqualToString:@"picker"]) {
             [self showPickerForItem:item fromTable:_searchResultsTable];
+        } else if ([type isEqualToString:@"font"]) {
+            [self showFontMenu];
         } else if ([type isEqualToString:@"color"]) {
             if ([item[@"key"] isEqualToString:@"amethyst_reset_appearance"]) [self resetAppearance];
             else [self showColorPickerForKey:item[@"key"] label:item[@"label"]];
@@ -1213,6 +1230,8 @@
         }
     } else if ([type isEqualToString:@"image"]) {
         [self showImagePicker];
+    } else if ([type isEqualToString:@"font"]) {
+        [self showFontMenu];
     } else if ([type isEqualToString:@"export"]) {
         [self exportAppearance];
     } else if ([type isEqualToString:@"import"]) {
@@ -1221,6 +1240,50 @@
 }
 
 #pragma mark - Actions
+
+- (void)showFontMenu {
+    FontManager *fm = [FontManager shared];
+    NSMutableArray *opts = [NSMutableArray array];
+    [opts addObject:@{@"title": localize(@"appearance.font_pick", nil), @"icon": @"textformat.size"}];
+    if (fm.isEnabled) {
+        [opts addObject:@{@"title": localize(@"appearance.font_default", nil), @"icon": @"arrow.counterclockwise"}];
+    }
+    [opts addObject:@{@"title": localize(@"Done", nil), @"icon": @"checkmark"}];
+    __weak typeof(self) weakSelf = self;
+    [AppSheet showOptionsWithTitle:localize(@"appearance.launcher_font", nil)
+                           message:fm.isEnabled ? fm.displayName : nil
+                           options:opts
+                     selectedIndex:(fm.isEnabled ? 1 : 0)
+                         selection:^(NSInteger idx) {
+        if (idx == 0) {
+            [weakSelf presentFontPicker];
+        } else if (idx == 1 && fm.isEnabled) {
+            [fm useSystemFont];
+            [HapticManager.shared play:HapticTypeLight];
+            [weakSelf reloadTables];
+        }
+    }];
+}
+
+- (void)presentFontPicker {
+    self.importingFont = YES;
+    if (@available(iOS 14.0, *)) {
+        NSMutableArray<UTType *> *types = [NSMutableArray array];
+        UTType *ttf = [UTType typeWithIdentifier:@"public.truetype-font"];
+        UTType *otf = [UTType typeWithIdentifier:@"public.opentype-font"];
+        if (ttf) [types addObject:ttf];
+        if (otf) [types addObject:otf];
+        if (types.count == 0) [types addObject:UTTypeData];
+        UIDocumentPickerViewController *picker = [[UIDocumentPickerViewController alloc] initForOpeningContentTypes:types];
+        picker.delegate = self;
+        picker.allowsMultipleSelection = NO;
+        [self presentViewController:picker animated:YES completion:nil];
+    } else {
+        UIDocumentPickerViewController *picker = [[UIDocumentPickerViewController alloc] initWithDocumentTypes:@[@"public.data"] inMode:UIDocumentPickerModeImport];
+        picker.delegate = self;
+        [self presentViewController:picker animated:YES completion:nil];
+    }
+}
 
 - (void)showCreditForItem:(NSDictionary *)item {
     NSMutableArray *opts = [NSMutableArray array];
@@ -1310,8 +1373,9 @@
     setPrefBool(item[@"key"], sender.on);
     if ([item[@"key"] isEqualToString:@"amethyst_ui_border_enabled"]) {
         // UI border lives in NSUserDefaults (ThemeManager reads it from there).
+        // The setter posts a targeted shell notification plus one coalesced
+        // full broadcast; an extra direct post here caused a double relayout.
         ThemeManager.shared.uiBorderEnabled = sender.on;
-        [[NSNotificationCenter defaultCenter] postNotificationName:ThemeDidChangeNotification object:nil];
     } else if ([item[@"key"] isEqualToString:@"java.auto_ram"]) {
         if (!sender.on) {
             CGFloat autoRatio = getEntitlementValue(@"com.apple.private.memorystatus") ? 0.4 : 0.25;
@@ -1352,9 +1416,9 @@
     } else if ([item[@"key"] isEqualToString:@"amethyst_ui_opacity"]) {
         ThemeManager.shared.uiOpacity = val / 100.0;
     } else if ([item[@"key"] isEqualToString:@"amethyst_ui_border_radius"]) {
+        // Setter persists, posts the targeted shell notification and
+        // schedules one coalesced full broadcast — no extra debounce needed.
         ThemeManager.shared.uiBorderCornerRadius = val;
-        [[NSUserDefaults standardUserDefaults] synchronize];
-        [self broadcastThemeDebounced];
     } else if ([item[@"key"] isEqualToString:@"amethyst_ui_border_width"]) {
         // Shell outline thickness: ThemeManager stores it and broadcasts, and
         // updateShellBorderPath reads it back — dragging updates live.
@@ -1587,6 +1651,20 @@
     NSURL *url = urls.firstObject;
     if (!url) return;
 
+    if (self.importingFont) {
+        self.importingFont = NO;
+        NSError *ferr = nil;
+        if ([[FontManager shared] importFontAtURL:url error:&ferr]) {
+            [HapticManager.shared play:HapticTypeSuccess];
+            showDialog(localize(@"appearance.launcher_font", nil), localize(@"appearance.font_imported", nil));
+            [self reloadTables];
+        } else {
+            NSLog(@"[FontManager] import failed for %@: %@", url, ferr);
+            showDialog(localize(@"Error", nil), ferr.localizedDescription ?: localize(@"appearance.font_failed", nil));
+        }
+        return;
+    }
+
     BOOL accessing = [url startAccessingSecurityScopedResource];
     NSData *data = [NSData dataWithContentsOfURL:url options:0 error:nil];
     if (accessing) [url stopAccessingSecurityScopedResource];
@@ -1663,8 +1741,7 @@
         NSData *png = [[NSData alloc] initWithBase64EncodedString:imgB64 options:0];
         UIImage *image = [UIImage imageWithData:png];
         if (image) {
-            NSArray *paths = NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES);
-            NSString *imgPath = [paths.firstObject stringByAppendingPathComponent:@"amethyst_bg.png"];
+            NSString *imgPath = amethyst_hidden_path(@"amethyst_bg.png");
             [UIImagePNGRepresentation(image) writeToFile:imgPath atomically:YES];
             [[NSUserDefaults standardUserDefaults] setObject:imgPath forKey:@"amethyst_bg_image"];
             theme.backgroundImage = image;
@@ -1763,7 +1840,7 @@
     if ([provider hasItemConformingToTypeIdentifier:UTTypeMovie.identifier]) {
         [provider loadFileRepresentationForTypeIdentifier:UTTypeMovie.identifier completionHandler:^(NSURL *url, NSError *error) {
             if (error || !url) return;
-            NSString *destPath = [NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES).firstObject stringByAppendingPathComponent:@"amethyst_bg.mp4"];
+            NSString *destPath = amethyst_hidden_path(@"amethyst_bg.mp4");
             NSFileManager *fm = [NSFileManager defaultManager];
             [fm removeItemAtPath:destPath error:nil];
             BOOL access = [url startAccessingSecurityScopedResource];
@@ -1817,9 +1894,7 @@
 }
 
 - (void)saveBackgroundImage:(UIImage *)image {
-    NSArray *paths = NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES);
-    NSString *docsPath = paths.firstObject;
-    NSString *imgPath = [docsPath stringByAppendingPathComponent:@"amethyst_bg.png"];
+    NSString *imgPath = amethyst_hidden_path(@"amethyst_bg.png");
     [UIImagePNGRepresentation(image) writeToFile:imgPath atomically:YES];
 
     ThemeManager.shared.backgroundImage = image;
@@ -1828,9 +1903,7 @@
 }
 
 - (void)saveBackgroundVideo:(NSURL *)videoURL {
-    NSArray *paths = NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES);
-    NSString *docsPath = paths.firstObject;
-    NSString *destPath = [docsPath stringByAppendingPathComponent:@"amethyst_bg.mp4"];
+    NSString *destPath = amethyst_hidden_path(@"amethyst_bg.mp4");
 
     NSFileManager *fm = [NSFileManager defaultManager];
     [fm removeItemAtPath:destPath error:nil];
@@ -1860,10 +1933,9 @@
     ThemeManager.shared.backgroundImage = nil;
     ThemeManager.shared.backgroundVideoURL = nil;
 
-    NSArray *paths = NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES);
-    NSString *imgPath = [paths.firstObject stringByAppendingPathComponent:@"amethyst_bg.png"];
+    NSString *imgPath = amethyst_hidden_path(@"amethyst_bg.png");
     [[NSFileManager defaultManager] removeItemAtPath:imgPath error:nil];
-    NSString *videoPath = [paths.firstObject stringByAppendingPathComponent:@"amethyst_bg.mp4"];
+    NSString *videoPath = amethyst_hidden_path(@"amethyst_bg.mp4");
     [[NSFileManager defaultManager] removeItemAtPath:videoPath error:nil];
 
     [ThemeManager.shared broadcastThemeChange];

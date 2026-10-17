@@ -33,6 +33,15 @@ typedef NS_ENUM(NSUInteger, DownloadType) {
 - (void)downloadMap:(NSString *)url name:(NSString *)name version:(NSString *)version completion:(void(^)(BOOL success, NSError *error))completion;
 - (void)downloadToPath:(NSString *)url targetPath:(NSString *)targetPath completion:(void(^)(BOOL success, NSError *error))completion;
 
+// Unpacks a world .zip into <savesDir>/<world folder> so Minecraft can see it
+// (a zip sitting in saves/ is invisible to the game). Handles both layouts:
+// level.dat at the archive root, and everything wrapped in one top folder.
+// Returns NO with an error when no level.dat exists anywhere in the archive.
++ (BOOL)installWorldArchiveAtPath:(NSString *)archivePath
+                         savesDir:(NSString *)savesDir
+                     fallbackName:(NSString *)fallbackName
+                            error:(NSError **)error;
+
 // Multi-download hub (top bar progress center). Fully parallel: callers may
 // start any number of tasks and continue using the app.
 - (NSArray<DownloadTask *> *)activeTasks;

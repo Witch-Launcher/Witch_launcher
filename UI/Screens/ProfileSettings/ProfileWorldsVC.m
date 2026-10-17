@@ -9,6 +9,7 @@
 #import "FileBrowserViewController.h"
 #import "AppSheet.h"
 #import "utils.h"
+#import "DownloadManager.h"
 
 @interface ProfileWorldsVC () <UITableViewDelegate, UITableViewDataSource, UIDocumentPickerDelegate>
 @property (nonatomic) UITableView *tableView;
@@ -242,17 +243,41 @@
                                                  (unsigned long)dpNames.count,
                                                  dpNames.count > 0 ? [dpNames componentsJoinedByString:@"\n"] : @"none"]] componentsJoinedByString:@"\n"];
     __weak typeof(self) weakSelf = self;
-    [AppSheet showOptionsWithTitle:w[@"title"] ?: @"World" message:msg options:@[
-        @{@"title": @"Open folder", @"icon": @"folder"},
-        @{@"title": localize(@"Done", nil), @"icon": @"checkmark"},
-    ] selectedIndex:NSNotFound selection:^(NSInteger idx) {
-        if (idx == 0) {
+    BOOL canExtract = !isDir; // old zip imports: offer to install it properly
+    NSMutableArray *opts = [NSMutableArray array];
+    if (canExtract) [opts addObject:@{@"title": localize(@"worlds.extract", nil), @"icon": @"shippingbox"}];
+    [opts addObject:@{@"title": @"Open folder", @"icon": @"folder"}];
+    [opts addObject:@{@"title": localize(@"Done", nil), @"icon": @"checkmark"}];
+    [AppSheet showOptionsWithTitle:w[@"title"] ?: @"World" message:msg options:opts selectedIndex:NSNotFound selection:^(NSInteger idx) {
+        NSInteger folderIdx = canExtract ? 1 : 0;
+        if (canExtract && idx == 0) {
+            [weakSelf extractWorld:w];
+            return;
+        }
+        if (idx == folderIdx) {
             FileBrowserViewController *vc = [[FileBrowserViewController alloc] init];
             vc.rootPath = isDir ? path : [path stringByDeletingLastPathComponent];
             vc.title = @"World files";
             [weakSelf.navigationController pushViewController:vc animated:YES];
         }
     }];
+}
+
+- (void)extractWorld:(NSDictionary *)w {
+    NSString *zipPath = w[@"path"];
+    if (![zipPath isKindOfClass:[NSString class]]) return;
+    NSString *dir = [self savesDir];
+    __weak typeof(self) weakSelf = self;
+    NSError *err = nil;
+    NSString *fallback = [w[@"filename"] isKindOfClass:[NSString class]]
+        ? [(NSString *)w[@"filename"] stringByDeletingPathExtension] : zipPath.lastPathComponent.stringByDeletingPathExtension;
+    if ([DownloadManager installWorldArchiveAtPath:zipPath savesDir:dir fallbackName:fallback error:&err]) {
+        [[NSFileManager defaultManager] removeItemAtPath:zipPath error:nil];
+        [HapticManager.shared play:HapticTypeSuccess];
+        [weakSelf reloadContent];
+    } else {
+        [ErrorPresenter showFileError:@"Import" path:zipPath.lastPathComponent error:err];
+    }
 }
 
 #pragma mark - Import / share / delete / browse
@@ -275,8 +300,23 @@
             NSString *dest = [dir stringByAppendingPathComponent:name];
             [[NSFileManager defaultManager] removeItemAtPath:dest error:nil];
             NSError *err = nil;
-            if ([[NSFileManager defaultManager] copyItemAtURL:url toURL:[NSURL fileURLWithPath:dest] error:&err]) imported++;
-            else [ErrorPresenter showFileError:@"Import" path:name error:err];
+            if ([[NSFileManager defaultManager] copyItemAtURL:url toURL:[NSURL fileURLWithPath:dest] error:&err]) {
+                // Unpack right away: Minecraft only sees world *folders* with
+                // level.dat, a loose zip in saves/ shows up as nothing.
+                NSError *unpackError = nil;
+                if ([DownloadManager installWorldArchiveAtPath:dest
+                                                      savesDir:dir
+                                                  fallbackName:[name stringByDeletingPathExtension]
+                                                         error:&unpackError]) {
+                    [[NSFileManager defaultManager] removeItemAtPath:dest error:nil];
+                    imported++;
+                } else {
+                    // Keep the zip (listed as archive) and explain the failure.
+                    [ErrorPresenter showFileError:@"Import" path:name error:unpackError];
+                }
+            } else {
+                [ErrorPresenter showFileError:@"Import" path:name error:err];
+            }
         }
         if (accessing) [url stopAccessingSecurityScopedResource];
     }

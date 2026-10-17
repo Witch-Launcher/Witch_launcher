@@ -1,4 +1,5 @@
 #import "CreditsService.h"
+#import "utils.h"
 
 static NSString *const CreditsURLString = @"https://raw.githubusercontent.com/Witch-Launcher/Witch_launcher/refs/heads/main/credits.md";
 static NSString *const CreditsCacheFileName = @"credits_cache.md";
@@ -32,8 +33,7 @@ NSNotificationName const CreditsDidUpdateNotification = @"CreditsDidUpdateNotifi
 }
 
 - (NSString *)cachePath {
-    NSArray *paths = NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES);
-    return [paths.firstObject stringByAppendingPathComponent:CreditsCacheFileName];
+    return amethyst_hidden_path(CreditsCacheFileName);
 }
 
 - (void)refreshIfNeeded {

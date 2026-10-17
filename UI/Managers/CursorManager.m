@@ -1,6 +1,7 @@
 #import "CursorManager.h"
 #import "LauncherPreferences.h"
 #import "WindowsCursorParser.h"
+#import "utils.h"
 #import <ImageIO/ImageIO.h>
 #import <string.h>
 
@@ -24,8 +25,7 @@ static NSString *const kImageGifName = @"image.gif";
 @implementation CursorManager
 
 + (NSString *)cursorsDirectory {
-    NSString *documents = NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES).firstObject;
-    NSString *path = [documents stringByAppendingPathComponent:kCursorsDirName];
+    NSString *path = amethyst_hidden_dir(kCursorsDirName);
     NSFileManager *fm = NSFileManager.defaultManager;
     if (![fm fileExistsAtPath:path]) {
         [fm createDirectoryAtPath:path withIntermediateDirectories:YES attributes:nil error:nil];
@@ -424,8 +424,7 @@ static NSString *const kImageGifName = @"image.gif";
 static NSString *const kCursorTypesDirName = @"cursor_types";
 
 + (NSString *)cursorTypesRootDirectory {
-    NSString *documents = NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES).firstObject;
-    NSString *path = [documents stringByAppendingPathComponent:kCursorTypesDirName];
+    NSString *path = amethyst_hidden_dir(kCursorTypesDirName);
     NSFileManager *fm = NSFileManager.defaultManager;
     if (![fm fileExistsAtPath:path]) {
         [fm createDirectoryAtPath:path withIntermediateDirectories:YES attributes:nil error:nil];

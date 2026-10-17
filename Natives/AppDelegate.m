@@ -2,6 +2,7 @@
 #import "SceneDelegate.h"
 #import "ios_uikit_bridge.h"
 #import "utils.h"
+#import "FontManager.h"
 #import "WitchAppAttest.h"
 
 // SurfaceViewController
@@ -13,6 +14,9 @@ extern dispatch_group_t fatalExitGroup;
 
 
 - (BOOL)application:(UIApplication *)application didFinishLaunchingWithOptions:(NSDictionary *)launchOptions {
+    // Install the custom-font swizzle before any UIKit view is constructed so
+    // every UIFont created by the launcher respects the user font.
+    [FontManager install];
     // Home-screen icon is fixed at build time (APP_ICON / asset catalog).
     // No runtime icon switching: setAlternateIconName with names missing
     // from Info.plist silently reverted to the wrong default icon.

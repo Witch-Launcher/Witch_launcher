@@ -288,7 +288,7 @@
             showDialog(localize(@"custom_controls.control_menu.save.error.json", nil), error.localizedDescription);
             return;
         }
-        BOOL success = [jsonData writeToFile:[NSString stringWithFormat:@"%s/controlmap/%@.json", getenv("POJAV_HOME"), name] options:NSDataWritingAtomic error:&error];
+        BOOL success = [jsonData writeToFile:amethyst_hidden_path([NSString stringWithFormat:@"controlmap/%@.json", name]) options:NSDataWritingAtomic error:&error];
         if (!success) {
             showDialog(localize(@"custom_controls.control_menu.save.error.write", nil), error.localizedDescription);
             return;
@@ -309,7 +309,7 @@
 
 - (void)actionOpenFilePicker:(void (^)(NSString *name))handler {
     FileListViewController *vc = [[FileListViewController alloc] init];
-    vc.listPath = [NSString stringWithFormat:@"%s/controlmap", getenv("POJAV_HOME")];
+    vc.listPath = amethyst_hidden_dir(@"controlmap");
     vc.whenItemSelected = handler;
     vc.modalPresentationStyle = UIModalPresentationPopover;
     vc.preferredContentSize = CGSizeMake(350, 250);

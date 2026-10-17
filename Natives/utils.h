@@ -125,6 +125,17 @@ NSMutableDictionary* parseJSONFromFile(NSString *path);
 NSError* saveJSONToFile(NSDictionary *dict, NSString *path);
 void customNSLog(const char *file, int lineNumber, const char *functionName, NSString *format, ...);
 
+// Launcher-owned support files live in POJAV_HOME/.amethyst so the visible
+// Documents folder only shows the user's game data (mods, worlds, screenshots).
+// Returns POJAV_HOME/.amethyst[/subpath]; the .amethyst folder is created on
+// demand. Use the dir variant when subpath is a folder.
+NSString* amethyst_hidden_path(NSString* subpath);
+NSString* amethyst_hidden_dir(NSString* subpath);
+// One-time migration of legacy root-level items (accounts, controlmap,
+// cursors, caches, background media, prefs) into .amethyst, plus cleanup of
+// obsolete staging folders. Idempotent; call once before loadPreferences().
+void amethyst_migrate_legacy_home(void);
+
 static inline CGFloat clamp(CGFloat x, CGFloat lower, CGFloat upper) {
     return fmin(upper, fmax(x, lower));
 }

@@ -341,7 +341,7 @@ typedef NS_ENUM(NSInteger, ProfileContentFilter) {
     [self showTab:ProfileDetailTabOverview];
     [self loadItemsIfNeeded];
     [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(onTheme) name:ThemeDidChangeNotification object:nil];
-    [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(onModsChanged) name:InstalledModsDidChangeNotification object:nil];
+    [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(onModsChanged:) name:InstalledModsDidChangeNotification object:nil];
     [self onTheme];
 }
 
@@ -568,9 +568,13 @@ typedef NS_ENUM(NSInteger, ProfileContentFilter) {
     [_contentTable reloadData];
 }
 
-- (void)onModsChanged {
+- (void)onModsChanged:(NSNotification *)note {
+    BOOL enabledOnly = [note.userInfo[@"reason"] isEqualToString:@"enabled"];
     [self updateTabCounts];
-    if (_currentTab != ProfileDetailTabOverview) [self loadItemsIfNeeded];
+    // "enabled" only moves a file on/off; the embedded list VCs already
+    // re-apply their filter, so re-loading every tab here was pure overhead
+    // (and re-parsed archives on large profiles).
+    if (!enabledOnly && _currentTab != ProfileDetailTabOverview) [self loadItemsIfNeeded];
     [self refreshHeader];
 }
 

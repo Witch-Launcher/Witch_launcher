@@ -32,7 +32,7 @@ BOOL leftShiftHeld;
     }
     
     NSString *controlFile = [PLProfiles resolveKeyForCurrentProfile:@"defaultGamepadCtrl"];
-    NSString *gamepadPath = [NSString stringWithFormat:@"%s/controlmap/gamepads/%@", getenv("POJAV_HOME"), controlFile];
+    NSString *gamepadPath = amethyst_hidden_path([NSString stringWithFormat:@"controlmap/gamepads/%@", controlFile]);
     NSMutableDictionary *gamepadJSON = parseJSONFromFile(gamepadPath);
     
     gameMap = gamepadJSON[@"mGameMappingList"];

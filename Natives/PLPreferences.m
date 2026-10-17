@@ -252,7 +252,7 @@
 
 - (id)initWithAutomaticMigrator {
     self = [super init];
-    self.globalPath = [@(getenv("POJAV_HOME")) stringByAppendingPathComponent:@"launcher_preferences_v2.plist"];
+    self.globalPath = amethyst_hidden_path(@"launcher_preferences_v2.plist");
     NSMutableDictionary *pref = [NSMutableDictionary dictionaryWithContentsOfFile:self.globalPath];
 
     NSString *oldPath = [@(getenv("POJAV_HOME")) stringByAppendingPathComponent:@"launcher_preferences.plist"];

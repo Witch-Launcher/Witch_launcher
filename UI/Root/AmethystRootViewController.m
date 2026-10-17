@@ -49,6 +49,7 @@
     [super viewDidLoad];
     [self setupViews];
     [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(updateColors) name:ThemeDidChangeNotification object:nil];
+    [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(updateShellBorderPath) name:ShellBorderDidChangeNotification object:nil];
     [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(updateColors) name:AmethystBlurIntensityDidChangeNotification object:nil];
     [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(updateFloatingLaunch) name:DownloadTasksDidChangeNotification object:nil];
     [self updateColors];

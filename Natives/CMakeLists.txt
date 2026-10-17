@@ -323,6 +323,7 @@ egl_bridge.m
 
    # UI
    ../UI/Common/ThemeManager.m
+   ../UI/Common/FontManager.m
    ../UI/Common/MarkdownRenderer.m
    ../UI/Common/MMMarkdown/MMDocument.m
    ../UI/Common/MMMarkdown/MMElement.m
@@ -388,6 +389,7 @@ egl_bridge.m
    ../UI/Screens/Shader/ShaderListViewController.m
    ../UI/Screens/Server/ServerListViewController.m
    ../UI/Screens/Settings/SettingsViewController.m
+   ../UI/Screens/Settings/StorageManagerViewController.m
    ../UI/Screens/Settings/CreditsService.m
     ../UI/Screens/Settings/CursorSettingsViewController.m
     ../UI/Screens/Settings/CursorTypeDetailViewController.m

@@ -42,7 +42,13 @@ public class PojavLauncher {
         // Ensure JNA uses a writable directory with valid code signing support
         String pojavHome = System.getenv("POJAV_HOME");
         if (pojavHome != null) {
-            String jnaTmpDir = pojavHome + "/jna_tmp";
+            // Native launcher exports the hidden home (POJAV_HOME/.amethyst);
+            // fall back to the same layout when built/run standalone.
+            String hiddenHome = System.getenv("POJAV_HIDDEN_HOME");
+            if (hiddenHome == null || hiddenHome.isEmpty()) {
+                hiddenHome = pojavHome + "/.amethyst";
+            }
+            String jnaTmpDir = hiddenHome + "/jna_tmp";
             new File(jnaTmpDir).mkdirs();
             System.setProperty("jna.tmpdir", jnaTmpDir);
             System.setProperty("jna.nosys", "true");

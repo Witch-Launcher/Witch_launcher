@@ -1,7 +1,9 @@
 #import "ThemeManager.h"
 #import <CoreImage/CoreImage.h>
+#import "utils.h"
 
 NSString * const ThemeDidChangeNotification = @"ThemeDidChangeNotification";
+NSString * const ShellBorderDidChangeNotification = @"ShellBorderDidChangeNotification";
 
 @interface ThemeManager ()
 @property (nonatomic) UITraitCollection *currentTraitCollection;
@@ -158,7 +160,7 @@ NSString * const ThemeDidChangeNotification = @"ThemeDidChangeNotification";
     _uiBorderEnabled = uiBorderEnabled;
     [[NSUserDefaults standardUserDefaults] setBool:uiBorderEnabled forKey:@"amethyst_ui_border_enabled"];
     [[NSUserDefaults standardUserDefaults] synchronize];
-    [self broadcastThemeChange];
+    [self notifyShellBorderChange];
 }
 
 - (UIColor *)uiBorderColor {
@@ -169,14 +171,14 @@ NSString * const ThemeDidChangeNotification = @"ThemeDidChangeNotification";
     _uiBorderWidth = MAX(0.0, MIN(uiBorderWidth, 4.0));
     [[NSUserDefaults standardUserDefaults] setFloat:_uiBorderWidth forKey:@"amethyst_ui_border_width"];
     [[NSUserDefaults standardUserDefaults] synchronize];
-    [self broadcastThemeChange];
+    [self notifyShellBorderChange];
 }
 
 - (void)setUiBorderCornerRadius:(CGFloat)uiBorderCornerRadius {
     _uiBorderCornerRadius = MAX(0, MIN(uiBorderCornerRadius, 28.0));
     [[NSUserDefaults standardUserDefaults] setFloat:_uiBorderCornerRadius forKey:@"amethyst_ui_border_radius"];
     [[NSUserDefaults standardUserDefaults] synchronize];
-    [self broadcastThemeChange];
+    [self notifyShellBorderChange];
 }
 
 - (void)setUiOpacity:(CGFloat)uiOpacity {
@@ -436,6 +438,19 @@ NSString * const ThemeDidChangeNotification = @"ThemeDidChangeNotification";
     [[NSNotificationCenter defaultCenter] postNotificationName:ThemeDidChangeNotification object:nil];
 }
 
+- (void)notifyShellBorderChange {
+    // Cheap path: only the root shell redraws the outline right now.
+    [[NSNotificationCenter defaultCenter] postNotificationName:ShellBorderDidChangeNotification object:nil];
+    // Everything else (panels, cells) gets one full broadcast once the
+    // slider settles, instead of one per drag tick.
+    [NSObject cancelPreviousPerformRequestsWithTarget:self selector:@selector(fireCoalescedThemeBroadcast) object:nil];
+    [self performSelector:@selector(fireCoalescedThemeBroadcast) withObject:nil afterDelay:0.3];
+}
+
+- (void)fireCoalescedThemeBroadcast {
+    [self broadcastThemeChange];
+}
+
 - (BOOL)shouldApplyBorderToView:(UIView *)view {
     return NO;
 }
@@ -474,10 +489,9 @@ NSString * const ThemeDidChangeNotification = @"ThemeDidChangeNotification";
     _backgroundBlurIntensity = 0;
     _uiOpacity = 1.0;
 
-    NSArray *paths = NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES);
-    NSString *imgPath = [paths.firstObject stringByAppendingPathComponent:@"amethyst_bg.png"];
+    NSString *imgPath = amethyst_hidden_path(@"amethyst_bg.png");
     [[NSFileManager defaultManager] removeItemAtPath:imgPath error:nil];
-    NSString *videoPath = [paths.firstObject stringByAppendingPathComponent:@"amethyst_bg.mp4"];
+    NSString *videoPath = amethyst_hidden_path(@"amethyst_bg.mp4");
     [[NSFileManager defaultManager] removeItemAtPath:videoPath error:nil];
 
     [self broadcastThemeChange];
