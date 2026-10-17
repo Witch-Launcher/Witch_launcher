@@ -36,7 +36,7 @@
 /* #undef HAVE_ARM64E_PTRAUTH */
 
 /* Define if your assembler supports .cfi_* directives. */
-/* #undef HAVE_AS_CFI_PSEUDO_OP */
+#define HAVE_AS_CFI_PSEUDO_OP 1
 
 /* Define if your assembler supports .register. */
 /* #undef HAVE_AS_REGISTER_PSEUDO_OP */

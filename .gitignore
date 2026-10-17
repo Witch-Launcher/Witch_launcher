@@ -12,12 +12,21 @@ xcuserdata/
 project.xcworkspace/
 /depends
 /Natives/config.h
+/Natives/Config/WitchConfig.h
 entitlements.codesign.xml
 /Compare
 /.rule/
 /sample/
 /.vscode/
 /log/
+/plan/
+note.md
+/.config/
+jetsam.txt
+latestlog.txt
+.cache/
+__pycache__/
+*.pyc
 
 # Build artifacts (users can build themselves)
 /amethyst-prebuilt-libraries/build/
@@ -48,3 +57,6 @@ entitlements.codesign.xml
 
 # Website moved to separate repo (witch-launcher-web)
 /web/
+
+*.class
+/Natives/build_test

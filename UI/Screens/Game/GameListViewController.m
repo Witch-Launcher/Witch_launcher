@@ -1,6 +1,7 @@
 #import "GameListViewController.h"
 #import "ThemeManager.h"
 #import "AmethystBlurView.h"
+#import "utils.h"
 
 @interface GameListViewController () <UITableViewDelegate, UITableViewDataSource>
 @property (nonatomic) UILabel *titleLabel;
@@ -23,7 +24,7 @@
     _titleLabel = [[UILabel alloc] init];
     _titleLabel.translatesAutoresizingMaskIntoConstraints = NO;
     _titleLabel.font = [UIFont systemFontOfSize:22 weight:UIFontWeightBold];
-    _titleLabel.text = @"Game Versions";
+    _titleLabel.text = localize(@"Game Versions", nil);
     [self.view addSubview:_titleLabel];
 
     _tableView = [[UITableView alloc] init];

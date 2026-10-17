@@ -5,8 +5,11 @@
 #import "LauncherPreferences.h"
 #import "config.h"
 #import "AmethystBlurView.h"
+#import "AppSheet.h"
+#import "utils.h"
+#import "WitchUpdateService.h"
 
-static NSString *const NewsURLString = @"https://raw.githubusercontent.com/Ynnyny/Angel-Aura-Amethyst-iOS/refs/heads/main/news.md";
+static NSString *const NewsURLString = @"https://raw.githubusercontent.com/Witch-Launcher/Witch_launcher/refs/heads/main/news.md";
 static const NSTimeInterval NewsRefreshInterval = 300.0; // 5 minutes
 
 @interface MainMenuViewController () <WKNavigationDelegate>
@@ -41,10 +44,56 @@ static const NSTimeInterval NewsRefreshInterval = 300.0; // 5 minutes
     [self setup];
     [CreditsService.shared refreshIfNeeded];
     [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(updateColors) name:ThemeDidChangeNotification object:nil];
-    [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(logoDidChange) name:@"LauncherLogoDidChangeNotification" object:nil];
     [self updateColors];
     [self loadNews];
     [self startNewsRefreshTimer];
+    // Auto-check launcher update (beta->pre-release, stable->release), respects "Để sau" 3 days.
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        [WitchUpdateService.shared autoCheckFromViewController:self];
+        [self maybeShowRuntimeOnboarding];
+    });
+}
+
+- (void)maybeShowRuntimeOnboarding {
+    // Slim build has no bundled runtimes: Bundle/java_runtimes missing or empty.
+    // Show once per install (pref witch.runtime_onboarded) so full builds never nag.
+    if ([getPrefObject(@"witch.runtime_onboarded") boolValue]) return;
+    NSFileManager *fm = [NSFileManager defaultManager];
+    NSString *internalPath = [NSString stringWithFormat:@"%@/java_runtimes", NSBundle.mainBundle.bundlePath];
+    BOOL hasInternal = NO;
+    NSArray *contents = [fm contentsOfDirectoryAtPath:internalPath error:nil];
+    for (NSString *c in contents) {
+        if ([c hasPrefix:@"java-"]) { hasInternal = YES; break; }
+    }
+    if (hasInternal) {
+        setPrefObject(@"witch.runtime_onboarded", @YES);
+        return;
+    }
+    const char *home = getenv("POJAV_HOME");
+    NSString *extPath = home ? [NSString stringWithFormat:@"%s/java_runtimes", home] : nil;
+    NSArray *extContents = extPath ? [fm contentsOfDirectoryAtPath:extPath error:nil] : @[];
+    BOOL hasExternal = NO;
+    for (NSString *c in extContents) {
+        if ([c hasPrefix:@"java-"]) { hasExternal = YES; break; }
+    }
+    if (hasExternal) {
+        setPrefObject(@"witch.runtime_onboarded", @YES);
+        return;
+    }
+    setPrefObject(@"witch.runtime_onboarded", @YES);
+    __weak typeof(self) weakSelf = self;
+    [AppSheet showConfirmWithTitle:@"Bản Simple: chưa có Runtime"
+                           message:@"Bản Simple không kèm JDK/LWJGL để nhẹ. Bạn muốn mở bảng tải ngay (có đánh dấu [quan trọng]) hay để sau trong Settings → Tải Runtime JDK/LWJGL?"
+                      confirmTitle:@"Mở bảng tải"
+                       destructive:NO
+                         onConfirm:^{
+        Class cls = NSClassFromString(@"RuntimeDownloadViewController");
+        if (!cls) return;
+        UIViewController *vc = [[cls alloc] init];
+        [vc setValue:@YES forKey:@"onboardingMode"];
+        UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:vc];
+        [weakSelf presentViewController:nav animated:YES completion:nil];
+    }];
 }
 
 - (void)viewWillAppear:(BOOL)animated {
@@ -78,7 +127,7 @@ static const NSTimeInterval NewsRefreshInterval = 300.0; // 5 minutes
     _titleLabel = [[UILabel alloc] init];
     _titleLabel.translatesAutoresizingMaskIntoConstraints = NO;
     _titleLabel.font = [UIFont systemFontOfSize:24 weight:UIFontWeightBold];
-    _titleLabel.text = @"Witch Launcher";
+    _titleLabel.text = localize(@"mainmenu.title", nil);
     [self.view addSubview:_titleLabel];
 
     _versionLabel = [[UILabel alloc] init];
@@ -227,22 +276,16 @@ static const NSTimeInterval NewsRefreshInterval = 300.0; // 5 minutes
     return [NSString stringWithFormat:@"#%02X%02X%02X", (int)(r * 255), (int)(g * 255), (int)(b * 255)];
 }
 
-// The menu logo follows the launcher.theme logo setting (launcher.logo_style):
-// "purple" uses the purple pair, "blue" the official blue pair, "dev" the
-// development logo. Until the user picks one, the build type decides the
-// default: release builds use purple, development builds use the dev logo.
+// The menu logo is fixed at build time (matches the APP_ICON asset baked
+// into the bundle): release builds use the purple pair, dev builds the dev
+// logo. No runtime switching — the old pref-driven switch referenced icon
+// names missing from Info.plist and fell back to the wrong default.
 - (NSString *)logoImageName {
-    NSString *style = getPrefObject(@"launcher.logo_style");
-    if (style == nil) {
-        style = CONFIG_RELEASE ? @"purple" : @"dev";
-    }
-    if ([style isEqualToString:@"dev"]) {
-        return @"logo-dev";
-    }
-    if ([style isEqualToString:@"blue"]) {
-        return ThemeManager.shared.isDarkMode ? @"logo-main-dark" : @"logo-main-light";
-    }
+#if CONFIG_RELEASE
     return ThemeManager.shared.isDarkMode ? @"logo-dark" : @"logo-light";
+#else
+    return @"logo-dev";
+#endif
 }
 
 - (void)logoDidChange {

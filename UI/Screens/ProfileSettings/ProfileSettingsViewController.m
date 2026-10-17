@@ -1,10 +1,11 @@
 #import "ProfileSettingsViewController.h"
+#import "AppSheet.h"
 #import "ThemeManager.h"
 #import "LauncherPreferences.h"
 #import "PLProfiles.h"
 #import "MinecraftResourceUtils.h"
 #import "utils.h"
-#import "ios_uikit_bridge.h"
+#import "ErrorPresenter.h"
 #import "HapticManager.h"
 #import "AmethystBlurView.h"
 
@@ -175,7 +176,7 @@
             PLProfiles.current.selectedProfileName = newName;
         }
     } else {
-        showDialog(localize(@"Error", nil), localize(@"profile.error.name_exists", nil));
+        [ErrorPresenter showError:localize(@"Error", nil) message:localize(@"profile.error.name_exists", nil)];
         return;
     }
 
@@ -369,48 +370,38 @@
     NSString *currentValue = [self profileValueForKey:item[@"key"]];
     BOOL isRenderer = [item[@"key"] isEqualToString:@"renderer"];
 
-    UIAlertController *sheet = [UIAlertController alertControllerWithTitle:item[@"label"]
-                                                                   message:nil
-                                                            preferredStyle:UIAlertControllerStyleActionSheet];
-
     if (![options isKindOfClass:[NSArray class]] || options.count == 0) {
-        showDialog(@"No Options", @"No options available for this setting.");
+        [ErrorPresenter showError:@"No Options" message:@"No options available for this setting."];
         return;
     }
 
+    NSMutableArray *opts = [NSMutableArray array];
+    NSMutableArray *keys = [NSMutableArray array];
+    NSInteger sel = NSNotFound;
     if (isRenderer && [options.firstObject isKindOfClass:[NSDictionary class]]) {
         for (NSDictionary *opt in options) {
             NSString *key = opt[@"key"];
             NSString *name = opt[@"name"];
-            BOOL isSelected = [currentValue isEqualToString:key];
-            NSString *label = isSelected ? [NSString stringWithFormat:@"✓ %@", name] : name;
-            [sheet addAction:[UIAlertAction actionWithTitle:label style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
-                [self setProfileValue:key forKey:item[@"key"]];
-                [self.tableView reloadData];
-            }]];
+            if (![key isKindOfClass:[NSString class]]) continue;
+            [opts addObject:@{@"title": ([name isKindOfClass:[NSString class]] ? name : key)}];
+            [keys addObject:key];
+            if ([currentValue isEqualToString:key]) sel = keys.count - 1;
         }
     } else {
         for (NSString *opt in options) {
             if (![opt isKindOfClass:[NSString class]]) continue;
-            BOOL isSelected = [currentValue isEqualToString:opt];
             NSString *display = opt;
-            if ([opt isEqualToString:@"(default)"]) display = opt;
-            else display = [opt stringByReplacingCharactersInRange:NSMakeRange(0,1) withString:[[opt substringToIndex:1] capitalizedString]];
-            NSString *label = isSelected ? [NSString stringWithFormat:@"✓ %@", display] : display;
-            [sheet addAction:[UIAlertAction actionWithTitle:label style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
-                [self setProfileValue:opt forKey:item[@"key"]];
-                [self.tableView reloadData];
-            }]];
+            if (![opt isEqualToString:@"(default)"]) display = [opt stringByReplacingCharactersInRange:NSMakeRange(0,1) withString:[[opt substringToIndex:1] capitalizedString]];
+            [opts addObject:@{@"title": display}];
+            [keys addObject:opt];
+            if ([currentValue isEqualToString:opt]) sel = keys.count - 1;
         }
     }
-    [sheet addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
+    [AppSheet showOptionsWithTitle:item[@"label"] message:nil options:opts selectedIndex:sel selection:^(NSInteger idx) {
+        [self setProfileValue:keys[idx] forKey:item[@"key"]];
+        [self.tableView reloadData];
+    }];
 
-    if (UIDevice.currentDevice.userInterfaceIdiom == UIUserInterfaceIdiomPad) {
-        sheet.popoverPresentationController.sourceView = self.view;
-        sheet.popoverPresentationController.sourceRect = CGRectMake(CGRectGetMidX(self.view.bounds), CGRectGetMidY(self.view.bounds), 0, 0);
-    }
-
-    [self presentViewController:sheet animated:YES completion:nil];
 }
 
 - (void)showVersionPicker {
@@ -423,24 +414,13 @@
         localize(@"Old-alpha", nil)
     ];
 
-    UIAlertController *sheet = [UIAlertController alertControllerWithTitle:@"Select Version"
-                                                                   message:nil
-                                                            preferredStyle:UIAlertControllerStyleActionSheet];
-
+    NSMutableArray *opts = [NSMutableArray array];
     for (NSUInteger ti = 0; ti < types.count; ti++) {
-        [sheet addAction:[UIAlertAction actionWithTitle:typeNames[ti] style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
-            [self showVersionSubPickerForType:types[ti] typeName:typeNames[ti]];
-        }]];
+        [opts addObject:@{@"title": typeNames[ti]}];
     }
-
-    [sheet addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
-
-    if (UIDevice.currentDevice.userInterfaceIdiom == UIUserInterfaceIdiomPad) {
-        sheet.popoverPresentationController.sourceView = self.view;
-        sheet.popoverPresentationController.sourceRect = CGRectMake(CGRectGetMidX(self.view.bounds), CGRectGetMidY(self.view.bounds), 0, 0);
-    }
-
-    [self presentViewController:sheet animated:YES completion:nil];
+    [AppSheet showOptionsWithTitle:localize(@"Select Version", nil) message:nil options:opts selectedIndex:NSNotFound selection:^(NSInteger idx) {
+        [self showVersionSubPickerForType:types[idx] typeName:typeNames[idx]];
+    }];
 }
 
 - (void)showVersionSubPickerForType:(NSString *)type typeName:(NSString *)typeName {
@@ -452,14 +432,12 @@
     }
 
     if (list == nil || list.count == 0) {
-        showDialog(@"No Versions", [NSString stringWithFormat:@"No %@ versions found.", typeName]);
+        [ErrorPresenter showError:@"No Versions" message:[NSString stringWithFormat:@"No %@ versions found.", typeName]];
         return;
     }
 
-    UIAlertController *subSheet = [UIAlertController alertControllerWithTitle:typeName
-                                                                       message:nil
-                                                                preferredStyle:UIAlertControllerStyleActionSheet];
-
+    NSMutableArray *opts = [NSMutableArray array];
+    NSMutableArray *ids = [NSMutableArray array];
     NSInteger maxItems = MIN(list.count, 60);
     for (NSInteger i = 0; i < maxItems; i++) {
         NSObject *obj = list[i];
@@ -470,26 +448,15 @@
             verId = [obj valueForKey:@"id"];
         }
         if (verId.length == 0) continue;
-        BOOL isSelected = [self.pendingVersion isEqualToString:verId];
-        NSString *label = isSelected ? [NSString stringWithFormat:@"✓ %@", verId] : verId;
-        [subSheet addAction:[UIAlertAction actionWithTitle:label style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
-            self.pendingVersion = verId;
-            [self setProfileValue:verId forKey:@"lastVersionId"];
-            [self.tableView reloadData];
-        }]];
+        [opts addObject:@{@"title": verId}];
+        [ids addObject:verId];
     }
-
-    [subSheet addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
-
-    if (UIDevice.currentDevice.userInterfaceIdiom == UIUserInterfaceIdiomPad) {
-        subSheet.popoverPresentationController.sourceView = self.view;
-        subSheet.popoverPresentationController.sourceRect = CGRectMake(CGRectGetMidX(self.view.bounds), CGRectGetMidY(self.view.bounds), 0, 0);
-    } else if (subSheet.actions.count > 10) {
-        subSheet.popoverPresentationController.sourceView = self.tableView;
-        subSheet.popoverPresentationController.sourceRect = [self.tableView rectForRowAtIndexPath:[NSIndexPath indexPathForRow:0 inSection:0]];
-    }
-
-    [self presentViewController:subSheet animated:YES completion:nil];
+    NSInteger sel = [ids indexOfObject:self.pendingVersion];
+    [AppSheet showOptionsWithTitle:typeName message:nil options:opts selectedIndex:(sel == NSNotFound ? NSNotFound : (NSInteger)sel) selection:^(NSInteger idx) {
+        self.pendingVersion = ids[idx];
+        [self setProfileValue:ids[idx] forKey:@"lastVersionId"];
+        [self.tableView reloadData];
+    }];
 }
 
 - (void)dealloc {

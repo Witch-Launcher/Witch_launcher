@@ -138,7 +138,7 @@ target_link_libraries(${CMAKE_PROJECT_NAME} PRIVATE
     spirv-cross-c
 )
 
-if (NOT MSVC AND NOT CMAKE_SYSTEM_NAME STREQUAL "Darwin")
+if (NOT MSVC AND NOT APPLE)
     # Calls between this library's own translation units must land in this
     # library. Without this, an internal call to an exported gl* symbol goes
     # through a preemptible PLT slot, and in an Android app process the system
@@ -149,8 +149,6 @@ if (NOT MSVC AND NOT CMAKE_SYSTEM_NAME STREQUAL "Darwin")
     # calls bind to changes. On the target, not in the AppleClang-guarded block
     # above -- that block's condition has never been true (dangling NOT MATCHES),
     # which is also why --gc-sections never made it into the link.
-    # Mach-O binds intra-image calls locally by default, so nothing is needed
-    # (and Apple's ld does not understand -Bsymbolic-functions) on Darwin.
     target_link_options(${CMAKE_PROJECT_NAME} PRIVATE -Wl,-Bsymbolic-functions)
 endif()
 

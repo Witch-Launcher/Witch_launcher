@@ -1,6 +1,6 @@
 #import "CreditsService.h"
 
-static NSString *const CreditsURLString = @"https://raw.githubusercontent.com/Ynnyny/Angel-Aura-Amethyst-iOS/refs/heads/main/credits.md";
+static NSString *const CreditsURLString = @"https://raw.githubusercontent.com/Witch-Launcher/Witch_launcher/refs/heads/main/credits.md";
 static NSString *const CreditsCacheFileName = @"credits_cache.md";
 static NSString *const CreditsLastUpdateKey = @"credits_last_update";
 

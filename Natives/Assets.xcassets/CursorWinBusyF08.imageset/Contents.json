@@ -1,0 +1,18 @@
+{
+  "images": [
+    {
+      "filename": "cursorwinbusyf08_32x32.png",
+      "idiom": "universal",
+      "scale": "1x"
+    },
+    {
+      "filename": "cursorwinbusyf08_64x64.png",
+      "idiom": "universal",
+      "scale": "2x"
+    }
+  ],
+  "info": {
+    "author": "xcode",
+    "version": 1
+  }
+}

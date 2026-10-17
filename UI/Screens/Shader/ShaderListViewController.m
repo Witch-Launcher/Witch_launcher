@@ -10,11 +10,17 @@
 #import "VersionDirectoryManager.h"
 #import "ios_uikit_bridge.h"
 #import "AmethystBlurView.h"
+#import "utils.h"
+#import "CurseForgeService.h"
+#import "LauncherPreferences.h"
 
 @interface ShaderListViewController () <UITableViewDelegate, UITableViewDataSource, UISearchBarDelegate>
 @property (nonatomic) UILabel *titleLabel;
 @property (nonatomic) UISearchBar *searchBar;
 @property (nonatomic) UISegmentedControl *typeControl;
+@property (nonatomic) UISegmentedControl *sourceControl;
+@property (nonatomic) NSLayoutConstraint *sourceControlWidthConstraint;
+@property (nonatomic) NSString *selectedSource;
 @property (nonatomic) UITableView *tableView;
 @property (nonatomic) NSMutableArray *shaders;
 @property (nonatomic) UIActivityIndicatorView *spinner;
@@ -35,6 +41,7 @@
 - (void)viewDidLoad {
     [super viewDidLoad];
     [AmethystBlurView installInView:self.view];
+    _selectedSource = @"modrinth";
     _currentCategoryFilter = @"";
     _pageCache = [NSMutableDictionary dictionary];
     _pageOffsets = [NSMutableArray array];
@@ -54,19 +61,31 @@
     _titleLabel = [[UILabel alloc] init];
     _titleLabel.translatesAutoresizingMaskIntoConstraints = NO;
     _titleLabel.font = [UIFont systemFontOfSize:22 weight:UIFontWeightBold];
-    _titleLabel.text = @"Shaders";
+    _titleLabel.text = localize(@"Shaders", nil);
     [self.view addSubview:_titleLabel];
 
     _searchBar = [[UISearchBar alloc] init];
     _searchBar.translatesAutoresizingMaskIntoConstraints = NO;
     _searchBar.delegate = self;
-    _searchBar.placeholder = @"Search shader packs...";
+    _searchBar.placeholder = localize(@"download.search.shaders", nil);
     _searchBar.searchBarStyle = UISearchBarStyleMinimal;
     [self.view addSubview:_searchBar];
 
-    _typeControl = [[UISegmentedControl alloc] initWithItems:@[@"All", @"Iris", @"Optifine"]];
+    _sourceControl = [[UISegmentedControl alloc] initWithItems:@[@"Modrinth", @"CurseForge"]];
+    _sourceControl.translatesAutoresizingMaskIntoConstraints = NO;
+    _sourceControl.selectedSegmentIndex = 0;
+    _sourceControl.selectedSegmentTintColor = ThemeManager.shared.accentColor;
+    _sourceControl.layer.cornerRadius = 8;
+    _sourceControl.clipsToBounds = YES;
+    [_sourceControl setTitleTextAttributes:@{NSForegroundColorAttributeName: ThemeManager.shared.primaryTextColor, NSFontAttributeName: [UIFont systemFontOfSize:11 weight:UIFontWeightMedium]} forState:UIControlStateNormal];
+    [_sourceControl setTitleTextAttributes:@{NSForegroundColorAttributeName: ThemeManager.shared.buttonTextColor, NSFontAttributeName: [UIFont systemFontOfSize:11 weight:UIFontWeightSemibold]} forState:UIControlStateSelected];
+    [_sourceControl addTarget:self action:@selector(sourceChanged) forControlEvents:UIControlEventValueChanged];
+    [self.view addSubview:_sourceControl];
+
+    _typeControl = [[UISegmentedControl alloc] initWithItems:@[localize(@"All", nil), @"Iris", @"Optifine"]];
     _typeControl.translatesAutoresizingMaskIntoConstraints = NO;
     _typeControl.selectedSegmentIndex = 0;
+    [ThemeManager.shared styleSegmentedControl:_typeControl];
     [_typeControl addTarget:self action:@selector(typeChanged) forControlEvents:UIControlEventValueChanged];
     [self.view addSubview:_typeControl];
 
@@ -77,7 +96,7 @@
 
     _emptyLabel = [[UILabel alloc] init];
     _emptyLabel.translatesAutoresizingMaskIntoConstraints = NO;
-    _emptyLabel.text = @"No shader packs found.\nTry a different search.";
+    _emptyLabel.text = localize(@"download.empty.shaders", nil);
     _emptyLabel.numberOfLines = 0;
     _emptyLabel.textAlignment = NSTextAlignmentCenter;
     _emptyLabel.font = [UIFont systemFontOfSize:14 weight:UIFontWeightRegular];
@@ -99,13 +118,19 @@
 
     [_tableView registerClass:[AmethystProjectCell class] forCellReuseIdentifier:@"ShaderCell"];
 
+    _sourceControlWidthConstraint = [_sourceControl.widthAnchor constraintEqualToConstant:160];
     [NSLayoutConstraint activateConstraints:@[
         [_titleLabel.topAnchor constraintEqualToAnchor:self.view.topAnchor constant:16],
         [_titleLabel.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor constant:20],
 
         [_searchBar.topAnchor constraintEqualToAnchor:_titleLabel.bottomAnchor constant:8],
         [_searchBar.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor constant:12],
-        [_searchBar.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor constant:-12],
+        [_searchBar.trailingAnchor constraintEqualToAnchor:_sourceControl.leadingAnchor constant:-8],
+
+        [_sourceControl.centerYAnchor constraintEqualToAnchor:_searchBar.centerYAnchor],
+        [_sourceControl.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor constant:-12],
+        _sourceControlWidthConstraint,
+        [_sourceControl.heightAnchor constraintEqualToConstant:32],
 
         [_typeControl.topAnchor constraintEqualToAnchor:_searchBar.bottomAnchor constant:8],
         [_typeControl.centerXAnchor constraintEqualToAnchor:self.view.centerXAnchor],
@@ -137,7 +162,16 @@
     _searchBar.searchTextField.textColor = theme.primaryTextColor;
     _searchBar.tintColor = theme.accentColor;
     _typeControl.selectedSegmentTintColor = theme.accentColor;
+    [theme styleSegmentedControl:_typeControl];
+    _sourceControl.selectedSegmentTintColor = theme.accentColor;
+    [_sourceControl setTitleTextAttributes:@{NSForegroundColorAttributeName: theme.primaryTextColor, NSFontAttributeName: [UIFont systemFontOfSize:11 weight:UIFontWeightMedium]} forState:UIControlStateNormal];
+    [_sourceControl setTitleTextAttributes:@{NSForegroundColorAttributeName: theme.buttonTextColor, NSFontAttributeName: [UIFont systemFontOfSize:11 weight:UIFontWeightSemibold]} forState:UIControlStateSelected];
     _emptyLabel.textColor = theme.secondaryTextColor;
+}
+
+- (void)sourceChanged {
+    _selectedSource = _sourceControl.selectedSegmentIndex == 0 ? @"modrinth" : @"curseforge";
+    [self loadShadersWithQuery:_searchBar.text ?: @"" offset:0];
 }
 
 - (void)typeChanged {
@@ -162,7 +196,7 @@
         _isLoadingMore = YES;
     }
 
-    [ModrinthService.shared searchProjectsWithType:@"shader" query:query offset:offset limit:50 categoryFilter:_currentCategoryFilter loaderFilter:nil gameVersionFilter:nil completion:^(NSArray<NSDictionary *> *results, NSError *error) {
+    void (^handleResults)(NSArray *, NSError *) = ^(NSArray<NSDictionary *> *results, NSError *error) {
         [self.spinner stopAnimating];
         [self.tableView.refreshControl endRefreshing];
         self.isLoadingMore = NO;
@@ -183,7 +217,12 @@
             [self.tableView reloadData];
             [self trimShadersIfNeeded];
         }
-    }];
+    };
+    if ([_selectedSource isEqualToString:@"curseforge"]) {
+        [CurseForgeService.shared searchProjectsWithClassId:6552 query:query offset:offset limit:50 loaderFilter:nil gameVersionFilter:nil completion:handleResults];
+    } else {
+        [ModrinthService.shared searchProjectsWithType:@"shader" query:query offset:offset limit:50 categoryFilter:_currentCategoryFilter loaderFilter:nil gameVersionFilter:nil completion:handleResults];
+    }
 }
 
 - (void)trimShadersIfNeeded {

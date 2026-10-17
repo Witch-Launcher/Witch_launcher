@@ -6,10 +6,18 @@
 #import "touchcontroller_jni_bridge.h"
 #import "SurfaceViewController.h"
 #import <BackgroundTasks/BackgroundTasks.h>
+#import "CrashLogAnalyzer.h"
+#import "WitchLogReporter.h"
+#import "WitchAIChatViewController.h"
+#import "WitchLogSnapshot.h"
+#import "AppSheet.h"
+#import "ErrorPresenter.h"
 
 extern UIWindow *mainWindow;
 
 @interface SceneDelegate ()
+
+- (void)presentPreviousCrashAlertWithIpsPath:(NSString *)ipsPath;
 
 @end
 
@@ -68,6 +76,10 @@ static NSString *const kMinecraftGPUBackgroundTaskPrefix = @"com.witch.zad626.mi
     mainWindow = self.window;
     launchInitialViewController(self.window);
     [self.window makeKeyAndVisible];
+    // Kiểm tra crash ra màn hình chính ở lần trước (flag còn lại + latestlog/.ips)
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        [self checkForPreviousCrashAndPrompt];
+    });
 
     if (getPrefBool(@"debug.debug_server_enabled")) {
         NSString *token = getPrefObject(@"debug.debug_server_token");
@@ -133,6 +145,104 @@ static NSString *const kMinecraftGPUBackgroundTaskPrefix = @"com.witch.zad626.mi
     // to restore the scene back to its current state.
     CallbackBridge_nativeSetWindowFocused(NO, YES);
     CallbackBridge_pauseGameIfNeed();
+}
+
+- (void)checkForPreviousCrashAndPrompt {
+    const char *home = getenv("POJAV_HOME");
+    if (!home) return;
+    NSString *flagPath = [@(home) stringByAppendingPathComponent:@".launcher_running"];
+    BOOL flagExists = [[NSFileManager defaultManager] fileExistsAtPath:flagPath];
+    // Tìm .ips mới nhất (nếu có) và latestlog crash
+    NSString *latestLog = [@(home) stringByAppendingPathComponent:@"latestlog.txt"];
+    BOOL hasLatestLog = [[NSFileManager defaultManager] fileExistsAtPath:latestLog];
+    // Tìm .ips trong Library/Logs/CrashReporter và trong POJAV_HOME
+    NSString *ipsPath = nil;
+    NSArray *searchDirs = @[
+        [NSHomeDirectory() stringByAppendingPathComponent:@"Library/Logs/CrashReporter"],
+        @(home)
+    ];
+    NSDate *now = [NSDate date];
+    for (NSString *dir in searchDirs) {
+        NSArray *files = [[NSFileManager defaultManager] contentsOfDirectoryAtPath:dir error:nil];
+        for (NSString *f in files) {
+            if ([f.pathExtension isEqualToString:@"ips"] && [f containsString:@"Witch"]) {
+                NSString *full = [dir stringByAppendingPathComponent:f];
+                NSDictionary *attr = [[NSFileManager defaultManager] attributesOfItemAtPath:full error:nil];
+                NSDate *mod = attr[NSFileModificationDate];
+                if (mod && [now timeIntervalSinceDate:mod] < 86400) { // trong 24h
+                    ipsPath = full;
+                    break;
+                }
+            }
+        }
+        if (ipsPath) break;
+    }
+    BOOL shouldPrompt = flagExists || ipsPath;
+    // Xóa flag để lần sau không hiện lại nếu user đã thấy
+    if (flagExists) [[NSFileManager defaultManager] removeItemAtPath:flagPath error:nil];
+    // Tạo lại flag cho lần chạy hiện tại
+    [[NSFileManager defaultManager] createFileAtPath:flagPath contents:[@"1" dataUsingEncoding:NSUTF8StringEncoding] attributes:nil];
+    if (!shouldPrompt) return;
+    // Kiểm tra latestlog có crash không — đọc TAIL bounded trên background
+    // (tuyệt đối không load toàn file trên main thread).
+    NSString *ipsCopy = ipsPath;
+    dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
+        BOOL crashed = (ipsCopy != nil);
+        if (!crashed && hasLatestLog) {
+            NSArray<NSString *> *tail = [WitchLogSnapshotter tailLinesOfFile:latestLog maxLines:200];
+            for (NSString *line in tail) {
+                if ([line rangeOfString:@"Game crashed!" options:NSCaseInsensitiveSearch].location != NSNotFound) {
+                    crashed = YES;
+                    break;
+                }
+            }
+        }
+        if (!crashed) return;
+        dispatch_async(dispatch_get_main_queue(), ^{
+            [self presentPreviousCrashAlertWithIpsPath:ipsCopy];
+        });
+    });
+}
+
+- (void)presentPreviousCrashAlertWithIpsPath:(NSString *)ipsPath {
+    // Hiện sheet cho phép gửi log (AI / Discord / để sau).
+    [AppSheet showOptionsWithTitle:localize(@"crash.prev_title", nil) message:localize(@"crash.prev_message", nil) options:@[
+        @{@"title": localize(@"crash.send_ai", nil), @"icon": @"sparkles"},
+        @{@"title": localize(@"crash.send_discord", nil), @"icon": @"paperplane"},
+    ] selectedIndex:NSNotFound selection:^(NSInteger idx) {
+        if (idx == 0) {
+            UIAlertController *wait = [UIAlertController alertControllerWithTitle:localize(@"crash.screen.loading", nil) message:nil preferredStyle:UIAlertControllerStyleAlert];
+            [self.window.rootViewController presentViewController:wait animated:YES completion:nil];
+            dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
+                CrashLogAnalyzerResult *analysis = [CrashLogAnalyzer analyzeWithExitCode:1];
+                dispatch_async(dispatch_get_main_queue(), ^{
+                    [wait dismissViewControllerAnimated:YES completion:^{
+                        WitchAIChatViewController *vc = [[WitchAIChatViewController alloc] initWithAnalysis:analysis exitCode:1];
+                        UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:vc];
+                        nav.modalPresentationStyle = UIModalPresentationFormSheet;
+                        [self.window.rootViewController presentViewController:nav animated:YES completion:nil];
+                    }];
+                });
+            });
+        } else {
+            dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
+                CrashLogAnalyzerResult *analysis = [CrashLogAnalyzer analyzeWithExitCode:1];
+                NSString *note = ipsPath ? [NSString stringWithFormat:@"Crash .ips: %@", ipsPath.lastPathComponent] : @"Launcher crash to home";
+                dispatch_async(dispatch_get_main_queue(), ^{
+                    // sendReport streams from disk on background queues internally.
+                    [WitchLogReporter sendReportWithAnalysis:analysis exitCode:1 note:note completion:^(BOOL success, NSString *logId, NSError *error){
+                        NSString *title = success ? localize(@"crash.sent_title", nil) : localize(@"Error", nil);
+                        NSString *msg = success ? [NSString stringWithFormat:localize(@"crash.sent_discord", nil), logId ?: @""] : error.localizedDescription;
+                        if (success) {
+                            [ErrorPresenter showSuccess:title message:msg];
+                        } else {
+                            [ErrorPresenter showNetworkError:error message:msg];
+                        }
+                    }];
+                });
+            });
+        }
+    }];
 }
 
 @end

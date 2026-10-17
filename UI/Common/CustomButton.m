@@ -39,7 +39,7 @@
             break;
         case CustomButtonStyleDestructive:
             self.backgroundColor = theme.errorColor;
-            [self setTitleColor:UIColor.whiteColor forState:UIControlStateNormal];
+            [self setTitleColor:[theme contrastTextColorForBackground:theme.errorColor] forState:UIControlStateNormal];
             break;
         case CustomButtonStyleGhost:
             self.backgroundColor = [UIColor clearColor];

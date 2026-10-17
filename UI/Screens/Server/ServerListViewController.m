@@ -1,4 +1,5 @@
 #import "ServerListViewController.h"
+#import "AppSheet.h"
 #import "ThemeManager.h"
 #import "CustomButton.h"
 #import "MainCoordinator.h"
@@ -35,13 +36,13 @@ static NSString *kServersFilePath;
     _titleLabel = [[UILabel alloc] init];
     _titleLabel.translatesAutoresizingMaskIntoConstraints = NO;
     _titleLabel.font = [UIFont systemFontOfSize:22 weight:UIFontWeightBold];
-    _titleLabel.text = @"Servers";
+    _titleLabel.text = localize(@"server.add.title", nil);
     [self.view addSubview:_titleLabel];
 
     _addButton = [UIButton buttonWithType:UIButtonTypeSystem];
     _addButton.translatesAutoresizingMaskIntoConstraints = NO;
     _addButton.titleLabel.font = [UIFont systemFontOfSize:14 weight:UIFontWeightSemibold];
-    [_addButton setTitle:@"+ Add" forState:UIControlStateNormal];
+    [_addButton setTitle:localize(@"server.connect", nil) forState:UIControlStateNormal];
     _addButton.backgroundColor = [UIColor clearColor];
     _addButton.tintColor = ThemeManager.shared.accentColor;
     [_addButton addTarget:self action:@selector(addServerTapped) forControlEvents:UIControlEventTouchUpInside];
@@ -98,24 +99,13 @@ static NSString *kServersFilePath;
 
 - (void)addServerTapped {
     [HapticManager.shared play:HapticTypeLight];
-    UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Add Server" message:nil preferredStyle:UIAlertControllerStyleAlert];
-    [alert addTextFieldWithConfigurationHandler:^(UITextField *field) {
-        field.placeholder = @"Server name (e.g. Hypixel)";
-    }];
-    [alert addTextFieldWithConfigurationHandler:^(UITextField *field) {
-        field.placeholder = @"Address (e.g. mc.hypixel.net)";
-    }];
-    [alert addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
-    [alert addAction:[UIAlertAction actionWithTitle:@"Add" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
-        NSString *name = alert.textFields[0].text;
-        NSString *address = alert.textFields[1].text;
+    [AppSheet showPrompt2WithTitle:localize(@"server.add.title", nil) message:nil placeholder1:localize(@"server.name.placeholder", nil) placeholder2:localize(@"server.address.placeholder", nil) onConfirm:^(NSString *name, NSString *address) {
         if (name.length > 0 && address.length > 0) {
             [self.servers addObject:@{@"name": name, @"address": address}];
             [self.tableView reloadData];
             [self saveServers];
         }
-    }]];
-    [self presentViewController:alert animated:YES completion:nil];
+    }];
 }
 
 #pragma mark - TableView

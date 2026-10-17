@@ -17,7 +17,9 @@
 #import "MapListViewController.h"
 #import "ModDetailViewController.h"
 #import "FileBrowserViewController.h"
-#import "ProfileSettingsViewController.h"
+#import "ProfileTabbedPageViewController.h"
+#import "ErrorPresenter.h"
+#import "AppSheet.h"
 
 #import "PLProfiles.h"
 #import "MinecraftResourceDownloadTask.h"
@@ -78,6 +80,30 @@
         [MinecraftResourceUtils refreshLocalVersionList];
     });
     [MinecraftResourceUtils refreshRemoteVersionList];
+    [self showPendingObjcCrashReportIfNeeded];
+}
+
+// If the previous run died on an ObjC exception, the handler in main.m wrote
+// crash-reports/objc_last_crash.txt (name+reason+stack — the .ips never has
+// the message). Surface it once with Copy so it can be sent to the dev.
+- (void)showPendingObjcCrashReportIfNeeded {
+    const char *home = getenv("POJAV_HOME");
+    if (!home) return;
+    NSString *reportPath = [[NSString stringWithUTF8String:home] stringByAppendingPathComponent:@"crash-reports/objc_last_crash.txt"];
+    NSString *report = [NSString stringWithContentsOfFile:reportPath encoding:NSUTF8StringEncoding error:nil];
+    if (![report isKindOfClass:[NSString class]] || report.length == 0) return;
+    // Show once: remove so it doesn't nag every launch.
+    [[NSFileManager defaultManager] removeItemAtPath:reportPath error:nil];
+    NSString *shown = report.length > 1500 ? [[report substringToIndex:1500] stringByAppendingString:@"\n…(full report kept in crash-reports/)"] : report;
+    [ErrorPresenter showWithKind:AppErrorKindError
+                           title:@"Previous crash detected"
+                         message:shown
+                    primaryTitle:@"OK"
+                  secondaryTitle:@"Copy"
+                       onPrimary:nil
+                     onSecondary:^{
+                         UIPasteboard.generalPasteboard.string = report;
+                     }];
 }
 
 - (void)accountDidChange {
@@ -160,7 +186,13 @@
 - (void)showAccount {
     AccountViewController *vc = [[AccountViewController alloc] init];
     vc.coordinator = self;
-    [self.rootVC presentContentAsSheet:vc];
+    UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:vc];
+    vc.navigationItem.rightBarButtonItem = [[UIBarButtonItem alloc] initWithTitle:localize(@"Done", nil) style:UIBarButtonItemStyleDone target:self action:@selector(dismissTopSheet)];
+    [self.rootVC presentContentAsSheet:nav];
+}
+
+- (void)dismissTopSheet {
+    [self.rootVC dismissViewControllerAnimated:YES completion:nil];
 }
 
 - (void)showSettings {
@@ -178,32 +210,27 @@
 }
 
 - (void)showVersionPicker {
-    UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Select Version" message:nil preferredStyle:UIAlertControllerStyleAlert];
-    [alert addTextFieldWithConfigurationHandler:^(UITextField *field) {
-        field.placeholder = @"e.g. 1.21.4";
-        field.text = VersionDirectoryManager.shared.currentVersion;
-    }];
-    [alert addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
-    [alert addAction:[UIAlertAction actionWithTitle:@"Set" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
-        NSString *ver = alert.textFields[0].text;
+    __weak typeof(self) weakSelf = self;
+    [AppSheet showPromptWithTitle:localize(@"Select Version", nil) message:nil placeholder:@"e.g. 1.21.4" initialText:VersionDirectoryManager.shared.currentVersion onConfirm:^(NSString *ver) {
         if (ver.length > 0) {
             VersionDirectoryManager.shared.currentVersion = ver;
-            [self.rootVC.rightPanelVC refreshVersions];
+            [weakSelf.rootVC.rightPanelVC refreshVersions];
         }
-    }]];
-    [self.rootVC presentViewController:alert animated:YES completion:nil];
+    }];
 }
 
 - (void)showModLoaderPicker {
-    UIAlertController *sheet = [UIAlertController alertControllerWithTitle:@"Mod Loader" message:nil preferredStyle:UIAlertControllerStyleActionSheet];
     NSArray *loaders = @[@"Vanilla", @"Fabric", @"Forge", @"Quilt", @"NeoForge"];
+    NSString *current = getPrefObject(@"internal.mod_loader");
+    if (![current isKindOfClass:[NSString class]]) current = @"";
+    NSMutableArray *opts = [NSMutableArray array];
     for (NSString *loader in loaders) {
-        [sheet addAction:[UIAlertAction actionWithTitle:loader style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
-            setPrefObject(@"internal.mod_loader", loader);
-        }]];
+        [opts addObject:@{@"title": loader, @"icon": @"cpu"}];
     }
-    [sheet addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
-    [self.rootVC presentViewController:sheet animated:YES completion:nil];
+    NSInteger sel = [loaders indexOfObject:current];
+    [AppSheet showOptionsWithTitle:localize(@"Mod Loader", nil) message:nil options:opts selectedIndex:(sel == NSNotFound ? NSNotFound : (NSInteger)sel) selection:^(NSInteger idx) {
+        setPrefObject(@"internal.mod_loader", loaders[idx]);
+    }];
 }
 
 - (void)showDownloadHub {
@@ -224,16 +251,15 @@
 }
 
 - (void)removeVersion:(NSString *)versionName {
-    UIAlertController *alert = [UIAlertController alertControllerWithTitle:[NSString stringWithFormat:@"Delete %@?", versionName]
-                                                                   message:@"This will permanently delete this profile and version. This action cannot be undone."
-                                                            preferredStyle:UIAlertControllerStyleAlert];
-    [alert addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
-    [alert addAction:[UIAlertAction actionWithTitle:@"Delete" style:UIAlertActionStyleDestructive handler:^(UIAlertAction *action) {
+    [AppSheet showConfirmWithTitle:[NSString stringWithFormat:localize(@"Delete %@?", nil), versionName]
+                           message:localize(@"This will permanently delete this profile and version. This action cannot be undone.", nil)
+                      confirmTitle:localize(@"Delete", nil)
+                       destructive:YES
+                         onConfirm:^{
         NSString *path = [VersionDirectoryManager.shared versionPathForVersion:versionName];
         [[NSFileManager defaultManager] removeItemAtPath:path error:nil];
         [self.rootVC.rightPanelVC refreshVersions];
-    }]];
-    [self.rootVC presentViewController:alert animated:YES completion:nil];
+    }];
 }
 
 - (void)selectVersion:(NSString *)versionName {
@@ -244,29 +270,33 @@
 
 - (void)editVersion:(NSString *)versionName {
     NSMutableDictionary *targetProfile = nil;
+    NSString *targetKey = nil;
     for (NSString *key in PLProfiles.current.profiles) {
         NSMutableDictionary *profile = PLProfiles.current.profiles[key];
         if ([profile[@"lastVersionId"] isEqualToString:versionName]) {
             targetProfile = profile;
+            targetKey = key;
             break;
         }
     }
+    BOOL isNew = NO;
     if (!targetProfile) {
         targetProfile = @{
             @"name": versionName,
             @"lastVersionId": versionName,
         }.mutableCopy;
         PLProfiles.current.profiles[versionName] = targetProfile;
+        targetKey = versionName;
+        isNew = YES;
     }
     [PLProfiles.current save];
 
-    PLProfiles.current.selectedProfileName = targetProfile[@"name"];
+    PLProfiles.current.selectedProfileName = targetProfile[@"name"] ?: targetKey;
 
-    ProfileSettingsViewController *vc = [ProfileSettingsViewController new];
-    vc.profile = targetProfile;
-    UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:vc];
-    nav.modalPresentationStyle = UIModalPresentationFormSheet;
-    [self.rootVC presentViewController:nav animated:YES completion:nil];
+    // Full-page floating-overlay page: real Back button,
+    // inner tabs (Overview / Mods / Shaders / Resources / Worlds) inside.
+    ProfileTabbedPageViewController *vc = [[ProfileTabbedPageViewController alloc] initWithProfile:targetProfile isNew:isNew];
+    [self.rootVC pushContent:vc animated:YES];
 }
 
 #pragma mark - Launch
@@ -274,18 +304,21 @@
 - (void)launchGame {
     NSString *accountName = BaseAuthenticator.current.authData[@"username"];
     if (!accountName) {
-        showDialog(@"Account Required", @"Please add and select an account first.");
+        __weak typeof(self) weakSelf = self;
+        [ErrorPresenter showMissingAccountWithAction:^{
+            [weakSelf showAccount];
+        }];
         return;
     }
 
     if ([accountName hasPrefix:@"Demo."]) {
-        showDialog(@"Minecraft Not Purchased", @"Your Microsoft account has not purchased Minecraft. Please purchase the game from minecraft.net to play.");
+        [ErrorPresenter showDemoAccount];
         return;
     }
 
     NSString *versionStr = VersionDirectoryManager.shared.currentVersion;
     if (versionStr.length == 0) {
-        showDialog(@"No Version", @"Please select a version from the sidebar first.");
+        [ErrorPresenter showMissingVersion];
         return;
     }
 
@@ -298,18 +331,21 @@
 - (void)launchWithServer:(NSDictionary *)server {
     NSString *accountName = BaseAuthenticator.current.authData[@"username"];
     if (!accountName) {
-        showDialog(@"Account Required", @"Please add and select an account first.");
+        __weak typeof(self) weakSelf = self;
+        [ErrorPresenter showMissingAccountWithAction:^{
+            [weakSelf showAccount];
+        }];
         return;
     }
 
     if ([accountName hasPrefix:@"Demo."]) {
-        showDialog(@"Minecraft Not Purchased", @"Your Microsoft account has not purchased Minecraft. Please purchase the game from minecraft.net to play.");
+        [ErrorPresenter showDemoAccount];
         return;
     }
 
     NSString *versionStr = VersionDirectoryManager.shared.currentVersion;
     if (versionStr.length == 0) {
-        showDialog(@"No Version", @"Please select a version from the sidebar first.");
+        [ErrorPresenter showMissingVersion];
         return;
     }
     [self showProgressAlert:localize(@"launcher.checking", nil)];
@@ -337,7 +373,7 @@
             [overlay dismiss];
             if (!success) {
                 NSString *errMsg = [status isKindOfClass:NSError.class] ? [(NSError *)status localizedDescription] : ([status isKindOfClass:NSString.class] ? status : @"Failed to refresh session.");
-                showDialog(localize(@"Error", nil), errMsg);
+                [ErrorPresenter showError:localize(@"Error", nil) message:errMsg];
                 return;
             }
             if (weakSelf) completion();
@@ -351,7 +387,7 @@
         if (error || !data) {
             dispatch_async(dispatch_get_main_queue(), ^{
                 [self dismissProgressAlert];
-                showDialog(@"Network Error", error.localizedDescription ?: @"Failed to fetch version manifest");
+                [ErrorPresenter showNetworkError:error message:@"Failed to fetch version manifest"];
             });
             return;
         }
@@ -359,7 +395,7 @@
         if (!json[@"versions"]) {
             dispatch_async(dispatch_get_main_queue(), ^{
                 [self dismissProgressAlert];
-                showDialog(@"Error", @"Invalid version manifest.");
+                [ErrorPresenter showError:@"Error" message:@"Invalid version manifest."];
             });
             return;
         }
@@ -389,7 +425,7 @@
         if (!versionObj) {
             dispatch_async(dispatch_get_main_queue(), ^{
                 [self dismissProgressAlert];
-                showDialog(@"Error", @"Cannot find version data.");
+                [ErrorPresenter showError:@"Error" message:@"Cannot find version data."];
             });
             return;
         }
@@ -404,7 +440,7 @@
                     [strongSelf safeRemoveProgressObserver];
                     strongSelf.downloadTask = nil;
                     [strongSelf dismissProgressAlert];
-                    showDialog(@"Download Error", @"Failed to download Minecraft resources.");
+                    [ErrorPresenter showError:@"Download Error" message:@"Failed to download Minecraft resources."];
                 });
             };
 
@@ -436,7 +472,7 @@
         if (progress.finished) {
             [self safeRemoveProgressObserver];
             dispatch_async(dispatch_get_main_queue(), ^{
-                [self.progressOverlay finishWithMessage:@"Verifying..."];
+                [self.progressOverlay finishWithMessage:localize(@"progress.msg.verifying", nil)];
                 [self performJITCheckAndLaunch];
             });
             return;
@@ -507,13 +543,20 @@
         [self finishLaunch];
         return;
     }
+
+    requestExternalJITEnable();
+
+    NSString *waitMessage;
     if (hasTrollStoreJIT) {
-        NSURL *jitURL = [NSURL URLWithString:[NSString stringWithFormat:@"apple-magnifier://enable-jit?bundle-id=%@", NSBundle.mainBundle.bundleIdentifier]];
-        [UIApplication.sharedApplication openURL:jitURL options:@{} completionHandler:nil];
+        waitMessage = localize(@"launcher.wait_jit_trollstore.message", nil);
+    } else if (DeviceNeedsDebugJITMapping()) {
+        waitMessage = localize(@"launcher.wait_jit_stikdebug.message", nil);
+    } else {
+        waitMessage = localize(@"launcher.wait_jit.message", nil);
     }
 
     self.jitAlert = [UIAlertController alertControllerWithTitle:localize(@"launcher.wait_jit.title", nil)
-        message:hasTrollStoreJIT ? localize(@"launcher.wait_jit_trollstore.message", nil) : localize(@"launcher.wait_jit.message", nil)
+        message:waitMessage
         preferredStyle:UIAlertControllerStyleAlert];
     [self.rootVC presentViewController:self.jitAlert animated:YES completion:nil];
 
@@ -550,7 +593,7 @@
 
         UIKit_launchMinecraftSurfaceVC(self.rootVC.view.window, self.downloadTask.metadata);
     } else {
-        showDialog(@"Error", @"No version metadata available.");
+        [ErrorPresenter showError:@"Error" message:@"No version metadata available."];
     }
 }
 
@@ -632,12 +675,12 @@
     if (players) {
         info = [NSString stringWithFormat:@"%@\n\nPlayers: %@/%@", desc, players[@"online"] ?: @"?", players[@"max"] ?: @"?"];
     }
-    UIAlertController *alert = [UIAlertController alertControllerWithTitle:name message:info preferredStyle:UIAlertControllerStyleAlert];
-    [alert addAction:[UIAlertAction actionWithTitle:@"Connect" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
-        [self launchWithServer:serverData];
-    }]];
-    [alert addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
-    [self.rootVC presentViewController:alert animated:YES completion:nil];
+    [AppSheet showOptionsWithTitle:name message:info options:@[
+        @{@"title": localize(@"common.connect", nil), @"icon": @"cable.connector"},
+        @{@"title": localize(@"Cancel", nil), @"icon": @"xmark"},
+    ] selectedIndex:NSNotFound selection:^(NSInteger idx) {
+        if (idx == 0) [self launchWithServer:serverData];
+    }];
 }
 
 #pragma mark - UIViewControllerTransitioningDelegate

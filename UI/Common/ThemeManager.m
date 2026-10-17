@@ -27,11 +27,16 @@ NSString * const ThemeDidChangeNotification = @"ThemeDidChangeNotification";
         _colorOverrides = [NSMutableDictionary dictionary];
         _backgroundBlurIntensity = 0;
         _uiOpacity = 1.0;
+        // Manual Dark/Light must stick on windows created later (sheets,
+        // pickers, dialogs) — they default to Unspecified (follow system).
+        [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(windowBecameKey:) name:UIWindowDidBecomeKeyNotification object:nil];
         [[NSUserDefaults standardUserDefaults] registerDefaults:@{
             @"amethyst_ui_opacity": @1.0,
-            @"amethyst_ui_border_enabled": @YES,
+            @"amethyst_ui_border_enabled": @NO,
             @"amethyst_ui_border_width": @1.0,
             @"amethyst_ui_border_radius": @10.0,
+            @"amethyst_shell_gap": @0,
+            @"amethyst_shell_inner_gap": @0,
             @"amethyst_settings_blur": @55,
             @"amethyst_topbar_blur": @55,
             @"amethyst_sidebar_blur": @55,
@@ -152,6 +157,7 @@ NSString * const ThemeDidChangeNotification = @"ThemeDidChangeNotification";
 - (void)setUiBorderEnabled:(BOOL)uiBorderEnabled {
     _uiBorderEnabled = uiBorderEnabled;
     [[NSUserDefaults standardUserDefaults] setBool:uiBorderEnabled forKey:@"amethyst_ui_border_enabled"];
+    [[NSUserDefaults standardUserDefaults] synchronize];
     [self broadcastThemeChange];
 }
 
@@ -162,12 +168,14 @@ NSString * const ThemeDidChangeNotification = @"ThemeDidChangeNotification";
 - (void)setUiBorderWidth:(CGFloat)uiBorderWidth {
     _uiBorderWidth = MAX(0.5, MIN(uiBorderWidth, 4.0));
     [[NSUserDefaults standardUserDefaults] setFloat:_uiBorderWidth forKey:@"amethyst_ui_border_width"];
+    [[NSUserDefaults standardUserDefaults] synchronize];
     [self broadcastThemeChange];
 }
 
 - (void)setUiBorderCornerRadius:(CGFloat)uiBorderCornerRadius {
     _uiBorderCornerRadius = MAX(0, MIN(uiBorderCornerRadius, 28.0));
     [[NSUserDefaults standardUserDefaults] setFloat:_uiBorderCornerRadius forKey:@"amethyst_ui_border_radius"];
+    [[NSUserDefaults standardUserDefaults] synchronize];
     [self broadcastThemeChange];
 }
 
@@ -258,8 +266,10 @@ NSString * const ThemeDidChangeNotification = @"ThemeDidChangeNotification";
 }
 
 - (UIColor *)accentColor {
+    // Default look is monochrome: black buttons in light mode, white in dark.
+    // Any saved custom color still wins over this fallback.
     return [self colorOverrideForKey:@"amethyst_accent_color"]
-        ?: [UIColor colorWithRed:0.067 green:0.235 blue:0.522 alpha:1.0];
+        ?: ([self isDarkMode] ? [UIColor whiteColor] : [UIColor blackColor]);
 }
 
 - (UIColor *)accentHoverColor {
@@ -327,8 +337,38 @@ NSString * const ThemeDidChangeNotification = @"ThemeDidChangeNotification";
     return [UIColor colorWithRed:1.0 green:0.388 blue:0.357 alpha:1.0];
 }
 
+- (UIColor *)contrastTextColorForBackground:(UIColor *)background {
+    // Contrast against the given background so text stays readable on
+    // both black/white defaults and user-picked colors.
+    CGFloat r, g, b, a;
+    if ([background getRed:&r green:&g blue:&b alpha:&a]) {
+        CGFloat luminance = 0.299 * r + 0.587 * g + 0.114 * b;
+        return luminance > 0.55 ? [UIColor blackColor] : [UIColor whiteColor];
+    }
+    return [self isDarkMode] ? [UIColor blackColor] : [UIColor whiteColor];
+}
+
 - (UIColor *)buttonTextColor {
-    return [UIColor whiteColor];
+    return [self contrastTextColorForBackground:self.accentColor];
+}
+
+- (void)styleSegmentedControl:(UISegmentedControl *)seg {
+    if (!seg) return;
+    UIColor *selBg = self.accentColor;
+    seg.selectedSegmentTintColor = selBg;
+    UIColor *selText = [self contrastTextColorForBackground:selBg];
+    NSDictionary *normal = [seg titleTextAttributesForState:UIControlStateNormal];
+    NSDictionary *selected = [seg titleTextAttributesForState:UIControlStateSelected];
+    UIFont *normalFont = normal[NSFontAttributeName];
+    UIFont *selectedFont = selected[NSFontAttributeName];
+    if (![normalFont isKindOfClass:[UIFont class]]) {
+        normalFont = [UIFont systemFontOfSize:13 weight:UIFontWeightRegular];
+    }
+    if (![selectedFont isKindOfClass:[UIFont class]]) {
+        selectedFont = [UIFont systemFontOfSize:13 weight:UIFontWeightSemibold];
+    }
+    [seg setTitleTextAttributes:@{NSForegroundColorAttributeName: self.primaryTextColor, NSFontAttributeName: normalFont} forState:UIControlStateNormal];
+    [seg setTitleTextAttributes:@{NSForegroundColorAttributeName: selText, NSFontAttributeName: selectedFont} forState:UIControlStateSelected];
 }
 
 - (void)applyAccentColor:(UIColor *)color {
@@ -369,10 +409,27 @@ NSString * const ThemeDidChangeNotification = @"ThemeDidChangeNotification";
 }
 
 - (void)applyThemeToAllWindows {
+    // Iterate scenes: sharedApplication.windows can miss the key window,
+    // which left manual Dark/Light switches with no visible effect.
+    for (UIScene *scene in UIApplication.sharedApplication.connectedScenes) {
+        if (![scene isKindOfClass:[UIWindowScene class]]) continue;
+        for (UIWindow *window in ((UIWindowScene *)scene).windows) {
+            window.overrideUserInterfaceStyle = _interfaceStyle;
+        }
+    }
+    // Fallback for any window not attached to a scene yet.
     for (UIWindow *window in UIApplication.sharedApplication.windows) {
         window.overrideUserInterfaceStyle = _interfaceStyle;
     }
     [self broadcastThemeChange];
+}
+
+- (void)windowBecameKey:(NSNotification *)note {
+    if (_interfaceStyle == UIUserInterfaceStyleUnspecified) return;
+    UIWindow *window = note.object;
+    if ([window isKindOfClass:[UIWindow class]]) {
+        window.overrideUserInterfaceStyle = _interfaceStyle;
+    }
 }
 
 - (void)broadcastThemeChange {

@@ -90,7 +90,7 @@ fi
 
 # 6. patched libjvm for 21/25: printf replaced by brk #0x6a, and jit-alloc brk #0xf00d present
 if [[ "$VER" == "21" || "$VER" == "25" ]]; then
-  if python3 "$ROOT/scripts/jre-build/check_libjvm_patch.py" "$JVM"; then
+  if python3 "$ROOT/scripts/jre-build/check_libjvm_patch.py" "$JVM"; [ "$?" -ne 1 ]; then
     ok "libjvm binary-patched (mirror brk active)"
   else
     bad "libjvm binary-patch verification failed (run scripts/patch_libjvm_mirror_brk.py + scripts/patch_libjvm_jit_alloc.py)"

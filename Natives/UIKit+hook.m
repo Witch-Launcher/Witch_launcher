@@ -29,7 +29,31 @@ void swizzleUIImageMethod(SEL originalAction, SEL swizzledAction) {
     }
 }
 
+// iOS 26/27: CFStringGetFastestEncoding <-> -[NSString _fastestEncodingInCFStringEncoding]
+// recurse until the UIKit eventfetch thread blows its stack (crash to SpringBoard).
+// Return a constant encoding so the cycle cannot start.
+static NSStringEncoding WitchNSStringFastestEncoding(id self, SEL _cmd) {
+    (void)self;
+    (void)_cmd;
+    return NSUTF8StringEncoding;
+}
+
+static void installFastestEncodingGuard(void) {
+    if (@available(iOS 26.0, *)) {
+        IMP imp = (IMP)WitchNSStringFastestEncoding;
+        const char *types = "Q@:";
+        Class nscf = NSClassFromString(@"__NSCFString");
+        Class nsstring = [NSString class];
+        class_replaceMethod(nsstring, @selector(fastestEncoding), imp, types);
+        if (nscf) {
+            class_replaceMethod(nscf, @selector(fastestEncoding), imp, types);
+        }
+        NSLog(@"[UIKit+hook] Installed NSString fastestEncoding guard");
+    }
+}
+
 void init_hookUIKitConstructor(void) {
+    installFastestEncodingGuard();
     UIUserInterfaceIdiom idiom = getPrefBool(@"debug.debug_ipad_ui") ? UIUserInterfaceIdiomPad : UIUserInterfaceIdiomPhone;
     [UIDevice.currentDevice _setActiveUserInterfaceIdiom:idiom];
     [UIScreen.mainScreen _setUserInterfaceIdiom:idiom];

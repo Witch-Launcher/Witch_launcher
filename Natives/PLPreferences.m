@@ -25,6 +25,9 @@
             @"widget_show_temp": @NO,
             @"widget_temp_unit": @"c",
             @"widget_show_batt": @NO,
+            @"widget_show_fgfps": @NO,
+            @"widget_show_clock": @NO,
+            @"widget_show_lowpower": @NO,
             @"widget_bg_opacity": @(0),
             @"widget_ram_style": @"none",
             @"widget_cpu_style": @"percent",
@@ -40,7 +43,9 @@
             @"silence_other_audio": @NO,
             @"silence_with_switch": @NO,
             @"allow_microphone": @NO,
-            @"microphone_source": @"auto"
+            @"microphone_source": @"auto",
+            @"moltenvk_version": @"1.4",
+            @"ltw_angle_backend": @"metal"
         }.mutableCopy,
         @"control": @{
             @"default_ctrl": @"default.json",
@@ -62,7 +67,34 @@
             @"gyroscope_enable": @NO,
             @"gyroscope_invert_x_axis": @NO,
             @"gyroscope_sensitivity": @(100),
-            @"gamepad_sensitivity": @(100)
+            @"gamepad_sensitivity": @(100),
+            @"cursor_types_enabled": @YES,
+            @"cursortype_normal_enabled": @YES,
+            @"cursortype_normal_cursor": @"default",
+            @"cursortype_link_enabled": @YES,
+            @"cursortype_link_cursor": @"default",
+            @"cursortype_text_enabled": @YES,
+            @"cursortype_text_cursor": @"default",
+            @"cursortype_busy_enabled": @YES,
+            @"cursortype_busy_cursor": @"default",
+            @"cursortype_working_enabled": @YES,
+            @"cursortype_working_cursor": @"default",
+            @"cursortype_precision_enabled": @YES,
+            @"cursortype_precision_cursor": @"default",
+            @"cursortype_unavailable_enabled": @YES,
+            @"cursortype_unavailable_cursor": @"default",
+            @"cursortype_vresize_enabled": @YES,
+            @"cursortype_vresize_cursor": @"default",
+            @"cursortype_hresize_enabled": @YES,
+            @"cursortype_hresize_cursor": @"default",
+            @"cursortype_diagonal_enabled": @YES,
+            @"cursortype_diagonal_cursor": @"default",
+            @"cursortype_move_enabled": @YES,
+            @"cursortype_move_cursor": @"default",
+            @"cursortype_help_enabled": @YES,
+            @"cursortype_help_cursor": @"default",
+            @"cursortype_hidden_enabled": @YES,
+            @"cursortype_hidden_cursor": @"default"
         }.mutableCopy,
         @"java": @{
             @"java_homes": @{
@@ -84,11 +116,13 @@
         }.mutableCopy,
         @"mobileglues": @{
             @"enable_angle": @NO,
-            @"enable_no_error": @(0),
+            @"angle_backend": @"metal",
+            @"enable_no_error": @(2),
             @"enable_ext_timer_query": @YES,
             @"enable_ext_compute_shader": @NO,
-            @"enable_ext_direct_state_access": @NO,
-            @"max_glsl_cache_size": @(32),
+            @"enable_ext_direct_state_access": @YES,
+            @"enable_ext_gl43": @NO,
+            @"max_glsl_cache_size": @(30),
             @"multidraw_mode": @(0),
             @"angle_depth_clear_fix_mode": @(0),
             @"custom_gl_version": @(0),
@@ -99,7 +133,45 @@
             @"gl_override": @(0),
             @"enable_gl_thread": @YES,
             @"glsl_cache_size": @(32),
-            @"api_features": @(0xFFFFFFFF)
+            @"api_features": @(0xFFFFFFFF),
+            @"mesa_version": @"26.2.2"
+        }.mutableCopy,
+        @"mobilegl": @{
+            @"backend_type": @"DirectVulkan",
+            @"angle_backend": @"tgles",
+            @"disable_timer_query": @NO,
+            @"disable_subgroup": @NO,
+            @"advertise_fp64": @NO,
+            @"frames_in_flight": @(3),
+            @"vma_block_size": @(32),
+            @"large_buffer_adopt_size": @(4),
+            @"coherent_as_flush": @NO,
+            @"async_shader_compile": @(0),
+            @"shader_cache": @(0),
+            @"r11g11b10f_fallback": @NO
+        }.mutableCopy,
+        // Renderer TGLMT (libtglmt.dylib). Key PHẢI có sẵn ở đây, nếu không
+        // PLPreferences setObject sẽ không tạo được mục mới và setting ghi im lặng.
+        // Env do TGLMTConfig apply khi khởi động game (không phải lúc bấm UI).
+        @"tglmt": @{
+            @"diag": @NO,
+            @"frames_in_flight": @(4),
+            @"buf_pool_slots": @(4),
+            @"pool_mb": @(192)
+        }.mutableCopy,
+        @"witch": @{
+            @"server_enabled": @YES,
+            @"proxy_base_url": @"",
+            @"proxy_token": @"",
+            @"proxy_hmac": @"",
+            @"curseforge_source": @"server",
+            @"curseforge_own_key": @"",
+            @"ai_enabled": @YES,
+            @"ai_source": @"server",
+            @"ai_own_key": @"",
+            @"ai_own_base": @"",
+            @"ai_own_model": @"",
+            @"ai_language": @"auto"
         }.mutableCopy,
         @"internal": @{
             @"isolated": @NO,
@@ -122,12 +194,15 @@
             @"debug_hide_home_indicator": @NO,
             @"debug_ipad_ui": @(realUIIdiom == UIUserInterfaceIdiomPad),
             @"debug_auto_correction": @YES,
+            @"debug_render_log": @NO,
+            @"mem_sample_log": @YES,
             @"debug_server_enabled": @NO,
             @"debug_server_port": @(9090),
             @"debug_server_token": @"",
             @"debug_server_localhost_only": @NO
         }.mutableCopy;
         defaults[@"launcher"] = @{
+            @"language": @"auto",
             @"theme": @"System",
             @"logo_style": (CONFIG_RELEASE ? @"purple" : @"dev")
         }.mutableCopy;
@@ -235,6 +310,14 @@
         }
     }
 
+    // One-time migration: mark as done so this block never runs again.
+    // Previously forced-overwrote user values; now respects stored preferences.
+    NSMutableDictionary *internal = pref[@"internal"];
+    if ([internal isKindOfClass:[NSMutableDictionary class]] &&
+        ![internal[@"mg_apple_defaults_v1"] boolValue]) {
+        internal[@"mg_apple_defaults_v1"] = @YES;
+    }
+
     return pref;
 }
 
@@ -290,6 +373,24 @@
         [self.globalPref setValue:value forKeyPath:key];
         [self saveGlobalPref];
         return YES;
+    }
+    // Key doesn't exist yet — create it in the correct section
+    // Key path format: "section.keyname" (e.g. "video.renderer")
+    NSRange dotRange = [key rangeOfString:@"."];
+    if (dotRange.location != NSNotFound) {
+        NSString *section = [key substringToIndex:dotRange.location];
+        NSString *keyName = [key substringFromIndex:dotRange.location + 1];
+        NSMutableDictionary *target = self.instancePref ?: self.globalPref;
+        if (target[section]) {
+            target[section][keyName] = value;
+            if (target == self.instancePref) {
+                [self saveInstancePref];
+            } else {
+                [self saveGlobalPref];
+            }
+            NSLog(@"[PLPreferences] Created new preference %@ = %@", key, value);
+            return YES;
+        }
     }
     NSLog(@"[PLPreferences] Setter could not find preference %@", key);
     return NO;

@@ -5,6 +5,7 @@
 
 #import <sys/utsname.h>
 #import <UIKit/UIKit.h>
+#import <Metal/Metal.h>
 
 NSString *const ZinkPrefSection = @"zink";
 static AppleGPUGeneration _cachedGPUGeneration = AppleGPUGenerationUnknown;
@@ -271,6 +272,108 @@ static AppleGPUGeneration _cachedGPUGeneration = AppleGPUGenerationUnknown;
     return [renderer hasPrefix:@"libOSMesa"];
 }
 
++ (NSString *)selectedMesaVersion {
+    id ver = getPrefObject(@"zink.mesa_version");
+    if (ver && [ver isKindOfClass:[NSString class]]) {
+        NSString *v = (NSString *)ver;
+        if ([v isEqualToString:@"25.0.7"] || [v isEqualToString:@"26.2.2"]) {
+            NSLog(@"[ZinkConfig] selectedMesaVersion: preference = %@", v);
+            return v;
+        }
+    }
+    NSLog(@"[ZinkConfig] selectedMesaVersion: default = 26.2.2");
+    return @"26.2.2";
+}
+
++ (NSString *)zinkLibraryName {
+    NSString *ver = [self selectedMesaVersion];
+    if ([ver isEqualToString:@"25.0.7"]) {
+        NSLog(@"[ZinkConfig] zinkLibraryName: libOSMesa.8.dylib (OSMesa backend)");
+        return @"libOSMesa.8.dylib";
+    }
+    NSLog(@"[ZinkConfig] zinkLibraryName: libEGL_Mesa26.dylib (EGL backend)");
+    return @"libEGL_Mesa26.dylib";
+}
+
++ (BOOL)isZinkUsingEGL {
+    NSString *ver = [self selectedMesaVersion];
+    BOOL result = [ver isEqualToString:@"26.2.2"];
+    NSLog(@"[ZinkConfig] isZinkUsingEGL: %@ → %@", ver, result ? @"YES (EGL)" : @"NO (OSMesa)");
+    return result;
+}
+
+#pragma mark - KosmicKrisp Support Detection
+
++ (BOOL)deviceSupportsKosmicKrisp {
+    static int cached = -1; // -1=unknown, 0=no, 1=yes
+    if (cached >= 0) return cached == 1;
+
+    id<MTLDevice> device = MTLCreateSystemDefaultDevice();
+    if (!device) {
+        NSLog(@"[ZinkConfig] KosmicKrisp: No Metal device found");
+        cached = 0;
+        return NO;
+    }
+
+    // KosmicKrisp minimum: A13/Apple6 (image atomics + Vulkan Memory Model + Arg Buffers Tier 2)
+    BOOL supported = NO;
+    if ([device respondsToSelector:@selector(supportsFamily:)]) {
+        supported = [device supportsFamily:MTLGPUFamilyApple6];
+    }
+
+    NSLog(@"[ZinkConfig] KosmicKrisp support: %@ (device=%@)",
+          supported ? @"YES" : @"NO", device.name);
+    cached = supported ? 1 : 0;
+    return supported;
+}
+
++ (BOOL)deviceSupportsKosmicKrispFull {
+    static int cached = -1;
+    if (cached >= 0) return cached == 1;
+
+    id<MTLDevice> device = MTLCreateSystemDefaultDevice();
+    if (!device) { cached = 0; return NO; }
+
+    // Full KosmicKrisp (Vulkan 1.4): A14+/Apple7+ (Metal 4)
+    BOOL supported = NO;
+    if ([device respondsToSelector:@selector(supportsFamily:)]) {
+        supported = [device supportsFamily:MTLGPUFamilyApple7];
+    }
+
+    NSLog(@"[ZinkConfig] KosmicKrisp Full (VK 1.4): %@ (device=%@)",
+          supported ? @"YES" : @"NO", device.name);
+    cached = supported ? 1 : 0;
+    return supported;
+}
+
++ (BOOL)deviceSupportsKosmicKrispReduced {
+    // A13 only (Apple6): KosmicKrisp with reduced Vulkan 1.2
+    return [self deviceSupportsKosmicKrisp] && ![self deviceSupportsKosmicKrispFull];
+}
+
++ (ZinkVulkanBackend)selectedVulkanBackend {
+    id raw = getPrefObject(@"zink.vulkan_backend");
+    if (raw && [raw isKindOfClass:[NSNumber class]]) {
+        NSInteger val = [raw integerValue];
+        if (val >= ZinkVulkanBackendAuto && val <= ZinkVulkanBackendKosmicKrisp) {
+            return (ZinkVulkanBackend)val;
+        }
+    }
+    return ZinkVulkanBackendAuto;
+}
+
++ (NSString *)vulkanBackendName {
+    switch ([self selectedVulkanBackend]) {
+        case ZinkVulkanBackendMoltenVK:    return @"MoltenVK";
+        case ZinkVulkanBackendKosmicKrisp: return @"KosmicKrisp";
+        case ZinkVulkanBackendAuto:
+        default: {
+            if ([self deviceSupportsKosmicKrisp]) return @"KosmicKrisp (auto)";
+            return @"MoltenVK (auto)";
+        }
+    }
+}
+
 #pragma mark - Environment Setup
 
 + (void)applyZinkEnvironmentForOptimizationLevel:(ZinkOptimizationLevel)level {
@@ -433,17 +536,30 @@ static AppleGPUGeneration _cachedGPUGeneration = AppleGPUGenerationUnknown;
     return [NSString stringWithFormat:
         @"[Zink Config]\n"
         @"Renderer: %@\n"
+        @"Mesa: %@ (%@)\n"
         @"GPU: %@ (recommended: %@)\n"
         @"Setting / Resolved: %@ / %@\n"
         @"GL: %@ / GL Thread: %@\n"
         @"Cache: %@ / API: %@",
-        renderer, genName, [self deviceRecommendationString],
+        renderer, [self selectedMesaVersion], [self isZinkUsingEGL] ? @"EGL" : @"OSMesa",
+        genName, [self deviceRecommendationString],
         levelName, resolvedLevelName,
         glVer, glThreadStr,
         cacheStr, apiStr];
 }
 
 + (void)applyZinkEnvironmentFromPreferences {
+    // Set Mesa version for Zink backend selection
+    NSString *mesaVersion = [self selectedMesaVersion];
+    setenv("ZINK_MESA_VERSION", mesaVersion.UTF8String, 1);
+    if ([self isZinkUsingEGL]) {
+        setenv("ZINK_USE_EGL", "1", 1);
+        NSLog(@"[ZinkConfig] Using Mesa %@ (EGL backend)", mesaVersion);
+    } else {
+        unsetenv("ZINK_USE_EGL");
+        NSLog(@"[ZinkConfig] Using Mesa %@ (OSMesa backend)", mesaVersion);
+    }
+
     id rawLevel = getPrefObject(@"zink.optimization_level");
     ZinkOptimizationLevel level = ZinkOptimizationLevelAuto;
     if (rawLevel) {

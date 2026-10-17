@@ -8,6 +8,11 @@
 #import "VersionDirectoryManager.h"
 #import "ios_uikit_bridge.h"
 #import "AmethystBlurView.h"
+#import "utils.h"
+#import "CurseForgeService.h"
+#import "ModSourceService.h"
+#import "LauncherPreferences.h"
+#import "AppSheet.h"
 
 @interface ResourcePackListViewController () <UITableViewDelegate, UITableViewDataSource, UISearchBarDelegate>
 @property (nonatomic) UISearchBar *searchBar;
@@ -24,6 +29,9 @@
 @property (nonatomic) BOOL isLoadingMore;
 @property (nonatomic) BOOL adjustingContentOffset;
 @property (nonatomic) NSString *currentQuery;
+@property (nonatomic) NSString *selectedSource;
+@property (nonatomic) UISegmentedControl *sourceControl;
+@property (nonatomic) NSLayoutConstraint *sourceControlWidthConstraint;
 @end
 
 @implementation ResourcePackListViewController
@@ -31,6 +39,7 @@
 - (void)viewDidLoad {
     [super viewDidLoad];
     [AmethystBlurView installInView:self.view];
+    _selectedSource = @"modrinth";
     _pageCache = [NSMutableDictionary dictionary];
     _pageOffsets = [NSMutableArray array];
     _hasMore = YES;
@@ -49,9 +58,20 @@
     _searchBar = [[UISearchBar alloc] init];
     _searchBar.translatesAutoresizingMaskIntoConstraints = NO;
     _searchBar.delegate = self;
-    _searchBar.placeholder = @"Search resource packs...";
+    _searchBar.placeholder = localize(@"download.search.resource_packs", nil);
     _searchBar.searchBarStyle = UISearchBarStyleMinimal;
     [self.view addSubview:_searchBar];
+
+    _sourceControl = [[UISegmentedControl alloc] initWithItems:@[@"Modrinth", @"CurseForge"]];
+    _sourceControl.translatesAutoresizingMaskIntoConstraints = NO;
+    _sourceControl.selectedSegmentIndex = 0;
+    _sourceControl.selectedSegmentTintColor = ThemeManager.shared.accentColor;
+    _sourceControl.layer.cornerRadius = 8;
+    _sourceControl.clipsToBounds = YES;
+    [_sourceControl setTitleTextAttributes:@{NSForegroundColorAttributeName: ThemeManager.shared.primaryTextColor, NSFontAttributeName: [UIFont systemFontOfSize:11 weight:UIFontWeightMedium]} forState:UIControlStateNormal];
+    [_sourceControl setTitleTextAttributes:@{NSForegroundColorAttributeName: ThemeManager.shared.buttonTextColor, NSFontAttributeName: [UIFont systemFontOfSize:11 weight:UIFontWeightSemibold]} forState:UIControlStateSelected];
+    [_sourceControl addTarget:self action:@selector(sourceChanged) forControlEvents:UIControlEventValueChanged];
+    [self.view addSubview:_sourceControl];
 
     _spinner = [[UIActivityIndicatorView alloc] initWithActivityIndicatorStyle:UIActivityIndicatorViewStyleLarge];
     _spinner.translatesAutoresizingMaskIntoConstraints = NO;
@@ -60,7 +80,7 @@
 
     _emptyLabel = [[UILabel alloc] init];
     _emptyLabel.translatesAutoresizingMaskIntoConstraints = NO;
-    _emptyLabel.text = @"No resource packs found.\nTry a different search.";
+    _emptyLabel.text = localize(@"download.empty.resource_packs", nil);
     _emptyLabel.numberOfLines = 0;
     _emptyLabel.textAlignment = NSTextAlignmentCenter;
     _emptyLabel.font = [UIFont systemFontOfSize:14 weight:UIFontWeightRegular];
@@ -88,10 +108,16 @@
 
     [_tableView registerClass:[AmethystProjectCell class] forCellReuseIdentifier:@"PackCell"];
 
+    _sourceControlWidthConstraint = [_sourceControl.widthAnchor constraintEqualToConstant:160];
     [NSLayoutConstraint activateConstraints:@[
         [_searchBar.topAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.topAnchor constant:8],
         [_searchBar.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor constant:12],
-        [_searchBar.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor constant:-12],
+        [_searchBar.trailingAnchor constraintEqualToAnchor:_sourceControl.leadingAnchor constant:-8],
+
+        [_sourceControl.centerYAnchor constraintEqualToAnchor:_searchBar.centerYAnchor],
+        [_sourceControl.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor constant:-12],
+        _sourceControlWidthConstraint,
+        [_sourceControl.heightAnchor constraintEqualToConstant:32],
 
         [_spinner.centerXAnchor constraintEqualToAnchor:self.view.centerXAnchor],
         [_spinner.centerYAnchor constraintEqualToAnchor:self.view.centerYAnchor],
@@ -124,6 +150,14 @@
     _searchBar.tintColor = theme.accentColor;
     _emptyLabel.textColor = theme.secondaryTextColor;
     _errorLabel.textColor = theme.errorColor;
+    _sourceControl.selectedSegmentTintColor = theme.accentColor;
+    [_sourceControl setTitleTextAttributes:@{NSForegroundColorAttributeName: theme.primaryTextColor, NSFontAttributeName: [UIFont systemFontOfSize:11 weight:UIFontWeightMedium]} forState:UIControlStateNormal];
+    [_sourceControl setTitleTextAttributes:@{NSForegroundColorAttributeName: theme.buttonTextColor, NSFontAttributeName: [UIFont systemFontOfSize:11 weight:UIFontWeightSemibold]} forState:UIControlStateSelected];
+}
+
+- (void)sourceChanged {
+    _selectedSource = _sourceControl.selectedSegmentIndex == 0 ? @"modrinth" : @"curseforge";
+    [self loadPacksWithQuery:_searchBar.text ?: @"" offset:0];
 }
 
 - (void)loadPacksWithQuery:(NSString *)query offset:(NSInteger)offset {
@@ -142,7 +176,7 @@
         _timeoutTimer = [NSTimer scheduledTimerWithTimeInterval:15 repeats:NO block:^(NSTimer *timer) {
             if (weakSelf.spinner.isAnimating) {
                 [weakSelf.spinner stopAnimating];
-                weakSelf.errorLabel.text = @"Request timed out.\nCheck your internet connection.";
+                weakSelf.errorLabel.text = localize(@"download.error.timeout", nil);
                 weakSelf.errorLabel.hidden = NO;
             }
         }];
@@ -150,7 +184,7 @@
         _isLoadingMore = YES;
     }
 
-    [ModrinthService.shared searchProjectsWithType:@"resourcepack" query:query offset:offset limit:50 categoryFilter:nil loaderFilter:nil gameVersionFilter:nil completion:^(NSArray<NSDictionary *> *results, NSError *error) {
+    void (^handleResults)(NSArray *, NSError *) = ^(NSArray<NSDictionary *> *results, NSError *error) {
         [self.timeoutTimer invalidate];
         [self.spinner stopAnimating];
         self.isLoadingMore = NO;
@@ -174,7 +208,12 @@
             self.errorLabel.text = error.localizedDescription ?: @"Failed to load resource packs.";
             self.errorLabel.hidden = NO;
         }
-    }];
+    };
+    if ([_selectedSource isEqualToString:@"curseforge"]) {
+        [CurseForgeService.shared searchProjectsWithClassId:12 query:query offset:offset limit:50 loaderFilter:nil gameVersionFilter:nil completion:handleResults];
+    } else {
+        [ModrinthService.shared searchProjectsWithType:@"resourcepack" query:query offset:offset limit:50 categoryFilter:nil loaderFilter:nil gameVersionFilter:nil completion:handleResults];
+    }
 }
 
 - (void)trimPacksIfNeeded {
@@ -272,28 +311,45 @@
     [HapticManager.shared play:HapticTypeLight];
     NSDictionary *pack = _packs[indexPath.row];
 
-    DownloadProgressOverlay *overlay = [DownloadProgressOverlay showInView:self.view title:@"Loading Versions"];
-    [overlay updateProgress:0 message:@"Fetching available versions..."];
+    DownloadProgressOverlay *overlay = [DownloadProgressOverlay showInView:self.view title:localize(@"progress.loading_versions", nil)];
+    [overlay updateProgress:0 message:localize(@"progress.msg.fetching", nil)];
 
-    [ModrinthService.shared loadProjectVersions:pack[@"project_id"] completion:^(NSArray<NSDictionary *> *versions, NSError *error) {
+    [ModSourceService loadVersionsForMod:pack completion:^(NSArray<NSDictionary *> *versions, NSError *error) {
         [overlay dismiss];
-        if (versions.count == 0) return;
+        if (error || versions.count == 0) {
+            showDialog(@"Error", error.localizedDescription ?: @"No versions found.");
+            return;
+        }
 
-        UIAlertController *sheet = [UIAlertController alertControllerWithTitle:pack[@"title"]
-                                                                        message:@"Select a version to install"
-                                                                 preferredStyle:UIAlertControllerStyleActionSheet];
+        NSMutableArray *opts = [NSMutableArray array];
+        NSMutableArray *vers = [NSMutableArray array];
         for (NSDictionary *ver in versions) {
             NSString *label = [NSString stringWithFormat:@"%@  [%@]", ver[@"name"], [ver[@"game_versions"] componentsJoinedByString:@", "]];
-            [sheet addAction:[UIAlertAction actionWithTitle:label style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
-                NSString *url = ver[@"url"];
-                NSString *filename = ver[@"filename"] ?: @"pack.zip";
-                if (url.length > 0) {
-                    [self installResourcePack:url name:filename];
-                }
-            }]];
+            [opts addObject:@{@"title": label}];
+            [vers addObject:ver];
         }
-        [sheet addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
-        [self presentViewController:sheet animated:YES completion:nil];
+        [AppSheet showOptionsWithTitle:pack[@"title"] message:localize(@"mod.select_install", nil) options:opts selectedIndex:NSNotFound selection:^(NSInteger idx) {
+            NSDictionary *ver = vers[idx];
+            NSString *filename = ver[@"filename"] ?: @"pack.zip";
+            NSString *url = ver[@"url"];
+            if (url.length > 0) {
+                [self installResourcePack:url name:filename];
+                return;
+            }
+            // CurseForge files sometimes hide the direct link: resolve it.
+            if ([ModSourceService isCurseForgeMod:pack]) {
+                DownloadProgressOverlay *resolving = [DownloadProgressOverlay showInView:self.view title:localize(@"progress.resolving", nil)];
+                [resolving updateProgress:0 message:localize(@"progress.msg.contact_cf", nil)];
+                [CurseForgeService.shared resolveDownloadURLForProject:pack[@"project_id"] fileId:ver[@"_cfFileId"] completion:^(NSString *resolved, NSError *resolveError) {
+                    [resolving dismiss];
+                    if (resolved.length > 0) {
+                        [self installResourcePack:resolved name:filename];
+                    } else {
+                        showDialog(@"Error", resolveError.localizedDescription ?: @"Could not resolve download URL");
+                    }
+                }];
+            }
+        }];
     }];
 }
 
@@ -302,18 +358,18 @@
     NSString *labelSuffix = version.length > 0 ? [NSString stringWithFormat:@" to %@", version] : @" to Downloads";
 
     DownloadProgressOverlay *overlay = [DownloadProgressOverlay showInView:self.view title:[NSString stringWithFormat:@"Installing Resource Pack%@", labelSuffix]];
-    [overlay updateProgress:0 message:@"Downloading..."];
+    [overlay updateProgress:0 message:localize(@"progress.msg.downloading", nil)];
 
     [DownloadManager.shared downloadResourcePack:urlString name:name version:version completion:^(BOOL success, NSError *error) {
         dispatch_async(dispatch_get_main_queue(), ^{
             if (success) {
-                [overlay finishWithMessage:@"Installed!"];
+                [overlay finishWithMessage:localize(@"common.installed_done", nil)];
                 dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 1.5 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
                     [overlay dismiss];
-                    showDialog(@"Installed", [NSString stringWithFormat:@"%@ installed to resourcepacks.", name]);
+                    showDialog(localize(@"Installed", nil), [NSString stringWithFormat:localize(@"rp.installed_to", nil), name]);
                 });
             } else {
-                [overlay finishWithMessage:@"Failed"];
+                [overlay finishWithMessage:localize(@"common.failed", nil)];
                 dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 1.0 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
                     [overlay dismiss];
                     showDialog(@"Error", error.localizedDescription ?: @"Download failed.");

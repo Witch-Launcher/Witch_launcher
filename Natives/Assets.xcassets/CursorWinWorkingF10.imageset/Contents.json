@@ -1,0 +1,18 @@
+{
+  "images": [
+    {
+      "filename": "cursorwinworkingf10_32x32.png",
+      "idiom": "universal",
+      "scale": "1x"
+    },
+    {
+      "filename": "cursorwinworkingf10_64x64.png",
+      "idiom": "universal",
+      "scale": "2x"
+    }
+  ],
+  "info": {
+    "author": "xcode",
+    "version": 1
+  }
+}

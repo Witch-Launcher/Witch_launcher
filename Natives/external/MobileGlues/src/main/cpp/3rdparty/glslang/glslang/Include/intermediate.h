@@ -310,6 +310,8 @@ enum TOperator {
     EOpEndStreamPrimitive,   // geometry only
 
     EOpBarrier,
+    EOpControlBarrierArriveEXT,
+    EOpControlBarrierWaitEXT,
     EOpMemoryBarrier,
     EOpMemoryBarrierAtomicCounter,
     EOpMemoryBarrierBuffer,
@@ -410,7 +412,7 @@ enum TOperator {
     EOpSubgroupPartitionedExclusiveXor,
 
     EOpSubgroupGuardStop,
-    
+
     // Integer dot product
     EOpDotPackedEXT,
     EOpDotAccSatEXT,
@@ -482,6 +484,7 @@ enum TOperator {
     EOpCooperativeMatrixReduceNV,
     EOpCooperativeMatrixPerElementOpNV,
     EOpCooperativeMatrixTransposeNV,
+    EOpCooperativeMatrixGetCoordinateEXT,
 
     EOpCreateTensorLayoutNV,
     EOpTensorLayoutSetBlockSizeNV,
@@ -782,6 +785,18 @@ enum TOperator {
     EOpFragmentMaskFetch,
     EOpFragmentFetch,
 
+    // QCOM Image processing3
+    EOpTextureGatherExtendedGuardBegin,
+    EOpTextureGather4x1QCOM,
+    EOpTextureGatherV2QCOM,
+    EOpTextureGatherH2QCOM,
+    EOpTextureGatherDQCOM,
+    EOpTextureGather4x1OffsetQCOM,
+    EOpTextureGatherV2OffsetQCOM,
+    EOpTextureGatherH2OffsetQCOM,
+    EOpTextureGatherDOffsetQCOM,
+    EOpTextureGatherExtendedGuardEnd,
+
     EOpSparseTextureGuardBegin,
 
     EOpSparseTexture,
@@ -880,7 +895,7 @@ enum TOperator {
     EOpRayQueryGetIntersectionObjectToWorld,
     EOpRayQueryGetIntersectionWorldToObject,
 
-    // 
+    //
     // GL_NV_shader_invocation_reorder
     //
 
@@ -918,7 +933,7 @@ enum TOperator {
     EOpFetchMicroTriangleVertexPositionNV,
     EOpFetchMicroTriangleVertexBarycentricNV,
 
-    // 
+    //
     // GL_EXT_shader_invocation_reorder
     //
 
@@ -1104,6 +1119,12 @@ enum TLinkType {
     ELinkExport,
 };
 
+enum TFunctionControl {
+    EfcNone       = 0,
+    EfcInline     = 0x1,
+    EfcDontInline = 0x2,
+};
+
 class TIntermTraverser;
 class TIntermVariableDecl;
 class TIntermOperator;
@@ -1266,7 +1287,8 @@ public:
         maxIterations(iterationsInfinite),
         iterationMultiple(1),
         peelCount(0),
-        partialCount(0)
+        partialCount(0),
+        multipleWaitQueuesQCOM(noMultipleQaitQueues)
     { }
 
     virtual       TIntermLoop* getAsLoopNode() { return this; }
@@ -1318,6 +1340,12 @@ public:
     }
     unsigned int getPartialCount() const { return partialCount; }
 
+    static const unsigned int noMultipleQaitQueues = 0xFFFFFFFF;
+    void setMultipleWaitQueuesQCOM(unsigned int numQ) {
+        multipleWaitQueuesQCOM = numQ;
+    }
+    unsigned int getMultipleWaitQueuesQCOM() const { return multipleWaitQueuesQCOM; }
+
 protected:
     TIntermNode* body;       // code to loop over
     TIntermNode* test;       // exit condition associated with loop, could be 0 for 'for' loops
@@ -1331,6 +1359,7 @@ protected:
     unsigned int iterationMultiple;  // as per the SPIR-V specification
     unsigned int peelCount;          // as per the SPIR-V specification
     unsigned int partialCount;       // as per the SPIR-V specification
+    unsigned int multipleWaitQueuesQCOM;
 };
 
 //
@@ -1382,7 +1411,7 @@ public:
     // per process threadPoolAllocator, then it causes increased memory usage per compile
     // it is essential to use "symbol = sym" to assign to symbol
     TIntermSymbol(long long i, const TString& n, EShLanguage s, const TType& t, const TString* mn = nullptr)
-        : TIntermTyped(t), id(i), flattenSubset(-1), stage(s), constSubtree(nullptr) { 
+        : TIntermTyped(t), id(i), flattenSubset(-1), stage(s), constSubtree(nullptr) {
         name = n;
         if (mn) {
             mangledName = *mn;
@@ -1475,7 +1504,10 @@ public:
     bool isImageFootprint() const { return op > EOpImageFootprintGuardBegin && op < EOpImageFootprintGuardEnd; }
     bool isSparseImage()   const { return op == EOpSparseImageLoad; }
     bool isSubgroup() const { return op > EOpSubgroupGuardStart && op < EOpSubgroupGuardStop; }
-
+    bool isTextureGatherExtended() const
+    {
+      return op > EOpTextureGatherExtendedGuardBegin && op < EOpTextureGatherExtendedGuardEnd;
+    }
     void setOperationPrecision(TPrecisionQualifier p) { operationPrecision = p; }
     TPrecisionQualifier getOperationPrecision() const { return operationPrecision != EpqNone ?
                                                                                      operationPrecision :
@@ -1602,6 +1634,17 @@ public:
             break;
         case EOpTextureGather:
         case EOpSparseTextureGather:
+        case EOpTextureGather4x1QCOM:
+        case EOpTextureGatherV2QCOM:
+        case EOpTextureGatherH2QCOM:
+        case EOpTextureGatherDQCOM:
+            cracked.gather = true;
+            break;
+        case EOpTextureGather4x1OffsetQCOM:
+        case EOpTextureGatherV2OffsetQCOM:
+        case EOpTextureGatherH2OffsetQCOM:
+        case EOpTextureGatherDOffsetQCOM:
+            cracked.offset = true;
             cracked.gather = true;
             break;
         case EOpTextureGatherOffset:
@@ -1730,7 +1773,7 @@ typedef TVector<TStorageQualifier> TQualifierList;
 //
 class TIntermAggregate : public TIntermOperator {
 public:
-    TIntermAggregate() : TIntermOperator(EOpNull), userDefined(false), pragmaTable(nullptr) { 
+    TIntermAggregate() : TIntermOperator(EOpNull), userDefined(false), pragmaTable(nullptr) {
         endLoc.init();
     }
     TIntermAggregate(TOperator o) : TIntermOperator(o), pragmaTable(nullptr) {
@@ -1764,6 +1807,8 @@ public:
 
     void setLinkType(TLinkType l) { linkType = l; }
     TLinkType getLinkType() const { return linkType; }
+    void setFunctionControl(unsigned int fc) { functionControl = fc; }
+    unsigned int getFunctionControl() const { return functionControl; }
 protected:
     TIntermAggregate(const TIntermAggregate&); // disallow copy constructor
     TIntermAggregate& operator=(const TIntermAggregate&); // disallow assignment operator
@@ -1776,6 +1821,7 @@ protected:
     TPragmaTable* pragmaTable;
     TSpirvInstruction spirvInst;
     TLinkType linkType = ELinkNone;
+    unsigned int functionControl = EfcNone;
 
     // Marking the end source location of the aggregate.
     // This is currently only set for a compound statement or a function body, pointing to '}'.
@@ -1928,7 +1974,7 @@ public:
     const bool rightToLeft;
 
     // Whether to traverse declaration symbols in the traversal.
-    // By default, declaration symbols are not visited in the traversal to avoid 
+    // By default, declaration symbols are not visited in the traversal to avoid
     // visiting them in SPIR-V generation where they are not needed.
     const bool includeDeclSymbol;
 

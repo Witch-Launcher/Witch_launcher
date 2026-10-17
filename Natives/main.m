@@ -48,6 +48,23 @@ void printEntitlementAvailability(NSString *key) {
 void uncaughtExceptionHandler(NSException *exception) {
     NSLog(@"Uncaught exception: %@", exception.description);
     NSLog(@"Call stack: %@", exception.callStackSymbols);
+    // Persist name+reason+stack to a file: .ips logs never include the
+    // ObjC exception message, so without this the next crash is blind again.
+    @try {
+        NSString *home = @(getenv("POJAV_HOME") ?: "/var/mobile");
+        NSString *dir = [home stringByAppendingPathComponent:@"crash-reports"];
+        [fm createDirectoryAtPath:dir withIntermediateDirectories:YES attributes:nil error:nil];
+        NSArray *stack = exception.callStackSymbols ?: @[];
+        NSString *report = [NSString stringWithFormat:@"name: %@\nreason: %@\nuserInfo: %@\nstack:\n%@\n",
+                            exception.name, exception.reason, exception.userInfo,
+                            [stack componentsJoinedByString:@"\n"]];
+        NSString *ts = [NSString stringWithFormat:@"%.0f", [[NSDate date] timeIntervalSince1970]];
+        [report writeToFile:[dir stringByAppendingPathComponent:[NSString stringWithFormat:@"objc_crash_%@.txt", ts]]
+                 atomically:YES encoding:NSUTF8StringEncoding error:nil];
+        [report writeToFile:[dir stringByAppendingPathComponent:@"objc_last_crash.txt"]
+                 atomically:YES encoding:NSUTF8StringEncoding error:nil];
+        NSLog(@"[Crash] ObjC exception report written to crash-reports/");
+    } @catch (...) {}
     usleep(10000);
 }
 
@@ -323,6 +340,7 @@ int main(int argc, char *argv[]) {
 
     init_setupResolvConf();
     init_setupMultiDir();
+    init_setupUniversalJITScript(YES);
     toggleIsolatedPref(NO);
     [PLProfiles updateCurrent];
     init_setupAccounts();

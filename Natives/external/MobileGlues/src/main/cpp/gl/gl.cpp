@@ -159,8 +159,6 @@ void glClear(GLbitfield mask) {
     LOG();
     LOG_D("glClear, mask = 0x%x", mask);
 
-    printf("[MG-CLEAR] mask=0x%x draw_fb=%u\n", mask, mg_current_draw_fbo());
-
     INIT_CHECK_GL_ERROR
 
     CHECK_GL_ERROR_NO_INIT

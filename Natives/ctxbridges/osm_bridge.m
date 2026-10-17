@@ -31,7 +31,7 @@ void dlsym_OSMesa() {
 
 bool osm_init() {
     dlsym_OSMesa();
-    return true; // no more specific initialization required
+    return true;
 }
 
 osm_render_window_t* osm_init_context(osm_render_window_t* share) {
@@ -46,22 +46,6 @@ osm_render_window_t* osm_init_context(osm_render_window_t* share) {
     return render_window;
 }
 
-// OSMesaMakeCurrent binds the context on the CALLING thread and FIRST flushes
-// the previous framebuffer into its user buffer (osmesa_st_framebuffer_flush_
-// front -> memmove). Sharing one context + one buffer across threads is
-// therefore fundamentally racy: FML's "fml-loadingscreen" background thread
-// binds the same context the main thread renders with, so each bind flushes
-// the OTHER window's framebuffer into a buffer the other thread may realloc
-// at the same instant -> memmove into freed memory -> SIGSEGV in
-// _platform_memmove (the buffer contents show libmalloc's freed-memory
-// scribble pattern at the fault site).
-//
-// Instead every thread that binds gets its OWN OSMesa context + its OWN
-// grow-only pixel buffer (entries are per-thread via pthread_key and only
-// touched by their owning thread, so no cross-thread realloc/free races).
-// The bundle's original context remains the share-list root. A mutex
-// serializes bind/flush/copy so two threads never run OSMesaMakeCurrent
-// concurrently.
 typedef struct {
     OSMesaContext context;
     void* buffer;
@@ -113,19 +97,26 @@ void osm_apply_current_ll_locked() {
     if (!e) {
         return;
     }
-    if (e->width == windowWidth && e->height == windowHeight) {
+    if (windowWidth <= 0 || windowHeight <= 0) {
+        return;
+    }
+    if (e->width == (uint32_t)windowWidth && e->height == (uint32_t)windowHeight) {
         return;
     }
 
     e->width = windowWidth;
     e->height = windowHeight;
 
-    // Grow-only pixel buffer: the flush in OSMesaMakeCurrent copies the
-    // PREVIOUS framebuffer (sized for the last bind) into the user buffer
-    // before resizing, so shrinking the allocation would overflow.
-    uint32_t needBytes = windowWidth * windowHeight * 4;
+    uint32_t needBytes = (uint32_t)windowWidth * (uint32_t)windowHeight * 4;
     if (needBytes > e->bufferBytes) {
-        e->buffer = reallocf(e->buffer, needBytes);
+        void *newBuf = reallocf(e->buffer, needBytes);
+        if (!newBuf) {
+            NSLog(@"[OSMBridge] ✗ reallocf failed for %u bytes", needBytes);
+            e->width = 0;
+            e->height = 0;
+            return;
+        }
+        e->buffer = newBuf;
         e->bufferBytes = needBytes;
     }
 
@@ -145,17 +136,19 @@ void osm_make_current(osm_render_window_t* bundle) {
     pthread_mutex_lock(&osm_render_lock);
     pthread_once(&osm_thread_entry_once, osm_make_thread_entry_key);
     if(!bundle) {
-        // Release this thread's own context/buffer (destroys on thread exit too).
         osm_thread_entry_t* e = pthread_getspecific(osm_thread_entry_key);
         if (e) {
             pthread_setspecific(osm_thread_entry_key, NULL);
             osm_destroy_thread_entry(e);
         }
-        CGColorSpaceRelease(currentBundle->osm.color_space);
-        currentBundle->osm.color_space = NULL;
-        currentBundle = NULL;
+        if (currentBundle) {
+            if (currentBundle->osm.color_space) {
+                CGColorSpaceRelease(currentBundle->osm.color_space);
+                currentBundle->osm.color_space = NULL;
+            }
+            currentBundle = NULL;
+        }
         pthread_mutex_unlock(&osm_render_lock);
-        //technically this does nothing as its not possible to unbind a context in OSMesa
         handle.OSMesaMakeCurrent(NULL, NULL, 0, 0, 0);
         return;
     }
@@ -167,49 +160,92 @@ void osm_make_current(osm_render_window_t* bundle) {
 }
 
 void osm_swap_buffers() {
-    // The rendered pixels are copied out of the live GL buffer before it can
-    // be realloc'd or freed (thread-owned context rebinding, resize, unbind).
-    // Posting the CGImage with a reference into the live buffer crashes the
-    // render server's in-process compositing pass (memmove SIGSEGV) whenever
-    // the buffer moves or is freed between swaps.
     pthread_mutex_lock(&osm_render_lock);
     pthread_once(&osm_thread_entry_once, osm_make_thread_entry_key);
     if (currentBundle) {
         osm_apply_current_ll_locked();
-        handle.glFinish(); // this will force osmesa to write the last rendered image into the buffer
+        handle.glFinish();
     }
     osm_thread_entry_t* e = pthread_getspecific(osm_thread_entry_key);
+
+    static void* staticBufs[2] = {0};
+    static size_t staticBufSizes[2] = {0};
+    static int bufIdx = 0;
+
     size_t pixelBytes = 0;
     void* copy = NULL;
     GLsizei copyWidth = 0;
     GLsizei copyHeight = 0;
-    if (e && e->width > 0 && e->height > 0) {
+    if (e && e->buffer && e->width > 0 && e->height > 0) {
         copyWidth = e->width;
         copyHeight = e->height;
         pixelBytes = (size_t)e->width * (size_t)e->height * 4;
-        copy = malloc(pixelBytes);
-        memcpy(copy, e->buffer, pixelBytes);
+
+        int myIdx = bufIdx;
+        bufIdx = (bufIdx + 1) % 2;
+
+        if (staticBufSizes[myIdx] < pixelBytes) {
+            void *newBuf = reallocf(staticBufs[myIdx], pixelBytes);
+            if (newBuf) {
+                staticBufs[myIdx] = newBuf;
+                staticBufSizes[myIdx] = pixelBytes;
+            } else {
+                NSLog(@"[OSMBridge] ✗ swap buffer reallocf failed for %zu bytes", pixelBytes);
+            }
+        }
+        copy = staticBufs[myIdx];
+        if (copy) {
+            memcpy(copy, e->buffer, pixelBytes);
+        }
     }
     osm_render_window_t bundle = currentBundle ? currentBundle->osm : (osm_render_window_t){0};
     pthread_mutex_unlock(&osm_render_lock);
     if (copy == NULL) {
         return;
     }
+
+    CGColorSpaceRef cs = bundle.color_space ? CGColorSpaceRetain(bundle.color_space) : CGColorSpaceCreateDeviceRGB();
+
     dispatch_async(dispatch_get_main_queue(), ^{
-    CGDataProviderRef bitmapProvider = CGDataProviderCreateWithData(copy, copy, pixelBytes, osm_release_buffer_data);
-    CGImageRef bitmap = CGImageCreate(copyWidth, copyHeight, 8, 32, 4 * copyWidth, bundle.color_space, kCGImageAlphaNoneSkipLast | kCGBitmapByteOrderDefault, bitmapProvider, NULL, FALSE, kCGRenderingIntentDefault);
-    SurfaceViewController.surface.layer.contents = (__bridge id)bitmap;
-    CGImageRelease(bitmap);
-    CGDataProviderRelease(bitmapProvider);
+        [CATransaction begin];
+        [CATransaction setDisableActions:YES];
+        CGDataProviderRef provider = CGDataProviderCreateWithData(NULL, copy, pixelBytes, NULL);
+        if (provider) {
+            CGImageRef bitmap = CGImageCreate(copyWidth, copyHeight, 8, 32, 4 * copyWidth, cs,
+                                              kCGImageAlphaNoneSkipLast | kCGBitmapByteOrderDefault,
+                                              provider, NULL, FALSE, kCGRenderingIntentDefault);
+            if (bitmap) {
+                SurfaceViewController.surface.layer.contents = (__bridge id)bitmap;
+                CGImageRelease(bitmap);
+            }
+            CGDataProviderRelease(provider);
+        }
+        [CATransaction commit];
+        if (cs) CGColorSpaceRelease(cs);
     });
 }
 
 void osm_swap_interval(int swapInterval) {
-    // Nothing to do here
 }
 
 void osm_terminate() {
-    // Nothing to do here
+    NSLog(@"[OSMBridge] Terminating OSMesa bridge...");
+    pthread_mutex_lock(&osm_render_lock);
+    osm_thread_entry_t* e = pthread_getspecific(osm_thread_entry_key);
+    if (e) {
+        pthread_setspecific(osm_thread_entry_key, NULL);
+        osm_destroy_thread_entry(e);
+    }
+    if (currentBundle) {
+        if (currentBundle->osm.color_space) {
+            CGColorSpaceRelease(currentBundle->osm.color_space);
+            currentBundle->osm.color_space = NULL;
+        }
+        currentBundle = NULL;
+    }
+    pthread_mutex_unlock(&osm_render_lock);
+    handle.OSMesaMakeCurrent(NULL, NULL, 0, 0, 0);
+    NSLog(@"[OSMBridge] ✓ OSMesa bridge terminated");
 }
 
 void set_osm_bridge_tbl() {

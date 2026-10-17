@@ -1,1 +1,11 @@
-# dummy
+src/aarch64/sysv.lo: ../src/aarch64/sysv.S fficonfig.h include/ffi.h \
+  include/ffitarget.h ../include/ffi_cfi.h ../src/aarch64/internal.h \
+  /Volumes/D/Applications/Xcode.app/Contents/Developer/Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS26.2.sdk/usr/include/mach/machine/vm_param.h \
+  /Volumes/D/Applications/Xcode.app/Contents/Developer/Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS26.2.sdk/usr/include/mach/arm/vm_param.h
+fficonfig.h:
+include/ffi.h:
+include/ffitarget.h:
+../include/ffi_cfi.h:
+../src/aarch64/internal.h:
+/Volumes/D/Applications/Xcode.app/Contents/Developer/Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS26.2.sdk/usr/include/mach/machine/vm_param.h:
+/Volumes/D/Applications/Xcode.app/Contents/Developer/Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS26.2.sdk/usr/include/mach/arm/vm_param.h:

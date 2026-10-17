@@ -7,6 +7,8 @@
 #import "VersionDirectoryManager.h"
 #import "UnzipKit.h"
 #import "AmethystBlurView.h"
+#import "utils.h"
+#import "AppSheet.h"
 
 @interface VersionBrowserViewController () <UITableViewDelegate, UITableViewDataSource, UIDocumentPickerDelegate>
 @property (nonatomic) UISegmentedControl *typeFilter;
@@ -47,7 +49,7 @@ static NSArray *kLoaders;
 
 - (void)setup {
     self.navigationItem.title = @"Game Versions";
-    self.navigationItem.rightBarButtonItem = [[UIBarButtonItem alloc] initWithTitle:@"Execute .jar" style:UIBarButtonItemStylePlain target:self action:@selector(importJar)];
+    self.navigationItem.rightBarButtonItem = [[UIBarButtonItem alloc] initWithTitle:localize(@"jar.execute", nil) style:UIBarButtonItemStylePlain target:self action:@selector(importJar)];
 
     _typeFilter = [[UISegmentedControl alloc] initWithItems:@[@"Release", @"Snapshot", @"Old"]];
     _typeFilter.translatesAutoresizingMaskIntoConstraints = NO;
@@ -112,7 +114,7 @@ static NSArray *kLoaders;
 - (void)updateColors {
     ThemeManager *theme = ThemeManager.shared;
     self.view.backgroundColor = theme.contentBackgroundColor;
-    _typeFilter.selectedSegmentTintColor = theme.accentColor;
+    [theme styleSegmentedControl:_typeFilter];
     _loaderButton.tintColor = theme.primaryTextColor;
     _loaderButton.backgroundColor = theme.cardBackgroundColor;
     _loaderButton.layer.borderColor = theme.separatorColor.CGColor;
@@ -127,7 +129,7 @@ static NSArray *kLoaders;
 
 - (void)fetchVersions {
     [_spinner startAnimating];
-    _statusLabel.text = @"Fetching version manifest...";
+    _statusLabel.text = localize(@"version.fetching", nil);
     _tableView.hidden = YES;
 
     NSURL *manifestURL = [NSURL URLWithString:@"https://piston-meta.mojang.com/mc/game/version_manifest_v2.json"];
@@ -171,24 +173,16 @@ static NSArray *kLoaders;
 #pragma mark - Loader Picker
 
 - (void)pickLoader {
-    UIAlertController *sheet = [UIAlertController alertControllerWithTitle:@"Select Mod Loader"
-                                                                   message:@"Choose a mod loader to combine with Minecraft version"
-                                                            preferredStyle:UIAlertControllerStyleActionSheet];
+    NSMutableArray *opts = [NSMutableArray array];
     for (NSString *loader in kLoaders) {
-        BOOL isSelected = [loader isEqualToString:_selectedLoader];
-        NSString *label = isSelected ? [NSString stringWithFormat:@"✓ %@", loader] : loader;
-        [sheet addAction:[UIAlertAction actionWithTitle:label style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
-            self.selectedLoader = loader;
-            [self updateLoaderButton];
-            [self filterChanged];
-        }]];
+        [opts addObject:@{@"title": loader, @"icon": @"cpu"}];
     }
-    [sheet addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
-
-    sheet.popoverPresentationController.sourceView = _loaderButton;
-    sheet.popoverPresentationController.sourceRect = _loaderButton.bounds;
-
-    [self presentViewController:sheet animated:YES completion:nil];
+    NSInteger sel = [kLoaders indexOfObject:_selectedLoader];
+    [AppSheet showOptionsWithTitle:localize(@"version.select_loader", nil) message:localize(@"version.choose_loader_hint", nil) options:opts selectedIndex:(sel == NSNotFound ? NSNotFound : (NSInteger)sel) selection:^(NSInteger idx) {
+        self.selectedLoader = kLoaders[idx];
+        [self updateLoaderButton];
+        [self filterChanged];
+    }];
 }
 
 #pragma mark - Fetch loader versions for a MC version
@@ -214,7 +208,7 @@ static NSArray *kLoaders;
 
     if (!apiURL) {
         [self.spinner stopAnimating];
-        _statusLabel.text = @"Unknown loader";
+        _statusLabel.text = localize(@"version.unknown_loader", nil);
         return;
     }
 
@@ -590,17 +584,7 @@ static NSArray *kLoaders;
 
     if ([[NSFileManager defaultManager] copyItemAtURL:url toURL:[NSURL fileURLWithPath:destPath] error:&error]) {
         [url stopAccessingSecurityScopedResource];
-        UIView *topView = self.view.window.rootViewController.view;
-        UIAlertController *confirm = [UIAlertController alertControllerWithTitle:@"Launch JAR"
-                                                                        message:[NSString stringWithFormat:@"Launch %@?", url.lastPathComponent]
-                                                                 preferredStyle:UIAlertControllerStyleAlert];
-        [confirm addAction:[UIAlertAction actionWithTitle:@"Launch" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
-            JavaGUIViewController *vc = [[JavaGUIViewController alloc] init];
-            vc.filepath = destPath;
-            [vc setHitEnterAfterWindowShown:YES];
-            vc.modalPresentationStyle = UIModalPresentationFullScreen;
-            [self presentViewController:vc animated:YES completion:nil];
-        }]];
+        NSMutableArray *opts = [NSMutableArray arrayWithObject:@{@"title": localize(@"common.launch", nil), @"icon": @"play.fill"}];
 
         // If this looks like a Forge/NeoForge installer, offer a headless install that
         // writes versions/<id> itself and then drops back to the home screen.
@@ -615,7 +599,11 @@ static NSArray *kLoaders;
             }
         }
         if (isInstaller) {
-            [confirm addAction:[UIAlertAction actionWithTitle:@"Install (headless)" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
+            [opts addObject:@{@"title": localize(@"jar.install_headless", nil), @"icon": @"terminal"}];
+        }
+        NSString *jarName = url.lastPathComponent;
+        [AppSheet showOptionsWithTitle:localize(@"jar.launch_title", nil) message:[NSString stringWithFormat:@"Launch %@?", jarName] options:opts selectedIndex:NSNotFound selection:^(NSInteger idx) {
+            if (idx == 1 && isInstaller) {
                 NSString *installDir = [NSString stringWithFormat:@"%s/instances/%@",
                     getenv("POJAV_HOME") ?: "", VersionDirectoryManager.shared.currentInstance ?: @"default"];
                 [InstallerProgressViewController presentInstallerFrom:self
@@ -628,11 +616,14 @@ static NSArray *kLoaders;
                         }
                         UIKit_returnToSplitView();
                     }];
-            }]];
-        }
-
-        [confirm addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
-        [self presentViewController:confirm animated:YES completion:nil];
+            } else {
+                JavaGUIViewController *vc = [[JavaGUIViewController alloc] init];
+                vc.filepath = destPath;
+                [vc setHitEnterAfterWindowShown:YES];
+                vc.modalPresentationStyle = UIModalPresentationFullScreen;
+                [self presentViewController:vc animated:YES completion:nil];
+            }
+        }];
     } else {
         [url stopAccessingSecurityScopedResource];
         showDialog(@"Import Failed", error.localizedDescription ?: @"Unknown error");

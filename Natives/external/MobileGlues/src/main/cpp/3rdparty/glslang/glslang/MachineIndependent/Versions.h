@@ -4,7 +4,7 @@
 // Copyright (C) 2017, 2022-2024 Arm Limited.
 // Copyright (C) 2015-2018 Google, Inc.
 // Modifications Copyright (C) 2020 Advanced Micro Devices, Inc. All rights reserved.
-// Modifications Copyright (C) 2024 Valve Corporation.
+// Modifications Copyright (C) 2024, 2026 Valve Corporation.
 //
 // All rights reserved.
 //
@@ -226,6 +226,7 @@ const char* const E_GL_EXT_texture_array                    = "GL_EXT_texture_ar
 const char* const E_GL_EXT_maximal_reconvergence            = "GL_EXT_maximal_reconvergence";
 const char* const E_GL_EXT_expect_assume                    = "GL_EXT_expect_assume";
 const char* const E_GL_EXT_control_flow_attributes2         = "GL_EXT_control_flow_attributes2";
+const char* const E_GL_EXT_function_control_attributes      = "GL_EXT_function_control_attributes";
 const char* const E_GL_EXT_spec_constant_composites         = "GL_EXT_spec_constant_composites";
 const char* const E_GL_EXT_texture_offset_non_const         = "GL_EXT_texture_offset_non_const";
 const char* const E_GL_EXT_nontemporal_keyword              = "GL_EXT_nontemporal_keyword";
@@ -233,6 +234,8 @@ const char* const E_GL_EXT_uniform_buffer_unsized_array     = "GL_EXT_uniform_bu
 const char* const E_GL_EXT_conservative_depth               = "GL_EXT_conservative_depth";
 const char* const E_GL_EXT_descriptor_heap                  = "GL_EXT_descriptor_heap";
 const char* const E_GL_EXT_structured_descriptor_heap       = "GL_EXT_structured_descriptor_heap";
+const char* const E_GL_EXT_split_barrier                    = "GL_EXT_split_barrier";
+const char* const E_GL_EXT_optional_input_attachment_index  = "GL_EXT_optional_input_attachment_index";
 
 // Arrays of extensions for the above viewportEXTs duplications
 
@@ -318,8 +321,10 @@ const int Num_viewportEXTs = sizeof(viewportEXTs) / sizeof(viewportEXTs[0]);
 
 const char* const E_GL_QCOM_image_processing                    = "GL_QCOM_image_processing";
 const char* const E_GL_QCOM_image_processing2                   = "GL_QCOM_image_processing2";
+const char* const E_GL_QCOM_image_processing3                   = "GL_QCOM_image_processing3";
 const char* const E_GL_QCOM_tile_shading                        = "GL_QCOM_tile_shading";
 const char* const E_GL_QCOM_cooperative_matrix_conversion       = "GL_QCOM_cooperative_matrix_conversion";
+const char* const E_GL_QCOM_multiple_wait_queues                = "GL_QCOM_multiple_wait_queues";
 
 // AEP
 const char* const E_GL_ANDROID_extension_pack_es31a             = "GL_ANDROID_extension_pack_es31a";
@@ -388,6 +393,8 @@ const char* const E_GL_EXT_long_vector = "GL_EXT_long_vector";
 const char* const E_GL_EXT_shader_64bit_indexing = "GL_EXT_shader_64bit_indexing";
 
 const char* const E_GL_EXT_shader_invocation_reorder = "GL_EXT_shader_invocation_reorder";
+
+const char* const E_GL_EXT_cooperative_matrix_maintenance1           = "GL_EXT_cooperative_matrix_maintenance1";
 
 // Arrays of extensions for the above AEP duplications
 

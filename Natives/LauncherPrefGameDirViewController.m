@@ -4,6 +4,7 @@
 #import "PLProfiles.h"
 #import "ios_uikit_bridge.h"
 #import "utils.h"
+#import "AppSheet.h"
 
 @interface LauncherPrefGameDirViewController ()<UITextFieldDelegate>
 @property(nonatomic) NSMutableArray *array;
@@ -216,10 +217,8 @@ viewForFooterInSection:(NSInteger)section
     UITableViewCell *view = [self.tableView cellForRowAtIndexPath:indexPath];
     NSString *title = localize(@"preference.title.confirm", nil);
     NSString *message = [NSString stringWithFormat:localize(@"preference.title.confirm.delete_game_directory", nil), self.array[indexPath.row]];
-    UIAlertController *confirmAlert = [UIAlertController alertControllerWithTitle:title message:message preferredStyle:UIAlertControllerStyleActionSheet];
-    confirmAlert.popoverPresentationController.sourceView = view;
-    confirmAlert.popoverPresentationController.sourceRect = view.bounds;
-    UIAlertAction *ok = [UIAlertAction actionWithTitle:localize(@"OK", nil) style:UIAlertActionStyleDestructive handler:^(UIAlertAction * _Nonnull action) {
+    (void)view;
+    [AppSheet showConfirmWithTitle:title message:message confirmTitle:localize(@"OK", nil) destructive:YES onConfirm:^{
         NSString *directory = [NSString stringWithFormat:@"%s/instances/%@", getenv("POJAV_HOME"), self.array[indexPath.row]];
         NSError *error;
         if([NSFileManager.defaultManager removeItemAtPath:directory error:&error]) {
@@ -233,10 +232,6 @@ viewForFooterInSection:(NSInteger)section
             showDialog(localize(@"Error", nil), error.localizedDescription);
         }
     }];
-    UIAlertAction *cancel = [UIAlertAction actionWithTitle:localize(@"Cancel", nil) style:UIAlertActionStyleCancel handler:nil];
-    [confirmAlert addAction:cancel];
-    [confirmAlert addAction:ok];
-    [self presentViewController:confirmAlert animated:YES completion:nil];
 }
 
 - (void) dismissModalViewController {

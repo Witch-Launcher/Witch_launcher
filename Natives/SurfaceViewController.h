@@ -24,9 +24,12 @@ CGPoint lastVirtualMousePoint;
 // In-game widget (SurfaceViewController+Widget.m)
 @property(nonatomic) UIView *widgetView;
 @property(nonatomic) UILabel *widgetFpsLabel;
+@property(nonatomic) UILabel *widgetFgFpsLabel;
 @property(nonatomic) UILabel *widgetRamLabel;
 @property(nonatomic) UILabel *widgetTempLabel;
 @property(nonatomic) UILabel *widgetBattLabel;
+@property(nonatomic) UILabel *widgetClockLabel;
+@property(nonatomic) UILabel *widgetLowPowerLabel;
 @property(nonatomic) UIView *widgetBarView;
 @property(nonatomic) UIView *widgetBarSegLauncher;
 @property(nonatomic) UIView *widgetBarSegDevice;

@@ -10,7 +10,11 @@
 
 #include "../gl/log.h"
 #include <EGL/egl.h>
+#if defined(__APPLE__)
+#include <pthread.h>
+#else
 #include <sys/syscall.h>
+#endif
 #include <unistd.h>
 
 // Tracing for the EGL layer.
@@ -34,18 +38,17 @@
 
 // A thread id, via the syscall rather than gettid(), which bionic only exposes as
 // a real symbol from API 30 and this library targets 21.
+static inline int mg_egl_tid(void) {
 #if defined(__APPLE__)
-#include <pthread.h>
-static inline int mg_egl_tid(void) {
     uint64_t tid = 0;
-    pthread_threadid_np(nullptr, &tid);
+    pthread_threadid_np(NULL, &tid);
     return (int)tid;
-}
-#else
-static inline int mg_egl_tid(void) {
+#elif defined(__ANDROID__) || defined(__linux__)
     return (int)syscall(__NR_gettid);
-}
+#else
+    return 0;
 #endif
+}
 
 #if MG_EGL_TRACE
 #define EGL_TRACE(...) LOG_I(__VA_ARGS__)

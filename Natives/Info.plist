@@ -4,8 +4,6 @@
 <dict>
 	<key>ALTDeviceID</key>
 	<string></string>
-	<!-- iOS 26+ continued-processing requests use this wildcard to request a
-	     short GPU workload when an active Vulkan game is backgrounded. -->
 	<key>BGTaskSchedulerPermittedIdentifiers</key>
 	<array>
 		<string>com.witch.zad626.minecraft.gpu.*</string>
@@ -98,12 +96,64 @@
 	<string>com.witch.zad626</string>
 	<key>CFBundleInfoDictionaryVersion</key>
 	<string>6.0</string>
+	<key>CFBundleLocalizations</key>
+	<array>
+		<string>af</string>
+		<string>ar</string>
+		<string>az</string>
+		<string>ba</string>
+		<string>bn</string>
+		<string>bn-IN</string>
+		<string>ca</string>
+		<string>cs</string>
+		<string>da</string>
+		<string>de</string>
+		<string>el</string>
+		<string>en</string>
+		<string>en-GB</string>
+		<string>es</string>
+		<string>et</string>
+		<string>fa</string>
+		<string>fi</string>
+		<string>fil</string>
+		<string>fr</string>
+		<string>he</string>
+		<string>hi</string>
+		<string>hu</string>
+		<string>id</string>
+		<string>it</string>
+		<string>ja</string>
+		<string>kk</string>
+		<string>ko</string>
+		<string>la</string>
+		<string>lt</string>
+		<string>ms</string>
+		<string>nl</string>
+		<string>no</string>
+		<string>pl</string>
+		<string>pr</string>
+		<string>pt</string>
+		<string>pt-BR</string>
+		<string>ro</string>
+		<string>ru</string>
+		<string>sk</string>
+		<string>sr</string>
+		<string>sr-Latn</string>
+		<string>sv</string>
+		<string>th</string>
+		<string>tr</string>
+		<string>tt</string>
+		<string>uk</string>
+		<string>vi</string>
+		<string>zh-Hans</string>
+		<string>zh-Hant</string>
+	</array>
 	<key>CFBundleName</key>
 	<string>Witch</string>
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
-	<string>0.0.2</string>
+	<string>0.0.3</string>
 	<key>CFBundleSignature</key>
 	<string>????</string>
 	<key>CFBundleURLTypes</key>
@@ -126,7 +176,7 @@
 		</dict>
 	</array>
 	<key>CFBundleVersion</key>
-	<string>1.0</string>
+	<string>0.0.3</string>
 	<key>GCSupportedGameControllers</key>
 	<array>
 		<dict>
@@ -145,6 +195,10 @@
 		<string>filza</string>
 		<string>santander</string>
 		<string>shareddocuments</string>
+		<string>stikdebug</string>
+		<string>sidestore</string>
+		<string>apple-magnifier</string>
+		<string>trollstore</string>
 	</array>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>

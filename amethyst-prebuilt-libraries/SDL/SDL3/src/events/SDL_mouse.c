@@ -29,6 +29,52 @@
 #if defined(SDL_PLATFORM_WINDOWS)
 #include "../core/windows/SDL_windows.h" // For GetDoubleClickTime()
 #endif
+#if defined(SDL_PLATFORM_IOS) || defined(SDL_PLATFORM_TVOS)
+#include <dlfcn.h> // For dlsym (Amethyst launcher cursor hook)
+#endif
+
+// Amethyst launcher cursor shape tracking hook.
+// When the game sets a system cursor, the launcher needs to know which
+// cursor type is active so it can update its virtual cursor overlay.
+static void (*sdl_bridge_NoteCursorShape)(int shape);
+static void UIKit_NoteCursorShape(int shape) {
+    if (!sdl_bridge_NoteCursorShape) {
+        sdl_bridge_NoteCursorShape = (void (*)(int)) dlsym(RTLD_DEFAULT, "AASDL_NoteCursorShape");
+    }
+    if (sdl_bridge_NoteCursorShape) {
+        sdl_bridge_NoteCursorShape(shape);
+    }
+}
+
+// Map cursor pointers to system cursor IDs for shape tracking.
+#define SDL_CURSOR_TRACK_MAX 128
+static struct { void *cursor; int shape; } sdl_cursor_track[SDL_CURSOR_TRACK_MAX];
+static int sdl_cursor_track_count = 0;
+
+static void track_system_cursor(void *cursor, int shape) {
+    if (!cursor) return;
+    for (int i = 0; i < sdl_cursor_track_count; i++) {
+        if (sdl_cursor_track[i].cursor == cursor) {
+            sdl_cursor_track[i].shape = shape;
+            return;
+        }
+    }
+    if (sdl_cursor_track_count < SDL_CURSOR_TRACK_MAX) {
+        sdl_cursor_track[sdl_cursor_track_count].cursor = cursor;
+        sdl_cursor_track[sdl_cursor_track_count].shape = shape;
+        sdl_cursor_track_count++;
+    }
+}
+
+static int lookup_cursor_shape(void *cursor) {
+    if (!cursor) return -1;
+    for (int i = 0; i < sdl_cursor_track_count; i++) {
+        if (sdl_cursor_track[i].cursor == cursor) {
+            return sdl_cursor_track[i].shape;
+        }
+    }
+    return -1;
+}
 
 // #define DEBUG_MOUSE
 
@@ -1828,6 +1874,8 @@ SDL_Cursor *SDL_CreateSystemCursor(SDL_SystemCursor id)
     if (cursor) {
         cursor->next = mouse->cursors;
         mouse->cursors = cursor;
+        // Amethyst: track cursor pointer -> system cursor ID mapping
+        track_system_cursor(cursor, (int)id);
     }
 
     return cursor;
@@ -1891,6 +1939,16 @@ bool SDL_SetCursor(SDL_Cursor *cursor)
             animation->last_update = SDL_GetTicks();
         }
         mouse->cur_cursor = cursor;
+
+        // Amethyst: notify launcher of cursor shape change
+        if (cursor == mouse->def_cursor) {
+            UIKit_NoteCursorShape(0); // SDL_SYSTEM_CURSOR_DEFAULT
+        } else {
+            int shape = lookup_cursor_shape(cursor);
+            if (shape >= 0) {
+                UIKit_NoteCursorShape(shape);
+            }
+        }
     }
 
     SDL_RedrawCursor();

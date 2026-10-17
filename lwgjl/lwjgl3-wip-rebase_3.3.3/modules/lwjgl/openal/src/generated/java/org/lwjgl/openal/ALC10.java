@@ -18,34 +18,6 @@ import static org.lwjgl.system.MemoryUtil.*;
 
 /** Native bindings to ALC 1.0 functionality. */
 public class ALC10 {
-// -- Begin LWJGL2 --
-    static ALCcontext alcContext;
-    
-    public static ALCcontext alcCreateContext(ALCdevice device, java.nio.IntBuffer attrList) {
-        long alContextHandle = alcCreateContext(device.device, attrList);
-        alcContext = new ALCcontext(alContextHandle);
-        return alcContext;
-    }
-    
-    // FIXME if Minecraft 1.12.2 and below crashes here!
-/*
-    public static ALCcontext alcGetCurrentContext() {
-        return alcContext;
-    }
-*/
-    public static ALCdevice alcGetContextsDevice(ALCcontext context) {
-        return AL.alcDevice;
-    }
-
-    public static void alcGetInteger(ALCdevice device, int pname, java.nio.IntBuffer integerdata) {
-        int res = alcGetInteger(device.device, pname);
-        integerdata.put(0, res);
-    }
-
-    public static String alcGetString(ALCdevice device, int pname) {
-        return alcGetString(device.device, pname);
-    }
-// -- End LWJGL2 --
 
     /** General tokens. */
     public static final int
@@ -513,13 +485,6 @@ public class ALC10 {
             checkNTSafe(attrList);
         }
         return invokePPP(deviceHandle, attrList, __functionAddress);
-    }
-
-      public static boolean alcIsExtensionPresent(ALCdevice device, String extName) {
-        long deviceHandle = JNI.invokeP(ALC.getICD().alcGetCurrentContext);
-        ByteBuffer bExtName = MemoryStack.stackUTF8(extName);
-        Checks.checkNT1(bExtName);
-        return nalcIsExtensionPresent(deviceHandle, MemoryUtil.memAddress(bExtName));
     }
 
     /** Array version of: {@link #alcGetIntegerv GetIntegerv} */

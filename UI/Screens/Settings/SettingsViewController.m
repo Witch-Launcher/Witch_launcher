@@ -9,13 +9,16 @@
 #import "config.h"
 #import "CustomControlsViewController.h"
 #import "AmethystBlurView.h"
+#import "AppSheet.h"
 #import <PhotosUI/PhotosUI.h>
 #import <UniformTypeIdentifiers/UniformTypeIdentifiers.h>
 
-@interface SettingsViewController () <UITableViewDelegate, UITableViewDataSource, UIScrollViewDelegate, UIColorPickerViewControllerDelegate, UINavigationControllerDelegate, UIImagePickerControllerDelegate, PHPickerViewControllerDelegate, UIDocumentPickerDelegate>
+@interface SettingsViewController () <UITableViewDelegate, UITableViewDataSource, UIScrollViewDelegate, UIColorPickerViewControllerDelegate, UINavigationControllerDelegate, UIImagePickerControllerDelegate, PHPickerViewControllerDelegate, UIDocumentPickerDelegate, UISearchBarDelegate>
 @property (nonatomic) NSArray *sections;
 @property (nonatomic) UIScrollView *tabBarScroll;
 @property (nonatomic) NSLayoutConstraint *tabWidthConstraint;
+@property (nonatomic) NSArray<NSLayoutConstraint *> *chromeConstraints;
+@property (nonatomic) BOOL chromeIsPortrait;
 @property (nonatomic) NSMutableArray *tabButtons;
 @property (nonatomic) UIScrollView *pageScroll;
 @property (nonatomic) NSMutableArray *pageTables;
@@ -23,6 +26,10 @@
 @property (nonatomic) BOOL skipOffsetSync;
 @property (nonatomic, copy) void (^pendingColorPickCallback)(UIColor *);
 @property (nonatomic) AmethystBlurView *panelBlur;
+// Search
+@property (nonatomic, strong) UISearchBar *settingsSearchBar;
+@property (nonatomic, strong) UITableView *searchResultsTable;
+@property (nonatomic, strong) NSArray *searchResults; // array of @{@"tab":title, @"tabIndex":@, @"item":dict, @"row":@}
 @end
 
 @implementation SettingsViewController
@@ -48,31 +55,78 @@
     NSArray *glVersions = @[@"0", @"3.0", @"3.1", @"3.2", @"3.3", @"4.0", @"4.1", @"4.2", @"4.3", @"4.4", @"4.5", @"4.6"];
     NSArray *zinkOptLevels = @[@"-1", @"0", @"1", @"2", @"3", @"4", @"5"];
 
+    // Group header row (uses the plain "label" cell style).
+    NSDictionary *(^header)(NSString *) = ^NSDictionary *(NSString *titleKey) {
+        return @{@"type": @"label", @"label": localize(titleKey, nil)};
+    };
+
     _sections = @[
-        @{@"title": localize(@"Render", nil), @"items": @[
+        @{@"title": localize(@"General", nil), @"items": @[
+            @{@"type": @"picker", @"label": localize(@"preference.title.language", nil), @"key": @"launcher.language", @"options": [self languageOptions], @"default": @"auto"},
+            @{@"type": @"picker", @"label": localize(@"preference.title.theme", nil), @"key": @"launcher.theme", @"options": @[
+                @{@"key": @"System", @"name": localize(@"theme.system", nil)},
+                @{@"key": @"Dark", @"name": localize(@"theme.dark", nil)},
+                @{@"key": @"Light", @"name": localize(@"theme.light", nil)},
+            ], @"default": @"System"},
+            @{@"type": @"picker", @"label": localize(@"preference.title.screen_orientation", nil), @"key": @"general.orientation_lock", @"options": @[
+                @{@"key": @"off", @"name": localize(@"orientation.off", nil)},
+                @{@"key": @"portrait", @"name": localize(@"orientation.portrait", nil)},
+                @{@"key": @"landscape", @"name": localize(@"orientation.landscape", nil)},
+            ], @"default": @"off"},
+            @{@"type": @"navigate", @"label": localize(@"preference.title.game_directory", nil), @"vc": @"LauncherPrefGameDirViewController"},
+            @{@"type": @"navigate", @"label": localize(@"preference.title.manage_runtime", nil) , @"vc": @"LauncherPrefManageJREViewController"},
+            @{@"type": @"navigate", @"label": @"Cập nhật Launcher (Beta/Stable)", @"vc": @"LauncherUpdateViewController"},
+            @{@"type": @"navigate", @"label": @"Tải Runtime JDK/LWJGL", @"vc": @"RuntimeDownloadViewController"},
+            @{@"type": @"picker", @"label": @"Kênh cập nhật", @"key": @"launcher.update_channel", @"options": @[
+                @{@"key": @"0", @"name": @"Tự động"},
+                @{@"key": @"1", @"name": @"Beta (pre-release)"},
+                @{@"key": @"2", @"name": @"Ổn định (release)"},
+            ], @"default": @"0"},
+        ]},
+        @{@"title": localize(@"Game", nil), @"items": @[
+            header(@"settings.group.display"),
             @{@"type": @"picker", @"label": localize(@"preference.title.renderer", nil), @"key": @"video.renderer", @"options": rendererOptions, @"default": @"auto"},
             @{@"type": @"slider", @"label": localize(@"preference.title.resolution", nil), @"key": @"video.resolution", @"min": @25, @"max": @150, @"suffix": @"%"},
             @{@"type": @"switch", @"label": localize(@"preference.title.max_framerate", nil), @"key": @"video.max_framerate"},
             @{@"type": @"switch", @"label": localize(@"preference.title.performance_hud", nil), @"key": @"video.performance_hud"},
+            @{@"type": @"switch", @"label": localize(@"preference.title.fullscreen_airplay", nil), @"key": @"video.fullscreen_airplay"},
+            header(@"settings.group.java"),
+            @{@"type": @"picker", @"label": localize(@"preference.title.lwjgl_version", nil), @"key": @"java.lwjgl_version", @"options": lwjglItems, @"default": @"(auto)"},
+            @{@"type": @"slider", @"label": localize(@"preference.title.allocated_memory", nil), @"key": @"java.allocated_memory", @"min": @256, @"max": @((NSProcessInfo.processInfo.physicalMemory / 1048576) * 0.85), @"suffix": @"MB"},
+            @{@"type": @"switch", @"label": localize(@"preference.title.auto_ram", nil), @"key": @"java.auto_ram"},
+            @{@"type": @"text", @"label": localize(@"preference.title.java_args", nil), @"key": @"java.java_args", @"placeholder": @"-Xmx2G -Xms512M"},
+            @{@"type": @"text", @"label": localize(@"preference.title.env_variables", nil), @"key": @"java.env_variables", @"placeholder": @"VAR=value"},
+            header(@"settings.group.game_opts"),
+            @{@"type": @"switch", @"label": localize(@"preference.title.check_sha", nil), @"key": @"general.check_sha"},
+            @{@"type": @"switch", @"label": localize(@"preference.title.cosmetica", nil), @"key": @"general.cosmetica"},
         ]},
-        @{@"title": localize(@"Custom Controls", nil), @"items": @[
-            @{@"type": @"slider", @"label": localize(@"preference.title.button_scale", nil), @"key": @"control.button_scale", @"min": @30, @"max": @200, @"suffix": @"%"},
+        @{@"title": localize(@"Controls", nil), @"items": @[
+            header(@"settings.group.mouse"),
+            @{@"type": @"switch", @"label": localize(@"preference.title.virtmouse_enable", nil), @"key": @"control.virtmouse_enable"},
             @{@"type": @"slider", @"label": localize(@"preference.title.mouse_scale", nil), @"key": @"control.mouse_scale", @"min": @30, @"max": @200, @"suffix": @"%"},
             @{@"type": @"slider", @"label": localize(@"preference.title.mouse_speed", nil), @"key": @"control.mouse_speed", @"min": @10, @"max": @300, @"suffix": @"%"},
-            @{@"type": @"switch", @"label": localize(@"preference.title.virtmouse_enable", nil), @"key": @"control.virtmouse_enable"},
-            @{@"type": @"switch", @"label": localize(@"preference.title.gyroscope_enable", nil), @"key": @"control.gyroscope_enable"},
-            @{@"type": @"switch", @"label": localize(@"preference.title.gyroscope_invert_x_axis", nil), @"key": @"control.gyroscope_invert_x_axis"},
-            @{@"type": @"slider", @"label": localize(@"preference.title.gyroscope_sensitivity", nil), @"key": @"control.gyroscope_sensitivity", @"min": @10, @"max": @300, @"suffix": @"%"},
+            header(@"settings.group.touch"),
+            @{@"type": @"slider", @"label": localize(@"preference.title.button_scale", nil), @"key": @"control.button_scale", @"min": @30, @"max": @200, @"suffix": @"%"},
             @{@"type": @"switch", @"label": localize(@"preference.title.slideable_hotbar", nil), @"key": @"control.slideable_hotbar"},
             @{@"type": @"switch", @"label": localize(@"preference.title.gesture_mouse", nil), @"key": @"control.gesture_mouse"},
             @{@"type": @"switch", @"label": localize(@"preference.title.gesture_hotbar", nil), @"key": @"control.gesture_hotbar"},
+            @{@"type": @"slider", @"label": localize(@"preference.title.press_duration", nil), @"key": @"control.press_duration", @"min": @100, @"max": @1000, @"suffix": @"ms"},
             @{@"type": @"switch", @"label": localize(@"preference.title.recording_hide", nil), @"key": @"control.recording_hide"},
             @{@"type": @"switch", @"label": localize(@"preference.title.disable_haptics", nil), @"key": @"control.disable_haptics"},
-            @{@"type": @"slider", @"label": localize(@"preference.title.press_duration", nil), @"key": @"control.press_duration", @"min": @100, @"max": @1000, @"suffix": @"ms"},
-            @{@"type": @"navigate", @"label": localize(@"Mouse Cursors", nil), @"vc": @"CursorManageViewController"},
+            header(@"settings.group.gyro"),
+            @{@"type": @"switch", @"label": localize(@"preference.title.gyroscope_enable", nil), @"key": @"control.gyroscope_enable"},
+            @{@"type": @"switch", @"label": localize(@"preference.title.gyroscope_invert_x_axis", nil), @"key": @"control.gyroscope_invert_x_axis"},
+            @{@"type": @"slider", @"label": localize(@"preference.title.gyroscope_sensitivity", nil), @"key": @"control.gyroscope_sensitivity", @"min": @10, @"max": @300, @"suffix": @"%"},
+            header(@"settings.group.gamepad"),
+            @{@"type": @"picker", @"label": localize(@"preference.title.default_gamepad_ctrl", nil), @"key": @"control.controller_type", @"options": @[@"none", @"mfi", @"ps4", @"ps5", @"xbox"], @"default": @"none"},
+            @{@"type": @"slider", @"label": localize(@"preference.title.gamepad_sensitivity", nil), @"key": @"control.gamepad_sensitivity", @"min": @10, @"max": @300, @"suffix": @"%"},
+            @{@"type": @"switch", @"label": localize(@"preference.title.hardware_hide", nil), @"key": @"control.hardware_hide"},
+            @{@"type": @"navigate", @"label": localize(@"Gamepad Layout", nil), @"vc": @"LauncherPrefContCfgViewController"},
+            header(@"settings.group.cursor"),
+            @{@"type": @"navigate", @"label": localize(@"Cursor Settings", nil), @"vc": @"CursorSettingsViewController"},
             @{@"type": @"navigate", @"label": localize(@"Edit Controls Layout", nil), @"vc": @"CustomControlsViewController"},
         ]},
-        @{@"title": localize(@"In-Game Widget", nil), @"items": @[
+        @{@"title": localize(@"Widget", nil), @"items": @[
             @{@"type": @"switch", @"label": localize(@"preference.title.widget_menu", nil), @"key": @"general.widget_menu"},
             @{@"type": @"switch", @"label": localize(@"preference.title.widget_show_fps", nil), @"key": @"general.widget_show_fps"},
             @{@"type": @"switch", @"label": localize(@"preference.title.widget_show_cpu", nil), @"key": @"general.widget_show_cpu"},
@@ -94,99 +148,148 @@
                 @{@"key": @"f", @"name": localize(@"preference.title.widget_temp_unit.f", nil)},
             ]},
             @{@"type": @"switch", @"label": localize(@"preference.title.widget_show_batt", nil), @"key": @"general.widget_show_batt"},
+            @{@"type": @"switch", @"label": localize(@"preference.title.widget_show_fgfps", nil), @"key": @"general.widget_show_fgfps"},
+            @{@"type": @"switch", @"label": localize(@"preference.title.widget_show_clock", nil), @"key": @"general.widget_show_clock"},
+            @{@"type": @"switch", @"label": localize(@"preference.title.widget_show_lowpower", nil), @"key": @"general.widget_show_lowpower"},
             @{@"type": @"slider", @"label": localize(@"preference.title.widget_bg_opacity", nil), @"key": @"general.widget_bg_opacity", @"min": @0, @"max": @80, @"suffix": @"%"},
         ]},
-        @{@"title": localize(@"Game", nil), @"items": @[
-            @{@"type": @"picker", @"label": localize(@"LWJGL Version", nil), @"key": @"java.lwjgl_version", @"options": lwjglItems, @"default": @"(auto)"},
-            @{@"type": @"switch", @"label": localize(@"preference.title.fullscreen_airplay", nil), @"key": @"video.fullscreen_airplay"},
-        ]},
-        @{@"title": localize(@"Audio", nil), @"items": @[
-            @{@"type": @"switch", @"label": localize(@"preference.title.allow_microphone", nil), @"key": @"video.allow_microphone"},
-            @{@"type": @"picker", @"label": localize(@"preference.title.microphone_source", nil), @"key": @"video.microphone_source", @"options": @[@"auto", @"front", @"bottom", @"back"], @"default": @"auto"},
-            @{@"type": @"switch", @"label": localize(@"preference.title.silence_other_audio", nil), @"key": @"video.silence_other_audio"},
-        ]},
-        @{@"title": localize(@"Gamepad", nil), @"items": @[
-            @{@"type": @"picker", @"label": localize(@"preference.title.default_gamepad_ctrl", nil), @"key": @"control.controller_type", @"options": @[@"none", @"mfi", @"ps4", @"ps5", @"xbox"], @"default": @"none"},
-            @{@"type": @"slider", @"label": localize(@"preference.title.gamepad_sensitivity", nil), @"key": @"control.gamepad_sensitivity", @"min": @10, @"max": @300, @"suffix": @"%"},
-            @{@"type": @"switch", @"label": localize(@"preference.title.hardware_hide", nil), @"key": @"control.hardware_hide"},
-            @{@"type": @"navigate", @"label": localize(@"Gamepad Layout", nil), @"vc": @"LauncherPrefContCfgViewController"},
-        ]},
-        @{@"title": localize(@"Launcher", nil), @"items": @[
-            @{@"type": @"navigate", @"label": localize(@"preference.title.game_directory", nil), @"vc": @"LauncherPrefGameDirViewController"},
-            @{@"type": @"navigate", @"label": localize(@"preference.title.manage_runtime", nil) , @"vc": @"LauncherPrefManageJREViewController"},
-            @{@"type": @"text", @"label": localize(@"preference.title.java_args", nil), @"key": @"java.java_args", @"placeholder": @"-Xmx2G -Xms512M"},
-            @{@"type": @"text", @"label": localize(@"preference.title.env_variables", nil), @"key": @"java.env_variables", @"placeholder": @"VAR=value"},
-            @{@"type": @"slider", @"label": localize(@"preference.title.allocated_memory", nil), @"key": @"java.allocated_memory", @"min": @256, @"max": @((NSProcessInfo.processInfo.physicalMemory / 1048576) * 0.85), @"suffix": @"MB"},
-            @{@"type": @"switch", @"label": localize(@"preference.title.auto_ram", nil), @"key": @"java.auto_ram"},
-            @{@"type": @"switch", @"label": localize(@"preference.title.check_sha", nil), @"key": @"general.check_sha"},
-            @{@"type": @"switch", @"label": localize(@"preference.title.cosmetica", nil), @"key": @"general.cosmetica"},
-            @{@"type": @"picker", @"label": localize(@"Screen Orientation", nil), @"key": @"general.orientation_lock", @"options": @[
-                @{@"key": @"off", @"name": localize(@"Off", nil)},
-                @{@"key": @"portrait", @"name": localize(@"Portrait", nil)},
-                @{@"key": @"landscape", @"name": localize(@"Landscape", nil)},
-            ], @"default": @"off"},
-            @{@"type": @"picker", @"label": localize(@"Theme", nil), @"key": @"launcher.theme", @"options": @[@"System", @"Dark", @"Light"], @"default": @"System"},
-            @{@"type": @"picker", @"label": localize(@"Launcher Logo", nil), @"key": @"launcher.logo_style", @"options": @[
-                @{@"key": @"purple", @"name": localize(@"Purple", nil)},
-                @{@"key": @"blue", @"name": localize(@"Blue", nil)},
-                @{@"key": @"dev", @"name": localize(@"Dev", nil)},
-            ], @"default": (CONFIG_RELEASE ? @"purple" : @"dev"), @"preview": @YES},
-            @{@"type": @"text", @"label": localize(@"CurseForge API Key", nil), @"key": @"curseforge.api_key", @"placeholder": localize(@"Paste your CurseForge API key here", nil)},
-            @{@"type": @"switch", @"label": localize(@"preference.title.debug_logging", nil), @"key": @"general.debug_logging"},
-            @{@"type": @"switch", @"label": localize(@"preference.title.debug_ipad_ui", nil), @"key": @"debug.debug_ipad_ui"},
-            @{@"type": @"switch", @"label": localize(@"preference.title.debug_skip_wait_jit", nil), @"key": @"debug.debug_skip_wait_jit"},
-        ]},
-        @{@"title": localize(@"MobileGlues", nil), @"items": @[
+        @{@"title": localize(@"Graphics", nil), @"items": @[
+            header(@"settings.group.graphics_hint"),
+            header(@"settings.group.moltenvk"),
+            @{@"type": @"picker", @"label": localize(@"preference.title.moltenvk_version", nil), @"key": @"video.moltenvk_version", @"options": @[@"1.2", @"1.4"], @"default": @"1.4"},
+            header(@"settings.group.mobileglues"),
             @{@"type": @"switch", @"label": localize(@"preference.title.enable_angle", nil), @"key": @"mobileglues.enable_angle"},
-            @{@"type": @"picker", @"label": localize(@"preference.title.enable_no_error", nil), @"key": @"mobileglues.enable_no_error", @"options": @[@"0", @"1", @"2"], @"default": @"0"},
+            @{@"type": @"picker", @"label": localize(@"preference.title.angle_backend", nil), @"key": @"mobileglues.angle_backend", @"options": @[@"metal", @"vulkan"], @"default": @"metal"},
+            @{@"type": @"picker", @"label": localize(@"preference.title.enable_no_error", nil), @"key": @"mobileglues.enable_no_error", @"options": @[@"0", @"1", @"2"], @"default": @"2"},
             @{@"type": @"switch", @"label": localize(@"preference.title.enable_ext_timer_query", nil), @"key": @"mobileglues.enable_ext_timer_query"},
             @{@"type": @"switch", @"label": localize(@"preference.title.enable_ext_compute_shader", nil), @"key": @"mobileglues.enable_ext_compute_shader"},
             @{@"type": @"switch", @"label": localize(@"preference.title.enable_ext_direct_state_access", nil), @"key": @"mobileglues.enable_ext_direct_state_access"},
+            @{@"type": @"switch", @"label": localize(@"preference.title.enable_ext_gl43", nil), @"key": @"mobileglues.enable_ext_gl43"},
             @{@"type": @"slider", @"label": localize(@"preference.title.max_glsl_cache_size", nil), @"key": @"mobileglues.max_glsl_cache_size", @"min": @8, @"max": @512, @"suffix": @"MB"},
             @{@"type": @"picker", @"label": localize(@"preference.title.multidraw_mode", nil), @"key": @"mobileglues.multidraw_mode", @"options": @[@"0", @"1", @"2", @"3"], @"default": @"0"},
             @{@"type": @"switch", @"label": localize(@"preference.title.angle_depth_clear_fix_mode", nil), @"key": @"mobileglues.angle_depth_clear_fix_mode"},
             @{@"type": @"picker", @"label": localize(@"preference.title.custom_gl_version", nil), @"key": @"mobileglues.custom_gl_version", @"options": glVersions, @"default": @"0"},
             @{@"type": @"picker", @"label": localize(@"preference.title.fsr1_setting", nil), @"key": @"mobileglues.fsr1_setting", @"options": @[@"0", @"1", @"2", @"3", @"4", @"5"], @"default": @"0"},
-        ]},
-        @{@"title": localize(@"Zink", nil), @"items": @[
-            @{@"type": @"picker", @"label": localize(@"Optimization Level", nil), @"key": @"zink.optimization_level", @"options": zinkOptLevels, @"default": @"-1"},
+            header(@"settings.group.ltw"),
+            @{@"type": @"picker", @"label": localize(@"preference.title.ltw_angle_backend", nil), @"key": @"video.ltw_angle_backend", @"options": @[@"metal", @"vulkan"], @"default": @"metal"},
+            header(@"settings.group.zink"),
+            @{@"type": @"picker", @"label": localize(@"preference.title.zink_mesa_version", nil), @"key": @"zink.mesa_version", @"options": @[@"25.0.7", @"26.2.2"], @"default": @"26.2.2"},
+            @{@"type": @"picker", @"label": localize(@"preference.title.optimization_level", nil), @"key": @"zink.optimization_level", @"options": zinkOptLevels, @"default": @"-1"},
             @{@"type": @"picker", @"label": localize(@"preference.title.zink_gl_override", nil), @"key": @"zink.gl_override", @"options": @[@"0", @"3.3", @"4.0", @"4.1", @"4.3", @"4.6"], @"default": @"0"},
             @{@"type": @"switch", @"label": localize(@"preference.title.zink_enable_gl_thread", nil), @"key": @"zink.enable_gl_thread"},
             @{@"type": @"slider", @"label": localize(@"preference.title.zink_glsl_cache_size", nil), @"key": @"zink.glsl_cache_size", @"min": @8, @"max": @512, @"suffix": @"MB"},
             @{@"type": @"picker", @"label": localize(@"preference.title.zink_api_features", nil), @"key": @"zink.api_features", @"options": @[@"0", @"1", @"2", @"3"], @"default": @"3"},
+            header(@"settings.group.mobilegl"),
+            @{@"type": @"picker", @"label": localize(@"preference.title.mobilegl_backend_type", nil), @"key": @"mobilegl.backend_type", @"options": @[@"DirectVulkan", @"DirectGLES"], @"default": @"DirectVulkan"},
+            @{@"type": @"picker", @"label": localize(@"preference.title.mobilegl_angle_backend", nil), @"key": @"mobilegl.angle_backend", @"options": @[@"tgles", @"vulkan"], @"default": @"tgles"},
+            @{@"type": @"switch", @"label": localize(@"preference.title.mobilegl_disable_timer_query", nil), @"key": @"mobilegl.disable_timer_query"},
+            @{@"type": @"switch", @"label": localize(@"preference.title.mobilegl_disable_subgroup", nil), @"key": @"mobilegl.disable_subgroup"},
+            @{@"type": @"switch", @"label": localize(@"preference.title.mobilegl_advertise_fp64", nil), @"key": @"mobilegl.advertise_fp64"},
+            @{@"type": @"slider", @"label": localize(@"preference.title.mobilegl_frames_in_flight", nil), @"key": @"mobilegl.frames_in_flight", @"min": @1, @"max": @8, @"suffix": @""},
+            @{@"type": @"picker", @"label": localize(@"preference.title.mobilegl_vma_block_size", nil), @"key": @"mobilegl.vma_block_size", @"options": @[
+                @{@"key": @"8", @"name": @"8 MB"},
+                @{@"key": @"16", @"name": @"16 MB"},
+                @{@"key": @"32", @"name": @"32 MB"},
+                @{@"key": @"64", @"name": @"64 MB"},
+                @{@"key": @"128", @"name": @"128 MB"},
+                @{@"key": @"256", @"name": @"256 MB"}
+            ], @"default": @"32"},
+            @{@"type": @"picker", @"label": localize(@"preference.title.mobilegl_large_buffer_adopt_size", nil), @"key": @"mobilegl.large_buffer_adopt_size", @"options": @[
+                @{@"key": @"1", @"name": @"1 MB"},
+                @{@"key": @"2", @"name": @"2 MB"},
+                @{@"key": @"4", @"name": @"4 MB"},
+                @{@"key": @"8", @"name": @"8 MB"},
+                @{@"key": @"16", @"name": @"16 MB"},
+                @{@"key": @"32", @"name": @"32 MB"}
+            ], @"default": @"4"},
+            @{@"type": @"switch", @"label": localize(@"preference.title.mobilegl_coherent_as_flush", nil), @"key": @"mobilegl.coherent_as_flush"},
+            @{@"type": @"picker", @"label": localize(@"preference.title.mobilegl_async_shader_compile", nil), @"key": @"mobilegl.async_shader_compile", @"options": @[@"0", @"1", @"2"], @"default": @"0"},
+            @{@"type": @"picker", @"label": localize(@"preference.title.mobilegl_shader_cache", nil), @"key": @"mobilegl.shader_cache", @"options": @[@"0", @"1", @"2"], @"default": @"0"},
+            @{@"type": @"switch", @"label": localize(@"preference.title.mobilegl_r11g11b10f_fallback", nil), @"key": @"mobilegl.r11g11b10f_fallback"},
+            header(@"settings.group.tglmt"),
+            @{@"type": @"switch", @"label": localize(@"preference.title.tglmt_diag", nil), @"key": @"tglmt.diag"},
+            @{@"type": @"slider", @"label": localize(@"preference.title.tglmt_frames_in_flight", nil), @"key": @"tglmt.frames_in_flight", @"min": @1, @"max": @8, @"suffix": @""},
+            @{@"type": @"slider", @"label": localize(@"preference.title.tglmt_buf_pool_slots", nil), @"key": @"tglmt.buf_pool_slots", @"min": @1, @"max": @8, @"suffix": @""},
+            @{@"type": @"slider", @"label": localize(@"preference.title.tglmt_pool_mb", nil), @"key": @"tglmt.pool_mb", @"min": @32, @"max": @512, @"suffix": @"MB"},
         ]},
-        @{@"title": localize(@"Debug", nil), @"items": @[
-            @{@"type": @"switch", @"label": localize(@"preference.title.debug_always_attached_jit", nil), @"key": @"debug.debug_always_attached_jit"},
-            @{@"type": @"switch", @"label": localize(@"preference.title.debug_hide_home_indicator", nil), @"key": @"debug.debug_hide_home_indicator"},
-            @{@"type": @"switch", @"label": localize(@"preference.title.debug_auto_correction", nil), @"key": @"debug.debug_auto_correction"},
-            @{@"type": @"switch", @"label": localize(@"preference.title.debug_server_enabled", nil), @"key": @"debug.debug_server_enabled"},
-            @{@"type": @"text", @"label": localize(@"Debug Server Port", nil), @"key": @"debug.debug_server_port", @"placeholder": @"9090"},
-            @{@"type": @"text", @"label": localize(@"Debug Server Token", nil), @"key": @"debug.debug_server_token", @"placeholder": @""},
-            @{@"type": @"switch", @"label": localize(@"preference.title.debug_server_localhost_only", nil), @"key": @"debug.debug_server_localhost_only"},
+        @{@"title": localize(@"Network", nil), @"items": @[
+            header(@"settings.group.witch"),
+            @{@"type": @"switch", @"label": localize(@"preference.title.witch_enabled", nil), @"key": @"witch.server_enabled", @"default": @YES},
+            @{@"type": @"text", @"label": localize(@"preference.title.witch_base_url", nil), @"key": @"witch.proxy_base_url", @"placeholder": localize(@"preference.detail.witch_base_url", nil)},
+            @{@"type": @"text", @"label": localize(@"preference.title.witch_token", nil), @"key": @"witch.proxy_token", @"placeholder": @"Bearer token"},
+            @{@"type": @"text", @"label": localize(@"preference.title.witch_hmac", nil), @"key": @"witch.proxy_hmac", @"placeholder": @"HMAC secret"},
+            header(@"settings.group.curseforge"),
+            @{@"type": @"picker", @"label": localize(@"preference.title.witch_cf_source", nil), @"key": @"witch.curseforge_source", @"options": @[
+                @{@"key": @"server", @"name": localize(@"preference.option.server", nil)},
+                @{@"key": @"own", @"name": localize(@"preference.option.own", nil)},
+            ], @"default": @"server"},
+            @{@"type": @"text", @"label": localize(@"preference.title.witch_cf_own_key", nil), @"key": @"witch.curseforge_own_key", @"placeholder": @"x-api-key (if own)"},
+            header(@"settings.group.ai"),
+            @{@"type": @"switch", @"label": localize(@"preference.title.ai_enabled", nil), @"key": @"witch.ai_enabled", @"default": @YES},
+            @{@"type": @"picker", @"label": localize(@"preference.title.ai_source", nil), @"key": @"witch.ai_source", @"options": @[
+                @{@"key": @"server", @"name": localize(@"preference.option.server", nil)},
+                @{@"key": @"own", @"name": localize(@"preference.option.own", nil)},
+            ], @"default": @"server"},
+            @{@"type": @"text", @"label": localize(@"preference.title.ai_own_key", nil), @"key": @"witch.ai_own_key", @"placeholder": @"sk-..."},
+            @{@"type": @"text", @"label": localize(@"preference.title.ai_own_base", nil), @"key": @"witch.ai_own_base", @"placeholder": @"https://api.openai.com/v1"},
+            @{@"type": @"text", @"label": localize(@"preference.title.ai_own_model", nil), @"key": @"witch.ai_own_model", @"placeholder": @"gpt-4o-mini"},
+            @{@"type": @"picker", @"label": localize(@"preference.title.ai_language", nil), @"key": @"witch.ai_language", @"options": @[
+                @{@"key": @"auto", @"name": localize(@"preference.option.auto", nil)},
+                @{@"key": @"vi", @"name": @"Tiếng Việt"},
+                @{@"key": @"en", @"name": @"English"},
+            ], @"default": @"auto"},
+            header(@"settings.group.mic"),
+            @{@"type": @"switch", @"label": localize(@"preference.title.allow_microphone", nil), @"key": @"video.allow_microphone"},
+            @{@"type": @"picker", @"label": localize(@"preference.title.microphone_source", nil), @"key": @"video.microphone_source", @"options": @[@"auto", @"front", @"bottom", @"back"], @"default": @"auto"},
+            @{@"type": @"switch", @"label": localize(@"preference.title.silence_other_audio", nil), @"key": @"video.silence_other_audio"},
         ]},
         @{@"title": localize(@"Appearance", nil), @"items": @[
-            @{@"type": @"color", @"label": localize(@"Accent Color", nil), @"key": @"amethyst_accent_color"},
-            @{@"type": @"color", @"label": localize(@"Text Color", nil), @"key": @"amethyst_text_color"},
-            @{@"type": @"color", @"label": localize(@"Secondary Text Color", nil), @"key": @"amethyst_secondary_text_color"},
-            @{@"type": @"color", @"label": localize(@"Background Color", nil), @"key": @"amethyst_bg_color"},
-            @{@"type": @"color", @"label": localize(@"Sidebar Color", nil), @"key": @"amethyst_sidebar_bg_color"},
-            @{@"type": @"color", @"label": localize(@"Top Bar Color", nil), @"key": @"amethyst_topbar_bg_color"},
-            @{@"type": @"color", @"label": localize(@"Right Panel Color", nil), @"key": @"amethyst_rightpanel_bg_color"},
-            @{@"type": @"color", @"label": localize(@"Content Card Color", nil), @"key": @"amethyst_card_bg_color"},
-            @{@"type": @"image", @"label": localize(@"Background", nil)},
-            @{@"type": @"slider", @"label": localize(@"UI Opacity", nil), @"key": @"amethyst_ui_opacity", @"min": @0, @"max": @100, @"suffix": @"%"},
-            @{@"type": @"slider", @"label": localize(@"Background Blur", nil), @"key": @"amethyst_bg_blur", @"min": @0, @"max": @20, @"suffix": @""},
-            @{@"type": @"slider", @"label": @"UI Panels Blur", @"key": @"amethyst_settings_blur", @"min": @0, @"max": @100, @"suffix": @"%"},
-            @{@"type": @"slider", @"label": @"Top Bar Blur", @"key": @"amethyst_topbar_blur", @"min": @0, @"max": @100, @"suffix": @"%"},
-            @{@"type": @"slider", @"label": @"Left Bar Blur", @"key": @"amethyst_sidebar_blur", @"min": @0, @"max": @100, @"suffix": @"%"},
-            @{@"type": @"slider", @"label": @"Right Panel Blur", @"key": @"amethyst_rightpanel_blur", @"min": @0, @"max": @100, @"suffix": @"%"},
-            @{@"type": @"slider", @"label": @"Bar Border Thickness", @"key": @"amethyst_bar_border_width", @"min": @0, @"max": @4, @"suffix": @" pt"},
-            @{@"type": @"export", @"label": localize(@"Export Appearance Theme", nil)},
-            @{@"type": @"import", @"label": localize(@"Import Appearance Theme", nil)},
-            @{@"type": @"color", @"label": localize(@"Reset Appearance", nil), @"key": @"amethyst_reset_appearance"},
+            @{@"type": @"color", @"label": localize(@"appearance.accent_color", nil), @"key": @"amethyst_accent_color"},
+            @{@"type": @"color", @"label": localize(@"appearance.text_color", nil), @"key": @"amethyst_text_color"},
+            @{@"type": @"color", @"label": localize(@"appearance.secondary_text_color", nil), @"key": @"amethyst_secondary_text_color"},
+            @{@"type": @"color", @"label": localize(@"appearance.background_color", nil), @"key": @"amethyst_bg_color"},
+            @{@"type": @"color", @"label": localize(@"appearance.sidebar_color", nil), @"key": @"amethyst_sidebar_bg_color"},
+            @{@"type": @"color", @"label": localize(@"appearance.top_bar_color", nil), @"key": @"amethyst_topbar_bg_color"},
+            @{@"type": @"color", @"label": localize(@"appearance.right_panel_color", nil), @"key": @"amethyst_rightpanel_bg_color"},
+            @{@"type": @"color", @"label": localize(@"appearance.content_card_color", nil), @"key": @"amethyst_card_bg_color"},
+            @{@"type": @"image", @"label": localize(@"appearance.background", nil)},
+            @{@"type": @"slider", @"label": localize(@"appearance.ui_opacity", nil), @"key": @"amethyst_ui_opacity", @"min": @0, @"max": @100, @"suffix": @"%"},
+            @{@"type": @"slider", @"label": localize(@"appearance.background_blur", nil), @"key": @"amethyst_bg_blur", @"min": @0, @"max": @20, @"suffix": @""},
+            @{@"type": @"slider", @"label": localize(@"appearance.ui_panels_blur", nil), @"key": @"amethyst_settings_blur", @"min": @0, @"max": @100, @"suffix": @"%"},
+            @{@"type": @"slider", @"label": localize(@"appearance.top_bar_blur", nil), @"key": @"amethyst_topbar_blur", @"min": @0, @"max": @100, @"suffix": @"%"},
+            @{@"type": @"slider", @"label": localize(@"appearance.left_bar_blur", nil), @"key": @"amethyst_sidebar_blur", @"min": @0, @"max": @100, @"suffix": @"%"},
+            @{@"type": @"slider", @"label": localize(@"appearance.right_panel_blur", nil), @"key": @"amethyst_rightpanel_blur", @"min": @0, @"max": @100, @"suffix": @"%"},
+            @{@"type": @"slider", @"label": localize(@"appearance.bar_border_thickness", nil), @"key": @"amethyst_bar_border_width", @"min": @0, @"max": @4, @"suffix": @" pt"},
+            @{@"type": @"switch", @"label": localize(@"appearance.ui_border", nil), @"key": @"amethyst_ui_border_enabled"},
+            @{@"type": @"slider", @"label": localize(@"appearance.border_radius", nil), @"key": @"amethyst_ui_border_radius", @"min": @0, @"max": @24, @"suffix": @" pt"},
+            @{@"type": @"slider", @"label": localize(@"appearance.shell_gap", nil), @"key": @"amethyst_shell_gap", @"min": @0, @"max": @12, @"suffix": @" pt"},
+            @{@"type": @"slider", @"label": localize(@"appearance.shell_inner_gap", nil), @"key": @"amethyst_shell_inner_gap", @"min": @0, @"max": @12, @"suffix": @" pt"},
+            @{@"type": @"picker", @"label": localize(@"appearance.mainbar_portrait", nil), @"key": @"general.mainsidebar_portrait", @"default": @"bottom", @"options": @[@"left", @"right", @"bottom"]},
+            @{@"type": @"picker", @"label": localize(@"appearance.mainbar_landscape", nil), @"key": @"general.mainsidebar_landscape", @"default": @"left", @"options": @[@"left", @"right", @"bottom"]},
+            @{@"type": @"export", @"label": localize(@"appearance.export_theme", nil)},
+            @{@"type": @"import", @"label": localize(@"appearance.import_theme", nil)},
+            @{@"type": @"color", @"label": localize(@"appearance.reset", nil), @"key": @"amethyst_reset_appearance"},
+        ]},
+        @{@"title": localize(@"Developer", nil), @"items": @[
+            header(@"settings.group.debug_opts"),
+            @{@"type": @"switch", @"label": localize(@"preference.title.debug_logging", nil), @"key": @"general.debug_logging"},
+            @{@"type": @"switch", @"label": localize(@"preference.title.debug_ipad_ui", nil), @"key": @"debug.debug_ipad_ui"},
+            @{@"type": @"switch", @"label": localize(@"preference.title.debug_skip_wait_jit", nil), @"key": @"debug.debug_skip_wait_jit"},
+            @{@"type": @"switch", @"label": localize(@"preference.title.debug_always_attached_jit", nil), @"key": @"debug.debug_always_attached_jit"},
+            @{@"type": @"text", @"label": localize(@"preference.title.debug_mirror_mapped_code_cache", nil), @"key": @"debug.debug_mirror_mapped_code_cache", @"placeholder": @"-1"},
+            @{@"type": @"switch", @"label": localize(@"preference.title.debug_hide_home_indicator", nil), @"key": @"debug.debug_hide_home_indicator"},
+            @{@"type": @"switch", @"label": localize(@"preference.title.debug_auto_correction", nil), @"key": @"debug.debug_auto_correction"},
+            @{@"type": @"switch", @"label": localize(@"preference.title.debug_render_log", nil), @"key": @"debug.debug_render_log"},
+            @{@"type": @"switch", @"label": localize(@"preference.title.debug_mem_sample_log", nil), @"key": @"debug.mem_sample_log"},
+            header(@"settings.group.dev_server"),
+            @{@"type": @"switch", @"label": localize(@"preference.title.debug_server_enabled", nil), @"key": @"debug.debug_server_enabled"},
+            @{@"type": @"text", @"label": localize(@"preference.title.debug_server_port", nil), @"key": @"debug.debug_server_port", @"placeholder": @"9090"},
+            @{@"type": @"text", @"label": localize(@"preference.title.debug_server_token", nil), @"key": @"debug.debug_server_token", @"placeholder": @""},
+            @{@"type": @"switch", @"label": localize(@"preference.title.debug_server_localhost_only", nil), @"key": @"debug.debug_server_localhost_only"},
         ]},
         @{@"title": localize(@"credits.title", nil), @"items": [self creditsItems]},
     ];
+
 
     NSUInteger appearanceIndex = NSNotFound;
     for (NSUInteger i = 0; i < _sections.count; i++) {
@@ -259,28 +362,151 @@
     return options;
 }
 
+/// A directory counts as a language pack when its name looks like a language
+/// tag (e.g. vi, pt-BR, zh-Hans) and it ships a Localizable.strings table.
++ (BOOL)isLanguagePackCode:(NSString *)code bundlePath:(NSString *)packPath {
+    if (code.length == 0 || [code isEqualToString:@"Base"]) return NO;
+    static NSRegularExpression *tagExpr = nil;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        tagExpr = [NSRegularExpression regularExpressionWithPattern:@"^[A-Za-z]{2,3}(-[A-Za-z0-9]+)*$"
+                                                            options:0 error:nil];
+    });
+    if ([tagExpr numberOfMatchesInString:code options:0 range:NSMakeRange(0, code.length)] == 0) {
+        return NO;
+    }
+    return [[NSBundle bundleWithPath:packPath] pathForResource:@"Localizable" ofType:@"strings"] != nil;
+}
+
+/// All language packs shipped in the bundle (*.lproj with Localizable.strings),
+/// shown with the display name each pack declares in its own
+/// `"language.name"` entry (rename it in the .strings file — no code changes).
+/// Falls back to the system locale name when a pack isn't annotated yet.
+- (NSArray *)languageOptions {
+    static NSArray *cachedLocales = nil;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        NSBundle *main = NSBundle.mainBundle;
+        NSMutableArray *items = [NSMutableArray array];
+        for (NSString *p in [main pathsForResourcesOfType:@"lproj" inDirectory:nil]) {
+            NSString *code = [[p lastPathComponent] stringByDeletingPathExtension];
+            if (![[self class] isLanguagePackCode:code bundlePath:p]) continue;
+            NSBundle *pack = [NSBundle bundleWithPath:p];
+            NSString *name = [pack localizedStringForKey:@"language.name" value:nil table:nil];
+            if (name.length == 0 || [name isEqualToString:@"language.name"]) {
+                name = [[NSLocale localeWithLocaleIdentifier:code] displayNameForKey:NSLocaleIdentifier value:code];
+            }
+            if (name.length == 0) {
+                name = [[NSLocale localeWithLocaleIdentifier:@"en"] displayNameForKey:NSLocaleIdentifier value:code];
+            }
+            if (name.length == 0) name = code;
+            else name = [name stringByReplacingCharactersInRange:NSMakeRange(0, 1)
+                                                     withString:[[name substringToIndex:1] uppercaseString]];
+            [items addObject:@{@"key": code, @"name": name}];
+        }
+        [items sortUsingComparator:^NSComparisonResult(NSDictionary *a, NSDictionary *b) {
+            return [a[@"name"] localizedCaseInsensitiveCompare:b[@"name"]];
+        }];
+        cachedLocales = [items copy];
+    });
+    NSMutableArray *options = [NSMutableArray arrayWithObject:@{
+        @"key": @"auto", @"name": localize(@"settings.language.auto", nil)}];
+    [options addObjectsFromArray:cachedLocales];
+    return options;
+}
+
+/// Rebuild the whole settings UI in the newly selected language, instantly.
+- (void)applyLanguageChange {
+    [self buildSections];
+    for (UIButton *b in _tabButtons) [b removeFromSuperview];
+    [_tabButtons removeAllObjects];
+    [self setupTabBar];
+    self.navigationItem.title = localize(@"Settings", nil);
+    _settingsSearchBar.placeholder = localize(@"Search settings...", nil);
+    if (_currentPage >= (NSInteger)_pageTables.count) _currentPage = 0;
+    [self reloadTables];
+    [self setPage:_currentPage animated:NO];
+}
+
 - (void)setup {
     self.view.clipsToBounds = YES;
     self.navigationItem.title = localize(@"Settings", nil);
     self.navigationItem.rightBarButtonItem = [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemDone target:self action:@selector(dismissSettings)];
     self.navigationItem.leftBarButtonItem = [[UIBarButtonItem alloc] initWithTitle:localize(@"preference.title.reset_settings", nil) style:UIBarButtonItemStylePlain target:self action:@selector(resetSettings)];
 
+    // Settings search bar (flat list, grouped by tab)
+    _settingsSearchBar = [[UISearchBar alloc] init];
+    _settingsSearchBar.translatesAutoresizingMaskIntoConstraints = NO;
+    _settingsSearchBar.placeholder = localize(@"Search settings...", nil);
+    _settingsSearchBar.searchBarStyle = UISearchBarStyleMinimal;
+    _settingsSearchBar.delegate = self;
+    _settingsSearchBar.showsCancelButton = NO;
+    [self.view addSubview:_settingsSearchBar];
+
+    _searchResultsTable = [[UITableView alloc] initWithFrame:CGRectZero style:UITableViewStyleGrouped];
+    _searchResultsTable.translatesAutoresizingMaskIntoConstraints = NO;
+    _searchResultsTable.delegate = self;
+    _searchResultsTable.dataSource = self;
+    _searchResultsTable.backgroundColor = [UIColor clearColor];
+    _searchResultsTable.hidden = YES;
+    [_searchResultsTable registerClass:[UITableViewCell class] forCellReuseIdentifier:@"SearchCell"];
+    [self.view addSubview:_searchResultsTable];
+
     [self setupTabBar];
     [self setupPages];
     [self setupBackgroundBlur];
 
     _tabWidthConstraint = [_tabBarScroll.widthAnchor constraintEqualToConstant:132];
-    [NSLayoutConstraint activateConstraints:@[
-        [_tabBarScroll.topAnchor constraintEqualToAnchor:self.view.topAnchor],
-        [_tabBarScroll.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor],
-        [_tabBarScroll.bottomAnchor constraintEqualToAnchor:self.view.bottomAnchor],
-        _tabWidthConstraint,
+    _chromeIsPortrait = NO;
+    [self rebuildChromeConstraints];
+}
 
-        [_pageScroll.topAnchor constraintEqualToAnchor:self.view.topAnchor],
-        [_pageScroll.leadingAnchor constraintEqualToAnchor:_tabBarScroll.trailingAnchor],
-        [_pageScroll.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor],
-        [_pageScroll.bottomAnchor constraintEqualToAnchor:self.view.bottomAnchor],
-    ]];
+// Portrait puts the section rail at the bottom (horizontal strip);
+// landscape keeps the left rail. Same floating-card language either way.
+- (void)rebuildChromeConstraints {
+    if (_chromeConstraints) [NSLayoutConstraint deactivateConstraints:_chromeConstraints];
+    NSMutableArray *c = [NSMutableArray arrayWithObjects:
+        [_settingsSearchBar.topAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.topAnchor constant:4],
+        [_settingsSearchBar.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor constant:8],
+        [_settingsSearchBar.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor constant:-8],
+        [_settingsSearchBar.heightAnchor constraintEqualToConstant:36],
+
+        [_searchResultsTable.topAnchor constraintEqualToAnchor:_settingsSearchBar.bottomAnchor constant:4],
+        [_searchResultsTable.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor],
+        [_searchResultsTable.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor],
+        [_searchResultsTable.bottomAnchor constraintEqualToAnchor:self.view.bottomAnchor],
+        nil];
+    if (_chromeIsPortrait) {
+        [c addObjectsFromArray:@[
+            [_pageScroll.topAnchor constraintEqualToAnchor:_settingsSearchBar.bottomAnchor constant:4],
+            [_pageScroll.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor],
+            [_pageScroll.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor],
+            [_pageScroll.bottomAnchor constraintEqualToAnchor:_tabBarScroll.topAnchor constant:-8],
+            [_tabBarScroll.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor constant:8],
+            [_tabBarScroll.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor constant:-8],
+            [_tabBarScroll.bottomAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.bottomAnchor constant:-8],
+            [_tabBarScroll.heightAnchor constraintEqualToConstant:56],
+        ]];
+    } else {
+        [c addObjectsFromArray:@[
+            [_tabBarScroll.topAnchor constraintEqualToAnchor:_settingsSearchBar.bottomAnchor constant:8],
+            [_tabBarScroll.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor constant:8],
+            [_tabBarScroll.bottomAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.bottomAnchor constant:-8],
+            _tabWidthConstraint,
+            [_pageScroll.topAnchor constraintEqualToAnchor:_settingsSearchBar.bottomAnchor constant:4],
+            [_pageScroll.leadingAnchor constraintEqualToAnchor:_tabBarScroll.trailingAnchor constant:8],
+            [_pageScroll.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor],
+            [_pageScroll.bottomAnchor constraintEqualToAnchor:self.view.bottomAnchor],
+        ]];
+    }
+    _chromeConstraints = c;
+    [NSLayoutConstraint activateConstraints:c];
+    // Pages/contentSize/offset must be measured AFTER the new chrome has
+    // taken effect. Measuring from the old bounds left both pages stacked
+    // in portrait (transparent overlap until another rotation fixed it).
+    [self.view layoutIfNeeded];
+    [self layoutTabButtons];
+    [self layoutPagesForCurrentBounds];
 }
 
 - (void)setupTabBar {
@@ -288,7 +514,13 @@
     _tabBarScroll.translatesAutoresizingMaskIntoConstraints = NO;
     _tabBarScroll.showsHorizontalScrollIndicator = NO;
     _tabBarScroll.showsVerticalScrollIndicator = NO;
-    _tabBarScroll.backgroundColor = [UIColor clearColor];
+    _tabBarScroll.alwaysBounceHorizontal = YES;
+    // Floating rail card, same language as the profile/main bars.
+    _tabBarScroll.backgroundColor = ThemeManager.shared.cardBackgroundColor;
+    _tabBarScroll.layer.cornerRadius = 16;
+    _tabBarScroll.clipsToBounds = YES;
+    _tabBarScroll.layer.borderWidth = 1;
+    _tabBarScroll.layer.borderColor = [ThemeManager.shared.accentColor colorWithAlphaComponent:0.25].CGColor;
     [self.view addSubview:_tabBarScroll];
 
     _tabButtons = [NSMutableArray array];
@@ -316,11 +548,23 @@
 }
 
 - (void)layoutTabButtons {
+    if (_chromeIsPortrait) {
+        // Bottom rail: fixed 120pt pills in a smooth horizontal strip.
+        CGFloat x = 8;
+        for (NSUInteger i = 0; i < _tabButtons.count; i++) {
+            UIButton *btn = _tabButtons[i];
+            btn.frame = CGRectMake(x, 8, 120, 40);
+            x += 128;
+        }
+        _tabBarScroll.contentSize = CGSizeMake(x + 8, 56);
+        return;
+    }
     CGFloat sideWidth = _tabBarScroll.bounds.size.width;
+    if (sideWidth < 1) sideWidth = _tabWidthConstraint.constant;
     CGFloat y = 8;
     for (NSUInteger i = 0; i < _tabButtons.count; i++) {
         UIButton *btn = _tabButtons[i];
-        btn.frame = CGRectMake(0, y, sideWidth, 40);
+        btn.frame = CGRectMake(6, y, MAX(sideWidth - 12, 0), 40);
         y += 46;
     }
     _tabBarScroll.contentSize = CGSizeMake(sideWidth, y + 8);
@@ -353,13 +597,30 @@
 - (void)viewDidLayoutSubviews {
     [super viewDidLayoutSubviews];
 
+    BOOL portrait = self.view.bounds.size.width < self.view.bounds.size.height;
+    if (portrait != _chromeIsPortrait) {
+        _chromeIsPortrait = portrait;
+        // rebuildChromeConstraints lays out immediately and re-pages, so
+        // the new bounds are used — never the stale pre-rotation ones.
+        [self rebuildChromeConstraints];
+        return;
+    }
     CGFloat sideWidth = MAX(110, MIN(190, self.view.bounds.size.width * 0.24));
-    if (_tabWidthConstraint.constant != sideWidth) {
+    if (!portrait && fabs(_tabWidthConstraint.constant - sideWidth) > 0.5) {
         _tabWidthConstraint.constant = sideWidth;
         [self.view layoutIfNeeded];
+        [self layoutTabButtons];
+    } else {
+        [self layoutTabButtons];
     }
-    [self layoutTabButtons];
+    [self layoutPagesForCurrentBounds];
+}
 
+// Single place that sizes pages from live bounds and restores the current
+// page offset. Setting scroll-subview frames/contentSize here does not
+// re-trigger our own layout, so no layout loop.
+- (void)layoutPagesForCurrentBounds {
+    if (!_pageScroll || _pageTables.count == 0) return;
     CGFloat pageW = MAX(_pageScroll.bounds.size.width, 1);
     CGFloat pageH = _pageScroll.bounds.size.height;
     _pageScroll.contentSize = CGSizeMake(pageW * _pageTables.count, pageH);
@@ -433,6 +694,9 @@
     BOOL selected = btn.tag == _currentPage;
     ThemeManager *theme = ThemeManager.shared;
     [btn setTitleColor:selected ? theme.accentColor : theme.secondaryTextColor forState:UIControlStateNormal];
+    btn.backgroundColor = selected ? [theme.accentColor colorWithAlphaComponent:0.12] : [UIColor clearColor];
+    btn.layer.cornerRadius = 10;
+    btn.clipsToBounds = YES;
     UIView *indicator = [btn viewWithTag:99];
     indicator.backgroundColor = theme.accentColor;
     indicator.hidden = !selected;
@@ -470,6 +734,65 @@
     [_tabBarScroll scrollRectToVisible:CGRectInset(btn.frame, 0, -40) animated:YES];
 }
 
+#pragma mark - Settings Search (flat list grouped by tab)
+
+- (void)searchBar:(UISearchBar *)searchBar textDidChange:(NSString *)searchText {
+    if (searchBar != _settingsSearchBar) {
+        if ([searchBar isKindOfClass:[UISearchBar class]] && searchText.length == 0) {
+            // Let other delegates handle
+        }
+        return;
+    }
+    NSString *query = [searchText stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceCharacterSet]].lowercaseString;
+    if (query.length == 0) {
+        self.searchResults = nil;
+        self.searchResultsTable.hidden = YES;
+        _tabBarScroll.hidden = NO;
+        _pageScroll.hidden = NO;
+        return;
+    }
+    NSMutableArray *results = [NSMutableArray array];
+    for (NSUInteger tabIdx = 0; tabIdx < _sections.count; tabIdx++) {
+        NSDictionary *section = _sections[tabIdx];
+        NSString *tabTitle = section[@"title"] ?: @"";
+        NSArray *items = section[@"items"] ?: @[];
+        for (NSUInteger row = 0; row < items.count; row++) {
+            NSDictionary *item = items[row];
+            NSString *label = item[@"label"] ?: @"";
+            NSString *key = item[@"key"] ?: @"";
+            if ([label.lowercaseString containsString:query] || [key.lowercaseString containsString:query] || [tabTitle.lowercaseString containsString:query]) {
+                [results addObject:@{@"tab": tabTitle, @"tabIndex": @(tabIdx), @"item": item, @"row": @(row)}];
+            }
+        }
+    }
+    self.searchResults = results;
+    self.searchResultsTable.hidden = NO;
+    _tabBarScroll.hidden = YES;
+    _pageScroll.hidden = YES;
+    [self.searchResultsTable reloadData];
+}
+
+- (void)searchBarSearchButtonClicked:(UISearchBar *)searchBar {
+    if (searchBar == _settingsSearchBar) [searchBar resignFirstResponder];
+}
+
+- (void)searchBarCancelButtonClicked:(UISearchBar *)searchBar {
+    if (searchBar == _settingsSearchBar) {
+        searchBar.text = @"";
+        [self searchBar:searchBar textDidChange:@""];
+        [searchBar resignFirstResponder];
+        searchBar.showsCancelButton = NO;
+    }
+}
+
+- (void)searchBarTextDidBeginEditing:(UISearchBar *)searchBar {
+    if (searchBar == _settingsSearchBar) searchBar.showsCancelButton = YES;
+}
+
+- (void)searchBarTextDidEndEditing:(UISearchBar *)searchBar {
+    if (searchBar == _settingsSearchBar && searchBar.text.length == 0) searchBar.showsCancelButton = NO;
+}
+
 #pragma mark - TableView
 
 - (NSDictionary *)itemsForTable:(UITableView *)tableView {
@@ -481,14 +804,17 @@
 }
 
 - (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView {
+    if (tableView == _searchResultsTable) return 1;
     return 1;
 }
 
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section {
+    if (tableView == _searchResultsTable) return self.searchResults.count;
     return [self itemsForTable:tableView].count;
 }
 
 - (NSString *)tableView:(UITableView *)tableView titleForHeaderInSection:(NSInteger)section {
+    if (tableView == _searchResultsTable) return nil;
     return _sections[tableView.tag][@"title"];
 }
 
@@ -500,10 +826,12 @@
 }
 
 - (CGFloat)tableView:(UITableView *)tableView heightForHeaderInSection:(NSInteger)section {
+    if (tableView == _searchResultsTable) return 0;
     return 36;
 }
 
 - (CGFloat)tableView:(UITableView *)tableView heightForRowAtIndexPath:(NSIndexPath *)indexPath {
+    if (tableView == _searchResultsTable) return 48;
     NSDictionary *item = [self itemAtIndexPath:indexPath inTable:tableView];
     if ([item[@"type"] isEqualToString:@"label"]) {
         return 64;
@@ -512,6 +840,31 @@
 }
 
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {
+    if (tableView == _searchResultsTable) {
+        // Always subtitle style (the registered default-style cell has no
+        // detail label, which is why the path row never showed).
+        UITableViewCell *cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:@"SearchCell"];
+        NSDictionary *entry = self.searchResults[indexPath.row];
+        NSDictionary *item = entry[@"item"];
+        NSString *tab = entry[@"tab"];
+        cell.textLabel.text = item[@"label"] ?: @"";
+        // Path below: tab plus live value for switches.
+        NSString *detail = tab ?: @"";
+        if ([item[@"type"] isEqualToString:@"switch"] && [item[@"key"] isKindOfClass:[NSString class]]) {
+            BOOL on = [item[@"key"] isEqualToString:@"amethyst_ui_border_enabled"]
+                ? [[NSUserDefaults standardUserDefaults] boolForKey:item[@"key"]]
+                : getPrefBool(item[@"key"]);
+            detail = [detail stringByAppendingFormat:@" • %@", on ? @"On" : @"Off"];
+        }
+        cell.detailTextLabel.text = detail;
+        cell.textLabel.font = [UIFont systemFontOfSize:15];
+        cell.detailTextLabel.font = [UIFont systemFontOfSize:12];
+        cell.detailTextLabel.textColor = ThemeManager.shared.secondaryTextColor;
+        cell.backgroundColor = ThemeManager.shared.cardBackgroundColor;
+        cell.textLabel.textColor = ThemeManager.shared.primaryTextColor;
+        cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
+        return cell;
+    }
     NSDictionary *item = [self itemAtIndexPath:indexPath inTable:tableView];
     NSString *type = item[@"type"];
     NSString *cellId = type;
@@ -699,21 +1052,14 @@
             }
         }
         cell.detailTextLabel.text = display;
-        if ([item[@"preview"] boolValue]) {
-            UIImageView *preview = [[UIImageView alloc] initWithFrame:CGRectMake(0, 0, 44, 44)];
-            preview.contentMode = UIViewContentModeScaleAspectFit;
-            preview.layer.cornerRadius = 9;
-            preview.layer.masksToBounds = YES;
-            preview.layer.borderWidth = 1;
-            preview.layer.borderColor = ThemeManager.shared.separatorColor.CGColor;
-            preview.image = [UIImage imageNamed:[self logoImageNameForStyle:value]];
-            cell.accessoryView = preview;
-        } else {
-            cell.accessoryView = nil;
-        }
+        cell.accessoryView = nil;
     } else if ([type isEqualToString:@"switch"]) {
         UISwitch *sw = (UISwitch *)cell.accessoryView;
-        sw.on = getPrefBool(item[@"key"]);
+        if ([item[@"key"] isEqualToString:@"amethyst_ui_border_enabled"]) {
+            sw.on = [[NSUserDefaults standardUserDefaults] boolForKey:@"amethyst_ui_border_enabled"];
+        } else {
+            sw.on = getPrefBool(item[@"key"]);
+        }
     } else if ([type isEqualToString:@"slider"]) {
         UILabel *label = (UILabel *)[cell.contentView viewWithTag:kLabelTag];
         UILabel *valLabel = (UILabel *)[cell.contentView viewWithTag:kValLabelTag];
@@ -735,6 +1081,11 @@
             // getPrefFloat targets. bg_blur is handled above, so this covers
             // settings/topbar/sidebar/rightpanel blur.
             val = [[NSUserDefaults standardUserDefaults] floatForKey:item[@"key"]];
+        } else if ([item[@"key"] isEqualToString:@"amethyst_ui_border_radius"] ||
+                   [item[@"key"] isEqualToString:@"amethyst_shell_gap"] ||
+                   [item[@"key"] isEqualToString:@"amethyst_shell_inner_gap"] ||
+                   [item[@"key"] isEqualToString:@"amethyst_bar_border_width"]) {
+            val = [[NSUserDefaults standardUserDefaults] floatForKey:item[@"key"]];
         } else {
             val = getPrefFloat(item[@"key"]);
             if ([item[@"key"] isEqualToString:@"java.allocated_memory"] && val < [item[@"min"] floatValue]) {
@@ -743,7 +1094,7 @@
                 setPrefFloat(@"java.allocated_memory", val);
             }
         }
-        if (val == 0 && ![item[@"key"] isEqualToString:@"amethyst_bg_blur"] && ![item[@"key"] isEqualToString:@"amethyst_ui_opacity"] && !([item[@"key"] hasPrefix:@"amethyst_"] && [item[@"key"] hasSuffix:@"_blur"]) && ![item[@"key"] isEqualToString:@"general.widget_bg_opacity"] && !disabled) val = [item[@"min"] floatValue] + ([item[@"max"] floatValue] - [item[@"min"] floatValue]) / 2;
+        if (val == 0 && ![item[@"key"] isEqualToString:@"amethyst_bg_blur"] && ![item[@"key"] isEqualToString:@"amethyst_ui_opacity"] && !([item[@"key"] hasPrefix:@"amethyst_"] && [item[@"key"] hasSuffix:@"_blur"]) && ![item[@"key"] isEqualToString:@"general.widget_bg_opacity"] && ![item[@"key"] isEqualToString:@"amethyst_ui_border_radius"] && ![item[@"key"] isEqualToString:@"amethyst_shell_gap"] && ![item[@"key"] isEqualToString:@"amethyst_shell_inner_gap"] && ![item[@"key"] isEqualToString:@"amethyst_bar_border_width"] && ![item[@"key"] isEqualToString:@"amethyst_ui_border_enabled"] && !disabled) val = [item[@"min"] floatValue] + ([item[@"max"] floatValue] - [item[@"min"] floatValue]) / 2;
         sl.minimumValue = [item[@"min"] floatValue];
         sl.maximumValue = [item[@"max"] floatValue];
         sl.value = val;
@@ -766,16 +1117,6 @@
     }
 
     return cell;
-}
-
-- (NSString *)logoImageNameForStyle:(NSString *)style {
-    if ([style isEqualToString:@"blue"]) {
-        return ThemeManager.shared.isDarkMode ? @"logo-main-dark" : @"logo-main-light";
-    }
-    if ([style isEqualToString:@"dev"]) {
-        return @"logo-dev";
-    }
-    return ThemeManager.shared.isDarkMode ? @"logo-dark" : @"logo-light";
 }
 
 - (UIColor *)colorForKey:(NSString *)key {
@@ -809,6 +1150,41 @@
 }
 
 - (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)indexPath {
+    if (tableView == _searchResultsTable) {
+        [tableView deselectRowAtIndexPath:indexPath animated:YES];
+        NSDictionary *entry = self.searchResults[indexPath.row];
+        NSDictionary *item = entry[@"item"];
+        NSString *type = item[@"type"];
+        // Direct inline edit: dialog-based types open right here, no page jump.
+        if ([type isEqualToString:@"picker"]) {
+            [self showPickerForItem:item fromTable:_searchResultsTable];
+        } else if ([type isEqualToString:@"color"]) {
+            if ([item[@"key"] isEqualToString:@"amethyst_reset_appearance"]) [self resetAppearance];
+            else [self showColorPickerForKey:item[@"key"] label:item[@"label"]];
+        } else if ([type isEqualToString:@"image"]) {
+            [self showImagePicker];
+        } else if ([type isEqualToString:@"export"]) {
+            [self exportAppearance];
+        } else if ([type isEqualToString:@"import"]) {
+            [self importAppearance];
+        } else if ([type isEqualToString:@"link"]) {
+            NSString *urlString = item[@"url"];
+            if (urlString.length > 0) {
+                NSURL *url = [NSURL URLWithString:urlString];
+                if (url) [UIApplication.sharedApplication openURL:url options:@{} completionHandler:nil];
+            }
+        } else if ([type isEqualToString:@"credit"]) {
+            [self showCreditForItem:item];
+        } else if ([type isEqualToString:@"navigate"]) {
+            [self navigateToVC:item[@"vc"] title:item[@"label"]];
+        } else if ([type isEqualToString:@"switch"]) {
+            [self toggleSearchResultSwitch:item atIndexPath:indexPath];
+        } else {
+            // Inline controls (text/slider) still need their page: jump + flash.
+            [self jumpToSearchResult:entry];
+        }
+        return;
+    }
     [tableView deselectRowAtIndexPath:indexPath animated:YES];
     NSDictionary *item = [self itemAtIndexPath:indexPath inTable:tableView];
     NSString *type = item[@"type"];
@@ -822,20 +1198,7 @@
             if (url) [UIApplication.sharedApplication openURL:url options:@{} completionHandler:nil];
         }
     } else if ([type isEqualToString:@"credit"]) {
-        UIAlertController *alert = [UIAlertController alertControllerWithTitle:item[@"label"] message:item[@"license"] preferredStyle:UIAlertControllerStyleAlert];
-        if ([item[@"licenseUrl"] length] > 0) {
-            [alert addAction:[UIAlertAction actionWithTitle:localize(@"credits.open_license", nil) style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
-                NSURL *url = [NSURL URLWithString:item[@"licenseUrl"]];
-                if (url) [UIApplication.sharedApplication openURL:url options:@{} completionHandler:nil];
-            }]];
-        } else if ([item[@"url"] length] > 0) {
-            [alert addAction:[UIAlertAction actionWithTitle:localize(@"credits.open_project", nil) style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
-                NSURL *url = [NSURL URLWithString:item[@"url"]];
-                if (url) [UIApplication.sharedApplication openURL:url options:@{} completionHandler:nil];
-            }]];
-        }
-        [alert addAction:[UIAlertAction actionWithTitle:localize(@"Done", nil) style:UIAlertActionStyleCancel handler:nil]];
-        [self presentViewController:alert animated:YES completion:nil];
+        [self showCreditForItem:item];
     } else if ([type isEqualToString:@"navigate"]) {
         [self navigateToVC:item[@"vc"] title:item[@"label"]];
     } else if ([type isEqualToString:@"color"]) {
@@ -855,6 +1218,74 @@
 
 #pragma mark - Actions
 
+- (void)showCreditForItem:(NSDictionary *)item {
+    NSMutableArray *opts = [NSMutableArray array];
+    if ([item[@"licenseUrl"] length] > 0) {
+        [opts addObject:@{@"title": localize(@"credits.open_license", nil), @"icon": @"doc.text"}];
+    } else if ([item[@"url"] length] > 0) {
+        [opts addObject:@{@"title": localize(@"credits.open_project", nil), @"icon": @"safari"}];
+    }
+    [opts addObject:@{@"title": localize(@"Done", nil), @"icon": @"checkmark"}];
+    [AppSheet showOptionsWithTitle:item[@"label"] message:item[@"license"] options:opts selectedIndex:NSNotFound selection:^(NSInteger idx) {
+        if (idx == 0 && opts.count > 1) {
+            NSString *urlString = [item[@"licenseUrl"] length] > 0 ? item[@"licenseUrl"] : item[@"url"];
+            NSURL *url = [NSURL URLWithString:urlString];
+            if (url) [UIApplication.sharedApplication openURL:url options:@{} completionHandler:nil];
+        }
+    }];
+}
+
+// Inline switch toggle for search results (no page jump).
+- (void)toggleSearchResultSwitch:(NSDictionary *)item atIndexPath:(NSIndexPath *)indexPath {
+    NSString *key = item[@"key"];
+    if (![key isKindOfClass:[NSString class]] || key.length == 0) return;
+    // Settings that need side effects stay on their page.
+    if ([key isEqualToString:@"java.auto_ram"]) {
+        [self jumpToSearchResult:self.searchResults[indexPath.row]];
+        return;
+    }
+    BOOL nowOn;
+    if ([key isEqualToString:@"amethyst_ui_border_enabled"]) {
+        nowOn = ![[NSUserDefaults standardUserDefaults] boolForKey:key];
+        ThemeManager.shared.uiBorderEnabled = nowOn;
+        [[NSUserDefaults standardUserDefaults] synchronize];
+        [[NSNotificationCenter defaultCenter] postNotificationName:ThemeDidChangeNotification object:nil];
+    } else {
+        nowOn = !getPrefBool(key);
+        setPrefBool(key, nowOn);
+        if ([key isEqualToString:@"general.liquid_glass"]) {
+            [[NSNotificationCenter defaultCenter] postNotificationName:@"LiquidGlassDidChangeNotification" object:nil];
+        }
+    }
+    [HapticManager.shared play:HapticTypeLight];
+    [_searchResultsTable reloadRowsAtIndexPaths:@[indexPath] withRowAnimation:UITableViewRowAnimationNone];
+    [self reloadTables];
+    (void)nowOn;
+}
+
+// Fallback for inline-control rows (text/slider): jump to page + flash.
+- (void)jumpToSearchResult:(NSDictionary *)entry {
+    NSInteger tabIdx = [entry[@"tabIndex"] integerValue];
+    NSInteger row = [entry[@"row"] integerValue];
+    // Hide search and jump to tab
+    _settingsSearchBar.text = @"";
+    [self searchBar:_settingsSearchBar textDidChange:@""];
+    [_settingsSearchBar resignFirstResponder];
+    [self setPage:tabIdx animated:YES];
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.35 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        UITableView *targetTable = self.pageTables[tabIdx];
+        NSIndexPath *targetPath = [NSIndexPath indexPathForRow:row inSection:0];
+        [targetTable scrollToRowAtIndexPath:targetPath atScrollPosition:UITableViewScrollPositionMiddle animated:YES];
+        // Flash cell
+        UITableViewCell *cell = [targetTable cellForRowAtIndexPath:targetPath];
+        UIColor *orig = cell.backgroundColor;
+        cell.backgroundColor = [ThemeManager.shared.accentColor colorWithAlphaComponent:0.3];
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.8 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            cell.backgroundColor = orig;
+        });
+    });
+}
+
 - (UITableView *)tableForCell:(UITableViewCell *)cell {
     UIView *view = cell.superview;
     while (view && ![view isKindOfClass:[UITableView class]]) {
@@ -873,7 +1304,11 @@
     if (!ip) return;
     NSDictionary *item = [self itemAtIndexPath:ip inTable:table];
     setPrefBool(item[@"key"], sender.on);
-    if ([item[@"key"] isEqualToString:@"java.auto_ram"]) {
+    if ([item[@"key"] isEqualToString:@"amethyst_ui_border_enabled"]) {
+        // UI border lives in NSUserDefaults (ThemeManager reads it from there).
+        ThemeManager.shared.uiBorderEnabled = sender.on;
+        [[NSNotificationCenter defaultCenter] postNotificationName:ThemeDidChangeNotification object:nil];
+    } else if ([item[@"key"] isEqualToString:@"java.auto_ram"]) {
         if (!sender.on) {
             CGFloat autoRatio = getEntitlementValue(@"com.apple.private.memorystatus") ? 0.4 : 0.25;
             float autoVal = roundf((NSProcessInfo.processInfo.physicalMemory / 1048576) * autoRatio);
@@ -912,6 +1347,21 @@
         ThemeManager.shared.backgroundBlurIntensity = val;
     } else if ([item[@"key"] isEqualToString:@"amethyst_ui_opacity"]) {
         ThemeManager.shared.uiOpacity = val / 100.0;
+    } else if ([item[@"key"] isEqualToString:@"amethyst_ui_border_radius"]) {
+        ThemeManager.shared.uiBorderCornerRadius = val;
+        [[NSUserDefaults standardUserDefaults] synchronize];
+        [self broadcastThemeDebounced];
+    } else if ([item[@"key"] isEqualToString:@"amethyst_bar_border_width"]) {
+        // NOTE: layout reads this from NSUserDefaults (updateShellBorderPath),
+        // NOT the launcher plist — route it there or drags never take effect.
+        [[NSUserDefaults standardUserDefaults] setFloat:val forKey:@"amethyst_bar_border_width"];
+        [[NSUserDefaults standardUserDefaults] synchronize];
+        [self broadcastThemeDebounced];
+    } else if ([item[@"key"] isEqualToString:@"amethyst_shell_gap"] ||
+               [item[@"key"] isEqualToString:@"amethyst_shell_inner_gap"]) {
+        [[NSUserDefaults standardUserDefaults] setFloat:val forKey:item[@"key"]];
+        [[NSUserDefaults standardUserDefaults] synchronize];
+        [self broadcastThemeDebounced];
     } else if ([item[@"key"] hasPrefix:@"amethyst_"] && [item[@"key"] hasSuffix:@"_blur"]) {
         // Save UI panel blur to NSUserDefaults — the store AmethystBlurView
         // actually reads. setPrefFloat would write the launcher plist and the
@@ -924,16 +1374,33 @@
         setPrefFloat(item[@"key"], val);
         if ([item[@"key"] isEqualToString:@"video.resolution"]) {
             [[NSNotificationCenter defaultCenter] postNotificationName:@"ResolutionDidChangeNotification" object:nil];
+        } else if ([item[@"key"] isEqualToString:@"control.mouse_scale"] || [item[@"key"] isEqualToString:@"control.button_scale"] || [item[@"key"] isEqualToString:@"control.mouse_speed"]) {
+            // Live update virtual mouse / button scale without relaunch
+            [[NSNotificationCenter defaultCenter] postNotificationName:@"ControlScaleDidChangeNotification" object:nil];
+            [[NSNotificationCenter defaultCenter] postNotificationName:@"MouseScaleDidChangeNotification" object:nil];
         }
         // Any *_blur slider drives realtime frosted surfaces; let them refresh.
         BOOL isBlurSlider = [item[@"key"] hasPrefix:@"amethyst_"] && [item[@"key"] hasSuffix:@"_blur"];
         BOOL isBorderWidth = [item[@"key"] isEqualToString:@"amethyst_bar_border_width"];
-        if (isBlurSlider || isBorderWidth) {
+        if (isBorderWidth) {
+            [self broadcastThemeDebounced];
+        } else if (isBlurSlider) {
             [[NSNotificationCenter defaultCenter] postNotificationName:AmethystBlurIntensityDidChangeNotification object:nil];
         }
     }
     UILabel *valLabel = (UILabel *)[cell.contentView viewWithTag:101];
     valLabel.text = [NSString stringWithFormat:@"%.0f%@", val, item[@"suffix"] ?: @""];
+}
+
+// Coalesce rapid slider drags into one theme broadcast (a full shell
+// relayout per tick saturates main and feels stuck).
+- (void)broadcastThemeDebounced {
+    [NSObject cancelPreviousPerformRequestsWithTarget:self selector:@selector(fireThemeBroadcast) object:nil];
+    [self performSelector:@selector(fireThemeBroadcast) withObject:nil afterDelay:0.15];
+}
+
+- (void)fireThemeBroadcast {
+    [[NSNotificationCenter defaultCenter] postNotificationName:ThemeDidChangeNotification object:nil];
 }
 
 - (void)textFieldChanged:(UITextField *)sender {
@@ -965,50 +1432,45 @@
     id currentValueObj = getPrefObject(item[@"key"]) ?: item[@"default"];
     NSString *currentValue = [currentValueObj isKindOfClass:[NSString class]] ? currentValueObj : [currentValueObj description];
 
-    UIAlertController *sheet = [UIAlertController alertControllerWithTitle:item[@"label"] message:nil preferredStyle:UIAlertControllerStyleActionSheet];
-
+    NSMutableArray *opts = [NSMutableArray array];
+    NSMutableArray *keys = [NSMutableArray array];
+    NSInteger sel = NSNotFound;
     if ([options.firstObject isKindOfClass:[NSDictionary class]]) {
         for (NSDictionary *opt in options) {
             NSString *key = opt[@"key"];
             NSString *name = opt[@"name"];
-            BOOL isSelected = [currentValue isEqualToString:key];
-            NSString *label = isSelected ? [NSString stringWithFormat:@"✓ %@", name] : name;
-            [sheet addAction:[UIAlertAction actionWithTitle:label style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
-                setPrefObject(item[@"key"], key);
-                if ([item[@"key"] isEqualToString:@"general.orientation_lock"]) {
-                    [self applyOrientationLock];
-                } else if ([item[@"key"] isEqualToString:@"launcher.logo_style"]) {
-                    applyLauncherAppIcon();
-                    [[NSNotificationCenter defaultCenter] postNotificationName:@"LauncherLogoDidChangeNotification" object:nil];
-                }
-                [self reloadTables];
-            }]];
+            if (![key isKindOfClass:[NSString class]]) continue;
+            [opts addObject:@{@"title": ([name isKindOfClass:[NSString class]] ? name : key)}];
+            [keys addObject:key];
+            if ([currentValue isEqualToString:key]) sel = keys.count - 1;
         }
     } else {
         for (NSString *opt in options) {
             if (![opt isKindOfClass:[NSString class]]) continue;
-            NSString *display = opt;
-            NSString *cap = [opt stringByReplacingCharactersInRange:NSMakeRange(0,1) withString:[[opt substringToIndex:1] capitalizedString]];
-            display = cap;
-            BOOL isSelected = [currentValue isEqualToString:opt];
-            NSString *label = isSelected ? [NSString stringWithFormat:@"✓ %@", display] : display;
-            [sheet addAction:[UIAlertAction actionWithTitle:label style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
-                setPrefObject(item[@"key"], opt);
-                if ([item[@"key"] isEqualToString:@"launcher.theme"]) {
-                    [self handleThemeChange:opt];
-                }
-                [self reloadTables];
-            }]];
+            NSString *display = [opt stringByReplacingCharactersInRange:NSMakeRange(0,1) withString:[[opt substringToIndex:1] capitalizedString]];
+            [opts addObject:@{@"title": display}];
+            [keys addObject:opt];
+            if ([currentValue isEqualToString:opt]) sel = keys.count - 1;
         }
     }
-    [sheet addAction:[UIAlertAction actionWithTitle:localize(@"Cancel", nil) style:UIAlertActionStyleCancel handler:nil]];
-
-    if (UIDevice.currentDevice.userInterfaceIdiom == UIUserInterfaceIdiomPad) {
-        sheet.popoverPresentationController.sourceView = table;
-        sheet.popoverPresentationController.sourceRect = CGRectMake(CGRectGetMidX(table.bounds), CGRectGetMidY(table.bounds), 0, 0);
-    }
-
-    [self presentViewController:sheet animated:YES completion:nil];
+    [AppSheet showOptionsWithTitle:item[@"label"] message:nil options:opts selectedIndex:sel selection:^(NSInteger idx) {
+        NSString *key = keys[idx];
+        setPrefObject(item[@"key"], key);
+        if ([item[@"key"] isEqualToString:@"general.orientation_lock"]) {
+            [self applyOrientationLock];
+        } else if ([item[@"key"] isEqualToString:@"launcher.theme"]) {
+            [self handleThemeChange:key];
+        } else if ([item[@"key"] isEqualToString:@"launcher.language"]) {
+            [self applyLanguageChange];
+            return;
+        } else if ([item[@"key"] isEqualToString:@"general.mainsidebar_portrait"] ||
+                   [item[@"key"] isEqualToString:@"general.mainsidebar_landscape"]) {
+            // Main sidebar dock change: re-layout the root shell.
+            [[NSNotificationCenter defaultCenter] postNotificationName:ThemeDidChangeNotification object:nil];
+        }
+        [self reloadTables];
+    }];
+    (void)table;
 }
 
 - (void)handleThemeChange:(NSString *)themeValue {
@@ -1261,19 +1723,15 @@
 }
 
 - (void)showImagePicker {
-    UIAlertController *sheet = [UIAlertController alertControllerWithTitle:localize(@"Background", nil) message:nil preferredStyle:UIAlertControllerStyleActionSheet];
-
-    [sheet addAction:[UIAlertAction actionWithTitle:localize(@"Choose Image from Library", nil) style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
-        [self openPhotoLibraryWithFilter:[PHPickerFilter imagesFilter]];
-    }]];
-    [sheet addAction:[UIAlertAction actionWithTitle:localize(@"Choose Video from Library", nil) style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
-        [self openPhotoLibraryWithFilter:[PHPickerFilter videosFilter]];
-    }]];
-    [sheet addAction:[UIAlertAction actionWithTitle:localize(@"Remove Background", nil) style:UIAlertActionStyleDestructive handler:^(UIAlertAction *action) {
-        [self removeBackgroundImage];
-    }]];
-    [sheet addAction:[UIAlertAction actionWithTitle:localize(@"Cancel", nil) style:UIAlertActionStyleCancel handler:nil]];
-    [self presentViewController:sheet animated:YES completion:nil];
+    [AppSheet showOptionsWithTitle:localize(@"Background", nil) message:nil options:@[
+        @{@"title": localize(@"Choose Image from Library", nil), @"icon": @"photo"},
+        @{@"title": localize(@"Choose Video from Library", nil), @"icon": @"video"},
+        @{@"title": localize(@"Remove Background", nil), @"icon": @"trash", @"destructive": @YES},
+    ] selectedIndex:NSNotFound selection:^(NSInteger idx) {
+        if (idx == 0) [self openPhotoLibraryWithFilter:[PHPickerFilter imagesFilter]];
+        else if (idx == 1) [self openPhotoLibraryWithFilter:[PHPickerFilter videosFilter]];
+        else [self removeBackgroundImage];
+    }];
 }
 
 - (void)openPhotoLibraryWithFilter:(PHPickerFilter *)filter {
@@ -1449,9 +1907,7 @@
 }
 
 - (void)resetSettings {
-    UIAlertController *alert = [UIAlertController alertControllerWithTitle:localize(@"Reset Settings", nil) message:localize(@"Are you sure you want to reset all settings to default?", nil) preferredStyle:UIAlertControllerStyleAlert];
-    [alert addAction:[UIAlertAction actionWithTitle:localize(@"Cancel", nil) style:UIAlertActionStyleCancel handler:nil]];
-    [alert addAction:[UIAlertAction actionWithTitle:localize(@"Reset", nil) style:UIAlertActionStyleDestructive handler:^(UIAlertAction *action) {
+    [AppSheet showConfirmWithTitle:localize(@"Reset Settings", nil) message:localize(@"Are you sure you want to reset all settings to default?", nil) confirmTitle:localize(@"Reset", nil) destructive:YES onConfirm:^{
         loadPreferences(YES);
         loadPreferences(NO);
         [ThemeManager.shared applyInterfaceStyle:UIUserInterfaceStyleUnspecified];
@@ -1459,8 +1915,7 @@
         [self resetAppearance];
         [self buildSections];
         [self reloadTables];
-    }]];
-    [self presentViewController:alert animated:YES completion:nil];
+    }];
 }
 
 - (void)dealloc {

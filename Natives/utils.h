@@ -7,7 +7,7 @@
 #include "jni.h"
 
 // Remove date + time from NSLog, unneeded
-#define NSLog(args...) customNSLog(__FILE__,__LINE__,__PRETTY_FUNCTION__,args);
+#define NSLog(args...) customNSLog(__FILE__,__LINE__,__PRETTY_FUNCTION__,args)
 
 // Control button actions
 #define ACTION_DOWN 0
@@ -43,6 +43,12 @@
 // Vulkan → MoltenVK → Metal direct renderer. The on-disk value is kept as the
 // historical "libMoltenVK.dylib" so existing profiles/settings stay valid.
 #define RENDERER_NAME_MOLTENVK "libMoltenVK.dylib"
+// MobileGL: desktop OpenGL 4.2+ implementation via Vulkan/MoltenVK backend
+#define RENDERER_NAME_MOBILEGL "libMobileGL.dylib"
+// TGLMT: OpenGL 4.6 Core -> Metal directly (libtglmt.dylib, no MoltenVK,
+// no ANGLE). Vanilla boot path, A11+. Selected from the renderer picker;
+// LWJGL resolves plain gl* symbols straight from this dylib.
+#define RENDERER_NAME_TGLMT "libtglmt.dylib"
 
 #define SPECIALBTN_KEYBOARD -1
 #define SPECIALBTN_TOGGLECTRL -2
@@ -62,6 +68,8 @@ BOOL debugLogEnabled, isJailbroken;
 #define CS_DEBUGGED 0x10000000
 int csops(pid_t pid, unsigned int ops, void *useraddr, size_t usersize);
 BOOL isJITEnabled(BOOL checkCSOps);
+BOOL processIsCurrentlyDebugged(void);
+void requestExternalJITEnable(void);
 // legacy method used to check if we're using universal script
 void* JIT26CreateRegionLegacy(size_t len);
 // used for large memory regions
@@ -82,6 +90,7 @@ JITFlags DeviceGetJITFlags(BOOL refresh);
 BOOL DeviceHasJITFlags(JITFlags flags);
 BOOL DeviceNeedsDebugJITMapping(void);
 BOOL DeviceHasTXMReal(void);
+BOOL DeviceHasTXM(void);
 BOOL JIT26IsLikelyDebuggerKeepAttached(void);
 
 void handle_fatal_exit(int code);
@@ -90,13 +99,21 @@ void handle_fatal_exit(int code);
 void init_bypassDyldLibValidation();
 void init_jit_vm_remap_hook();
 void rebind_jit_vm_hooks_after_libjvm_load();
-void verify_libjvm_mirror_brk_patch(void);
+BOOL verify_libjvm_mirror_brk_patch(void);
 void start_jit_mirror_prepare_poll_thread(void);
 void prewarm_jit_mirror_superpage(void);
 void AmethystJIT26PrepareMirrorPair(void *rx, void *rw, size_t size);
+BOOL JIT26ExecPreflight(void);
 void init_hookFunctions();
 void init_hookUIKitConstructor();
 void init_setupMultiDir();
+void init_setupUniversalJITScript(BOOL copyToClipboard);
+void JITReportInit(void);
+void JITReportLine(NSString *format, ...);
+NSString* WitchHardwareMachine(void);
+// Last dyld-bypass outcome, for the one-page JIT report (-1/NO = not attempted).
+extern int g_dyldMmapMatches, g_dyldFcntlMatches;
+extern BOOL g_dyldMmapOK, g_dyldFcntlOK;
 
 BOOL PLPatchMachOPlatformForFile(const char *path);
 

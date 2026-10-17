@@ -6,6 +6,7 @@
 #import "MapListViewController.h"
 #import "ResourcePackListViewController.h"
 #import "AmethystBlurView.h"
+#import "utils.h"
 
 @interface DownloadHubCategoryCard : UIView
 @property (nonatomic) UIImageView *iconView;
@@ -80,13 +81,13 @@
 }
 
 - (void)setup {
-    self.navigationItem.title = @"Download Hub";
+    self.navigationItem.title = localize(@"Download Hub", nil);
     self.navigationItem.rightBarButtonItem = [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemClose target:self action:@selector(dismissSelf)];
 
     UILabel *subtitleLabel = [[UILabel alloc] init];
     subtitleLabel.translatesAutoresizingMaskIntoConstraints = NO;
     subtitleLabel.font = [UIFont systemFontOfSize:14 weight:UIFontWeightRegular];
-    subtitleLabel.text = @"Browse and install content for Minecraft";
+    subtitleLabel.text = localize(@"Browse and install content for Minecraft", nil);
     [self.view addSubview:subtitleLabel];
 
     UIColor *purple = [UIColor colorWithRed:0.37 green:0.37 blue:0.90 alpha:1];
@@ -97,12 +98,12 @@
     UIColor *red = [UIColor colorWithRed:0.90 green:0.30 blue:0.30 alpha:1];
 
     NSArray *categories = @[
-        @{@"icon": @"cube.box", @"title": @"Game", @"desc": @"Install & manage versions", @"color": purple, @"id": @"game"},
-        @{@"icon": @"wrench.and.screwdriver", @"title": @"Mod", @"desc": @"Browse Modrinth mods", @"color": green, @"id": @"mod"},
-        @{@"icon": @"square.stack.3d.up", @"title": @"Modpack", @"desc": @"Curated mod collections", @"color": orange, @"id": @"modpack"},
-        @{@"icon": @"paintpalette", @"title": @"Shader", @"desc": @"Iris & Optifine packs", @"color": blue, @"id": @"shader"},
-        @{@"icon": @"paintbrush.fill", @"title": @"Resource Pack", @"desc": @"Textures & visual overhauls", @"color": red, @"id": @"resourcepack"},
-        @{@"icon": @"map", @"title": @"Maps", @"desc": @"Worlds & adventure maps", @"color": teal, @"id": @"map"},
+        @{@"icon": @"cube.box", @"title": localize(@"Game", nil), @"desc": localize(@"Install & manage versions", nil), @"color": purple, @"id": @"game"},
+        @{@"icon": @"wrench.and.screwdriver", @"title": localize(@"Mod", nil), @"desc": localize(@"Browse Modrinth mods", nil), @"color": green, @"id": @"mod"},
+        @{@"icon": @"square.stack.3d.up", @"title": localize(@"Modpack", nil), @"desc": localize(@"Curated mod collections", nil), @"color": orange, @"id": @"modpack"},
+        @{@"icon": @"paintpalette", @"title": localize(@"Shader", nil), @"desc": localize(@"Iris & Optifine packs", nil), @"color": blue, @"id": @"shader"},
+        @{@"icon": @"paintbrush.fill", @"title": localize(@"Resource Pack", nil), @"desc": localize(@"Textures & visual overhauls", nil), @"color": red, @"id": @"resourcepack"},
+        @{@"icon": @"map", @"title": localize(@"Maps", nil), @"desc": localize(@"Worlds & adventure maps", nil), @"color": teal, @"id": @"map"},
     ];
 
     CGFloat cardHeight = 110;

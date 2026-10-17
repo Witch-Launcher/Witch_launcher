@@ -2,6 +2,7 @@
 #import "SceneDelegate.h"
 #import "ios_uikit_bridge.h"
 #import "utils.h"
+#import "WitchAppAttest.h"
 
 // SurfaceViewController
 extern dispatch_group_t fatalExitGroup;
@@ -12,11 +13,27 @@ extern dispatch_group_t fatalExitGroup;
 
 
 - (BOOL)application:(UIApplication *)application didFinishLaunchingWithOptions:(NSDictionary *)launchOptions {
-    // Re-apply the chosen home-screen icon on every launch; keeps the icon in
-    // sync with the launcher.logo_style preference (and flushes stale caches).
-    dispatch_async(dispatch_get_main_queue(), ^{
-        applyLauncherAppIcon();
-    });
+    // Home-screen icon is fixed at build time (APP_ICON / asset catalog).
+    // No runtime icon switching: setAlternateIconName with names missing
+    // from Info.plist silently reverted to the wrong default icon.
+    // Tạo flag file để phát hiện crash ra màn hình chính (nếu app crash, file sẽ còn lại)
+    const char *home = getenv("POJAV_HOME");
+    if (home) {
+        NSString *flag = [@(home) stringByAppendingPathComponent:@".launcher_running"];
+        [[NSFileManager defaultManager] createFileAtPath:flag contents:[@"1" dataUsingEncoding:NSUTF8StringEncoding] attributes:nil];
+    }
+    // Kích hoạt AppAttest (BuildKeys) — tạo key/assertion nền, Worker sẽ ưu tiên
+    if ([WitchAppAttest isSupported]) {
+        dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
+            [WitchAppAttest attestIfNeededWithCompletion:^(NSString *token, NSError *error){
+                if (token) {
+                    NSLog(@"[WitchAppAttest] ready");
+                } else {
+                    NSLog(@"[WitchAppAttest] not ready: %@", error.localizedDescription);
+                }
+            }];
+        });
+    }
     return YES;
 }
 
@@ -38,6 +55,11 @@ extern dispatch_group_t fatalExitGroup;
     if (fatalExitGroup != nil) {
         dispatch_group_leave(fatalExitGroup);
         fatalExitGroup = nil;
+    }
+    const char *home = getenv("POJAV_HOME");
+    if (home) {
+        NSString *flag = [@(home) stringByAppendingPathComponent:@".launcher_running"];
+        [[NSFileManager defaultManager] removeItemAtPath:flag error:nil];
     }
 }
 

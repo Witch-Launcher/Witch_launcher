@@ -239,7 +239,7 @@ ifndef SDKPATH
 $(error You need to specify SDKPATH to the path of iPhoneOS.sdk. The SDK version should be 14.0 or newer.)
 endif
 
-all: clean lwgjl native java jre assets payload package dsym
+all: clean lwgjl native dep_moltenvk dep_mesa_zink dep_angle java jre assets payload package dsym
 
 help:
 	echo 'Makefile to compile Witch'
@@ -357,6 +357,18 @@ jre: native
 	for ver in 21 25; do \
 		jvm="$(SOURCEDIR)/depends/java-$$ver-openjdk/lib/server/libjvm.dylib"; \
 		if [ -f "$$jvm" ]; then \
+			if python3 $(SOURCEDIR)/scripts/patch_libjvm_mirror_brk.py "$$jvm" && \
+			   python3 $(SOURCEDIR)/scripts/patch_libjvm_jit_alloc.py "$$jvm"; then \
+				echo "[jre] Java $$ver mirror brk patches OK"; \
+			else \
+				echo "[jre] WARNING: Java $$ver mirror brk patch failed — removing mirror marker so the launcher falls back to classic JIT26"; \
+				rm -f $(SOURCEDIR)/depends/java-$$ver-openjdk/.witch-mirror-mapping; \
+			fi; \
+		fi; \
+	done; \
+	for ver in 21 25; do \
+		jvm="$(SOURCEDIR)/depends/java-$$ver-openjdk/lib/server/libjvm.dylib"; \
+		if [ -f "$$jvm" ]; then \
 			if ! otool -l "$$jvm" >/dev/null 2>&1; then \
 				echo "[jre] ERROR: libjvm.dylib for Java $$ver failed Mach-O validation (corrupt build/download?)"; \
 				exit 1; \
@@ -393,7 +405,6 @@ verify-jres:
 	echo '[Witch v$(VERSION)] dep_mg - start'
 	mkdir -p $(WORKINGDIR)/mobileglues
 	cd $(WORKINGDIR)/mobileglues && cmake \
-		-DMACOS="1" \
 		-DCMAKE_CROSSCOMPILING=true \
 		-DCMAKE_SYSTEM_NAME=Darwin \
 		-DCMAKE_SYSTEM_PROCESSOR=aarch64 \
@@ -403,12 +414,279 @@ verify-jres:
 		-DCMAKE_C_FLAGS="-arch arm64" \
 		-DCMAKE_MAKE_PROGRAM=/usr/bin/make \
 		-DSPIRV_CROSS_SHARED="ON" \
-$(SOURCEDIR)/Natives/external/MobileGlues/src/main/cpp/
+		$(SOURCEDIR)/Natives/external/MobileGlues/src/main/cpp/
 
 	cmake --build $(WORKINGDIR)/mobileglues --config RelWithDebInfo -j$(JOBS) --target mobileglues
 	cp $(WORKINGDIR)/mobileglues/libmobileglues*.dylib $(WORKINGDIR)/
 	cp $(WORKINGDIR)/mobileglues/libspirv-cross*.dylib $(WORKINGDIR)/ 2>/dev/null || true
 	echo '[Witch v$(VERSION)] dep_mg - end'
+
+dep_mobilegl:
+	echo '[Witch v$(VERSION)] dep_mobilegl - start'
+	@if [ ! -f "$(SOURCEDIR)/Natives/external/MobileGL/CMakeLists.txt" ]; then \
+		echo '[Witch] MobileGL source missing (submodule not checked out) - using vendored libMobileGL.dylib'; \
+		test -f "$(SOURCEDIR)/Natives/resources/Frameworks/libMobileGL.dylib" || { echo 'ERROR: vendored libMobileGL.dylib missing too'; exit 1; }; \
+		cp "$(SOURCEDIR)/Natives/resources/Frameworks/libMobileGL.dylib" "$(WORKINGDIR)/libMobileGL.dylib"; \
+	else \
+		echo '[Witch] Building MobileGL from source (two-level namespace, no flat_namespace)'; \
+		mkdir -p $(WORKINGDIR)/mobilegl; \
+		cd $(WORKINGDIR)/mobilegl && cmake \
+			-DCMAKE_CROSSCOMPILING=true \
+			-DCMAKE_SYSTEM_NAME=iOS \
+			-DCMAKE_OSX_SYSROOT="$(SDKPATH)" \
+			-DCMAKE_OSX_ARCHITECTURES=arm64 \
+			-DCMAKE_OSX_DEPLOYMENT_TARGET=14.0 \
+			-DCMAKE_C_FLAGS="-arch arm64" \
+			-DCMAKE_MAKE_PROGRAM=/usr/bin/make \
+			-DMOBILEGL_IOS=ON \
+			-DMOBILEGL_BACKEND_TYPE=DirectVulkan \
+			-DMOBILEGL_BUILD_TEST=OFF \
+			-DMOBILEGL_BUILD_BENCHMARK=OFF \
+			-DMOBILEGL_VULKAN_LIBRARY="$(SOURCEDIR)/Natives/resources/Frameworks/libMoltenVK.dylib" \
+			-DSPIRV_CROSS_SHARED="ON" \
+			-DCMAKE_SHARED_LINKER_FLAGS="-L$(SOURCEDIR)/Natives/resources/Frameworks -lc++_cxx23 -lc++abi_cxx23 -Wl,-undefined,error" \
+			$(SOURCEDIR)/Natives/external/MobileGL/; \
+		cmake --build $(WORKINGDIR)/mobilegl --config Release -j$(JOBS) --target MobileGL; \
+		cp $(WORKINGDIR)/mobilegl/libMobileGL*.dylib $(WORKINGDIR)/ 2>/dev/null || true; \
+		cp $(WORKINGDIR)/mobilegl/libMobileGL_s.a $(WORKINGDIR)/ 2>/dev/null || true; \
+		cp $(WORKINGDIR)/libMobileGL.dylib $(SOURCEDIR)/Natives/resources/Frameworks/libMobileGL.dylib; \
+		install_name_tool -change @rpath/libMoltenVK.1.dylib @rpath/libMoltenVK.dylib $(WORKINGDIR)/libMobileGL.dylib; \
+		install_name_tool -change @rpath/libMoltenVK.1.dylib @rpath/libMoltenVK.dylib $(SOURCEDIR)/Natives/resources/Frameworks/libMobileGL.dylib; \
+	fi
+	echo '[Witch v$(VERSION)] dep_mobilegl - end'
+
+TGLES_SRC ?= /Volumes/D/TGLES
+TGLMT_SRC ?= /Volumes/D/TGLMT
+dep_tglmt:
+	echo '[Witch v$(VERSION)] dep_tglmt - start'
+	mkdir -p "$(WORKINGDIR)"
+	if [ -d "$(TGLMT_SRC)" ]; then \
+		cmake -S "$(TGLMT_SRC)" -B "$(TGLMT_SRC)/build-ios-pkg" \
+			-DCMAKE_SYSTEM_NAME=iOS \
+			-DCMAKE_OSX_SYSROOT="$(SDKPATH)" \
+			-DCMAKE_OSX_ARCHITECTURES=arm64 \
+			-DCMAKE_OSX_DEPLOYMENT_TARGET=14.0 \
+			-DCMAKE_BUILD_TYPE=Release \
+			-DTGLMT_APPLE_METAL=ON \
+			-DTGLMT_BUILD_TESTS=OFF \
+			-DTGLMT_BUILD_SHARED=ON && \
+		cmake --build "$(TGLMT_SRC)/build-ios-pkg" --config Release && \
+		cp "$(TGLMT_SRC)/build-ios-pkg/libtglmt.dylib" \
+			"$(SOURCEDIR)/Natives/resources/Frameworks/libtglmt.dylib" && \
+		cp "$(TGLMT_SRC)/build-ios-pkg/libtglmt.dylib" \
+			"$(WORKINGDIR)/libtglmt.dylib"; \
+	else \
+		echo '[Witch] TGLMT_SRC not found at $(TGLMT_SRC), keeping vendored libtglmt.dylib'; \
+		cp "$(SOURCEDIR)/Natives/resources/Frameworks/libtglmt.dylib" \
+			"$(WORKINGDIR)/libtglmt.dylib"; \
+	fi
+	test -f "$(SOURCEDIR)/Natives/resources/Frameworks/libtglmt.dylib" || \
+		{ echo 'ERROR: libtglmt.dylib missing (set TGLMT_SRC or vendor the dylib)'; exit 1; }
+	echo '[Witch v$(VERSION)] dep_tglmt - end'
+
+dep_tgles:
+	echo '[Witch v$(VERSION)] dep_tgles - start'
+	mkdir -p "$(WORKINGDIR)"
+	if [ -d "$(TGLES_SRC)" ]; then \
+		cmake -S "$(TGLES_SRC)" -B "$(TGLES_SRC)/build-ios-dev" \
+			-DCMAKE_SYSTEM_NAME=iOS \
+			-DCMAKE_OSX_SYSROOT="$(SDKPATH)" \
+			-DCMAKE_OSX_ARCHITECTURES=arm64 \
+			-DCMAKE_OSX_DEPLOYMENT_TARGET=14.0 \
+			-DCMAKE_BUILD_TYPE=Release && \
+		cmake --build "$(TGLES_SRC)/build-ios-dev" --config Release && \
+		cp "$(TGLES_SRC)/build-ios-dev/libtgles.dylib" \
+			"$(SOURCEDIR)/Natives/resources/Frameworks/libtgles.dylib" && \
+		cp "$(TGLES_SRC)/build-ios-dev/libtgles.dylib" \
+			"$(WORKINGDIR)/libtgles.dylib"; \
+	else \
+		echo '[Witch] TGLES_SRC not found at $(TGLES_SRC), keeping vendored libtgles.dylib'; \
+		cp "$(SOURCEDIR)/Natives/resources/Frameworks/libtgles.dylib" \
+			"$(WORKINGDIR)/libtgles.dylib"; \
+	fi
+	test -f "$(SOURCEDIR)/Natives/resources/Frameworks/libtgles.dylib" || \
+		{ echo 'ERROR: libtgles.dylib missing (set TGLES_SRC or vendor the dylib)'; exit 1; }
+	echo '[Witch v$(VERSION)] dep_tgles - end'
+
+dep_moltenvk12:
+	echo '[Witch v$(VERSION)] dep_moltenvk12 - start'
+	mkdir -p $(WORKINGDIR)/moltenvk12
+	cd "$(SOURCEDIR)/Natives/external/MoltenVK" && \
+		git stash 2>/dev/null || true && \
+		git checkout v1.2.11 2>/dev/null || git checkout v1.2.10 2>/dev/null || true
+	cd $(WORKINGDIR)/moltenvk12 && cmake \
+		-DCMAKE_CROSSCOMPILING=true \
+		-DCMAKE_SYSTEM_NAME=iOS \
+		-DCMAKE_OSX_SYSROOT="$(SDKPATH)" \
+		-DCMAKE_OSX_ARCHITECTURES=arm64 \
+		-DCMAKE_OSX_DEPLOYMENT_TARGET=14.0 \
+		-DCMAKE_C_FLAGS="-arch arm64" \
+		-DCMAKE_CXX_FLAGS="-arch arm64 -stdlib=libc++" \
+		-DCMAKE_MAKE_PROGRAM=/usr/bin/make \
+		-DMVK_STATIC_LIBRARY_ONLY=ON \
+		$(SOURCEDIR)/Natives/external/MoltenVK/
+	cmake --build $(WORKINGDIR)/moltenvk12 --config Release -j$(JOBS)
+	cd "$(SOURCEDIR)/Natives/external/MoltenVK" && \
+		git checkout - 2>/dev/null || true
+	echo '[Witch v$(VERSION)] dep_moltenvk12 - end'
+
+dep_moltenvk:
+	echo '[Witch v$(VERSION)] dep_moltenvk - start'
+	MOLTENVK_SRC="$(SOURCEDIR)/Natives/external/MoltenVK"
+	MOLTENVK_BUILD="$(WORKINGDIR)/moltenvk14"
+	mkdir -p "$$MOLTENVK_BUILD"
+	cp -f "$(SOURCEDIR)/patches/MoltenVK-Common-CMakeLists.txt" "$$MOLTENVK_SRC/Common/CMakeLists.txt" 2>/dev/null || true
+	cd "$$MOLTENVK_SRC/Common" && cmake \
+		-DCMAKE_CROSSCOMPILING=true \
+		-DCMAKE_SYSTEM_NAME=iOS \
+		-DCMAKE_OSX_SYSROOT="$(SDKPATH)" \
+		-DCMAKE_OSX_ARCHITECTURES=arm64 \
+		-DCMAKE_OSX_DEPLOYMENT_TARGET=14.0 \
+		-DCMAKE_C_FLAGS="-arch arm64" \
+		-DCMAKE_CXX_FLAGS="-arch arm64 -stdlib=libc++" \
+		-DMVK_STATIC_LIBRARY_ONLY=OFF \
+		-DCMAKE_INSTALL_PREFIX="$(SOURCEDIR)/Natives/resources/Frameworks" \
+		-B "$$MOLTENVK_BUILD" \
+		.
+	cmake --build "$$MOLTENVK_BUILD" --config Release -j$(JOBS)
+	cp "$$MOLTENVK_BUILD/MoltenVK/libMoltenVK.dylib" "$(SOURCEDIR)/Natives/resources/Frameworks/"
+	echo '[Witch v$(VERSION)] dep_moltenvk - end'
+
+dep_mesa_zink:
+	echo '[Witch v$(VERSION)] dep_mesa_zink - start'
+	# Build Mesa 25.0.7 (OSMesa+Zink)
+	MESA_SRC="$(SOURCEDIR)/source/mesa-25.0.7"
+	MESA_BUILD="$(SOURCEDIR)/source/mesa-build-25.0.7"
+	MVK_DIR="$(SOURCEDIR)/Natives/external/MoltenVK/MoltenVK"
+	rm -rf "$$MESA_BUILD"; mkdir -p "$$MESA_BUILD"
+	cd "$$MESA_SRC" && meson setup "$$MESA_BUILD" . \
+		--cross-file cross-ios-arm64.txt \
+		-Dplatforms= \
+		-Dosmesa=true \
+		-Degl=disabled \
+		-Dglx=disabled \
+		-Dglx-direct=false \
+		-Dgallium-drivers=zink,softpipe \
+		-Dvulkan-drivers= \
+		-Dgbm=disabled \
+		-Dshader-cache=disabled \
+		-Dmoltenvk-dir="$$MVK_DIR" \
+		-Dprefix="$(SOURCEDIR)/Natives/resources/Frameworks" \
+		-Dlibdir=lib \
+		-Dbindir=bin
+	ninja -C "$$MESA_BUILD" -j$(JOBS)
+	cp "$$MESA_BUILD/src/gallium/targets/osmesa/libOSMesa.8.dylib" "$(SOURCEDIR)/Natives/resources/Frameworks/"
+	# Build Mesa 26.2.2 (EGL)
+	MESA26_SRC="$(SOURCEDIR)/source/mesa-26.2.2"
+	MESA26_BUILD="$(SOURCEDIR)/source/mesa26-build"
+	rm -rf "$$MESA26_BUILD"; mkdir -p "$$MESA26_BUILD"
+	export PATH="/usr/local/opt/bison/bin:$$PATH"
+	cd "$$MESA26_SRC" && meson setup "$$MESA26_BUILD" . \
+		--cross-file ../mesa-25.0.7/cross-ios-arm64.txt \
+		-Dplatforms= \
+		-Degl=enabled \
+		-Dglx=disabled \
+		-Dglx-direct=false \
+		-Dgallium-drivers=zink,softpipe \
+		-Dvulkan-drivers= \
+		-Dgbm=disabled \
+		-Ddisplay-info=disabled \
+		-Dzstd=disabled \
+		-Dshader-cache=disabled \
+		-Dllvm=disabled \
+		-Dvalgrind=disabled \
+		-Dlibunwind=disabled \
+		-Dexpat=disabled \
+		-Dvideo-codecs=av1dec \
+		-Dmoltenvk-dir="$$MVK_DIR" \
+		-Dprefix="$(SOURCEDIR)/Natives/resources/Frameworks" \
+		-Dlibdir=lib \
+		-Dbindir=bin
+	ninja -C "$$MESA26_BUILD" -j$(JOBS)
+	cp "$$MESA26_BUILD/src/egl/libEGL.1.dylib" "$(SOURCEDIR)/Natives/resources/Frameworks/libEGL_Mesa26.dylib"
+	cp "$$MESA26_BUILD/src/gallium/targets/dri/libgallium-26.2.2.dylib" "$(SOURCEDIR)/Natives/resources/Frameworks/"
+	echo '[Witch v$(VERSION)] dep_mesa_zink - end'
+
+dep_kkosmic:
+	echo '[Witch v$(VERSION)] dep_kkosmic - start'
+	# Build KosmicKrisp Vulkan driver for iOS (A13+)
+	# Requires Mesa mainline source at source/mesa-kosmickrisp/
+	KK_SRC="$(SOURCEDIR)/source/mesa-kosmickrisp"
+	KK_BUILD="$(SOURCEDIR)/source/mesa-kk-build"
+	KK_CROSS="$$KK_SRC/cross-ios-arm64-kkosmic.txt"
+	PREFIX="$(SOURCEDIR)/Natives/resources/Frameworks"
+	if [ ! -d "$$KK_SRC/src/kosmickrisp" ]; then \
+		echo "ERROR: Mesa source not found. Run: git clone https://gitlab.freedesktop.org/mesa/mesa.git $$KK_SRC"; \
+		exit 1; \
+	fi
+	rm -rf "$$KK_BUILD"; mkdir -p "$$KK_BUILD"
+	cd "$$KK_SRC" && meson setup "$$KK_BUILD" . \
+		--cross-file "$$KK_CROSS" \
+		-Dplatforms= \
+		-Dvulkan-drivers=kosmickrisp \
+		-Dgallium-drivers= \
+		-Dopengl=false \
+		-Dgles1=disabled \
+		-Dgles2=disabled \
+		-Dglx=disabled \
+		-Dglx-direct=false \
+		-Dgbm=disabled \
+		-Dllvm=disabled \
+		-Dvalgrind=disabled \
+		-Dlibunwind=disabled \
+		-Dzstd=disabled \
+		-Dshader-cache=disabled \
+		-Dexpat=disabled \
+		-Dbuildtype=release \
+		-Dprefix="$$PREFIX" \
+		-Dlibdir=lib \
+		-Dbindir=bin
+	ninja -C "$$KK_BUILD" -j$(JOBS)
+	# Copy KosmicKrisp driver (try multiple possible output paths)
+	cp "$$KK_BUILD/src/vulkan/libvulkan_kosmickrisp.dylib" "$$PREFIX/" 2>/dev/null || \
+	cp "$$KK_BUILD/src/vulkan/libvulkan_kosmickrisp.so" "$$PREFIX/" 2>/dev/null || \
+	echo "WARNING: KosmicKrisp driver not found in build output"
+	echo '[Witch v$(VERSION)] dep_kkosmic - end'
+
+dep_angle:
+	echo '[Witch v$(VERSION)] dep_angle - start'
+	ANGLE_SRC="$(SOURCEDIR)/source/angle-build/angle"
+	cd "$$ANGLE_SRC" && \
+	mkdir -p out/ios-vulkan-arm64 out/ios-metal-arm64 && \
+	"$$(pwd)/buildtools/mac/gn" gen out/ios-vulkan-arm64 --args=' \
+		target_os="ios" target_cpu="arm64" target_environment="device" \
+		ios_deployment_target="16.0" \
+		is_debug=false is_official_build=true chrome_pgo_phase=0 \
+		ios_enable_code_signing=false is_component_build=false symbol_level=0 \
+		angle_standalone=true angle_build_tests=false \
+		angle_enable_vulkan=true angle_shared_libvulkan=true angle_use_custom_libvulkan=true \
+		angle_enable_metal=false angle_enable_gl=false angle_enable_null=false \
+		angle_enable_wgpu=false angle_enable_swiftshader=false \
+		angle_enable_essl=false angle_enable_glsl=true \
+		treat_warnings_as_errors=false use_custom_libcxx=true \
+		clang_base_path="//third_party/llvm-build/Release+Asserts" \
+		enable_rust=false use_system_xcode=true' && \
+	"$$(pwd)/third_party/ninja/ninja" -C out/ios-vulkan-arm64 -j4 libEGL libGLESv2 && \
+	"$$(pwd)/buildtools/mac/gn" gen out/ios-metal-arm64 --args=' \
+		target_os="ios" target_cpu="arm64" target_environment="device" \
+		ios_deployment_target="16.0" \
+		is_debug=false is_official_build=true chrome_pgo_phase=0 \
+		ios_enable_code_signing=false is_component_build=false symbol_level=0 \
+		angle_standalone=true angle_build_tests=false \
+		angle_enable_vulkan=false angle_enable_metal=true \
+		angle_enable_gl=false angle_enable_null=false \
+		angle_enable_wgpu=false angle_enable_swiftshader=false \
+		angle_enable_essl=false angle_enable_glsl=true \
+		treat_warnings_as_errors=false use_custom_libcxx=true \
+		clang_base_path="//third_party/llvm-build/Release+Asserts" \
+		enable_rust=false use_system_xcode=true metal_preferred_client="native"' && \
+	"$$(pwd)/third_party/ninja/ninja" -C out/ios-metal-arm64 -j4 libEGL libGLESv2 && \
+	cp out/ios-vulkan-arm64/libEGL.framework/libEGL "$(SOURCEDIR)/Natives/resources/Frameworks/libEGL_angle_vulkan" && \
+	cp out/ios-vulkan-arm64/libGLESv2.framework/libGLESv2 "$(SOURCEDIR)/Natives/resources/Frameworks/libGLESv2_angle_vulkan" && \
+	cp out/ios-vulkan-arm64/libvulkan.dylib "$(SOURCEDIR)/Natives/resources/Frameworks/" && \
+	cp out/ios-metal-arm64/libEGL.framework/libEGL "$(SOURCEDIR)/Natives/resources/Frameworks/libEGL_angle_metal" && \
+	cp out/ios-metal-arm64/libGLESv2.framework/libGLESv2 "$(SOURCEDIR)/Natives/resources/Frameworks/libGLESv2_angle_metal"
+	echo '[Witch v$(VERSION)] dep_angle - end'
 
 assets: logos
 	echo '[Witch v$(VERSION)] assets - start'
@@ -458,7 +736,7 @@ lwgjl:
 	LWJGL33_DIR="$(SOURCEDIR)/lwgjl/lwjgl3-wip-rebase_3.3.3"; \
 	if [ ! -f "$$LWJGL33_DIR/bin/out/liblwjgl.dylib" ]; then \
 		echo "Building LWGJL 3.3.3..."; \
-		cd "$$LWJGL33_DIR" && export JAVA_HOME="$(JAVA_HOME)" && cd libffi && find build_iphoneos-arm64 -name Makefile -exec touch {} + && touch build_iphoneos-arm64/config.status && make -C build_iphoneos-arm64 && cd .. && mkdir -p bin/libs/native/macos/arm64/org/lwjgl bin/libs/native/macos/x64/org/lwjgl && cp libffi/build_iphoneos-arm64/.libs/libffi.a bin/libs/native/macos/arm64/org/lwjgl/libffi.a && cp bin/libs/native/macos/arm64/org/lwjgl/libffi.a bin/libs/native/macos/x64/org/lwjgl/libffi.a 2>/dev/null && ant -Dplatform.macos=true -Dbinding.assimp=false -Dbinding.bgfx=false -Dbinding.cuda=false -Dbinding.egl=false -Dbinding.fmod=false -Dbinding.harfbuzz=false -Dbinding.hwloc=false -Dbinding.jawt=false -Dbinding.jemalloc=false -Dbinding.ktx=false -Dbinding.libdivide=false -Dbinding.llvm=false -Dbinding.lmdb=false -Dbinding.lz4=false -Dbinding.meow=false -Dbinding.meshoptimizer=false -Dbinding.nfd=false -Dbinding.nuklear=false -Dbinding.odbc=false -Dbinding.opengles=false -Dbinding.opencl=false -Dbinding.openvr=false -Dbinding.openxr=false -Dbinding.opus=false -Dbinding.par=false -Dbinding.remotery=false -Dbinding.renderdoc=false -Dbinding.rpmalloc=false -Dbinding.vulkan=true -Dbinding.vma=true -Dbinding.spvc=true -Dbinding.shaderc=true -Dbinding.sse=false -Dbinding.spng=false -Dbinding.tinyexr=false -Dbinding.tinyfd=true -Dbinding.tootle=false -Dbinding.xxhash=false -Dbinding.yoga=false -Dbinding.zstd=false -Dbinding.sdl=false -Dbuild.type=release/3.3.3 -Djavadoc.skip=true -Dnashorn.args="--no-deprecation-warning" compile-templates compile compile-native release && mkdir -p bin/out && find bin/libs/native/macos/arm64/org/lwjgl -name '*.dylib' -exec cp {} bin/out/ \; || exit 1; \
+		cd "$$LWJGL33_DIR" && export JAVA_HOME="$(JAVA_HOME)" && cd libffi && find build_iphoneos-arm64 -name Makefile -exec touch {} + && touch build_iphoneos-arm64/config.status && make -C build_iphoneos-arm64 && cd .. && mkdir -p bin/libs/native/macos/arm64/org/lwjgl bin/libs/native/macos/x64/org/lwjgl && cp libffi/build_iphoneos-arm64/.libs/libffi.a bin/libs/native/macos/arm64/org/lwjgl/libffi.a && cp bin/libs/native/macos/arm64/org/lwjgl/libffi.a bin/libs/native/macos/x64/org/lwjgl/libffi.a 2>/dev/null && ant -Dplatform.macos=true -Dbuild.arch=arm64 -Dbinding.assimp=false -Dbinding.bgfx=false -Dbinding.cuda=false -Dbinding.egl=false -Dbinding.fmod=false -Dbinding.harfbuzz=false -Dbinding.hwloc=false -Dbinding.jawt=false -Dbinding.jemalloc=false -Dbinding.ktx=false -Dbinding.libdivide=false -Dbinding.llvm=false -Dbinding.lmdb=false -Dbinding.lz4=false -Dbinding.meow=false -Dbinding.meshoptimizer=false -Dbinding.nfd=false -Dbinding.nuklear=false -Dbinding.odbc=false -Dbinding.opengles=false -Dbinding.opencl=false -Dbinding.openvr=false -Dbinding.openxr=false -Dbinding.opus=false -Dbinding.par=false -Dbinding.remotery=false -Dbinding.renderdoc=false -Dbinding.rpmalloc=false -Dbinding.vulkan=true -Dbinding.vma=true -Dbinding.spvc=true -Dbinding.shaderc=true -Dbinding.sse=false -Dbinding.spng=false -Dbinding.tinyexr=false -Dbinding.tinyfd=true -Dbinding.tootle=false -Dbinding.xxhash=false -Dbinding.yoga=false -Dbinding.zstd=false -Dbinding.sdl=false -Dbuild.type=release/3.3.3 -Djavadoc.skip=true -Dnashorn.args="--no-deprecation-warning" compile-templates compile compile-native release && mkdir -p bin/out && find bin/libs/native/macos/arm64/org/lwjgl -name '*.dylib' -exec cp {} bin/out/ \; || exit 1; \
 	fi; \
 	echo "Copying 3.3.3 JARs to libs/lwjgl..."; \
 	find "$$LWJGL33_DIR/bin/RELEASE" -name '*.jar' ! -name '*-natives-*' ! -name '*-sources.jar' -exec cp {} "$(SOURCEDIR)/JavaApp/libs/lwjgl/" \; 2>/dev/null || true; \
@@ -466,7 +744,7 @@ lwgjl:
 	mkdir -p "$(SOURCEDIR)/JavaApp/libs/lwjgl36"; \
 	if [ ! -f "$$LWJGL36_DIR/bin/out/liblwjgl.dylib" ]; then \
 		echo "Building LWGJL 3.3.6..."; \
-		cd "$$LWJGL36_DIR" && export JAVA_HOME="$(JAVA_HOME)" && cd libffi && find build_iphoneos-arm64 -name Makefile -exec touch {} + && touch build_iphoneos-arm64/config.status && make -C build_iphoneos-arm64 && cd .. && mkdir -p bin/libs/native/macos/arm64/org/lwjgl bin/libs/native/macos/x64/org/lwjgl && cp libffi/build_iphoneos-arm64/.libs/libffi.a bin/libs/native/macos/arm64/org/lwjgl/libffi.a && cp bin/libs/native/macos/arm64/org/lwjgl/libffi.a bin/libs/native/macos/x64/org/lwjgl/libffi.a 2>/dev/null && ant -Dplatform.macos=true -Dbinding.assimp=false -Dbinding.bgfx=false -Dbinding.cuda=false -Dbinding.egl=false -Dbinding.fmod=false -Dbinding.harfbuzz=false -Dbinding.hwloc=false -Dbinding.jawt=false -Dbinding.jemalloc=false -Dbinding.ktx=false -Dbinding.libdivide=false -Dbinding.llvm=false -Dbinding.lmdb=false -Dbinding.lz4=false -Dbinding.meow=false -Dbinding.meshoptimizer=false -Dbinding.nfd=false -Dbinding.nuklear=false -Dbinding.odbc=false -Dbinding.opengles=false -Dbinding.opencl=false -Dbinding.openvr=false -Dbinding.openxr=false -Dbinding.opus=false -Dbinding.par=false -Dbinding.remotery=false -Dbinding.renderdoc=false -Dbinding.rpmalloc=false -Dbinding.vulkan=true -Dbinding.vma=true -Dbinding.spvc=true -Dbinding.shaderc=true -Dbinding.sse=false -Dbinding.spng=false -Dbinding.tinyexr=false -Dbinding.tinyfd=true -Dbinding.tootle=false -Dbinding.xxhash=false -Dbinding.yoga=false -Dbinding.zstd=false -Dbinding.sdl=false -Dbuild.type=release/3.3.6 -Djavadoc.skip=true -Dnashorn.args="--no-deprecation-warning" compile-templates compile compile-native release && mkdir -p bin/out && find bin/libs/native/macos/arm64/org/lwjgl -name '*.dylib' -exec cp {} bin/out/ \; || exit 1; \
+		cd "$$LWJGL36_DIR" && export JAVA_HOME="$(JAVA_HOME)" && cd libffi && find build_iphoneos-arm64 -name Makefile -exec touch {} + && touch build_iphoneos-arm64/config.status && make -C build_iphoneos-arm64 && cd .. && mkdir -p bin/libs/native/macos/arm64/org/lwjgl bin/libs/native/macos/x64/org/lwjgl && cp libffi/build_iphoneos-arm64/.libs/libffi.a bin/libs/native/macos/arm64/org/lwjgl/libffi.a && cp bin/libs/native/macos/arm64/org/lwjgl/libffi.a bin/libs/native/macos/x64/org/lwjgl/libffi.a 2>/dev/null && ant -Dplatform.macos=true -Dbuild.arch=arm64 -Dbinding.assimp=false -Dbinding.bgfx=false -Dbinding.cuda=false -Dbinding.egl=false -Dbinding.fmod=false -Dbinding.harfbuzz=false -Dbinding.hwloc=false -Dbinding.jawt=false -Dbinding.jemalloc=false -Dbinding.ktx=false -Dbinding.libdivide=false -Dbinding.llvm=false -Dbinding.lmdb=false -Dbinding.lz4=false -Dbinding.meow=false -Dbinding.meshoptimizer=false -Dbinding.nfd=false -Dbinding.nuklear=false -Dbinding.odbc=false -Dbinding.opengles=false -Dbinding.opencl=false -Dbinding.openvr=false -Dbinding.openxr=false -Dbinding.opus=false -Dbinding.par=false -Dbinding.remotery=false -Dbinding.renderdoc=false -Dbinding.rpmalloc=false -Dbinding.vulkan=true -Dbinding.vma=true -Dbinding.spvc=true -Dbinding.shaderc=true -Dbinding.sse=false -Dbinding.spng=false -Dbinding.tinyexr=false -Dbinding.tinyfd=true -Dbinding.tootle=false -Dbinding.xxhash=false -Dbinding.yoga=false -Dbinding.zstd=false -Dbinding.sdl=false -Dbuild.type=release/3.3.6 -Djavadoc.skip=true -Dnashorn.args="--no-deprecation-warning" compile-templates compile compile-native release && mkdir -p bin/out && find bin/libs/native/macos/arm64/org/lwjgl -name '*.dylib' -exec cp {} bin/out/ \; || exit 1; \
 	fi; \
 	echo "Copying 3.3.6 JARs to libs/lwjgl36..."; \
 	find "$$LWJGL36_DIR/bin/RELEASE" -name '*.jar' ! -name '*-natives-*' ! -name '*-sources.jar' -exec cp {} "$(SOURCEDIR)/JavaApp/libs/lwjgl36/" \; 2>/dev/null || true; \
@@ -475,13 +753,18 @@ lwgjl:
 	if [ ! -f "$$LWJGL41_DIR/bin/out/liblwjgl.dylib" ] || \
 	   ! nm -gU "$$LWJGL41_DIR/bin/out/libshaderc.dylib" 2>/dev/null | grep -q '_shaderc_compile_options_set_max_id_bound$$'; then \
 		echo "Building LWGJL 3.4.1..."; \
-		cd "$$LWJGL41_DIR" && export JAVA_HOME="$(JAVA_HOME)" && cd libffi && find build_iphoneos-arm64 -name Makefile -exec touch {} + && touch build_iphoneos-arm64/config.status && make -C build_iphoneos-arm64 && cd .. && mkdir -p bin/libs/native/macos/arm64/org/lwjgl bin/libs/native/macos/x64/org/lwjgl && cp libffi/build_iphoneos-arm64/.libs/libffi.a bin/libs/native/macos/arm64/org/lwjgl/libffi.a && cp bin/libs/native/macos/arm64/org/lwjgl/libffi.a bin/libs/native/macos/x64/org/lwjgl/libffi.a 2>/dev/null && ant -Dplatform.macos=true -Dbinding.assimp=false -Dbinding.bgfx=false -Dbinding.cuda=false -Dbinding.egl=false -Dbinding.fmod=false -Dbinding.harfbuzz=false -Dbinding.hwloc=false -Dbinding.jawt=false -Dbinding.jemalloc=false -Dbinding.ktx=false -Dbinding.libdivide=false -Dbinding.llvm=false -Dbinding.lmdb=false -Dbinding.lz4=false -Dbinding.meow=false -Dbinding.meshoptimizer=false -Dbinding.nfd=false -Dbinding.nuklear=false -Dbinding.odbc=false -Dbinding.opengles=false -Dbinding.opencl=false -Dbinding.openvr=false -Dbinding.openxr=false -Dbinding.opus=false -Dbinding.par=false -Dbinding.remotery=false -Dbinding.renderdoc=false -Dbinding.rpmalloc=false -Dbinding.vulkan=true -Dbinding.vma=true -Dbinding.spvc=true -Dbinding.shaderc=true -Dbinding.sse=false -Dbinding.spng=false -Dbinding.tinyexr=false -Dbinding.tinyfd=true -Dbinding.tootle=false -Dbinding.xxhash=false -Dbinding.yoga=false -Dbinding.zstd=false -Dbinding.sdl=false -Dbuild.type=release/3.4.1 -Djavadoc.skip=true -Dnashorn.args="--no-deprecation-warning" compile-templates compile compile-native release && mkdir -p bin/out && find bin/libs/native/macos/arm64/org/lwjgl -name '*.dylib' -exec cp {} bin/out/ \; || exit 1; \
+		cd "$$LWJGL41_DIR" && export JAVA_HOME="$(JAVA_HOME)" && cd libffi && find build_iphoneos-arm64 -name Makefile -exec touch {} + && touch build_iphoneos-arm64/config.status && make -C build_iphoneos-arm64 && cd .. && mkdir -p bin/libs/native/macos/arm64/org/lwjgl bin/libs/native/macos/x64/org/lwjgl && cp libffi/build_iphoneos-arm64/.libs/libffi.a bin/libs/native/macos/arm64/org/lwjgl/libffi.a && cp bin/libs/native/macos/arm64/org/lwjgl/libffi.a bin/libs/native/macos/x64/org/lwjgl/libffi.a 2>/dev/null && ant -Dplatform.macos=true -Dbuild.arch=arm64 -Dbinding.assimp=false -Dbinding.bgfx=false -Dbinding.cuda=false -Dbinding.egl=false -Dbinding.fmod=false -Dbinding.harfbuzz=false -Dbinding.hwloc=false -Dbinding.jawt=false -Dbinding.jemalloc=false -Dbinding.ktx=false -Dbinding.libdivide=false -Dbinding.llvm=false -Dbinding.lmdb=false -Dbinding.lz4=false -Dbinding.meow=false -Dbinding.meshoptimizer=false -Dbinding.nfd=false -Dbinding.nuklear=false -Dbinding.odbc=false -Dbinding.opengles=false -Dbinding.opencl=false -Dbinding.openvr=false -Dbinding.openxr=false -Dbinding.opus=false -Dbinding.par=false -Dbinding.remotery=false -Dbinding.renderdoc=false -Dbinding.rpmalloc=false -Dbinding.vulkan=true -Dbinding.vma=true -Dbinding.spvc=true -Dbinding.shaderc=true -Dbinding.sse=false -Dbinding.spng=false -Dbinding.tinyexr=false -Dbinding.tinyfd=true -Dbinding.tootle=false -Dbinding.xxhash=false -Dbinding.yoga=false -Dbinding.zstd=false -Dbinding.sdl=false -Dbuild.type=release/3.4.1 -Djavadoc.skip=true -Dnashorn.args="--no-deprecation-warning" compile-templates compile compile-native release && mkdir -p bin/out && find bin/libs/native/macos/arm64/org/lwjgl -name '*.dylib' -exec cp {} bin/out/ \; && unzip -o libshaderc-ios.zip libshaderc_shared.dylib -d /tmp/shaderc-fix && cp /tmp/shaderc-fix/libshaderc_shared.dylib bin/out/libshaderc.dylib && rm -rf /tmp/shaderc-fix || exit 1; \
+	fi; \
+	if [ -f "$$LWJGL41_DIR/libshaderc-ios.zip" ] && \
+	   ! nm -gU "$$LWJGL41_DIR/bin/out/libshaderc.dylib" 2>/dev/null | grep -q '_shaderc_compile_options_set_max_id_bound$$'; then \
+		echo "Replacing broken shaderc with working one from libshaderc-ios.zip..."; \
+		cd "$$LWJGL41_DIR" && unzip -o libshaderc-ios.zip libshaderc_shared.dylib -d /tmp/shaderc-fix && cp /tmp/shaderc-fix/libshaderc_shared.dylib bin/out/libshaderc.dylib && rm -rf /tmp/shaderc-fix; \
 	fi; \
 	echo "Copying 3.4.1 JARs to libs/lwjgl41..."; \
 	find "$$LWJGL41_DIR/bin/RELEASE" -name '*.jar' ! -name '*-natives-*' ! -name '*-sources.jar' -exec cp {} "$(SOURCEDIR)/JavaApp/libs/lwjgl41/" \; 2>/dev/null || true; \
 	echo '[Witch v$(VERSION)] lwgjl - end'
 
-payload: native dep_mg lwgjl java jre assets
+payload: native dep_mg dep_mobilegl dep_tgles dep_tglmt lwgjl java jre assets
 	echo '[Witch v$(VERSION)] payload - start'
 	rm -f $(WORKINGDIR)/Witch.app/*.png
 	$(call METHOD_DIRCHECK,$(WORKINGDIR)/Witch.app/libs)
@@ -500,6 +783,16 @@ payload: native dep_mg lwgjl java jre assets
 	cp $(SOURCEDIR)/lwgjl/lwjgl3-wip-rebase_3.3.3/bin/out/*.dylib $(WORKINGDIR)/Witch.app/libs/lwjgl33_natives/ || exit 1
 	cp $(SOURCEDIR)/lwgjl/lwjgl3-wip-rebase_3.3.6/bin/out/*.dylib $(WORKINGDIR)/Witch.app/libs/lwjgl36_natives/ || exit 1
 	cp $(SOURCEDIR)/lwgjl/lwjgl3-wip-rebase_3.4.1/bin/out/*.dylib $(WORKINGDIR)/Witch.app/libs/lwjgl41_natives/ || exit 1
+	# The LWJGL macOS build emits a macOS-platform libMoltenVK.dylib (links
+	# AppKit, platform macOS) that can never dlopen on iOS. If it stays in the
+	# natives dirs, LWJGL resolves a bare "libMoltenVK.dylib" opengl.libname via
+	# org.lwjgl.librarypath and dies with UnsatisfiedLinkError (error=null) in
+	# GL.create() on MC 26.x. The signed iOS copy lives in Frameworks and is
+	# referenced by absolute path (vulkan.libname) / dlopen redirect, so drop
+	# the macOS copies here.
+	rm -f $(WORKINGDIR)/Witch.app/libs/lwjgl33_natives/libMoltenVK*.dylib \
+		$(WORKINGDIR)/Witch.app/libs/lwjgl36_natives/libMoltenVK*.dylib \
+		$(WORKINGDIR)/Witch.app/libs/lwjgl41_natives/libMoltenVK*.dylib
 	@nm -gU $(WORKINGDIR)/Witch.app/libs/lwjgl41_natives/libshaderc.dylib | \
 		grep -q '_shaderc_compile_options_set_max_id_bound$$' || \
 		{ echo 'ERROR: LWJGL 3.4.1 Shaderc is too old for VulkanMod'; exit 1; }
@@ -551,23 +844,31 @@ payload: native dep_mg lwgjl java jre assets
 	if [ '$(SLIMMED_ONLY)' != '1' ]; then \
 		cp -R $(OUTPUTDIR)/java_runtimes $(OUTPUTDIR)/Payload/Witch.app; \
 	fi
-	ldid -S $(OUTPUTDIR)/Payload/Witch.app; \
+	# Always run the platform retag FIRST before signing so CodeResources hashes stay intact.
+	$(call METHOD_MACHO_JRE,$(OUTPUTDIR)/Payload/Witch.app,$(call METHOD_CHANGE_PLAT,$(PLATFORM),$$file)); \
+	$(call METHOD_MACHO_JRE,$(OUTPUTDIR)/java_runtimes,$(call METHOD_CHANGE_PLAT,$(PLATFORM),$$file));
+	chmod -R 755 $(OUTPUTDIR)/Payload
+	# Sideload (SideStore/AltStore/ESign/Feather): entitlements.sideload.xml is
+	# intentionally MINIMAL (no com.apple.private.*, no disable-library-validation,
+	# no background-gpu, no jb.pmap_cs.*). Private keys live only in
+	# entitlements.trollstore.xml — adding them here breaks free-Apple-ID signing
+	# with 0xe8008016. Use TROLLSTORE_JIT_ENT=1 only for TrollStore.
+	# Optional override: SIDESTORE_ENT=/path/to/entitlements.xml
+	# ORDER MATTERS: ad-hoc-sign the whole bundle FIRST, then overlay the
+	# entitlements on the main binary. ldid -S <dir> (no plist) re-signs every
+	# Mach-O inside ad-hoc with no entitlement blob, so running it last used to
+	# silently WIPE the keys above — the installed app then reported
+	# "memorystatus=0 increased-memory-limit=0" and died at the 2 GiB Jetsam cap.
+	ldid -S $(OUTPUTDIR)/Payload/Witch.app;
 	if [ '$(TROLLSTORE_JIT_ENT)' == '1' ]; then \
 		ldid -S$(SOURCEDIR)/entitlements.trollstore.xml $(OUTPUTDIR)/Payload/Witch.app/Witch; \
 	elif [ '$(PLATFORM)' == '6' ]; then \
 		ldid -S$(SOURCEDIR)/entitlements.codesign.xml $(OUTPUTDIR)/Payload/Witch.app/Witch; \
+	elif [ -n '$(SIDESTORE_ENT)' ] && [ -f '$(SIDESTORE_ENT)' ]; then \
+		ldid -S$(SIDESTORE_ENT) $(OUTPUTDIR)/Payload/Witch.app/Witch; \
 	else \
 		ldid -S$(SOURCEDIR)/entitlements.sideload.xml $(OUTPUTDIR)/Payload/Witch.app/Witch; \
 	fi
-	chmod -R 755 $(OUTPUTDIR)/Payload
-	# Always run the platform retag — it's idempotent on already-iOS-tagged
-	# Mach-Os, and catches dylibs we drop in fresh from Maven (which ship
-	# tagged platform=macos and would be silently rejected by iOS dyld).
-	# Originally guarded by `[ PLATFORM != 2 ]` on the assumption that all
-	# committed dylibs were already iOS-tagged — that broke when v19 added
-	# the 3.3.5 lwjgl-stb dylib straight from upstream.
-	$(call METHOD_MACHO_JRE,$(OUTPUTDIR)/Payload/Witch.app,$(call METHOD_CHANGE_PLAT,$(PLATFORM),$$file)); \
-	$(call METHOD_MACHO_JRE,$(OUTPUTDIR)/java_runtimes,$(call METHOD_CHANGE_PLAT,$(PLATFORM),$$file));
 	echo '[Witch v$(VERSION)] payload - end'
 
 deploy:
@@ -627,11 +928,11 @@ codesign:
 
 clean:
 	echo '[Witch v$(VERSION)] clean - start'
-	rm -rf $(WORKINGDIR)
-	rm -rf JavaApp/build
-	rm -rf $(OUTPUTDIR)
+	-xattr -rc $(WORKINGDIR) 2>/dev/null; rm -rf $(WORKINGDIR)
+	-xattr -rc JavaApp/build 2>/dev/null; rm -rf JavaApp/build
+	-xattr -rc $(OUTPUTDIR) 2>/dev/null; rm -rf $(OUTPUTDIR)
 	echo '[Witch v$(VERSION)] clean - end'
 
 		
 
-.PHONY: all clean check native java jre lwgjl dep_mg assets payload package dsym deploy help codesign
+.PHONY: all clean check native java jre lwgjl dep_mg dep_mobilegl dep_tgles dep_tglmt dep_moltenvk dep_moltenvk12 dep_mesa_zink dep_kkosmic dep_angle assets payload package dsym deploy help codesign

@@ -515,9 +515,7 @@ public class GL32C extends GL31C {
             check(indices, count.remaining());
             check(basevertex, count.remaining());
         }
-        while (basevertex.hasRemaining()){
-            GL32C.glDrawElementsBaseVertex(mode, count.get(), type, indices.get(), basevertex.get());
-        }
+        nglMultiDrawElementsBaseVertex(mode, memAddress(count), type, memAddress(indices), count.remaining(), memAddress(basevertex));
     }
 
     // --- [ glProvokingVertex ] ---

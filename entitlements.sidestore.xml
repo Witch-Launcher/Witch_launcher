@@ -1,0 +1,31 @@
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>application-identifier</key>
+	<string>com.witch.zad626</string>
+	<key>get-task-allow</key>
+	<true/>
+
+	<!-- Sideload-safe memory entitlements. Free Apple IDs CAN request these
+	     via SideStore/AltStore; if your signer still rejects the IPA, delete
+	     these two keys and re-sign (game will use a lower Jetsam limit). -->
+	<key>com.apple.developer.kernel.extended-virtual-addressing</key>
+	<true/>
+	<key>com.apple.developer.kernel.increased-memory-limit</key>
+	<true/>
+
+	<!-- NOTE (SideStore): do NOT add private/restricted keys here.
+	     The following WILL make SideStore/AltStore fail to sign with a free
+	     Apple ID (0xe8008016 / "invalid entitlements") and must stay
+	     TrollStore-only (see entitlements.trollstore.xml):
+	       com.apple.private.security.container-required
+	       com.apple.private.memorystatus
+	       com.apple.private.mobileinstall.upgrade-enabled
+	       com.apple.private.security.no-sandbox
+	       com.apple.security.cs.disable-library-validation
+	       com.apple.developer.background-tasks.continued-processing.gpu
+	       jb.pmap_cs.custom_trust
+	     If you need Distant Horizons (dlopen of ad-hoc dylib) or background
+	     Vulkan on iOS 26+, use TrollStore. SideStore builds run without them. -->
+</dict>
+</plist>

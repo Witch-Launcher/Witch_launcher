@@ -123,19 +123,6 @@ void glGetIntegerv(GLenum pname, GLint* params) {
         (*params) = g_current_ctx ? g_current_ctx->context_flags : 0;
         break;
     }
-    case GL_UNIFORM_BUFFER_OFFSET_ALIGNMENT: {
-        // Minecraft 1.21.6+ divides by this value at renderer init
-        // (DynamicUniformStorage/GlDevice). The ES backend reports 0 for this
-        // desktop query on some devices (e.g. iPhone 6s / A9 through ANGLE),
-        // which crashes the game with ArithmeticException (/ by zero). Promise a
-        // valid power-of-two alignment (16 is Apple's Metal/GLES3 minimum) when
-        // the backend has no answer.
-        GLint es_params = 0;
-        GLES.glGetIntegerv(pname, &es_params);
-        (*params) = es_params > 0 ? es_params : 16;
-        LOG_D("  -> %d", *params)
-        break;
-    }
     case GL_ARRAY_BUFFER_BINDING:
     case GL_ATOMIC_COUNTER_BUFFER_BINDING:
     case GL_COPY_READ_BUFFER_BINDING:
@@ -201,9 +188,6 @@ GLenum glGetError() {
     const GLenum frontend = g_frontend_error;
     g_frontend_error = GL_NO_ERROR;
 
-    printf("[MG-GETERR] returning NO_ERROR (backend=%s frontend=%s)\n", glEnumToString(backend),
-           glEnumToString(frontend));
-
     // GL_NO_ERROR, always, in every configuration and whatever ignoreError says.
     //
     // Deliberate, and not the same thing as not knowing. This layer emulates
@@ -219,8 +203,6 @@ GLenum glGetError() {
     // logcat even though the application will never be told.
     const GLenum swallowed = frontend != GL_NO_ERROR ? frontend : backend;
     if (swallowed != GL_NO_ERROR) {
-        printf("[MG-ERROR] glGetError delivering %s (backend=%s frontend=%s)\n", glEnumToString(swallowed),
-               glEnumToString(backend), glEnumToString(frontend));
         LOG_W("glGetError -> %s, reported to the application as GL_NO_ERROR", glEnumToString(swallowed))
     }
     return GL_NO_ERROR;
@@ -301,11 +283,7 @@ std::string getBeforeThirdSpace(const std::string& str) {
 }
 
 std::string getGpuName() {
-    const char* glRenderer = (const char*)GLES.glGetString(GL_RENDERER);
-    if (glRenderer == nullptr) {
-        return "<unknown>";
-    }
-    std::string gpuName = std::string(glRenderer);
+    std::string gpuName = std::string((char*)GLES.glGetString(GL_RENDERER));
 
     if (gpuName.empty()) {
         return "<unknown>";
@@ -343,24 +321,45 @@ std::string getGpuName() {
 }
 
 void set_es_version() {
-    const char* glVersion = (const char*)GLES.glGetString(GL_VERSION);
-    std::string ESVersionStr = glVersion ? getBeforeThirdSpace(std::string(glVersion)) : std::string();
+    const char* rawVersion = (const char*)GLES.glGetString(GL_VERSION);
+    std::string version = rawVersion ? rawVersion : "";
     int major, minor;
 
-    if (sscanf(ESVersionStr.c_str(), "OpenGL ES %d.%d", &major, &minor) == 2) {
+    // Locate "OpenGL ES <major>.<minor>" anywhere in the raw string rather
+    // than parsing getBeforeThirdSpace's three-word prefix. MetalANGLE writes
+    // "OpenGL ES 3.0 <vendor> ..." so the prefix alone happens to work; TGLES
+    // writes "TGL OpenGL ES 3.2 (0.2.0)", whose prefix is "TGL OpenGL ES" and
+    // drops the version, which used to send an ES 3.2 backend down the 3.0
+    // fallback. es_version picks the shader translation target (ESSL 3.2 vs
+    // 3.0), the texture-buffer emulation path, the DSA paths and the
+    // GL_SHADING_LANGUAGE_VERSION string, so it must name the real level.
+    size_t esPos = version.find("OpenGL ES");
+    if (esPos != std::string::npos &&
+        sscanf(version.c_str() + esPos, "OpenGL ES %d.%d", &major, &minor) == 2) {
         hardware->es_version = major * 100 + minor * 10;
     } else {
         hardware->es_version = 300;
     }
-    LOG_I("OpenGL ES Version: %s (%d)", ESVersionStr.c_str(), hardware->es_version)
+    LOG_I("OpenGL ES Version: %s (%d)", version.c_str(), hardware->es_version)
     if (hardware->es_version < 300) {
         LOG_I("OpenGL ES version is lower than 3.0! This version is not supported!")
     }
 }
 
 std::string getGLESName() {
-    const char* glVersion = (const char*)GLES.glGetString(GL_VERSION);
-    return glVersion ? getBeforeThirdSpace(std::string(glVersion)) : std::string();
+    std::string version((const char*)GLES.glGetString(GL_VERSION));
+    // Same two formats as set_es_version: start at "OpenGL ES" (TGLES puts a
+    // vendor word in front of it, ANGLE does not) and cut at the space after
+    // major.minor, so GL_RENDERER reads "OpenGL ES 3.2" on both backends.
+    size_t esPos = version.find("OpenGL ES");
+    if (esPos != std::string::npos) {
+        size_t dot = version.find('.', esPos);
+        if (dot != std::string::npos) {
+            size_t end = version.find(' ', dot);
+            return version.substr(esPos, end == std::string::npos ? std::string::npos : end - esPos);
+        }
+    }
+    return getBeforeThirdSpace(version);
 }
 
 static std::string rendererString;

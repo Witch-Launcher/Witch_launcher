@@ -46,8 +46,19 @@ public class PojavLauncher {
             new File(jnaTmpDir).mkdirs();
             System.setProperty("jna.tmpdir", jnaTmpDir);
             System.setProperty("jna.nosys", "true");
-            System.setProperty("jna.boot.library.path", jnaTmpDir);
+            // The native launcher sets jna.boot.library.path to Frameworks
+            // (signed libjnidispatch). Do not overwrite that with jna_tmp —
+            // leftover unsigned extracts there fail dlopen on iOS 26+.
+            if (System.getProperty("jna.boot.library.path") == null) {
+                System.setProperty("jna.boot.library.path", jnaTmpDir);
+            }
         }
+
+        // Create logs directory before any class loading triggers log4j init.
+        // Fabric/Forge log4j configs write logs/latest.log relative to user.dir.
+        try {
+            new File(System.getProperty("user.dir"), "logs").mkdirs();
+        } catch (Exception ignored) {}
 
         // Skip JNA's internal class-initialization that tries to dlopen dyld
         // shared-cache images (non-existent on iOS), preventing spurious
@@ -505,7 +516,12 @@ public class PojavLauncher {
             }
         }
 
-        System.setProperty("org.lwjgl.vulkan.libname", "libMoltenVK.dylib");
+        // Native launcher already points this at the signed Frameworks copy.
+        // Overwriting with a bare name makes LWJGL look in lwjgl41_natives,
+        // which has no loadable libMoltenVK.dylib (UnsatisfiedLinkError, error=null).
+        if (System.getProperty("org.lwjgl.vulkan.libname") == null) {
+            System.setProperty("org.lwjgl.vulkan.libname", "libMoltenVK.dylib");
+        }
 
         // NOTE: SDL_SetMainReady is now called from the native side
         // (aasdl_setMainReady at pojavInit). Do NOT touch org.lwjgl.sdl.SDLMain

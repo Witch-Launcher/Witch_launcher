@@ -1,0 +1,107 @@
+name: Build JDK + LWJGL runtimes
+# Copy file này sang repo Witch-Launcher/JDK-Java_iOS thành .github/workflows/build-runtimes.yml
+permissions:
+  contents: write
+on:
+  workflow_dispatch:
+  push:
+    branches: ['main', 'beta']
+    tags: ['runtimes-*']
+
+jobs:
+  build-jre:
+    strategy:
+      matrix:
+        ver: [8, 17, 21, 25]
+    runs-on: macos-14
+    timeout-minutes: 360
+    steps:
+      - uses: actions/checkout@v5
+      # TODO: copy scripts/jre-build/* + Makefile jre logic từ repo chính sang repo này,
+      # hoặc dùng repo chính làm submodule để tái sử dụng build.sh / verify_jre.sh / patch_*.py
+      - name: Build JRE ${{ matrix.ver }}
+        run: |
+          echo "Build jre${{ matrix.ver }} here (reuse scripts/jre-build/build.sh ${{ matrix.ver }})"
+          # bash scripts/jre-build/build.sh ${{ matrix.ver }}
+          # bash scripts/jre-build/verify_jre.sh ${{ matrix.ver }}
+      - name: Upload JRE artifact (1 file = 1 artifact, KHÔNG zip chung)
+        uses: actions/upload-artifact@v4
+        with:
+          name: jre${{ matrix.ver }}-ios-aarch64
+          path: depends/jre${{ matrix.ver }}-*.tar.xz
+          retention-days: 7
+          if-no-files-found: error
+          compression-level: 0
+
+  build-lwjgl:
+    strategy:
+      matrix:
+        ver: ["3.3.3", "3.3.6", "3.4.1"]
+    runs-on: macos-14
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v5
+      - name: Build LWJGL ${{ matrix.ver }}
+        run: |
+          echo "Build lwjgl ${{ matrix.ver }} here (reuse Makefile lwgjl target per-version)"
+      - name: Upload LWJGL jar (riêng)
+        uses: actions/upload-artifact@v4
+        with:
+          name: lwjgl-${{ matrix.ver }}
+          path: JavaApp/build/lwjgl-${{ matrix.ver }}.jar
+          retention-days: 7
+          if-no-files-found: error
+          compression-level: 0
+      - name: Upload LWJGL natives (riêng)
+        uses: actions/upload-artifact@v4
+        with:
+          name: lwjgl-natives-${{ matrix.ver }}
+          path: lwjgl-natives-${{ matrix.ver }}.tar.xz
+          retention-days: 7
+          if-no-files-found: warn
+          compression-level: 0
+
+  publish:
+    needs: [build-jre, build-lwjgl]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: ./runtimes
+      - name: Generate runtimes.json manifest
+        run: |
+          python3 - <<'PY'
+          import os, json, glob
+          base = "https://github.com/Witch-Launcher/JDK-Java_iOS/releases/download/runtimes-latest"
+          out = {}
+          for p in glob.glob("runtimes/**/*", recursive=True):
+              if os.path.isfile(p):
+                  name = os.path.basename(p)
+                  sz = os.path.getsize(p)
+                  key = name
+                  # map filenames -> manifest keys used by WitchRuntimeService
+                  mapping = {
+                    "jre8": "jre8", "jre17": "jre17", "jre21": "jre21", "jre25": "jre25",
+                    "3.3.3": "lwjgl333", "3.3.6": "lwjgl336", "3.4.1": "lwjgl341",
+                  }
+                  for k, v in mapping.items():
+                      if k in name:
+                          key = v
+                  out[key] = {"version": key, "url": f"{base}/{name}", "size": sz}
+          with open("runtimes.json", "w") as f:
+              json.dump(out, f, indent=2)
+          print(open("runtimes.json").read()[:3000])
+          PY
+      - name: Publish rolling runtimes-latest (mỗi file 1 asset riêng)
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: runtimes-latest
+          name: Runtimes latest
+          prerelease: false
+          draft: false
+          fail_on_unmatched_files: false
+          files: |
+            runtimes/**/*
+            runtimes.json

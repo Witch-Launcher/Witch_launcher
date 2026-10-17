@@ -1,5 +1,4 @@
 #import "utils.h"
-#include "external/fishhook/fishhook.h"
 #include <dlfcn.h>
 #include <libkern/OSCacheControl.h>
 #include <mach/mach.h>
@@ -7,56 +6,16 @@
 #include <mach-o/dyld.h>
 #include <mach/vm_map.h>
 #include <pthread.h>
+#include <signal.h>
+#include <setjmp.h>
 #include <stdarg.h>
 #include <stdatomic.h>
 #include <string.h>
+#include <sys/mman.h>
 #include <unistd.h>
 
-typedef kern_return_t (*vm_remap_fn)(
-    vm_map_t target_task,
-    vm_address_t *target_address,
-    vm_size_t size,
-    vm_offset_t mask,
-    int flags,
-    vm_map_t src_task,
-    vm_address_t src_address,
-    boolean_t copy,
-    vm_prot_t *cur_protection,
-    vm_prot_t *max_protection,
-    vm_inherit_t inheritance);
-
-typedef kern_return_t (*mach_vm_remap_fn)(
-    vm_map_t target_task,
-    mach_vm_address_t *target_address,
-    mach_vm_size_t size,
-    mach_vm_offset_t mask,
-    int flags,
-    vm_map_t src_task,
-    mach_vm_address_t src_address,
-    boolean_t copy,
-    vm_prot_t *cur_protection,
-    vm_prot_t *max_protection,
-    vm_inherit_t inheritance);
-
-typedef kern_return_t (*vm_protect_fn)(
-    vm_map_t target_task,
-    vm_address_t address,
-    vm_size_t size,
-    boolean_t set_maximum,
-    vm_prot_t new_protection);
-
-static vm_remap_fn real_vm_remap;
-static mach_vm_remap_fn real_mach_vm_remap;
-static vm_protect_fn real_vm_protect;
-static int (*real_vprintf)(const char *restrict, va_list);
 static vm_address_t g_lastPreparedRx;
 static vm_size_t g_lastPreparedSize;
-static atomic_bool g_pollThreadStarted;
-static atomic_bool g_dyldHookRegistered;
-
-static void rebind_vm_hooks_in_image(const struct mach_header *header, intptr_t slide, const char *name);
-
-static void prepareMirrorPair(vm_address_t rx, vm_address_t rw, vm_size_t size);
 
 static const uint32_t kMirrorBrk0x6a = 0xD4200D40u;
 
@@ -76,7 +35,7 @@ static vm_address_t decode_adrp_add_immediate(vm_address_t pc, uint32_t adrp, ui
 
 static uint32_t *find_mirror_mapping_brk_site_in_image(const struct mach_header *header) {
     unsigned long cstringSize = 0;
-    const char *cstring = getsectiondata((const struct mach_header_64 *)header, "__TEXT", "__cstring", &cstringSize);
+    const char *cstring = (const char *)getsectiondata((const struct mach_header_64 *)header, "__TEXT", "__cstring", &cstringSize);
     if (!cstring || cstringSize == 0) {
         return NULL;
     }
@@ -95,7 +54,7 @@ static uint32_t *find_mirror_mapping_brk_site_in_image(const struct mach_header 
     }
 
     unsigned long textSize = 0;
-    const char *text = getsectiondata((const struct mach_header_64 *)header, "__TEXT", "__text", &textSize);
+    const char *text = (const char *)getsectiondata((const struct mach_header_64 *)header, "__TEXT", "__text", &textSize);
     if (!text || textSize < 12) {
         return NULL;
     }
@@ -120,9 +79,42 @@ static uint32_t *find_mirror_mapping_brk_site_in_image(const struct mach_header 
     return NULL;
 }
 
-void verify_libjvm_mirror_brk_patch(void) {
+static BOOL write_rx_u32(uint32_t *site, uint32_t insn) {
+    vm_size_t page = (vm_size_t)getpagesize();
+    vm_address_t addr = (vm_address_t)(uintptr_t)site;
+    vm_address_t pageAddr = addr & ~(page - 1);
+    vm_size_t offset = addr - pageAddr;
+
+    JIT26PrepareRegionForPatching((void *)pageAddr, page);
+
+    vm_address_t mirrored = 0;
+    vm_prot_t cur_prot = 0, max_prot = 0;
+    kern_return_t ret = vm_remap(mach_task_self(), &mirrored, page, 0, VM_FLAGS_ANYWHERE,
+                                 mach_task_self(), pageAddr, FALSE, &cur_prot, &max_prot,
+                                 VM_INHERIT_SHARE);
+    if (ret != KERN_SUCCESS) {
+        NSLog(@"[JIT26] vm_remap for libjvm brk patch failed: 0x%x", ret);
+        return NO;
+    }
+    ret = vm_protect(mach_task_self(), mirrored, page, FALSE,
+                     VM_PROT_READ | VM_PROT_WRITE);
+    if (ret != KERN_SUCCESS) {
+        // NOTE: no VM_PROT_COPY here on purpose — COW would route the write to a
+        // private copy and the patch would silently never land (same trap as the
+        // old dyld mirrored path). Fail loudly; the caller reports it.
+        NSLog(@"[JIT26] vm_protect(RW) for libjvm brk patch failed: 0x%x", ret);
+        vm_deallocate(mach_task_self(), mirrored, page);
+        return NO;
+    }
+    *(volatile uint32_t *)(mirrored + offset) = insn;
+    sys_icache_invalidate(site, sizeof(insn));
+    vm_deallocate(mach_task_self(), mirrored, page);
+    return *site == insn;
+}
+
+BOOL verify_libjvm_mirror_brk_patch(void) {
     if (!DeviceNeedsDebugJITMapping()) {
-        return;
+        return YES;
     }
 
     uint32_t count = _dyld_image_count();
@@ -134,110 +126,30 @@ void verify_libjvm_mirror_brk_patch(void) {
         uint32_t *site = find_mirror_mapping_brk_site_in_image(_dyld_get_image_header(i));
         if (!site) {
             NSLog(@"[JIT26] WARNING: could not locate mirror prepare site in %s", name);
-            return;
+            return NO;
         }
         if (*site == kMirrorBrk0x6a) {
             NSLog(@"[JIT26] libjvm mirror brk #0x6a patch verified at %p in %s", site, name);
-        } else {
-            NSLog(@"[JIT26] ERROR: libjvm mirror brk patch missing at %p in %s (insn=%#x, expected brk #0x6a). "
+            return YES;
+        }
+        if ((*site & 0xFC000000u) != 0x94000000u) {
+            NSLog(@"[JIT26] ERROR: unexpected insn %#x at mirror prepare site %p in %s",
+                  *site, site, name);
+            return NO;
+        }
+        NSLog(@"[JIT26] libjvm mirror brk patch missing at %p (insn=%#x). Patching BL printf → brk #0x6a at runtime.",
+              site, *site);
+        if (!write_rx_u32(site, kMirrorBrk0x6a)) {
+            NSLog(@"[JIT26] ERROR: failed to install brk #0x6a at %p in %s. "
                   @"Run scripts/patch_libjvm_mirror_brk.py on bundled runtimes.",
-                  site, name, *site);
+                  site, name);
+            return NO;
         }
-        return;
+        NSLog(@"[JIT26] libjvm mirror brk #0x6a patch verified at %p in %s", site, name);
+        return YES;
     }
-}
-
-static BOOL looksLikeJITSuperpage(vm_address_t addr) {
-    return addr >= 0x700000000ULL && addr < 0x800000000ULL;
-}
-
-static void resolveKernelSymbols(void) {
-    static dispatch_once_t onceToken;
-    dispatch_once(&onceToken, ^{
-        void *lib = dlopen("/usr/lib/system/libsystem_kernel.dylib", RTLD_NOW);
-        if (!lib) {
-            NSLog(@"[JIT26] failed to dlopen libsystem_kernel: %s", dlerror());
-            return;
-        }
-        real_vm_remap = (vm_remap_fn)dlsym(lib, "vm_remap");
-        real_mach_vm_remap = (mach_vm_remap_fn)dlsym(lib, "mach_vm_remap");
-        real_vm_protect = (vm_protect_fn)dlsym(lib, "vm_protect");
-        if (!real_vm_remap || !real_mach_vm_remap || !real_vm_protect) {
-            NSLog(@"[JIT26] failed to resolve kernel VM symbols");
-        }
-        if (!real_vprintf) {
-            real_vprintf = (int (*)(const char *restrict, va_list))dlsym(RTLD_DEFAULT, "vprintf");
-        }
-    });
-}
-
-static BOOL tryPrepareMirrorFromMappingLog(void *rw, void *rx) {
-    if (!DeviceNeedsDebugJITMapping() || !rw || !rx) {
-        return NO;
-    }
-    vm_address_t rwAddr = (vm_address_t)(uintptr_t)rw;
-    vm_address_t rxAddr = (vm_address_t)(uintptr_t)rx;
-    if (rwAddr <= rxAddr || !looksLikeJITSuperpage(rxAddr)) {
-        return NO;
-    }
-    vm_size_t size = (vm_size_t)(rwAddr - rxAddr);
-    if (size < 16 * 1024 * 1024) {
-        return NO;
-    }
-    NSLog(@"[JIT26] mirror setup hook: preparing RX=%p RW=%p size=%zu MB",
-          (void *)(uintptr_t)rxAddr, (void *)(uintptr_t)rwAddr, size / (1024 * 1024));
-    prepareMirrorPair(rxAddr, rwAddr, size);
-    return YES;
-}
-
-static int hooked_printf(const char *restrict fmt, ...) {
-    va_list ap;
-    va_start(ap, fmt);
-    if (fmt && strstr(fmt, "mapping at RW=%p, RX=%p")) {
-        void *rw = va_arg(ap, void *);
-        void *rx = va_arg(ap, void *);
-        tryPrepareMirrorFromMappingLog(rw, rx);
-        va_end(ap);
-        va_start(ap, fmt);
-    }
-    if (!real_vprintf) {
-        va_end(ap);
-        return 0;
-    }
-    int result = real_vprintf(fmt, ap);
-    va_end(ap);
-    return result;
-}
-
-static BOOL looksLikeMirrorCodeCacheRemap(vm_address_t src, vm_size_t size) {
-    if (size < 16 * 1024 * 1024) {
-        return NO;
-    }
-    return looksLikeJITSuperpage(src);
-}
-
-static BOOL looksLikeMirrorRWProtect(vm_address_t addr, vm_size_t size, vm_prot_t prot) {
-    if (size < 16 * 1024 * 1024) {
-        return NO;
-    }
-    if ((prot & VM_PROT_WRITE) == 0 || (prot & VM_PROT_EXECUTE) != 0) {
-        return NO;
-    }
-    if (!looksLikeJITSuperpage(addr)) {
-        return NO;
-    }
-    vm_address_t rx = addr - size;
-    return looksLikeJITSuperpage(rx);
-}
-
-static BOOL looksLikeJITExecProtect(vm_address_t addr, vm_size_t size, vm_prot_t prot) {
-    if ((prot & VM_PROT_EXECUTE) == 0) {
-        return NO;
-    }
-    if (!looksLikeJITSuperpage(addr)) {
-        return NO;
-    }
-    return size >= (vm_size_t)getpagesize();
+    NSLog(@"[JIT26] ERROR: libjvm.dylib is not loaded; cannot verify mirror brk patch");
+    return NO;
 }
 
 void AmethystJIT26PrepareMirrorPair(void *rx, void *rw, size_t size) {
@@ -258,309 +170,104 @@ void AmethystJIT26PrepareMirrorPair(void *rx, void *rw, size_t size) {
           rw, rx, size / (1024 * 1024));
 }
 
-static void prepareMirrorPair(vm_address_t rx, vm_address_t rw, vm_size_t size) {
-    AmethystJIT26PrepareMirrorPair((void *)rx, (void *)rw, (size_t)size);
-}
-
-static BOOL regionCoversAddress(vm_address_t addr, vm_size_t minSize) {
-    vm_address_t query = addr;
-    vm_size_t size = 0;
-    vm_region_basic_info_data_64_t info;
-    mach_msg_type_number_t count = VM_REGION_BASIC_INFO_COUNT_64;
-    memory_object_name_t object;
-
-    kern_return_t kr = vm_region_64(
-        mach_task_self(), &query, &size, VM_REGION_BASIC_INFO_64,
-        (vm_region_info_64_t)&info, &count, &object);
-    return kr == KERN_SUCCESS && query <= addr && addr < query + size && size >= minSize;
-}
-
-static BOOL tryPrepareKnownMirrorLayout(void) {
-    vm_address_t rx = 0x700000000ULL;
-    vm_address_t rw = 0x700f000000ULL;
-    vm_size_t size = 0xf000000ULL;
-
-    if (!regionCoversAddress(rx, size) || !regionCoversAddress(rw, size)) {
-        return NO;
-    }
-    prepareMirrorPair(rx, rw, size);
-    return YES;
-}
-
-static kern_return_t hooked_vm_remap(
-    vm_map_t target_task,
-    vm_address_t *target_address,
-    vm_size_t size,
-    vm_offset_t mask,
-    int flags,
-    vm_map_t src_task,
-    vm_address_t src_address,
-    boolean_t copy,
-    vm_prot_t *cur_protection,
-    vm_prot_t *max_protection,
-    vm_inherit_t inheritance) {
-    resolveKernelSymbols();
-    if (!real_vm_remap) {
-        return KERN_FAILURE;
-    }
-
-    kern_return_t result = real_vm_remap(
-        target_task, target_address, size, mask, flags, src_task, src_address, copy,
-        cur_protection, max_protection, inheritance);
-
-    if (result != KERN_SUCCESS || target_address == NULL) {
-        return result;
-    }
-
-    if (looksLikeMirrorCodeCacheRemap(src_address, size)) {
-        NSLog(@"[JIT26] vm_remap mirror: RX=%p RW=%p size=%zu MB",
-              (void *)(uintptr_t)src_address, (void *)(uintptr_t)*target_address, size / (1024 * 1024));
-        prepareMirrorPair(src_address, *target_address, size);
-    }
-    return result;
-}
-
-static kern_return_t hooked_mach_vm_remap(
-    vm_map_t target_task,
-    mach_vm_address_t *target_address,
-    mach_vm_size_t size,
-    mach_vm_offset_t mask,
-    int flags,
-    vm_map_t src_task,
-    mach_vm_address_t src_address,
-    boolean_t copy,
-    vm_prot_t *cur_protection,
-    vm_prot_t *max_protection,
-    vm_inherit_t inheritance) {
-    resolveKernelSymbols();
-    if (!real_mach_vm_remap) {
-        return KERN_FAILURE;
-    }
-
-    kern_return_t result = real_mach_vm_remap(
-        target_task, target_address, size, mask, flags, src_task, src_address, copy,
-        cur_protection, max_protection, inheritance);
-
-    if (result != KERN_SUCCESS || target_address == NULL) {
-        return result;
-    }
-
-    if (looksLikeMirrorCodeCacheRemap((vm_address_t)src_address, (vm_size_t)size)) {
-        NSLog(@"[JIT26] mach_vm_remap mirror: RX=%p RW=%p size=%zu MB",
-              (void *)(uintptr_t)src_address, (void *)(uintptr_t)*target_address, (size_t)size / (1024 * 1024));
-        prepareMirrorPair((vm_address_t)src_address, (vm_address_t)*target_address, (vm_size_t)size);
-    }
-    return result;
-}
-
-static kern_return_t hooked_vm_protect(
-    vm_map_t target_task,
-    vm_address_t address,
-    vm_size_t size,
-    boolean_t set_maximum,
-    vm_prot_t new_protection) {
-    resolveKernelSymbols();
-    if (!real_vm_protect) {
-        return KERN_FAILURE;
-    }
-
-    kern_return_t result = real_vm_protect(target_task, address, size, set_maximum, new_protection);
-    if (result == KERN_SUCCESS && looksLikeMirrorRWProtect(address, size, new_protection)) {
-        vm_address_t rx = address - size;
-        NSLog(@"[JIT26] vm_protect mirror RW=%p RX=%p size=%zu MB",
-              (void *)(uintptr_t)address, (void *)(uintptr_t)rx, size / (1024 * 1024));
-        prepareMirrorPair(rx, address, size);
-    } else if (result == KERN_SUCCESS && looksLikeJITExecProtect(address, size, new_protection)) {
-        // Mirror prepare is idempotent per region. The prewarm (or an earlier
-        // vm_remap/vm_protect) already prepared the whole superpage window, so
-        // skip the debugger round-trip whenever this RX request is covered —
-        // JVM init on iOS 26.6+/27 otherwise fires one brk per code blob
-        // transition, which stutters startup and can hang on a slow debugger
-        // link. sys_icache_invalidate stays local and is always safe.
-        BOOL covered = g_lastPreparedRx != 0
-            && address >= g_lastPreparedRx
-            && address + size <= g_lastPreparedRx + g_lastPreparedSize;
-        static BOOL skipLoggedOnce;
-        if (covered) {
-            if (!skipLoggedOnce) {
-                skipLoggedOnce = YES;
-                NSLog(@"[JIT26] vm_protect RX already prepared (addr=%p size=%zu KB), skipping debugger round-trip",
-                      (void *)(uintptr_t)address, size / 1024);
-            }
-        } else {
-            skipLoggedOnce = NO;
-            NSLog(@"[JIT26] vm_protect RX prepare: addr=%p size=%zu KB",
-                  (void *)(uintptr_t)address, size / 1024);
-            JIT26PrepareRegion((void *)(uintptr_t)address, size);
-            g_lastPreparedRx = address;
-            g_lastPreparedSize = size;
-        }
-        sys_icache_invalidate((void *)(uintptr_t)address, size);
-    }
-    return result;
-}
-
-static BOOL findMirrorMapping(vm_address_t *out_rx, vm_address_t *out_rw, vm_size_t *out_size) {
-    vm_address_t cursor = 0x700000000ULL;
-    const vm_address_t limit = 0x800000000ULL;
-
-    while (cursor < limit) {
-        vm_address_t region_start = cursor;
-        vm_size_t region_size = 0;
-        vm_region_basic_info_data_64_t info;
-        mach_msg_type_number_t count = VM_REGION_BASIC_INFO_COUNT_64;
-        memory_object_name_t object;
-
-        kern_return_t kr = vm_region_64(
-            mach_task_self(), &region_start, &region_size, VM_REGION_BASIC_INFO_64,
-            (vm_region_info_64_t)&info, &count, &object);
-        if (kr != KERN_SUCCESS) {
-            break;
-        }
-
-        if (region_start >= 0x700000000ULL && region_size >= 16 * 1024 * 1024) {
-            vm_address_t rw_candidate = region_start + region_size;
-            vm_address_t rw_query = rw_candidate;
-            vm_size_t rw_size = 0;
-            vm_region_basic_info_data_64_t rw_info;
-            mach_msg_type_number_t rw_count = VM_REGION_BASIC_INFO_COUNT_64;
-            memory_object_name_t rw_object;
-
-            kr = vm_region_64(
-                mach_task_self(), &rw_query, &rw_size, VM_REGION_BASIC_INFO_64,
-                (vm_region_info_64_t)&rw_info, &rw_count, &rw_object);
-            if (kr == KERN_SUCCESS && rw_query <= rw_candidate && rw_candidate < rw_query + rw_size
-                && (rw_info.protection & VM_PROT_WRITE) && !(rw_info.protection & VM_PROT_EXECUTE)) {
-                *out_rx = region_start;
-                *out_rw = rw_candidate;
-                *out_size = region_size;
-                return YES;
-            }
-        }
-
-        vm_address_t next = region_start + region_size;
-        if (next <= cursor) {
-            break;
-        }
-        cursor = next;
-    }
-    return NO;
-}
-
-static void *mirror_prepare_poll_thread(void *arg) {
-    (void)arg;
-    for (int attempt = 0; attempt < 20000; attempt++) {
-        if (tryPrepareKnownMirrorLayout()) {
-            return NULL;
-        }
-        vm_address_t rx = 0;
-        vm_address_t rw = 0;
-        vm_size_t size = 0;
-        if (findMirrorMapping(&rx, &rw, &size)) {
-            prepareMirrorPair(rx, rw, size);
-            return NULL;
-        }
-        usleep(500);
-    }
-    NSLog(@"[JIT26] mirror prepare poll thread timed out");
-    return NULL;
-}
-
 void prewarm_jit_mirror_superpage(void) {
-    if (!DeviceNeedsDebugJITMapping()) {
-        return;
-    }
-    static const size_t kMirrorSuperpageSize = 0xf000000; // 240 MB
-    void *rx = JIT26PrepareRegion(NULL, kMirrorSuperpageSize);
-    if (!rx) {
-        NSLog(@"[JIT26] mirror superpage prewarm failed (got NULL)");
-        return;
-    }
-    vm_address_t rxAddr = (vm_address_t)(uintptr_t)rx;
-    vm_address_t rwAddr = rxAddr + kMirrorSuperpageSize;
-    NSLog(@"[JIT26] mirror superpage prewarm: RX=%p RW=%p size=%zu MB",
-          (void *)(uintptr_t)rxAddr, (void *)(uintptr_t)rwAddr, kMirrorSuperpageSize / (1024 * 1024));
-    AmethystJIT26PrepareMirrorPair(rx, (void *)(uintptr_t)rwAddr, kMirrorSuperpageSize);
+    // No-op: JIT mirror regions are prepared directly via libjvm brk 0x69/0x6a and StikDebug
 }
 
 void start_jit_mirror_prepare_poll_thread(void) {
-    if (!DeviceNeedsDebugJITMapping()) {
-        return;
-    }
-    bool expected = false;
-    if (!atomic_compare_exchange_strong(&g_pollThreadStarted, &expected, true)) {
-        return;
-    }
-    pthread_t thread;
-    pthread_attr_t attr;
-    pthread_attr_init(&attr);
-    pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
-    if (pthread_create(&thread, &attr, mirror_prepare_poll_thread, NULL) != 0) {
-        atomic_store(&g_pollThreadStarted, false);
-        NSLog(@"[JIT26] failed to start mirror prepare poll thread");
-    } else {
-        NSLog(@"[JIT26] mirror prepare poll thread started");
-    }
-    pthread_attr_destroy(&attr);
-}
-
-static void rebind_vm_hooks_in_image(const struct mach_header *header, intptr_t slide, const char *name) {
-    if (!name || !strstr(name, "libjvm.dylib")) {
-        return;
-    }
-    struct rebinding rebindings[] = {
-        {"vm_remap", hooked_vm_remap, NULL},
-        {"mach_vm_remap", hooked_mach_vm_remap, NULL},
-        {"vm_protect", hooked_vm_protect, NULL},
-        {"printf", hooked_printf, NULL},
-    };
-    int result = rebind_symbols_image((void *)header, slide, rebindings, 4);
-    NSLog(@"[JIT26] fishhook rebind in %s -> %d", name, result);
-}
-
-static void rebind_vm_hooks_on_image_load(const struct mach_header *header, intptr_t slide) {
-    if (!DeviceNeedsDebugJITMapping()) {
-        return;
-    }
-    uint32_t count = _dyld_image_count();
-    for (uint32_t i = 0; i < count; i++) {
-        if (_dyld_get_image_header(i) == header) {
-            rebind_vm_hooks_in_image(header, slide, _dyld_get_image_name(i));
-            return;
-        }
-    }
+    // No-op: Native brk 0x69/0x6a breakpoints handle JIT memory preparation in StikDebug
 }
 
 void rebind_jit_vm_hooks_after_libjvm_load(void) {
-    if (!DeviceNeedsDebugJITMapping()) {
-        return;
-    }
-    resolveKernelSymbols();
-    uint32_t count = _dyld_image_count();
-    for (uint32_t i = 0; i < count; i++) {
-        const char *name = _dyld_get_image_name(i);
-        if (name && strstr(name, "libjvm.dylib")) {
-            rebind_vm_hooks_in_image(_dyld_get_image_header(i), _dyld_get_image_vmaddr_slide(i), name);
-        }
-    }
+    // No-op on iOS 26+/27 to preserve memory safety and avoid dyld symbol corruption
 }
 
 void init_jit_vm_remap_hook(void) {
-    resolveKernelSymbols();
-    struct rebinding rebindings[] = {
-        {"vm_remap", hooked_vm_remap, NULL},
-        {"mach_vm_remap", hooked_mach_vm_remap, NULL},
-        {"vm_protect", hooked_vm_protect, NULL},
-        {"printf", hooked_printf, NULL},
-    };
-    if (rebind_symbols(rebindings, 4) != 0) {
-        NSLog(@"[JIT26] fishhook vm_remap/vm_protect registration failed");
-        return;
+    NSLog(@"[JIT26] JIT handler initialized (breakpoint-driven JIT mode for iOS 26+/27)");
+}
+
+static sigjmp_buf g_jitPreflightJmp;
+static volatile sig_atomic_t g_jitPreflightArmed = 0;
+
+static void jit_preflight_fault(int sig) {
+    (void)sig;
+    if (g_jitPreflightArmed) {
+        siglongjmp(g_jitPreflightJmp, 1);
     }
-    bool expected = false;
-    if (atomic_compare_exchange_strong(&g_dyldHookRegistered, &expected, true)) {
-        _dyld_register_func_for_add_image(rebind_vm_hooks_on_image_load);
+}
+
+// Pre-flight proof that debugger-backed JIT execution REALLY works with the
+// attached StikDebug session: bless 2 pages via brk, mirror an RW alias, write
+// a `mov w0,#42; ret` stub, and CALL it under a fault guard. Returns YES only
+// if the stub executes and returns 42. A stale debugger, detached session, or
+// wrong script fails LOUDLY here instead of crashing later inside JLI_Launch
+// with a black screen and no dialog (the JVM abort path cannot show UI).
+BOOL JIT26ExecPreflight(void) {
+    vm_size_t page = (vm_size_t)getpagesize();
+    vm_size_t len = page * 2;
+
+    NSLog(@"[JIT26] preflight: requesting scratch RX region via debugger");
+    void *rx = JIT26PrepareRegion(NULL, len);
+    if (!rx || rx == MAP_FAILED || ((vm_address_t)rx & (page - 1)) != 0) {
+        NSLog(@"[JIT26] preflight: debugger did not return a usable RX region (%p)", rx);
+        return NO;
     }
-    NSLog(@"[JIT26] fishhook vm_remap/mach_vm_remap/vm_protect/printf registered");
-    start_jit_mirror_prepare_poll_thread();
+    NSLog(@"[JIT26] preflight: got RX=%p, mirroring RW alias", rx);
+
+    vm_address_t mirrored = 0;
+    vm_prot_t cur_prot = 0, max_prot = 0;
+    kern_return_t ret = vm_remap(mach_task_self(), &mirrored, len, 0, VM_FLAGS_ANYWHERE,
+                                 mach_task_self(), (vm_address_t)rx, FALSE,
+                                 &cur_prot, &max_prot, VM_INHERIT_SHARE);
+    if (ret != KERN_SUCCESS) {
+        NSLog(@"[JIT26] preflight: vm_remap failed: 0x%x", ret);
+        return NO;
+    }
+    // Keep this alias shared with RX. VM_PROT_COPY makes writes private (COW),
+    // so the stub would be written to a different backing page than the one
+    // executed below. The debugger has already prepared the RX mapping; this
+    // alias only needs ordinary RW protection, matching write_rx_u32 above.
+    ret = vm_protect(mach_task_self(), mirrored, len, FALSE, VM_PROT_READ | VM_PROT_WRITE);
+    if (ret != KERN_SUCCESS) {
+        NSLog(@"[JIT26] preflight: vm_protect(RW) failed: 0x%x", ret);
+        vm_deallocate(mach_task_self(), mirrored, len);
+        return NO;
+    }
+    static const uint32_t stub[] = { 0x52800540u, 0xD65F03C0u }; // movz w0, #42; ret
+    memcpy((void *)mirrored, stub, sizeof(stub));
+    sys_icache_invalidate(rx, sizeof(stub));
+    NSLog(@"[JIT26] preflight: stub written, calling it under fault guard");
+
+    struct sigaction sa = {0}, oldBus, oldSegv, oldTrap, oldIll;
+    sa.sa_handler = jit_preflight_fault;
+    sigemptyset(&sa.sa_mask);
+    sigaction(SIGBUS, &sa, &oldBus);
+    sigaction(SIGSEGV, &sa, &oldSegv);
+    sigaction(SIGTRAP, &sa, &oldTrap);
+    sigaction(SIGILL, &sa, &oldIll);
+
+    volatile int result = -1;
+    g_jitPreflightArmed = 1;
+    if (sigsetjmp(g_jitPreflightJmp, 1) == 0) {
+        int (*fn)(void) = (int (*)(void))rx;
+        result = fn();
+    } else {
+        NSLog(@"[JIT26] preflight: fault while executing blessed region (blessing ineffective)");
+    }
+    g_jitPreflightArmed = 0;
+
+    sigaction(SIGBUS, &oldBus, NULL);
+    sigaction(SIGSEGV, &oldSegv, NULL);
+    sigaction(SIGTRAP, &oldTrap, NULL);
+    sigaction(SIGILL, &oldIll, NULL);
+    vm_deallocate(mach_task_self(), mirrored, len);
+    // NOTE: the 2 RX pages stay reserved (debugger-owned); negligible and keeps
+    // the debugger allocator state intact for the JVM's own requests.
+
+    if (result != 42) {
+        NSLog(@"[JIT26] preflight: FAILED (stub returned %d, want 42)", result);
+        return NO;
+    }
+    NSLog(@"[JIT26] preflight: executable JIT memory works (stub returned 42)");
+    return YES;
 }

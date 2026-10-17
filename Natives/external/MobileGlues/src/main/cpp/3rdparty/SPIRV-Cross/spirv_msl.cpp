@@ -6441,13 +6441,14 @@ void CompilerMSL::emit_custom_functions()
 			statement("template<typename T, int LCols, int LRows, int RCols, int RRows>");
 			statement("[[clang::optnone]] matrix<T, RCols, LRows> spvFMulMatrixMatrix(matrix<T, LCols, LRows> l, matrix<T, RCols, RRows> r)");
 			begin_scope();
+			statement("static_assert(LCols == RRows, \"column-row configuration mismatch\");");
 			statement("matrix<T, RCols, LRows> res;");
 			statement("for (uint i = 0; i < RCols; i++)");
 			begin_scope();
-			statement("vec<T, RCols> tmp(0);");
+			statement("vec<T, LRows> tmp(0);");
 			statement("for (uint j = 0; j < LCols; j++)");
 			begin_scope();
-			statement("tmp = fma(vec<T, RCols>(r[i][j]), l[j], tmp);");
+			statement("tmp = fma(vec<T, LRows>(r[i][j]), l[j], tmp);");
 			end_scope();
 			statement("res[i] = tmp;");
 			end_scope();
@@ -8274,6 +8275,37 @@ void CompilerMSL::emit_custom_functions()
 			statement("");
 			break;
 
+		case SPVFuncImplDepthCast:
+			statement("template <typename T>");
+			statement("static inline depth2d<T> spvDepthCast(texture2d<T> t)");
+			begin_scope();
+			statement("return reinterpret_cast<thread const depth2d<T> &>(t);");
+			end_scope();
+			statement("");
+			statement("template <typename T>");
+			statement("static inline depth2d_array<T> spvDepthCast(texture2d_array<T> t)");
+			begin_scope();
+			statement("return reinterpret_cast<thread const depth2d_array<T> &>(t);");
+			end_scope();
+			statement("");
+			statement("template <typename T>");
+			statement("static inline depthcube<T> spvDepthCast(texturecube<T> t)");
+			begin_scope();
+			statement("return reinterpret_cast<thread const depthcube<T> &>(t);");
+			end_scope();
+			statement("");
+
+			if (!msl_options.is_ios() || msl_options.supports_msl_version(2))
+			{
+				statement("template <typename T>");
+				statement("static inline depthcube_array<T> spvDepthCast(texturecube_array<T> t)");
+				begin_scope();
+				statement("return reinterpret_cast<thread const depthcube_array<T> &>(t);");
+				end_scope();
+				statement("");
+			}
+			break;
+
 		case SPVFuncImplMulExtended:
 			// Compiler may hit an internal error with mulhi, but doesn't when encapsulated for some reason.
 			statement("template<typename T, typename U, typename V>");
@@ -10038,7 +10070,7 @@ void CompilerMSL::emit_instruction(const Instruction &instruction)
 		case Dim1D:
 			if (!msl_options.texture_1D_as_2D)
 				SPIRV_CROSS_THROW("ImageQueryLod is not supported on 1D textures.");
-			[[fallthrough]];
+			/* fallthrough */
 		case Dim2D:
 			if (coord_type.vecsize > 2)
 				coord_expr = enclose_expression(coord_expr) + ".xy";
@@ -10510,7 +10542,7 @@ void CompilerMSL::emit_instruction(const Instruction &instruction)
 	case OpRayQueryGetIntersectionCandidateAABBOpaqueKHR:
 	{
 		flush_variable_declaration(ops[0]);
-		emit_op(ops[0], ops[1], join(to_expression(ops[2]), ".is_candidate_non_opaque_bounding_box()"), false);
+		emit_op(ops[0], ops[1], join("(!", to_expression(ops[2]), ".is_candidate_non_opaque_bounding_box())"), false);
 		break;
 	}
 	case OpRayQueryConfirmIntersectionKHR:
@@ -12293,7 +12325,7 @@ string CompilerMSL::to_function_name(const TextureFunctionNameArguments &args)
 	if (msl_options.swizzle_texture_samples && args.base.is_gather && !is_dynamic_img_sampler &&
 	    (!constexpr_sampler || !constexpr_sampler->ycbcr_conversion_enable))
 	{
-		bool is_compare = comparison_ids.count(img);
+		bool is_compare = args.has_dref;
 		add_spv_func_and_recompile(is_compare ? SPVFuncImplGatherCompareSwizzle : SPVFuncImplGatherSwizzle);
 		return is_compare ? "spvGatherCompareSwizzle" : "spvGatherSwizzle";
 	}
@@ -12302,7 +12334,7 @@ string CompilerMSL::to_function_name(const TextureFunctionNameArguments &args)
 	if (args.has_array_offsets && !is_dynamic_img_sampler &&
 	    (!constexpr_sampler || !constexpr_sampler->ycbcr_conversion_enable))
 	{
-		bool is_compare = comparison_ids.count(img);
+		bool is_compare = args.has_dref;
 		add_spv_func_and_recompile(is_compare ? SPVFuncImplGatherCompareConstOffsets : SPVFuncImplGatherConstOffsets);
 		return is_compare ? "spvGatherCompareConstOffsets" : "spvGatherConstOffsets";
 	}
@@ -12417,7 +12449,18 @@ string CompilerMSL::to_function_name(const TextureFunctionNameArguments &args)
 	}
 	else
 	{
-		fname = to_expression(combined ? combined->image : img) + ".";
+		string img_expr = to_expression(combined ? combined->image : img);
+
+		// Vulkan ignores Depth as part of the SPIR-V type, and we cannot rely on it.
+		// We also cannot rely on deduction through code analysis since a texture can be consumed
+		// in both Dref and non-Dref contexts, which MSL normally does not allow without hackery.
+		if (args.has_dref)
+		{
+			add_spv_func_and_recompile(SPVFuncImplDepthCast);
+			img_expr = join("spvDepthCast(", img_expr, ")");
+		}
+
+		fname = img_expr + ".";
 
 		// Texture function and sampler
 		if (args.base.is_fetch)
@@ -12484,12 +12527,31 @@ string CompilerMSL::to_function_args(const TextureFunctionArguments &args, bool 
 		         msl_options.swizzle_texture_samples && args.base.is_gather)
 		{
 			auto *combined = maybe_get<SPIRCombinedImageSampler>(img);
-			farg_str += to_expression(combined ? combined->image : img);
+			auto img_expr = to_expression(combined ? combined->image : img);
+			if (args.dref)
+			{
+				add_spv_func_and_recompile(SPVFuncImplDepthCast);
+				img_expr = join("spvDepthCast(", img_expr, ")");
+			}
+			farg_str += img_expr;
 		}
 
 		// Gathers with constant offsets call a special function, so include the texture.
 		if (args.has_array_offsets)
-			farg_str += to_expression(img);
+		{
+			// Vulkan ignores Depth as part of the SPIR-V type, and we cannot rely on it.
+			// We also cannot rely on deduction through code analysis since a texture can be consumed
+			// in both Dref and non-Dref contexts, which MSL normally does not allow without hackery.
+			if (args.dref)
+			{
+				add_spv_func_and_recompile(SPVFuncImplDepthCast);
+				farg_str += join("spvDepthCast(", to_expression(img), ")");
+			}
+			else
+			{
+				farg_str += to_expression(img);
+			}
+		}
 
 		// Sampler reference
 		if (!args.base.is_fetch)
@@ -12977,18 +13039,12 @@ string CompilerMSL::to_function_args(const TextureFunctionArguments &args, bool 
 		{
 			forward = forward && should_forward(args.component);
 
-			uint32_t image_var = 0;
-			if (const auto *combined = maybe_get<SPIRCombinedImageSampler>(img))
-			{
-				if (const auto *img_var = maybe_get_backing_variable(combined->image))
-					image_var = img_var->self;
-			}
-			else if (const auto *var = maybe_get_backing_variable(img))
-			{
-				image_var = var->self;
-			}
-
-			if (image_var == 0 || !is_depth_image(expression_type(image_var), image_var))
+			// gather_compare (Dref) takes no component argument, and neither does plain gather()
+			// on a resource that's genuinely depth-typed at this call site.
+			// Cast to a depthXXX<T> via spvDepthCast
+			// because this specific call has a Dref. A resource that's only comparison_ids-tracked
+			// but has no Dref on THIS call stays texture2d<T> here and does take a component.
+			if (!args.dref)
 				farg_str += ", " + to_component_argument(args.component);
 		}
 	}
@@ -13517,7 +13573,7 @@ bool CompilerMSL::is_non_native_row_major_matrix(uint32_t id)
 }
 
 // Checks whether the member is a row_major matrix that requires conversion before use
-bool CompilerMSL::member_is_non_native_row_major_matrix(const SPIRType &type, uint32_t index)
+bool CompilerMSL::member_is_non_native_row_major_matrix(const SPIRType &type, uint32_t index, bool /*is_layout_disabled*/)
 {
 	return has_member_decoration(type.self, index, DecorationRowMajor);
 }
@@ -16563,6 +16619,30 @@ const std::unordered_set<std::string> &CompilerMSL::get_reserved_keyword_set()
 		"gradientcube",
 		"gradient3d",
 		"min_lod_clamp",
+
+		// MSL type names emitted by sampler_type() and image_type_glsl(). A variable or struct
+		// member carrying one of these shadows the type itself, and the next declaration that
+		// uses the type fails to compile:
+		//   texture2d<float> sampler [[id(0)]];
+		//   sampler samplerSmplr [[id(1)]];   // error: must use 'struct' tag to refer to type
+		// GLSL permits a uniform named "sampler", so this is reachable from ordinary shaders.
+		"sampler",
+		"texture1d",
+		"texture1d_array",
+		"texture2d",
+		"texture2d_array",
+		"texture2d_ms",
+		"texture2d_ms_array",
+		"texture3d",
+		"texture_buffer",
+		"texturecube",
+		"texturecube_array",
+		"depth2d",
+		"depth2d_array",
+		"depth2d_ms",
+		"depth2d_ms_array",
+		"depthcube",
+		"depthcube_array",
 		"assert",
 		"VARIABLE_TRACEPOINT",
 		"STATIC_DATA_TRACEPOINT",
@@ -17426,110 +17506,67 @@ string CompilerMSL::image_type_glsl(const SPIRType &type, uint32_t id, bool memb
 
 	auto &img_type = type.image;
 
-	if (is_depth_image(type, id))
+	switch (img_type.dim)
 	{
-		switch (img_type.dim)
-		{
-		case Dim1D:
-		case Dim2D:
-			if (img_type.dim == Dim1D && !msl_options.texture_1D_as_2D)
-			{
-				// Use a native Metal 1D texture
-				img_type_name += "depth1d_unsupported_by_metal";
-				break;
-			}
+	case DimBuffer:
+		if (img_type.ms || img_type.arrayed)
+			SPIRV_CROSS_THROW("Cannot use texel buffers with multisampling or array layers.");
 
-			if (img_type.ms && img_type.arrayed)
-			{
-				if (!msl_options.supports_msl_version(2, 1))
-					SPIRV_CROSS_THROW("Multisampled array textures are supported from 2.1.");
-				img_type_name += "depth2d_ms_array";
-			}
-			else if (img_type.ms)
-				img_type_name += "depth2d_ms";
-			else if (img_type.arrayed)
-				img_type_name += "depth2d_array";
-			else
-				img_type_name += "depth2d";
-			break;
-		case Dim3D:
-			img_type_name += "depth3d_unsupported_by_metal";
-			break;
-		case DimCube:
-			if (!msl_options.emulate_cube_array)
-				img_type_name += (img_type.arrayed ? "depthcube_array" : "depthcube");
-			else
-				img_type_name += (img_type.arrayed ? "depth2d_array" : "depthcube");
-			break;
-		default:
-			img_type_name += "unknown_depth_texture_type";
+		if (msl_options.texture_buffer_native)
+		{
+			if (!msl_options.supports_msl_version(2, 1))
+				SPIRV_CROSS_THROW("Native texture_buffer type is only supported in MSL 2.1.");
+			img_type_name = "texture_buffer";
+		}
+		else
+			img_type_name += "texture2d";
+		break;
+	case Dim1D:
+	case Dim2D:
+	case DimSubpassData:
+	{
+		bool subpass_array =
+			img_type.dim == DimSubpassData && (msl_options.multiview || msl_options.arrayed_subpass_input);
+		if (img_type.dim == Dim1D && !msl_options.texture_1D_as_2D)
+		{
+			// Use a native Metal 1D texture
+			img_type_name += (img_type.arrayed ? "texture1d_array" : "texture1d");
 			break;
 		}
+
+		// Use Metal's native frame-buffer fetch API for subpass inputs.
+		if (type_is_msl_framebuffer_fetch(type))
+		{
+			auto img_type_4 = get<SPIRType>(img_type.type);
+			img_type_4.vecsize = 4;
+			return type_to_glsl(img_type_4);
+		}
+		if (img_type.ms && (img_type.arrayed || subpass_array))
+		{
+			if (!msl_options.supports_msl_version(2, 1))
+				SPIRV_CROSS_THROW("Multisampled array textures are supported from 2.1.");
+			img_type_name += "texture2d_ms_array";
+		}
+		else if (img_type.ms)
+			img_type_name += "texture2d_ms";
+		else if (img_type.arrayed || subpass_array)
+			img_type_name += "texture2d_array";
+		else
+			img_type_name += "texture2d";
+		break;
 	}
-	else
-	{
-		switch (img_type.dim)
-		{
-		case DimBuffer:
-			if (img_type.ms || img_type.arrayed)
-				SPIRV_CROSS_THROW("Cannot use texel buffers with multisampling or array layers.");
-
-			if (msl_options.texture_buffer_native)
-			{
-				if (!msl_options.supports_msl_version(2, 1))
-					SPIRV_CROSS_THROW("Native texture_buffer type is only supported in MSL 2.1.");
-				img_type_name = "texture_buffer";
-			}
-			else
-				img_type_name += "texture2d";
-			break;
-		case Dim1D:
-		case Dim2D:
-		case DimSubpassData:
-		{
-			bool subpass_array =
-			    img_type.dim == DimSubpassData && (msl_options.multiview || msl_options.arrayed_subpass_input);
-			if (img_type.dim == Dim1D && !msl_options.texture_1D_as_2D)
-			{
-				// Use a native Metal 1D texture
-				img_type_name += (img_type.arrayed ? "texture1d_array" : "texture1d");
-				break;
-			}
-
-			// Use Metal's native frame-buffer fetch API for subpass inputs.
-			if (type_is_msl_framebuffer_fetch(type))
-			{
-				auto img_type_4 = get<SPIRType>(img_type.type);
-				img_type_4.vecsize = 4;
-				return type_to_glsl(img_type_4);
-			}
-			if (img_type.ms && (img_type.arrayed || subpass_array))
-			{
-				if (!msl_options.supports_msl_version(2, 1))
-					SPIRV_CROSS_THROW("Multisampled array textures are supported from 2.1.");
-				img_type_name += "texture2d_ms_array";
-			}
-			else if (img_type.ms)
-				img_type_name += "texture2d_ms";
-			else if (img_type.arrayed || subpass_array)
-				img_type_name += "texture2d_array";
-			else
-				img_type_name += "texture2d";
-			break;
-		}
-		case Dim3D:
-			img_type_name += "texture3d";
-			break;
-		case DimCube:
-			if (!msl_options.emulate_cube_array)
-				img_type_name += (img_type.arrayed ? "texturecube_array" : "texturecube");
-			else
-				img_type_name += (img_type.arrayed ? "texture2d_array" : "texturecube");
-			break;
-		default:
-			img_type_name += "unknown_texture_type";
-			break;
-		}
+	case Dim3D:
+		img_type_name += "texture3d";
+		break;
+	case DimCube:
+		if (!msl_options.emulate_cube_array)
+			img_type_name += (img_type.arrayed ? "texturecube_array" : "texturecube");
+		else
+			img_type_name += (img_type.arrayed ? "texture2d_array" : "texturecube");
+		break;
+	default:
+		img_type_name += "unknown_texture_type";
+		break;
 	}
 
 	// Append the pixel type

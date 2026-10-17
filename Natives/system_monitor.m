@@ -155,3 +155,20 @@ double tm_battery_percent(void) {
     }
     return MIN(100.0, MAX(0.0, level * 100.0));
 }
+
+int tm_battery_is_charging(void) {
+    static BOOL monitoringEnabled = NO;
+    if (!monitoringEnabled) {
+        UIDevice.currentDevice.batteryMonitoringEnabled = YES;
+        monitoringEnabled = YES;
+    }
+    switch (UIDevice.currentDevice.batteryState) {
+        case UIDeviceBatteryStateCharging:
+        case UIDeviceBatteryStateFull:
+            return 1;
+        case UIDeviceBatteryStateUnplugged:
+            return 0;
+        default:
+            return -1;
+    }
+}

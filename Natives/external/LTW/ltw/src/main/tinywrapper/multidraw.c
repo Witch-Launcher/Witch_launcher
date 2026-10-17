@@ -20,11 +20,6 @@ void glMultiDrawArrays( GLenum mode, GLint *first, GLsizei *count, GLsizei primc
 void glMultiDrawElements( GLenum mode, GLsizei *count, GLenum type, const void * const *indices, GLsizei primcount )
 {
     if(!current_context) return;
-    static long drawCalls = 0;
-    drawCalls++;
-    if (drawCalls <= 5 || (drawCalls % 500) == 0)
-        printf("LTW: glMultiDrawElements mode=0x%x type=0x%x primcount=%d first=%d last=%d totalCalls=%ld\n",
-               mode, type, primcount, count[0], count[primcount-1], drawCalls);
     GLint elementbuffer;
     es3_functions.glGetIntegerv(GL_ELEMENT_ARRAY_BUFFER_BINDING, &elementbuffer);
     es3_functions.glBindBuffer(GL_COPY_WRITE_BUFFER, current_context->multidraw_element_buffer);
@@ -48,4 +43,19 @@ void glMultiDrawElements( GLenum mode, GLsizei *count, GLenum type, const void *
     es3_functions.glDrawElements(mode, total, type, 0);
     if(elementbuffer != 0) es3_functions.glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, elementbuffer);
 
+}
+
+void glMultiDrawElementsIndirect(GLenum mode, GLenum type, const void *indirect, GLsizei drawcount, GLsizei stride){
+    if(!current_context) return;
+    if(current_context->multidraw_indirect) {
+        es3_functions.glMultiDrawElementsIndirectEXT(mode, type, indirect, drawcount, stride);
+    }
+    // TODO: handle MDI emulation if needed
+}
+
+void glMultiDrawArraysIndirect(GLenum mode, const void *indirect, GLsizei drawcount, GLsizei stride) {
+    if(!current_context) return;
+    if(current_context->multidraw_indirect) {
+        es3_functions.glMultiDrawArraysIndirectEXT(mode, indirect, drawcount, stride);
+    }
 }

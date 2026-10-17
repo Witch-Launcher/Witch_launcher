@@ -14,6 +14,8 @@ endif()
 
 include_directories(
   "."
+  "LogEngine"
+  "LogUpload"
   "external/AFNetworking/AFNetworking"
   "external/AFNetworking/UIKit+AFNetworking"
   "external/DBNumberedSlider/Classes"
@@ -40,11 +42,12 @@ include_directories(
   "../UI/Screens/Modpack"
   "../UI/Screens/Shader"
   "../UI/Screens/Server"
-  "../UI/Screens/Settings"
-  "../UI/Screens/Account"
-  "../UI/Screens/Download"
-  "../UI/Screens/FileBrowser"
-  "../UI/Screens/ProfileSettings"
+   "../UI/Screens/Settings"
+   "../UI/Screens/Account"
+   "../UI/Screens/Download"
+   "../UI/Screens/FileBrowser"
+   "../UI/Screens/ProfileSettings"
+   "../UI/Screens/AI"
   "installer/modpack"
 )
 
@@ -97,7 +100,6 @@ set(LTW_INCLUDES
   "${LTW_DIR}/glsl_optimizer/src"
   "${LTW_DIR}/vgpu_shaderconv"
   "${LTW_DIR}/unordered_map"
-  "${CMAKE_CURRENT_LIST_DIR}/external/MobileGlues/src/main/cpp/include"
 )
 
 include(cmake/ltw_sources.cmake)
@@ -110,6 +112,15 @@ list(FILTER GLSL_OPTIMIZER_SRC EXCLUDE REGEX ".*u_debug_stack_android\\.cpp$")
 
 add_library(glsl_optimizer STATIC ${GLSL_OPTIMIZER_SRC})
 target_include_directories(glsl_optimizer PRIVATE ${LTW_INCLUDES})
+# Vulkan headers for nir_print.c / nir_vulkan.h. Prefer the MoltenVK
+# submodule copy when checked out (local dev), else fall back to the
+# minimal vendored copy (CI only inits the GL4ES deps, not MoltenVK).
+if(EXISTS "${CMAKE_CURRENT_LIST_DIR}/external/MoltenVK/External/Vulkan-Headers/include/vulkan/vulkan_core.h")
+  set(VULKAN_HEADERS_INCLUDE "${CMAKE_CURRENT_LIST_DIR}/external/MoltenVK/External/Vulkan-Headers/include")
+else()
+  set(VULKAN_HEADERS_INCLUDE "${CMAKE_CURRENT_LIST_DIR}/external/vulkan-headers-compat/include")
+endif()
+target_include_directories(glsl_optimizer PRIVATE "${VULKAN_HEADERS_INCLUDE}")
 set_target_properties(glsl_optimizer PROPERTIES
   POSITION_INDEPENDENT_CODE ON
   CXX_STANDARD 17
@@ -121,11 +132,11 @@ target_compile_definitions(glsl_optimizer PRIVATE
   UTL_ARCH_LITTLE_ENDIAN UNIX
   HAVE_OPENGL HAVE_OPENGL_ES_1 HAVE_OPENGL_ES_2
   HAVE_TIMESPEC_GET HAVE_STRUCT_TIMESPEC
-  VK_DESCRIPTOR_TYPE_INLINE_UNIFORM_BLOCK=VK_DESCRIPTOR_TYPE_INLINE_UNIFORM_BLOCK_EXT
 )
 
 add_library(ltw SHARED ${LTW_CORE_SRC})
 target_include_directories(ltw PRIVATE ${LTW_INCLUDES})
+target_include_directories(ltw PRIVATE "${CMAKE_CURRENT_LIST_DIR}/external/MobileGlues/src/main/cpp/include")
 target_link_libraries(ltw
   "${GLOBAL_LDFLAGS}"
   -Wl,-force_load,$<TARGET_FILE:glsl_optimizer>
@@ -236,6 +247,7 @@ add_executable(Witch
   JavaLauncher.m
   external/fishhook/fishhook.c
   UIKit+hook.m
+  MemSampler.m
 
   authenticator/BaseAuthenticator.m
   authenticator/LocalAuthenticator.m
@@ -245,6 +257,8 @@ add_executable(Witch
   ctxbridges/gl_bridge.m
   ctxbridges/osm_bridge.m
   ctxbridges/vk_bridge.m
+  ctxbridges/mesa_egl_bridge.m
+  ctxbridges/tglmt_bridge.m
 
   debug/DebugServer.m
  
@@ -301,6 +315,8 @@ add_executable(Witch
   system_monitor.m
 egl_bridge.m
     ZinkConfig.m
+    MobileGLConfig.m
+    TGLMTConfig.m
     input_bridge_v3.m
     ios_uikit_bridge.m
     utils.m
@@ -329,6 +345,9 @@ egl_bridge.m
     ../UI/Common/UIView+LiquidGlass.m
     ../UI/Common/AmethystBlurView.m
    ../UI/Common/BlurredDialog.m
+   ../UI/Common/AppErrorDialog.m
+   ../UI/Common/ErrorPresenter.m
+   ../UI/Common/AppSheet.m
     ../UI/Root/AmethystRootViewController.m
    ../UI/Root/TopBarView.m
    ../UI/Root/SidebarViewController.m
@@ -336,26 +355,52 @@ egl_bridge.m
    ../UI/App/MainCoordinator.m
    ../UI/Managers/VersionDirectoryManager.m
    ../UI/Managers/DownloadManager.m
-   ../UI/Managers/CursorManager.m
-   ../UI/Managers/InstalledModsManager.m
-   ../UI/Screens/MainMenu/MainMenuViewController.m
+    ../UI/Managers/CursorManager.m
+    ../UI/Managers/CursorTypeManager.m
+    ../UI/Managers/WindowsCursorParser.m
+    ../UI/Managers/InstalledModsManager.m
+   ../UI/Managers/DependencyResolver.m
+   ../UI/Managers/ProfileAvatarManager.m
+   ../UI/Managers/ModIconReader.m
+   ../UI/Managers/ModMetadataReader.m
+   ../UI/Managers/ModUpdateChecker.m
+   ../UI/Managers/WitchUpdateService.m
+   ../UI/Managers/WitchRuntimeService.m
+    ../UI/Screens/MainMenu/MainMenuViewController.m
+     WitchAIService.m
+     WitchLogReporter.m
+     LogEngine/WitchLogIndex.m
+     LogEngine/WitchLogSnapshot.m
+     LogUpload/WitchLogUpload.m
+     WitchAppAttest.m
+     WitchCrypto.m
    ../UI/Screens/CrashLog/CrashLogAnalyzer.m
    ../UI/Screens/CrashLog/CrashScreenViewController.m
+   ../UI/Screens/AI/WitchAIChatViewController.m
    ../UI/Screens/Game/GameListViewController.m
    ../UI/Screens/Mod/ModListViewController.m
    ../UI/Screens/Mod/ModDetailViewController.m
    ../UI/Screens/Mod/MrpackInstaller.m
    ../UI/Screens/Mod/ModrinthService.m
    ../UI/Screens/Mod/CurseForgeService.m
+   ../UI/Screens/Mod/ModSourceService.m
    ../UI/Screens/Modpack/ModpackListViewController.m
    ../UI/Screens/Shader/ShaderListViewController.m
    ../UI/Screens/Server/ServerListViewController.m
    ../UI/Screens/Settings/SettingsViewController.m
    ../UI/Screens/Settings/CreditsService.m
-   ../UI/Screens/Settings/CursorManageViewController.m
-   ../UI/Screens/Settings/CursorHitboxEditorViewController.m
+    ../UI/Screens/Settings/CursorSettingsViewController.m
+    ../UI/Screens/Settings/CursorTypeDetailViewController.m
+    ../UI/Screens/Settings/CursorHitboxEditorViewController.m
+   ../UI/Screens/Settings/LauncherUpdateViewController.m
+   ../UI/Screens/Settings/RuntimeDownloadViewController.m
    ../UI/Screens/Account/AccountViewController.m
    ../UI/Screens/ProfileSettings/ProfileSettingsViewController.m
+   ../UI/Screens/ProfileSettings/ProfileTabbedPageViewController.m
+   ../UI/Screens/ProfileSettings/ProfileOverviewVC.m
+   ../UI/Screens/ProfileSettings/ProfileContentListVC.m
+   ../UI/Screens/ProfileSettings/ProfileWorldsVC.m
+   ../UI/Screens/ProfileSettings/ProfileItemCell.m
    ../UI/Screens/Download/DownloadHubViewController.m
    ../UI/Screens/Download/VersionBrowserViewController.m
     ../UI/Screens/Download/MapListViewController.m
@@ -371,6 +416,7 @@ target_link_libraries(Witch
   PUBLIC AFNetworking
   TouchControllerBridge
   lzma
+  z
   "-F'${CMAKE_CURRENT_LIST_DIR}/build'"
   "-F'${CMAKE_CURRENT_LIST_DIR}/resources/Frameworks'"
   "-framework AltKit"
@@ -383,6 +429,7 @@ target_link_libraries(Witch
   "-framework CoreImage"
   "-framework CoreMotion"
   "-framework GameController"
+  "-framework IOSurface"
   "-framework IOKit"
   "-framework PhotosUI"
   "-framework QuartzCore"
@@ -393,9 +440,15 @@ target_link_libraries(Witch
   "-framework UniformTypeIdentifiers"
   "-framework UnzipKit"
   "-framework WebKit"
+  "-framework DeviceCheck"
   "-weak_framework SafariServices"
 )
 set_target_properties(Witch PROPERTIES
   MACOSX_BUNDLE TRUE
   MACOSX_FRAMEWORK_IDENTIFIER org.cmake.ExecutableTarget
-  MACOSX_BUNDLE_INFO_PLIST "${CMAKE_CURRENT_LIST_DIR}/Info.plist")
+  MACOSX_BUNDLE_INFO_PLIST "${CMAKE_CURRENT_LIST_DIR}/Info.plist"
+  CXX_STANDARD 23
+  CXX_STANDARD_REQUIRED ON
+  OBJCXX_STANDARD 23
+  OBJCXX_STANDARD_REQUIRED ON
+)

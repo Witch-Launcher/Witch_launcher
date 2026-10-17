@@ -313,6 +313,11 @@ void TParseContextBase::checkIndex(const TSourceLoc& loc, const TType& type, int
             error(loc, "", "[", "cooperative vector index out of range '%d'", index);
             index = type.computeNumComponents() - 1;
         }
+    } else if (type.isLongVector()) {
+        if (!type.hasSpecConstantVectorComponents() && index >= type.computeNumComponents()) {
+            error(loc, "", "[", "vector index out of range '%d'", index);
+            index = type.computeNumComponents() - 1;
+        }
     }
 }
 
@@ -699,14 +704,14 @@ void TParseContextBase::growAtomicCounterBlock(int binding, const TSourceLoc& lo
         TQualifier blockQualifier;
         blockQualifier.clear();
         blockQualifier.storage = EvqBuffer;
-        
+
         char charBuffer[512];
         if (binding != TQualifier::layoutNotSet) {
             snprintf(charBuffer, 512, "%s_%d", getAtomicCounterBlockName(), binding);
         } else {
             snprintf(charBuffer, 512, "%s_0", getAtomicCounterBlockName());
         }
-        
+
         TType blockType(new TTypeList, *NewPoolTString(charBuffer), blockQualifier);
         setUniformBlockDefaults(blockType);
         blockType.getQualifier().layoutPacking = ElpStd430;

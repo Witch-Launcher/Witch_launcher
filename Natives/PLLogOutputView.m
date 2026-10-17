@@ -2,6 +2,7 @@
 #import "SurfaceViewController.h"
 #import "utils.h"
 #import "CrashScreenViewController.h"
+#import "AppSheet.h"
 
 @interface PLLogOutputView()<UITableViewDataSource, UITableViewDelegate>
 @property(nonatomic) UITableView* logTableView;
@@ -85,19 +86,15 @@ static PLLogOutputView* current;
         return;
     }
 
-    UIAlertController *alert = [UIAlertController alertControllerWithTitle:nil message:line preferredStyle:UIAlertControllerStyleActionSheet];
-    alert.popoverPresentationController.sourceView = cell;
-    alert.popoverPresentationController.sourceRect = cell.bounds;
-    UIAlertAction *share = [UIAlertAction actionWithTitle:localize(localize(@"Share", nil), nil) style:UIAlertActionStyleDefault handler:^(UIAlertAction * _Nonnull action) {
+    [AppSheet showOptionsWithTitle:nil message:line options:@[
+        @{@"title": localize(localize(@"Share", nil), nil), @"icon": @"square.and.arrow.up"},
+    ] selectedIndex:NSNotFound selection:^(NSInteger idx) {
+        if (idx != 0) return;
         UIActivityViewController *activityVC = [[UIActivityViewController alloc] initWithActivityItems:@[line] applicationActivities:nil];
         activityVC.popoverPresentationController.sourceView = _navigationBar;
         activityVC.popoverPresentationController.sourceRect = _navigationBar.bounds;
         [currentVC() presentViewController:activityVC animated:YES completion:nil];
     }];
-    UIAlertAction *cancel = [UIAlertAction actionWithTitle:localize(@"Cancel", nil) style:UIAlertActionStyleCancel handler:nil];
-    [alert addAction:share];
-    [alert addAction:cancel];
-    [currentVC() presentViewController:alert animated:YES completion:nil];
 }
 
 - (void)actionClearLogOutput {

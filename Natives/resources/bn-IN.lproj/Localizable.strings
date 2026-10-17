@@ -1,0 +1,4 @@
+/* Language display name shown in the launcher language list.
+   Edit the value to rename this language — no code changes needed. */
+"language.name" = "বাংলা (ভারত)";
+

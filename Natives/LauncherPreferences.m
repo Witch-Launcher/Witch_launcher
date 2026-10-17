@@ -4,6 +4,7 @@
 #import "PLPreferences.h"
 #import "UIKit+hook.h"
 #import <CoreFoundation/CoreFoundation.h>
+#import "WitchCrypto.h"
 
 static PLPreferences* pref;
 
@@ -26,8 +27,38 @@ void toggleIsolatedPref(BOOL forceEnable) {
     [pref toggleIsolationForced:forceEnable];
 }
 
+static BOOL WitchShouldEncryptPref(NSString *key) {
+    if (!key) return NO;
+    // Encrypt all sensitive witch keys + user-owned keys
+    if ([key isEqualToString:@"witch.proxy_token"]) return YES;
+    if ([key isEqualToString:@"witch.proxy_hmac"]) return YES;
+    if ([key isEqualToString:@"witch.proxy_hmac_secret"]) return YES;
+    if ([key isEqualToString:@"witch.proxy_base_url"]) return YES;
+    if ([key isEqualToString:@"witch.curseforge_own_key"]) return YES;
+    if ([key isEqualToString:@"witch.ai_own_key"]) return YES;
+    if ([key isEqualToString:@"curseforge.api_key"]) return YES;
+    return NO;
+}
+
 id getPrefObject(NSString *key) {
-    return [pref getObject:key];
+    id val = [pref getObject:key];
+    if (WitchShouldEncryptPref(key) && [val isKindOfClass:[NSString class]]) {
+        NSString *s = (NSString *)val;
+        if ([WitchCrypto isEncryptedString:s]) {
+            NSString *dec = [WitchCrypto decryptPrefValue:s];
+            return dec ?: s;
+        } else if (s.length > 0 && [WitchCrypto isEnabled]) {
+            // Lazy migration: plain pref -> encrypt at rest in background
+            NSString *keyCopy = [key copy];
+            NSString *valCopy = [s copy];
+            dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
+                // Re-encrypt via setPrefObject (will apply WitchShouldEncryptPref check)
+                // Delay slightly to avoid reentrancy during launch
+                setPrefObject(keyCopy, valCopy);
+            });
+        }
+    }
+    return val;
 }
 BOOL getPrefBool(NSString *key) {
     return [getPrefObject(key) boolValue];
@@ -40,6 +71,15 @@ NSInteger getPrefInt(NSString *key) {
 }
 
 void setPrefObject(NSString *key, id value) {
+    // Auto-encrypt sensitive witch prefs at rest (AES-256-GCM)
+    if (WitchShouldEncryptPref(key) && [value isKindOfClass:[NSString class]]) {
+        NSString *s = (NSString *)value;
+        if (s.length > 0 && ![WitchCrypto isEncryptedString:s] && [WitchCrypto isEnabled]) {
+            NSString *enc = [WitchCrypto encryptPrefValue:s];
+            if (enc.length > 0) value = enc;
+        }
+        // empty string stays empty (clearing pref)
+    }
     [pref setObject:key value:value];
 }
 void setPrefBool(NSString *key, BOOL value) {
@@ -144,7 +184,9 @@ NSArray* getRendererKeys(BOOL containsDefault) {
         @ RENDERER_NAME_MOBILEGLUES,
         @ RENDERER_NAME_LTW,
         @ RENDERER_NAME_VK_ZINK,
-        @ RENDERER_NAME_MOLTENVK
+        @ RENDERER_NAME_MOLTENVK,
+        @ RENDERER_NAME_MOBILEGL,
+        @ RENDERER_NAME_TGLMT
     ].mutableCopy;
 
     if (containsDefault) {
@@ -159,6 +201,12 @@ NSArray* getRendererNames(BOOL containsDefault) {
     if (containsDefault) {
         [array addObject:@"(default)"];
     }
+    // localize() trả về key khi thiếu bản dịch — fallback tiếng Anh để
+    // picker không hiện key thô ở ngôn ngữ chưa dịch TGLMT.
+    NSString *tglmtName = localize(@"preference.title.renderer.debug.tglmt", nil);
+    if ([tglmtName hasPrefix:@"preference.title"]) {
+        tglmtName = @"TGLMT (Metal) - exports OpenGL 4.6 Core via Metal, A11+";
+    }
     NSString *names[] = {
         localize(@"preference.title.renderer.debug.auto", nil),
         localize(@"preference.title.renderer.debug.gl4es", nil),
@@ -166,7 +214,9 @@ NSArray* getRendererNames(BOOL containsDefault) {
         localize(@"preference.title.renderer.debug.mg", nil),
         localize(@"preference.title.renderer.debug.ltw", nil),
         localize(@"preference.title.renderer.debug.zink", nil),
-        localize(@"preference.title.renderer.debug.vulkan", nil)
+        localize(@"preference.title.renderer.debug.vulkan", nil),
+        localize(@"preference.title.renderer.debug.mobilegl", nil),
+        tglmtName
     };
     for (int i = 0; i < sizeof(names)/sizeof(names[0]); i++) {
         if (names[i]) {

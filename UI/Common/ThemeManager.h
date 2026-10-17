@@ -22,6 +22,15 @@ extern NSString * const ThemeDidChangeNotification;
 @property (nonatomic, readonly) UIColor *warningColor;
 @property (nonatomic, readonly) UIColor *errorColor;
 @property (nonatomic, readonly) UIColor *buttonTextColor;
+// Luminance-based readable text color for an arbitrary background (same
+// rule as buttonTextColor, but evaluated against the given color instead
+// of the accent). Use for badges, pills and selected segments.
+- (UIColor *)contrastTextColorForBackground:(UIColor *)background;
+// Theme a segmented control: accent selection + readable titles in both
+// modes (default mono accent is white in dark / black in light, so a
+// hardcoded white selected title turns invisible). Preserves each state's
+// font, only fixes colors.
+- (void)styleSegmentedControl:(UISegmentedControl *)seg;
 
 @property (nonatomic) UIImage *backgroundImage;
 @property (nonatomic) UIImage *blurredBackgroundImage;

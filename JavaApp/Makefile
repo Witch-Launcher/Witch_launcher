@@ -24,7 +24,7 @@ $(shell mkdir -p $(JAVAC_TMPDIR))
 SOURCES := $(shell find $(SOURCEDIR) -type f -name '*.java')
 CLASSES := $(SOURCES:$(SOURCEDIR)/%.java=$(OUTPUTDIR)/%.class)
 
-TARGETS := $(shell find $(SOURCEDIR) -mindepth 1 -maxdepth 1 -type d)
+TARGETS := $(shell find $(SOURCEDIR) -mindepth 1 -maxdepth 1 -type d ! -name agent)
 TARGETS := $(TARGETS:$(SOURCEDIR)/%=$(OUTPUTDIR)/%.jar)
 TARGETS += $(OUTPUTDIR)/lwjgl-3.3.3.jar $(OUTPUTDIR)/lwjgl-3.3.6.jar $(OUTPUTDIR)/lwjgl-3.4.1.jar $(OUTPUTDIR)/cacio-init-agent.jar
 
@@ -116,6 +116,10 @@ $(OUTPUTDIR)/lwjgl-3.4.1.jar: $(CLASSES)
 	@cd $(OUTPUTDIR)/lwjgl41_lib && $(BOOTJDK)/jar -xf "../../../lwjgl.jar" && rm -rf META-INF
 	@cd $(OUTPUTDIR)/lwjgl41_lib && find ../../libs/lwjgl41 -name 'lwjgl*.jar' ! -name 'lwjgl.jar' -exec $(BOOTJDK)/jar -xf {} \; && rm -rf META-INF
 	@cd $(OUTPUTDIR)/lwjgl41_lib && $(BOOTJDK)/jar -xf "../../libs/lwjgl41/lwjgl.jar" && rm -rf META-INF
+	# Re-extract lwjgl-tinyfd.jar last: lwjgl-util.jar contains a stale
+	# TinyFileDialogs (boolean API) that overwrites the correct one from
+	# lwjgl-tinyfd.jar (int API) due to alphabetical extraction order.
+	@cd $(OUTPUTDIR)/lwjgl41_lib && $(BOOTJDK)/jar -xf "../../libs/lwjgl41/lwjgl-tinyfd.jar"
 	@cp -R $(OUTPUTDIR)/lwjgl/* $(OUTPUTDIR)/lwjgl41_lib/
 	# Forge 26.2 builds a JPMS layer containing the classpath jars; the merged
 	# org/jspecify from lwjgl-core would split the package with the real

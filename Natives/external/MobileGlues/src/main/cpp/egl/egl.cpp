@@ -16,7 +16,6 @@
 #include "loader.h"
 #include "trace.h"
 #include <EGL/eglext.h>
-#include <atomic>
 #include <cstdio>
 #include <mutex>
 #include <string>
@@ -28,8 +27,6 @@
 #define DEBUG 0
 
 namespace {
-
-    std::atomic<uint64_t> g_eglSwapCount{0};
 
     constexpr EGLint kBackendDesktopGlClientVersion = 3;
     constexpr EGLint kBackendDesktopGlRenderableBit = EGL_OPENGL_ES3_BIT;
@@ -410,7 +407,6 @@ namespace {
     // and every path that presents a frame has to go through here.
     EGLBoolean presentSurface(EGLDisplay dpy, EGLSurface surface) {
         LOAD_EGL(eglSwapBuffers)
-        g_eglSwapCount.fetch_add(1, std::memory_order_relaxed);
         if (global_settings.fsr1_setting == FSR1_Quality_Preset::Disabled) {
             return egl_eglSwapBuffers(dpy, surface);
         }
@@ -496,10 +492,6 @@ namespace {
     }
 
 } // namespace
-
-extern "C" __attribute__((visibility("default"))) uint64_t mobileglues_swap_count(void) {
-    return g_eglSwapCount.load(std::memory_order_relaxed);
-}
 
 extern "C"
 {

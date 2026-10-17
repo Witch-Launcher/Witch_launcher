@@ -33,4 +33,8 @@ double tm_battery_temperature_celsius(void);
 // unavailable.
 double tm_battery_percent(void);
 
+// Returns YES if the device is currently charging (plugged in),
+// NO if unplugged, or (-1) as int if battery state is unknown.
+int tm_battery_is_charging(void);
+
 #endif

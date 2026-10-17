@@ -354,6 +354,15 @@ public class GLFW
 
     public static final int GLFW_NOT_ALLOWED_CURSOR = 0x3600A;
 
+    /** Custom cursor shape for busy/waiting state (not in standard GLFW). */
+    public static final int GLFW_BUSY_CURSOR = 0x3600B;
+
+    /** Custom cursor shape for working in background (not in standard GLFW). */
+    public static final int GLFW_WORKING_IN_BACKGROUND_CURSOR = 0x3600C;
+
+    /** Custom cursor shape for help select (not in standard GLFW). */
+    public static final int GLFW_HELP_CURSOR = 0x3600D;
+
     /** Legacy name for compatibility. */
     public static final int GLFW_HRESIZE_CURSOR = GLFW_RESIZE_EW_CURSOR;
 
@@ -1231,10 +1240,23 @@ public class GLFW
         return 4L;
     }
     public static long glfwCreateStandardCursor(int shape) {
-        return 4L;
+        // Encode the shape constant directly into the handle so glfwSetCursor can read it.
+        return (long) shape;
     }
     public static void glfwDestroyCursor(@NativeType("GLFWcursor *") long cursor) {}
-    public static void glfwSetCursor(@NativeType("GLFWwindow *") long window, @NativeType("GLFWcursor *") long cursor) {}
+    public static void glfwSetCursor(@NativeType("GLFWwindow *") long window, @NativeType("GLFWcursor *") long cursor) {
+        // Extract shape constant from cursor handle and notify native side for cursor type switching.
+        if (cursor != 0) {
+            int shape = (int) (cursor & 0xFFFFL);
+            nativeSetCursorType(shape);
+        } else {
+            // GLFW spec: glfwSetCursor(window, NULL) resets to default arrow cursor.
+            nativeSetCursorType(GLFW_ARROW_CURSOR & 0xFFFF);
+        }
+    }
+
+    /** Native method to notify the launcher of cursor shape changes. */
+    private static native void nativeSetCursorType(int shape);
 
     public static boolean glfwRawMouseMotionSupported() {
         // Should be not supported?

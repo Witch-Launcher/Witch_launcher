@@ -9,6 +9,9 @@
 #import "MrpackInstaller.h"
 #import "ios_uikit_bridge.h"
 #import "AmethystBlurView.h"
+#import "utils.h"
+#import "CurseForgeService.h"
+#import "LauncherPreferences.h"
 
 @interface ModpackListViewController () <UITableViewDelegate, UITableViewDataSource, UISearchBarDelegate, UIDocumentPickerDelegate>
 @property (nonatomic) UILabel *titleLabel;
@@ -27,6 +30,9 @@
 @property (nonatomic) BOOL adjustingContentOffset;
 @property (nonatomic) NSString *currentQuery;
 @property (nonatomic) NSInteger pageSize;
+@property (nonatomic) NSString *selectedSource;
+@property (nonatomic) UISegmentedControl *sourceControl;
+@property (nonatomic) NSLayoutConstraint *sourceControlWidthConstraint;
 @end
 
 @implementation ModpackListViewController
@@ -34,6 +40,7 @@
 - (void)viewDidLoad {
     [super viewDidLoad];
     [AmethystBlurView installInView:self.view];
+    _selectedSource = @"modrinth";
     _pageCache = [NSMutableDictionary dictionary];
     _pageOffsets = [NSMutableArray array];
     _hasMore = YES;
@@ -53,12 +60,12 @@
     _titleLabel = [[UILabel alloc] init];
     _titleLabel.translatesAutoresizingMaskIntoConstraints = NO;
     _titleLabel.font = [UIFont systemFontOfSize:22 weight:UIFontWeightBold];
-    _titleLabel.text = @"Modpacks";
+    _titleLabel.text = localize(@"Modpacks", nil);
     [self.view addSubview:_titleLabel];
 
     _importButton = [UIButton buttonWithType:UIButtonTypeSystem];
     _importButton.translatesAutoresizingMaskIntoConstraints = NO;
-    [_importButton setTitle:@"Import .mrpack" forState:UIControlStateNormal];
+    [_importButton setTitle:localize(@"Import .mrpack", nil) forState:UIControlStateNormal];
     [_importButton setImage:[UIImage systemImageNamed:@"square.and.arrow.down"] forState:UIControlStateNormal];
     _importButton.titleLabel.font = [UIFont systemFontOfSize:13 weight:UIFontWeightSemibold];
     [_importButton addTarget:self action:@selector(importMrpack) forControlEvents:UIControlEventTouchUpInside];
@@ -67,9 +74,20 @@
     _searchBar = [[UISearchBar alloc] init];
     _searchBar.translatesAutoresizingMaskIntoConstraints = NO;
     _searchBar.delegate = self;
-    _searchBar.placeholder = @"Search modpacks...";
+    _searchBar.placeholder = localize(@"download.search.modpacks", nil);
     _searchBar.searchBarStyle = UISearchBarStyleMinimal;
     [self.view addSubview:_searchBar];
+
+    _sourceControl = [[UISegmentedControl alloc] initWithItems:@[@"Modrinth", @"CurseForge"]];
+    _sourceControl.translatesAutoresizingMaskIntoConstraints = NO;
+    _sourceControl.selectedSegmentIndex = 0;
+    _sourceControl.selectedSegmentTintColor = ThemeManager.shared.accentColor;
+    _sourceControl.layer.cornerRadius = 8;
+    _sourceControl.clipsToBounds = YES;
+    [_sourceControl setTitleTextAttributes:@{NSForegroundColorAttributeName: ThemeManager.shared.primaryTextColor, NSFontAttributeName: [UIFont systemFontOfSize:11 weight:UIFontWeightMedium]} forState:UIControlStateNormal];
+    [_sourceControl setTitleTextAttributes:@{NSForegroundColorAttributeName: ThemeManager.shared.buttonTextColor, NSFontAttributeName: [UIFont systemFontOfSize:11 weight:UIFontWeightSemibold]} forState:UIControlStateSelected];
+    [_sourceControl addTarget:self action:@selector(sourceChanged) forControlEvents:UIControlEventValueChanged];
+    [self.view addSubview:_sourceControl];
 
     _spinner = [[UIActivityIndicatorView alloc] initWithActivityIndicatorStyle:UIActivityIndicatorViewStyleLarge];
     _spinner.translatesAutoresizingMaskIntoConstraints = NO;
@@ -78,7 +96,7 @@
 
     _emptyLabel = [[UILabel alloc] init];
     _emptyLabel.translatesAutoresizingMaskIntoConstraints = NO;
-    _emptyLabel.text = @"No modpacks found.\nTry a different search.";
+    _emptyLabel.text = localize(@"download.empty.modpacks", nil);
     _emptyLabel.numberOfLines = 0;
     _emptyLabel.textAlignment = NSTextAlignmentCenter;
     _emptyLabel.font = [UIFont systemFontOfSize:14 weight:UIFontWeightRegular];
@@ -100,6 +118,7 @@
 
     [_tableView registerClass:[AmethystProjectCell class] forCellReuseIdentifier:@"ModpackCell"];
 
+    _sourceControlWidthConstraint = [_sourceControl.widthAnchor constraintEqualToConstant:160];
     [NSLayoutConstraint activateConstraints:@[
         [_titleLabel.topAnchor constraintEqualToAnchor:self.view.topAnchor constant:16],
         [_titleLabel.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor constant:20],
@@ -110,7 +129,12 @@
 
         [_searchBar.topAnchor constraintEqualToAnchor:_titleLabel.bottomAnchor constant:8],
         [_searchBar.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor constant:12],
-        [_searchBar.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor constant:-12],
+        [_searchBar.trailingAnchor constraintEqualToAnchor:_sourceControl.leadingAnchor constant:-8],
+
+        [_sourceControl.centerYAnchor constraintEqualToAnchor:_searchBar.centerYAnchor],
+        [_sourceControl.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor constant:-12],
+        _sourceControlWidthConstraint,
+        [_sourceControl.heightAnchor constraintEqualToConstant:32],
 
         [_spinner.centerXAnchor constraintEqualToAnchor:self.view.centerXAnchor],
         [_spinner.centerYAnchor constraintEqualToAnchor:self.view.centerYAnchor],
@@ -139,6 +163,9 @@
     _searchBar.searchTextField.textColor = theme.primaryTextColor;
     _searchBar.tintColor = theme.accentColor;
     _emptyLabel.textColor = theme.secondaryTextColor;
+    _sourceControl.selectedSegmentTintColor = theme.accentColor;
+    [_sourceControl setTitleTextAttributes:@{NSForegroundColorAttributeName: theme.primaryTextColor, NSFontAttributeName: [UIFont systemFontOfSize:11 weight:UIFontWeightMedium]} forState:UIControlStateNormal];
+    [_sourceControl setTitleTextAttributes:@{NSForegroundColorAttributeName: theme.buttonTextColor, NSFontAttributeName: [UIFont systemFontOfSize:11 weight:UIFontWeightSemibold]} forState:UIControlStateSelected];
 }
 
 #pragma mark - Import local .mrpack
@@ -181,6 +208,11 @@
     }
 }
 
+- (void)sourceChanged {
+    _selectedSource = _sourceControl.selectedSegmentIndex == 0 ? @"modrinth" : @"curseforge";
+    [self loadModpacksWithQuery:_searchBar.text ?: @"" offset:0];
+}
+
 - (void)loadModpacksWithQuery:(NSString *)query offset:(NSInteger)offset {
     if (offset == 0) {
         _hasMore = YES;
@@ -194,7 +226,7 @@
         _isLoadingMore = YES;
     }
 
-    [ModrinthService.shared searchProjectsWithType:@"modpack" query:query offset:offset limit:50 categoryFilter:nil loaderFilter:nil gameVersionFilter:nil completion:^(NSArray<NSDictionary *> *results, NSError *error) {
+    void (^handleResults)(NSArray *, NSError *) = ^(NSArray<NSDictionary *> *results, NSError *error) {
         [self.spinner stopAnimating];
         [self.tableView.refreshControl endRefreshing];
         self.isLoadingMore = NO;
@@ -215,7 +247,12 @@
             [self.tableView reloadData];
             [self trimModpacksIfNeeded];
         }
-    }];
+    };
+    if ([_selectedSource isEqualToString:@"curseforge"]) {
+        [CurseForgeService.shared searchProjectsWithClassId:4471 query:query offset:offset limit:50 loaderFilter:nil gameVersionFilter:nil completion:handleResults];
+    } else {
+        [ModrinthService.shared searchProjectsWithType:@"modpack" query:query offset:offset limit:50 categoryFilter:nil loaderFilter:nil gameVersionFilter:nil completion:handleResults];
+    }
 }
 
 - (void)trimModpacksIfNeeded {

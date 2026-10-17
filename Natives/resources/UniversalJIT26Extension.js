@@ -12,49 +12,81 @@ legacyCommands[0x69] = function(brkResponse) {
     }
 };
 
-legacyCommands[0x6a] = function(brkResponse) {
-    let rw = x1;
-    let rx = parseRegNum(brkResponse, 0x02);
-    let size = parseRegNum(brkResponse, 0x13);
-    if (!rx) {
-        rx = parseRegNum(brkResponse, 0x14);
+function readRegister(regNum) {
+    const hexReg = regNum.toString(16);
+    let regResponse = send_command(`p${hexReg};thread:${tid};`);
+    if (!regResponse || regResponse.startsWith('E') || regResponse.length < 16) {
+        regResponse = send_command(`p${hexReg}`);
     }
-    if (!rw) {
-        rw = parseRegNum(brkResponse, 0x08);
+    if (regResponse && !regResponse.startsWith('E') && regResponse.length >= 16) {
+        return littleEndianHexStringToNumber(regResponse.substr(0, 16));
     }
-    if (!rx || !rw) {
-        log(`Mirror prepare brk 0x6a: missing rx/rw (x1=${x1}, x2=${parseRegNum(brkResponse, 0x02)})`);
-        return;
-    }
-    // Mirror superpage lives in a fixed 4 GB band (0x700000000-0x800000000).
-    // Reject out-of-band pairs: a register-layout shift between JDK builds
-    // would otherwise prepare_memory_region() on random addresses.
-    if (rx < 0x700000000n || rx >= 0x800000000n || rw <= rx || rw > 0x800000000n) {
-        log(`Mirror prepare brk 0x6a: out-of-band rx=0x${rx.toString(16)} rw=0x${rw.toString(16)}, skipping (layout drift?)`);
-        return;
-    }
-    if (!size || size < 16n * 1024n * 1024n) {
-        if (rw > rx) {
-            size = rw - rx;
-        } else {
-            log(`Mirror prepare brk 0x6a: invalid mirror layout rx=${rx} rw=${rw}`);
-            return;
-        }
-    }
-    log(`Mirror prepare brk 0x6a: RX=0x${rx.toString(16)} RW=0x${rw.toString(16)} size=0x${size.toString(16)}`);
-    try {
-        prepare_memory_region(rx, size);
-        prepare_memory_region(rw, size);
-        log(`Prepared mirror pair RX=0x${rx.toString(16)} RW=0x${rw.toString(16)}`);
-    } catch (e) {
-        log(`ERROR: mirror prepare failed: ${e}`);
-    }
-};
+    return null;
+}
 
 function parseRegNum(brkResponse, regNum) {
     const hex = regNum.toString(16).padStart(2, '0');
     const match = new RegExp(`${hex}:(?<reg>[0-9a-f]{16});`).exec(brkResponse);
-    return match ? littleEndianHexStringToNumber(match.groups['reg']) : null;
+    if (match) {
+        return littleEndianHexStringToNumber(match.groups['reg']);
+    }
+    return readRegister(regNum);
 }
+
+function resolveMirrorPair(brkResponse, rxGuess, rwGuess) {
+    const inBand = (v) => v !== null && v !== undefined && v >= 0x100000000n && v < 0x10000000000n;
+    const fmt = (v) => (v === null || v === undefined ? "?" : "0x" + v.toString(16));
+    let x8v = null, x20v = null;
+    try { x8v = parseRegNum(brkResponse, 0x08); } catch (e) { x8v = null; }
+    try { x20v = parseRegNum(brkResponse, 0x14); } catch (e) { x20v = null; }
+    log(`Mirror brk 0x6a regs: x1=${fmt(rwGuess)} x2=${fmt(rxGuess)} x8=${fmt(x8v)} x20=${fmt(x20v)}`);
+    if (inBand(x20v) && inBand(x8v)) {
+        log(`Mirror pair from x20/x8 (live regs): RX=0x${x20v.toString(16)} RW=0x${x8v.toString(16)}`);
+        return { rx: x20v, rw: x8v };
+    }
+    if (inBand(rxGuess) && inBand(rwGuess)) {
+        log(`Mirror pair from x1/x2 (legacy fallback)`);
+        return { rx: rxGuess, rw: rwGuess };
+    }
+    return null;
+}
+
+legacyCommands[0x6a] = function(brkResponse) {
+    let rwGuess = x1;
+    let rxGuess = parseRegNum(brkResponse, 0x02);
+    if (!rxGuess) {
+        rxGuess = parseRegNum(brkResponse, 0x00);
+    }
+    if (!rwGuess) {
+        rwGuess = parseRegNum(brkResponse, 0x01);
+    }
+    const pair = resolveMirrorPair(brkResponse, rxGuess, rwGuess);
+    if (!pair) {
+        log(`Mirror prepare brk 0x6a: no valid pair (rwGuess=${rwGuess}, rxGuess=${rxGuess}); region stays unblessed`);
+        return;
+    }
+    const rx = pair.rx, rw = pair.rw;
+    // Range-guard (band: 4 GB..1 TB — iOS 27 parks large reservations high,
+    // e.g. CodeHeap RX=0x700F004000; see UniversalJIT26.js MIRROR_BAND_*).
+    if (rx < 0x100000000n || rx >= 0x10000000000n || rw < 0x100000000n || rw >= 0x10000000000n) {
+        log(`Mirror prepare brk 0x6a: out-of-band rx=0x${rx.toString(16)} rw=0x${rw.toString(16)}, skipping (layout drift?)`);
+        return;
+    }
+    let size = 0xf000000n; // 240 MB default
+    if (rw > rx) {
+        let diff = rw - rx;
+        if (diff >= 16n * 1024n * 1024n) {
+            size = diff;
+        }
+    }
+    log(`Mirror prepare brk 0x6a: RX=0x${rx.toString(16)} RW=0x${rw.toString(16)} size=0x${size.toString(16)}`);
+    try {
+        let r1 = prepare_memory_region(rx, size);
+        let r2 = prepare_memory_region(rw, size);
+        log(`Prepared mirror pair RX=0x${rx.toString(16)} (${r1}) RW=0x${rw.toString(16)} (${r2})`);
+    } catch (e) {
+        log(`ERROR: mirror prepare failed: ${e}`);
+    }
+};
 
 log('Amethyst UniversalJIT26 extension loaded (handlers 0x69/0x6a, detach disabled)');

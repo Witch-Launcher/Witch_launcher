@@ -9,6 +9,7 @@
 
 #import <UIKit/UIKit.h>
 #import <QuartzCore/QuartzCore.h>
+#import <objc/runtime.h>
 #import "AppDelegate.h"
 #import "SurfaceViewController.h"
 
@@ -453,6 +454,37 @@ Java_org_lwjgl_glfw_GLFW_glfwSetCursorPos(JNIEnv *env, jclass clazz, jlong windo
     cLastY = cursorY = ypos;
 }
 
+// Cursor type switching: called from Java when glfwSetCursor or glfwCreateStandardCursor is invoked.
+// shape is the GLFW cursor shape constant (e.g. GLFW_ARROW_CURSOR = 0x36001).
+JNIEXPORT void JNICALL
+Java_org_lwjgl_glfw_GLFW_nativeSetCursorType(JNIEnv *env, jclass clazz, jint shape) {
+    currentCursorShape = shape;
+    int capturedShape = shape;
+    dispatch_async(dispatch_get_main_queue(), ^{
+        Class cls = NSClassFromString(@"CursorTypeManager");
+        if (cls) {
+            // Use performSelector for class method with two int/BOOL args
+            // objc_msgSend for class methods: ((id(*)(id, SEL, int, BOOL))objc_msgSend)(cls, sel, shape, NO)
+            SEL sel = NSSelectorFromString(@"handleCursorShapeChange:isSDL3:");
+            ((void(*)(id, SEL, int, BOOL))objc_msgSend)(cls, sel, capturedShape, NO);
+        }
+    });
+}
+
+// SDL3 cursor type switching: called from native SDL3 hook when SDL_SetCursor is invoked.
+// sdlShape is the SDL3 system cursor constant (e.g. SDL_SYSTEM_CURSOR_DEFAULT = 0).
+void nativeSetCursorTypeFromSDL3(int sdlShape) {
+    currentCursorShape = sdlShape;
+    int capturedShape = sdlShape;
+    dispatch_async(dispatch_get_main_queue(), ^{
+        Class cls = NSClassFromString(@"CursorTypeManager");
+        if (cls) {
+            SEL sel = NSSelectorFromString(@"handleCursorShapeChange:isSDL3:");
+            ((void(*)(id, SEL, int, BOOL))objc_msgSend)(cls, sel, capturedShape, YES);
+        }
+    });
+}
+
 void sendData(short type, int i1, int i2, short i3, short i4) {
     size_t counter = atomic_load_explicit(&eventCounter, memory_order_acquire);
     if (counter < 7999) {
@@ -664,6 +696,60 @@ static uint32_t aasdl_winID;
 static int aasdl_winW;
 static int aasdl_winH;
 
+// SDL3 cursor hook: track cursor shape from SDL_CreateSystemCursor
+typedef void* (*SDL_CreateSystemCursor_func)(int);
+typedef void* (*SDL_SetCursor_func)(void*);
+typedef void (*SDL_DestroyCursor_func)(void*);
+
+static SDL_CreateSystemCursor_func real_SDL_CreateSystemCursor;
+static SDL_SetCursor_func real_SDL_SetCursor;
+static SDL_DestroyCursor_func real_SDL_DestroyCursor;
+
+// Map cursor pointer to SDL3 shape constant (simple cache for system cursors)
+#define SDL_CURSOR_MAP_SIZE 64
+static void* sdlCursorPtrs[SDL_CURSOR_MAP_SIZE];
+static int sdlCursorShapes[SDL_CURSOR_MAP_SIZE];
+static int sdlCursorCount = 0;
+
+static void trackCursor(void* cursor, int shape) {
+    if (!cursor) return;
+    for (int i = 0; i < sdlCursorCount; i++) {
+        if (sdlCursorPtrs[i] == cursor) {
+            sdlCursorShapes[i] = shape;
+            return;
+        }
+    }
+    if (sdlCursorCount < SDL_CURSOR_MAP_SIZE) {
+        sdlCursorPtrs[sdlCursorCount] = cursor;
+        sdlCursorShapes[sdlCursorCount] = shape;
+        sdlCursorCount++;
+    }
+}
+
+static int lookupCursorShape(void* cursor) {
+    if (!cursor) return -1;
+    for (int i = 0; i < sdlCursorCount; i++) {
+        if (sdlCursorPtrs[i] == cursor) {
+            return sdlCursorShapes[i];
+        }
+    }
+    return -1;
+}
+
+static void* hooked_SDL_CreateSystemCursor(int id) {
+    void* cursor = real_SDL_CreateSystemCursor(id);
+    trackCursor(cursor, id);
+    return cursor;
+}
+
+static void* hooked_SDL_SetCursor(void* cursor) {
+    int shape = lookupCursorShape(cursor);
+    if (shape >= 0) {
+        nativeSetCursorTypeFromSDL3(shape);
+    }
+    return real_SDL_SetCursor(cursor);
+}
+
 static BOOL aasdl_available(void) {
     if (!aasdl_PushEvent) {
         aasdl_PushEvent = (int (*)(void *)) dlsym(RTLD_DEFAULT, "SDL_PushEvent");
@@ -727,6 +813,16 @@ void aasdl_setMainReady(NSString *nativesDir) {
     } else {
         NSLog(@"[SDLInject] SDL_SetMainReady not found in libSDL3.dylib");
     }
+
+    // Hook SDL3 cursor functions for cursor type switching
+    real_SDL_CreateSystemCursor = (SDL_CreateSystemCursor_func) dlsym(handle, "SDL_CreateSystemCursor");
+    real_SDL_SetCursor = (SDL_SetCursor_func) dlsym(handle, "SDL_SetCursor");
+    real_SDL_DestroyCursor = (SDL_DestroyCursor_func) dlsym(handle, "SDL_DestroyCursor");
+    if (real_SDL_CreateSystemCursor && real_SDL_SetCursor) {
+        NSLog(@"[SDLInject] SDL3 cursor hooks installed");
+    } else {
+        NSLog(@"[SDLInject] SDL3 cursor hook functions not found, cursor type switching disabled");
+    }
 }
 
 static uint32_t aasdl_windowID(void) {
@@ -785,6 +881,15 @@ double AASDL_LastGrabChangeAge(void) {
 /* True if a physical key was pressed within the given number of seconds. */
 bool AASDL_HardwareKeySeenWithin(double seconds) {
     return aasdl_lastKeySec > 0 && (CACurrentMediaTime() - aasdl_lastKeySec) <= seconds;
+}
+
+/*
+ * Called by SDL3 (via dlsym) when the game sets a system cursor.
+ * shape is the SDL3 SystemCursor enum value (0=DEFAULT, 1=TEXT, etc.).
+ * Dispatches to CursorTypeManager on the main thread.
+ */
+void AASDL_NoteCursorShape(int shape) {
+    nativeSetCursorTypeFromSDL3(shape);
 }
 
 /*

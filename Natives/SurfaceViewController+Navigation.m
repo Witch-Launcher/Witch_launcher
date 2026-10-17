@@ -4,6 +4,7 @@
 #import "PLProfiles.h"
 #import "SurfaceViewController.h"
 #import "utils.h"
+#import "AppSheet.h"
 
 @implementation SurfaceViewController(Navigation)
 
@@ -104,14 +105,11 @@ static CGPoint lastCenterPoint;
 }
 
 - (void)actionForceClose {
-    UIAlertController* alert = [UIAlertController alertControllerWithTitle:nil
-        message:localize(@"game.menu.confirm.force_close", nil)
-        preferredStyle:UIAlertControllerStyleAlert];
-
-    UIAlertAction* cancelAction = [UIAlertAction actionWithTitle:localize(@"Cancel", nil) style:UIAlertActionStyleDefault handler:nil];
-    [alert addAction:cancelAction];
-
-    UIAlertAction* okAction = [UIAlertAction actionWithTitle:localize(@"OK", nil) style:UIAlertActionStyleDestructive handler:^(UIAlertAction * action) {
+    [AppSheet showConfirmWithTitle:nil
+                           message:localize(@"game.menu.confirm.force_close", nil)
+                      confirmTitle:localize(@"OK", nil)
+                       destructive:YES
+                         onConfirm:^{
         [UIView animateWithDuration:0.4 delay:0 options:UIViewAnimationOptionCurveEaseIn animations:^{
             self.rootView.center = CGPointMake(self.rootView.bounds.size.width/-2, self.rootView.center.y);
             self.menuView.frame = CGRectMake(self.view.frame.size.width, 0, 0, 0);
@@ -123,9 +121,6 @@ static CGPoint lastCenterPoint;
             }
         }];
     }];
-    [alert addAction:okAction];
-
-    [self presentViewController:alert animated:YES completion:nil];
 }
 
 - (void)actionOpenCustomControls {

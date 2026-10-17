@@ -12,20 +12,21 @@
 
 #include <objc/runtime.h>
 #include "ios_uikit_bridge.h"
+#import "AppSheet.h"
 #include "utils.h"
-#import "BlurredDialog.h"
+#import "AppErrorDialog.h"
 
 void internal_showDialog(NSString* title, NSString* message) {
     NSLog(@"[UI] Dialog shown: %@: %@", title, message);
 
-    UIWindow *alertWindow = [[UIWindow alloc] initWithWindowScene:UIWindow.mainWindow.windowScene];
-    alertWindow.frame = UIScreen.mainScreen.bounds;
-    alertWindow.rootViewController = [UIViewController new];
-    alertWindow.windowLevel = 1000;
-    alertWindow.backgroundColor = UIColor.clearColor;
-    [alertWindow makeKeyAndVisible];
-    // Frosted realtime dialog (samples the app behind the window)
-    [BlurredDialog presentInWindow:alertWindow title:title message:message okTitle:localize(@"OK", nil)];
+    // Route every legacy showDialog() through the global AppErrorDialog so all
+    // launcher errors share one frosted card + kind icon (tintable SF Symbol,
+    // no sticker/emoji) + haptic. Localize here so every caller gets the
+    // launcher language for free; dynamic messages pass through untouched.
+    NSString *lt = title ? localize(title, nil) : nil;
+    NSString *lm = message ? localize(message, nil) : nil;
+    // AppErrorDialog localizes again (idempotent) and picks its own window.
+    [AppErrorDialog presentLegacyTitle:lt message:lm];
 }
 
 void showDialog(NSString* title, NSString* message) {
@@ -50,34 +51,18 @@ JNIEXPORT void JNICALL Java_net_kdt_pojavlaunch_uikit_UIKit_showError(JNIEnv* en
 
 dispatch_async(dispatch_get_main_queue(), ^{
 
-    UIAlertController* alert = [UIAlertController
-        alertControllerWithTitle:title_o message:message_o
-        preferredStyle:UIAlertControllerStyleAlert];
-    NSMutableParagraphStyle *style = [[NSMutableParagraphStyle alloc] init];
-    style.alignment = NSTextAlignmentLeft;
-
-    NSMutableAttributedString *atrStr = [[NSMutableAttributedString alloc] initWithString:message_o attributes:@{NSParagraphStyleAttributeName:style,NSFontAttributeName:[UIFont systemFontOfSize:13.0]}];
-
-    [alert setValue:atrStr forKey:@"attributedMessage"];
-
-    UIAlertAction* okAction = [UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault
-        handler:^(UIAlertAction * action) {
-            if (exitIfOk == JNI_TRUE) {
-                exit(-1);
-            }
-        }];
-    [alert addAction:okAction];
-    
-    UIAlertAction* copyAction = [UIAlertAction actionWithTitle:@"Copy" style:UIAlertActionStyleDefault
-        handler:^(UIAlertAction * action) {
+    // Launcher-styled sheet (Copy / OK) instead of a raw system alert.
+    [AppSheet showOptionsWithTitle:title_o message:message_o options:@[
+        @{@"title": localize(@"Copy", nil), @"icon": @"doc.on.doc"},
+        @{@"title": localize(@"OK", nil), @"icon": @"checkmark"},
+    ] selectedIndex:NSNotFound selection:^(NSInteger idx) {
+        if (idx == 0) {
             UIPasteboard.generalPasteboard.string = message_o;
-            if (exitIfOk == JNI_TRUE) {
-                exit(-1);
-            }
-        }];
-    [alert addAction:copyAction];
-    
-    [currentVC() presentViewController:alert animated:YES completion:nil];
+        }
+        if (exitIfOk == JNI_TRUE) {
+            exit(-1);
+        }
+    }];
 });
 }
 
@@ -177,44 +162,9 @@ UIInterfaceOrientationMask amethyst_orientation_mask(void) {
     return UIInterfaceOrientationMaskAllButUpsideDown;
 }
 
-// Switch the home-screen app icon. "blue" reverts to the build's primary icon
-// (AppIcon-Light); "purple"/"dev" use their alternate icon sets. Not supported
-// on every sideload setup, so failures are only logged.
-static void applyLauncherAppIconAttempt(NSString *iconName, int attempt) {
-    UIApplication *app = UIApplication.sharedApplication;
-    NSString *current = app.alternateIconName;
-    BOOL same = (current == nil && iconName == nil) || (current != nil && [current isEqualToString:iconName]);
-    if (same) {
-        NSLog(@"[AppIcon] alternate icon already set to %@, skipping", iconName ?: @"primary");
-        return;
-    }
-    [app setAlternateIconName:iconName completionHandler:^(NSError *error) {
-        if (error) {
-            NSLog(@"[AppIcon] setAlternateIconName(%@) failed: %@", iconName ?: @"primary", error.localizedDescription);
-            // FBSOpenApplicationErrorDomain "The operation was cancelled" is
-            // returned when the call happens before the app is fully active
-            // (e.g. at launch). Retry with a delay rather than giving up.
-            if (attempt < 3) {
-                dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.8 * (attempt + 1) * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-                    applyLauncherAppIconAttempt(iconName, attempt + 1);
-                });
-            }
-        } else {
-            NSLog(@"[AppIcon] setAlternateIconName(%@) OK", iconName ?: @"primary");
-        }
-    }];
-}
-
-void applyLauncherAppIcon(void) {
-    NSString *style = getPrefObject(@"launcher.logo_style");
-    NSString *iconName = nil; // nil = primary AppIcon-Light
-    if ([style isEqualToString:@"purple"]) {
-        iconName = @"AppIcon-Purple";
-    } else if ([style isEqualToString:@"dev"]) {
-        iconName = @"AppIcon-Development";
-    }
-    applyLauncherAppIconAttempt(iconName, 0);
-}
+// Home-screen icon is fixed at build time (APP_ICON / asset catalog).
+// The runtime switchers below were removed: the alternate names they used
+// were never in Info.plist, so iOS fell back to the wrong default icon.
 
 void UIKit_returnToSplitView() {
     dispatch_async(dispatch_get_main_queue(), ^{
