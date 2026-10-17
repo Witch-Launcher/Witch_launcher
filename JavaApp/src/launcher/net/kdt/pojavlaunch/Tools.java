@@ -52,7 +52,20 @@ public final class Tools {
     public static final String DIR_GAME_PROFILE = System.getProperty("user.dir");
     
     public static final String DIR_APP_DATA = System.getenv("POJAV_HOME");
-    public static final String DIR_ACCOUNT_NEW = DIR_APP_DATA + "/accounts";
+
+    // Launcher-private files (accounts, cursors, runtimes, ...) live in the
+    // hidden ".amethyst" dir. Native sets POJAV_HIDDEN_HOME before the JVM
+    // starts; fall back to the same convention when it is missing.
+    private static String resolveHiddenHome() {
+        String hiddenHome = System.getenv("POJAV_HIDDEN_HOME");
+        if (hiddenHome == null || hiddenHome.isEmpty()) {
+            hiddenHome = DIR_APP_DATA + "/.amethyst";
+        }
+        return hiddenHome;
+    }
+
+    public static final String DIR_HIDDEN_HOME = resolveHiddenHome();
+    public static final String DIR_ACCOUNT_NEW = DIR_HIDDEN_HOME + "/accounts";
 
     // New since 2.4.2
     public static final String DIR_HOME_VERSION = DIR_GAME_NEW + "/versions";

@@ -51,7 +51,11 @@ didFinishDownloadingToURL:(NSURL *)location {
         }
         return;
     }
-    NSString *dest = [NSTemporaryDirectory() stringByAppendingPathComponent:[NSUUID UUID].UUIDString];
+    NSString *ext = downloadTask.response.suggestedFilename.pathExtension;
+    if (ext.length == 0) ext = downloadTask.originalRequest.URL.pathExtension;
+    NSString *tmpName = [NSUUID UUID].UUIDString;
+    if (ext.length > 0) tmpName = [tmpName stringByAppendingPathExtension:ext];
+    NSString *dest = [NSTemporaryDirectory() stringByAppendingPathComponent:tmpName];
     NSError *moveError = nil;
     [[NSFileManager defaultManager] moveItemAtURL:location toURL:[NSURL fileURLWithPath:dest] error:&moveError];
     if (self.onFinish) self.onFinish(moveError ? nil : dest, moveError);
@@ -383,9 +387,26 @@ didFinishDownloadingToURL:(NSURL *)location {
 
 #pragma mark - Extraction
 
+// Downloads may land with no extension (temp names); sniff magic bytes so
+// archives keep working even when the URL/server hides the format.
+static NSString *WitchArchiveExtensionForFile(NSString *path) {
+    NSString *ext = path.pathExtension.lowercaseString;
+    if (ext.length > 0) return ext;
+    NSFileHandle *fh = [NSFileHandle fileHandleForReadingAtPath:path];
+    if (!fh) return ext;
+    NSData *magic = [fh readDataOfLength:8];
+    [fh closeFile];
+    if (magic.length >= 6) {
+        const uint8_t *b = magic.bytes;
+        if (b[0] == 0xFD && b[1] == '7' && b[2] == 'z' && b[3] == 'X' && b[4] == 'Z' && b[5] == 0x00) return @"xz";
+        if (b[0] == 'P' && b[1] == 'K') return @"zip";
+    }
+    return ext;
+}
+
 - (BOOL)extractArchive:(NSString *)archive to:(NSString *)target report:(void(^)(float, NSString *))report
                   base:(float)base span:(float)span item:(WitchRuntimeItem *)item error:(NSError **)error {
-    NSString *ext = archive.pathExtension.lowercaseString;
+    NSString *ext = WitchArchiveExtensionForFile(archive);
     if ([ext isEqualToString:@"xz"] || [ext isEqualToString:@"txz"]) {
         NSDictionary *attrs = [[NSFileManager defaultManager] attributesOfItemAtPath:archive error:nil];
         unsigned long long size = [attrs[NSFileSize] unsignedLongLongValue];
@@ -413,7 +434,7 @@ didFinishDownloadingToURL:(NSURL *)location {
         report(base + span, WitchRuntimeStatus(@"runtime.status_extracting", archive.lastPathComponent));
         return YES;
     }
-    if (error) *error = WitchRuntimeError(12, [NSString stringWithFormat:@"Unsupported archive: %@", ext]);
+    if (error) *error = WitchRuntimeError(12, [NSString stringWithFormat:@"Unsupported archive: %@", archive.lastPathComponent]);
     return NO;
 }
 

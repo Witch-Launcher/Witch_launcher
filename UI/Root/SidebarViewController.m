@@ -135,6 +135,7 @@
         [self.stackContainer addSubview:item];
         [itemArray addObject:item];
     }
+    self.items = itemArray;
     [self rebuildItemConstraints];
 
     [NSLayoutConstraint activateConstraints:@[
@@ -144,7 +145,6 @@
         [self.stackContainer.heightAnchor constraintEqualToAnchor:self.view.heightAnchor multiplier:0.85],
     ]];
 
-    self.items = itemArray;
     self.selectedTab = SidebarTabGame;
 
     [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(updateColors) name:ThemeDidChangeNotification object:nil];
@@ -192,7 +192,7 @@
 }
 
 - (void)setHorizontal:(BOOL)horizontal {
-    if (_horizontal == horizontal && _itemConstraints) return;
+    if (_horizontal == horizontal && _itemConstraints.count > 0) return;
     _horizontal = horizontal;
     if (!self.items) return;
     [self rebuildItemConstraints];

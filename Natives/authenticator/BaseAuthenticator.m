@@ -10,7 +10,10 @@ static BaseAuthenticator *current = nil;
 
 + (id)current {
     if (current == nil) {
-        [self loadSavedName:getPrefObject(@"internal.selected_account")];
+        NSString *name = getPrefObject(@"internal.selected_account");
+        if ([name isKindOfClass:[NSString class]] && name.length > 0) {
+            [self loadSavedName:name];
+        }
     }
     return current;
 }
