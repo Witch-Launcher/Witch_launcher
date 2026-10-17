@@ -1008,7 +1008,7 @@ static GameSurfaceView* pojavWindow;
 
     if (sender.state == UIGestureRecognizerStateRecognized) {
         if (currentHotbarSlot == -1) {
-            if (!self.enableMouseGestures) return;
+            if (!self.enableMouseGestures || !self.enableHoldGesture) return;
             CallbackBridge_nativeSendMouseButton(isGrabbing == JNI_TRUE ?
                 GLFW_MOUSE_BUTTON_RIGHT : GLFW_MOUSE_BUTTON_LEFT, 1, 0);
             dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 33 * NSEC_PER_MSEC), dispatch_get_main_queue(), ^{
@@ -1104,7 +1104,7 @@ static GameSurfaceView* pojavWindow;
         self.shouldTriggerClick = NO;
         if (currentHotbarSlot == -1) {
 
-            if (self.enableHoldGesture)
+            if (self.enableMouseGestures && self.enableHoldGesture)
                 CallbackBridge_nativeSendMouseButton(GLFW_MOUSE_BUTTON_LEFT, 1, 0);
         } else {
             CallbackBridge_nativeSendKey(GLFW_KEY_Q, 0, 1, 0);
@@ -1116,7 +1116,7 @@ static GameSurfaceView* pojavWindow;
             || sender.state == UIGestureRecognizerStateEnded)
     {
         if (currentHotbarSlot == -1) {
-            if (self.enableHoldGesture)
+            if (self.enableMouseGestures && self.enableHoldGesture)
                 CallbackBridge_nativeSendMouseButton(GLFW_MOUSE_BUTTON_LEFT, 0, 0);
         } else {
             CallbackBridge_nativeSendKey(GLFW_KEY_Q, 0, 0, 0);

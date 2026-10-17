@@ -381,7 +381,7 @@
 "preference.title.gesture_mouse" = "Mouse gestures";
 "preference.detail.gesture_mouse" = "Enables gestures, such as tap to place block, hold to break block, scrolling with 2 fingers";
 "preference.title.gesture_hotbar" = "Hotbar gestures";
-"preference.title.gesture_hold" = "Hold screen to break blocks";
+"preference.title.gesture_hold" = "Tap to place, hold to break blocks";
 "preference.title.doubletap_offhand" = "Double-tap hotbar to swap offhand (F)";
 "preference.title.gesture_scroll" = "Gesture to control mouse wheel";
 "preference.detail.gesture_hotbar" = "Enables gestures, such as touch the hotbar slot, swap items between hand, throw items";
@@ -662,6 +662,7 @@
 "runtime.error_no_manifest" = "No runtimes.json manifest available (runtimes-latest). Publish the JDK repo first, or import a .tar.xz manually in Manage Runtime.";
 "runtime.error_extract" = "Extraction failed: %@";
 "runtime.error_release_missing" = "Missing 'release' file after extraction.";
+"runtime.error_jit_patch_failed" = "This runtime can't be prepared for JIT on this iOS version (libjvm lacks the JIT26 mirror support and can't be patched). Choose a Java 8/17/21/25 runtime from the repository.";
 "runtime.installed_toast" = "Installed.";
 "runtime.install_failed_toast" = "Install failed.";
 "runtime.error_builtin_jdk" = "The built-in runtime in the app can't be deleted (only downloads in POJAV_HOME can).";

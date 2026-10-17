@@ -253,7 +253,7 @@
 "preference.title.gesture_mouse" = "Mouse gestures";
 "preference.detail.gesture_mouse" = "Bật các cử chỉ, chẳng hạn như nhấn để đặt khối, giữ để phá khối, cuộn bằng 2";
 "preference.title.gesture_hotbar" = "Cử Chỉ Hotbar";
-"preference.title.gesture_hold" = "Giữ màn hình để đập/đặt khối";
+"preference.title.gesture_hold" = "Chạm để đặt, giữ để đập khối";
 "preference.title.doubletap_offhand" = "Nhấn đôi hotbar để đổi tay trái (F)";
 "preference.title.gesture_scroll" = "Cử chỉ điều khiển con lăn chuột";
 "preference.detail.gesture_hotbar" = "Cho phép các cử chỉ, chẳng hạn như chạm vào khe thanh nóng, trao đổi vật phẩm giữa các tay, ném vật phẩm";
@@ -507,6 +507,7 @@
 "runtime.error_no_manifest" = "Chưa có manifest runtimes.json (runtimes-latest). Hãy publish repo JDK trước, hoặc import tay file .tar.xz trong Manage Runtime.";
 "runtime.error_extract" = "Giải nén thất bại: %@";
 "runtime.error_release_missing" = "Thiếu file release sau khi giải nén.";
+"runtime.error_jit_patch_failed" = "Runtime này không thể chuẩn bị JIT cho phiên bản iOS hiện tại (libjvm thiếu hỗ trợ JIT26 mirror và không patch được). Hãy chọn runtime Java 8/17/21/25 từ kho.";
 "runtime.installed_toast" = "Đã cài đặt.";
 "runtime.install_failed_toast" = "Cài đặt thất bại.";
 "runtime.error_builtin_jdk" = "Bản built-in trong app không xóa được (chỉ xóa được bản tải thêm ở POJAV_HOME).";
