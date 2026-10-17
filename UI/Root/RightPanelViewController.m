@@ -101,6 +101,7 @@
     _versionsScroll = [[UIScrollView alloc] init];
     _versionsScroll.translatesAutoresizingMaskIntoConstraints = NO;
     _versionsScroll.showsVerticalScrollIndicator = NO;
+    _versionsScroll.contentInsetAdjustmentBehavior = UIScrollViewContentInsetAdjustmentNever;
     [contentView addSubview:_versionsScroll];
 
     _versionsStack = [[UIStackView alloc] init];
@@ -165,11 +166,14 @@
         [_versionsScroll.trailingAnchor constraintEqualToAnchor:contentView.trailingAnchor],
         [_versionsScroll.heightAnchor constraintEqualToConstant:120],
 
-        [_versionsStack.topAnchor constraintEqualToAnchor:_versionsScroll.topAnchor],
-        [_versionsStack.leadingAnchor constraintEqualToAnchor:_versionsScroll.leadingAnchor],
-        [_versionsStack.trailingAnchor constraintEqualToAnchor:_versionsScroll.trailingAnchor],
-        [_versionsStack.bottomAnchor constraintEqualToAnchor:_versionsScroll.bottomAnchor],
-        [_versionsStack.widthAnchor constraintEqualToAnchor:_versionsScroll.widthAnchor],
+        // Pin to the content guide (not the frame) so short lists stay flush
+        // under the header instead of being stretched/centred, and long lists
+        // scroll naturally instead of fighting the fixed 120pt frame.
+        [_versionsStack.topAnchor constraintEqualToAnchor:_versionsScroll.contentLayoutGuide.topAnchor],
+        [_versionsStack.leadingAnchor constraintEqualToAnchor:_versionsScroll.contentLayoutGuide.leadingAnchor],
+        [_versionsStack.trailingAnchor constraintEqualToAnchor:_versionsScroll.contentLayoutGuide.trailingAnchor],
+        [_versionsStack.bottomAnchor constraintEqualToAnchor:_versionsScroll.contentLayoutGuide.bottomAnchor],
+        [_versionsStack.widthAnchor constraintEqualToAnchor:_versionsScroll.frameLayoutGuide.widthAnchor],
 
         [_addVersionButton.topAnchor constraintEqualToAnchor:_versionsScroll.bottomAnchor constant:4],
         [_addVersionButton.leadingAnchor constraintEqualToAnchor:contentView.leadingAnchor constant:4],

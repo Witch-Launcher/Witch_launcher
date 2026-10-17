@@ -115,8 +115,14 @@ POJAV_JRE8_DIR        ?= $(SOURCEDIR)/depends/java-8-openjdk
 POJAV_JRE17_DIR       ?= $(SOURCEDIR)/depends/java-17-openjdk
 POJAV_JRE21_DIR       ?= $(SOURCEDIR)/depends/java-21-openjdk
 POJAV_JRE25_DIR       ?= $(SOURCEDIR)/depends/java-25-openjdk
-# App icon set to use: AppIcon-Light (official) or AppIcon-Development (dev builds)
+# App icon set to use: AppIcon-Light (official) or AppIcon-Development (dev builds).
+# Non-release builds carry the dev logo (local `make` + the GitHub beta
+# workflow); only RELEASE=1 builds keep the official blue one.
+ifeq (1,$(RELEASE))
 APP_ICON              ?= AppIcon-Light
+else
+APP_ICON              ?= AppIcon-Development
+endif
 
 # Function to use later for checking dependencies
 METHOD_DEPCHECK   = $(shell $(1) >/dev/null 2>&1 && echo 1)
