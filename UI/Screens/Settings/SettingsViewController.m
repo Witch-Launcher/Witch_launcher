@@ -519,7 +519,9 @@
     _tabBarScroll.translatesAutoresizingMaskIntoConstraints = NO;
     _tabBarScroll.showsHorizontalScrollIndicator = NO;
     _tabBarScroll.showsVerticalScrollIndicator = NO;
-    _tabBarScroll.alwaysBounceHorizontal = YES;
+    // Horizontal drag is only meaningful for the portrait bottom rail; the
+    // landscape side rail is vertical and locks its X axis below.
+    _tabBarScroll.alwaysBounceHorizontal = NO;
     // Floating rail card, same language as the profile/main bars.
     _tabBarScroll.backgroundColor = ThemeManager.shared.cardBackgroundColor;
     _tabBarScroll.layer.cornerRadius = 16;
@@ -555,6 +557,8 @@
 - (void)layoutTabButtons {
     if (_chromeIsPortrait) {
         // Bottom rail: fixed 120pt pills in a smooth horizontal strip.
+        _tabBarScroll.alwaysBounceHorizontal = YES;
+        _tabBarScroll.directionalLockEnabled = NO;
         CGFloat x = 8;
         for (NSUInteger i = 0; i < _tabButtons.count; i++) {
             UIButton *btn = _tabButtons[i];
@@ -564,6 +568,10 @@
         _tabBarScroll.contentSize = CGSizeMake(x + 8, 56);
         return;
     }
+    // Landscape side rail: vertical list only — lock the X axis so the rail
+    // can't be dragged/rubber-banded sideways.
+    _tabBarScroll.alwaysBounceHorizontal = NO;
+    _tabBarScroll.directionalLockEnabled = YES;
     CGFloat sideWidth = _tabBarScroll.bounds.size.width;
     if (sideWidth < 1) sideWidth = _tabWidthConstraint.constant;
     CGFloat y = 8;

@@ -145,7 +145,10 @@ static CGPoint lastCenterPoint;
 
 - (void)actionOpenPreferences {
     SettingsViewController *vc = [[SettingsViewController alloc] init];
-    [self presentViewController:vc animated:YES completion:nil];
+    // Wrapped in a navigation controller so the Settings sheet keeps its
+    // title bar with the Done (Xong) button in-game, like the launcher menu.
+    UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:vc];
+    [self presentViewController:nav animated:YES completion:nil];
 }
 
 - (void)actionOpenNavigationMenu {
