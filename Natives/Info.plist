@@ -22,10 +22,10 @@
 		<dict>
 			<key>CFBundleIconFiles</key>
 			<array>
-				<string>AppIcon-Light60x60</string>
+				<string>AppIcon-Witch60x60</string>
 			</array>
 			<key>CFBundleIconName</key>
-			<string>AppIcon-Light</string>
+			<string>AppIcon-Witch</string>
 		</dict>
 	</dict>
 	<key>CFBundleIcons~ipad</key>
@@ -34,11 +34,11 @@
 		<dict>
 			<key>CFBundleIconFiles</key>
 			<array>
-				<string>AppIcon-Light60x60</string>
-				<string>AppIcon-Light76x76</string>
+				<string>AppIcon-Witch60x60</string>
+				<string>AppIcon-Witch76x76</string>
 			</array>
 			<key>CFBundleIconName</key>
-			<string>AppIcon-Light</string>
+			<string>AppIcon-Witch</string>
 		</dict>
 	</dict>
 	<key>CFBundleIdentifier</key>

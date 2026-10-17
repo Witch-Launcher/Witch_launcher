@@ -8,6 +8,7 @@
 @property (nonatomic) UIView *containerView;
 @property (nonatomic) UILabel *titleLabel;
 @property (nonatomic) UIButton *cancelBtn;
+@property (nonatomic) UIButton *infoBtn;
 @property (nonatomic) BOOL isFinished;
 @property (nonatomic) BOOL isDismissing;
 @end
@@ -125,6 +126,20 @@
             [_etaLabel.bottomAnchor constraintLessThanOrEqualToAnchor:_containerView.bottomAnchor constant:-16],
         ]];
 
+        _infoBtn = [UIButton buttonWithType:UIButtonTypeSystem];
+        _infoBtn.translatesAutoresizingMaskIntoConstraints = NO;
+        [_infoBtn setImage:[UIImage systemImageNamed:@"info.circle"] forState:UIControlStateNormal];
+        _infoBtn.hidden = YES;
+        [_infoBtn addTarget:self action:@selector(infoTapped) forControlEvents:UIControlEventTouchUpInside];
+        [_containerView addSubview:_infoBtn];
+
+        [NSLayoutConstraint activateConstraints:@[
+            [_infoBtn.topAnchor constraintEqualToAnchor:_containerView.topAnchor constant:8],
+            [_infoBtn.trailingAnchor constraintEqualToAnchor:_containerView.trailingAnchor constant:-8],
+            [_infoBtn.widthAnchor constraintEqualToConstant:26],
+            [_infoBtn.heightAnchor constraintEqualToConstant:26],
+        ]];
+
         _cancelBtn = [UIButton buttonWithType:UIButtonTypeSystem];
         _cancelBtn.translatesAutoresizingMaskIntoConstraints = NO;
         _cancelBtn.hidden = YES;
@@ -163,8 +178,13 @@
     _percentLabel.textColor = ThemeManager.shared.accentColor;
     _speedLabel.textColor = ThemeManager.shared.secondaryTextColor;
     _etaLabel.textColor = ThemeManager.shared.secondaryTextColor;
+    _infoBtn.tintColor = ThemeManager.shared.accentColor;
     [_cancelBtn setTitleColor:ThemeManager.shared.errorColor forState:UIControlStateNormal];
     _cancelBtn.layer.borderColor = ThemeManager.shared.errorColor.CGColor;
+}
+
+- (void)infoTapped {
+    if (self.infoBlock) self.infoBlock();
 }
 
 - (void)updateProgress:(float)progress message:(NSString *)message {
@@ -225,6 +245,13 @@
     _cancelBlock = [cancelBlock copy];
     dispatch_async(dispatch_get_main_queue(), ^{
         self.cancelBtn.hidden = cancelBlock == nil;
+    });
+}
+
+- (void)setInfoBlock:(void (^)(void))infoBlock {
+    _infoBlock = [infoBlock copy];
+    dispatch_async(dispatch_get_main_queue(), ^{
+        self.infoBtn.hidden = infoBlock == nil;
     });
 }
 

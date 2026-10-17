@@ -15,5 +15,6 @@
 @property (nonatomic, readonly) UILabel *etaLabel;
 @property (nonatomic, readonly) UIProgressView *progressView;
 @property (nonatomic, copy) void (^cancelBlock)(void);
+@property (nonatomic, copy) void (^infoBlock)(void);
 
 @end

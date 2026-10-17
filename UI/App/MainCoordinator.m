@@ -12,6 +12,7 @@
 #import "SettingsViewController.h"
 #import "AccountViewController.h"
 #import "DownloadHubViewController.h"
+#import "DownloadTasksViewController.h"
 #import "VersionBrowserViewController.h"
 #import "ResourcePackListViewController.h"
 #import "MapListViewController.h"
@@ -239,6 +240,22 @@
     UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:vc];
     nav.modalPresentationStyle = UIModalPresentationFormSheet;
     [self.rootVC presentViewController:nav animated:YES completion:nil];
+}
+
+- (void)showDownloadTasks {
+    DownloadTasksViewController *vc = [[DownloadTasksViewController alloc] initWithHubTasks];
+    UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:vc];
+    nav.modalPresentationStyle = UIModalPresentationFormSheet;
+    [self.rootVC presentViewController:nav animated:YES completion:nil];
+}
+
+- (void)showDownloadTasksForLaunch {
+    if (!self.downloadTask) return;
+    DownloadTasksViewController *vc = [[DownloadTasksViewController alloc] initWithLaunchTask:self.downloadTask];
+    UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:vc];
+    nav.modalPresentationStyle = UIModalPresentationFormSheet;
+    UIViewController *presenter = self.rootVC.presentedViewController ?: self.rootVC;
+    [presenter presentViewController:nav animated:YES completion:nil];
 }
 
 #pragma mark - Version Management
@@ -600,7 +617,7 @@
 #pragma mark - Progress Alert helpers
 
 - (void)showProgressAlert:(NSString *)message {
-    self.progressOverlay = [DownloadProgressOverlay showBlurredInView:self.rootVC.view title:@"Launching" blurred:YES];
+    self.progressOverlay = [DownloadProgressOverlay showBlurredInView:self.rootVC.view title:localize(@"launcher.launching", nil) blurred:YES];
     self.progressOverlay.statusLabel.text = message;
     __weak typeof(self) weakSelf = self;
     self.progressOverlay.cancelBlock = ^{
@@ -616,6 +633,11 @@
             strongSelf.downloadTask = nil;
         }
         [strongSelf dismissProgressAlert];
+    };
+    self.progressOverlay.infoBlock = ^{
+        MainCoordinator *strongSelf = weakSelf;
+        if (!strongSelf) return;
+        [strongSelf showDownloadTasksForLaunch];
     };
     struct timeval tv;
     gettimeofday(&tv, NULL);

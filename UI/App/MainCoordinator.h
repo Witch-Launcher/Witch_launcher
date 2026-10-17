@@ -19,6 +19,7 @@
 - (void)showVersionPicker;
 - (void)showModLoaderPicker;
 - (void)showDownloadHub;
+- (void)showDownloadTasks;
 - (void)showAddVersion;
 - (void)removeVersion:(NSString *)versionName;
 - (void)selectVersion:(NSString *)versionName;

@@ -396,6 +396,10 @@
 "account.no_account" = "Chưa có tài khoản";
 "launcher.checking" = "Đang kiểm tra...";
 "launcher.download" = "Đang tải xuống...";
+"launcher.launching" = "Đang khởi chạy";
+"Downloads" = "Tải xuống";
+"Downloading" = "Đang tải";
+"No downloads" = "Không có mục tải xuống";
 "preference.title.gamepad_sensitivity" = "Độ nhạy tay cầm";
 "preference.title.lwjgl_version" = "Phiên bản LWJGL";
 

@@ -6,12 +6,22 @@
 
 NSString * const DownloadTasksDidChangeNotification = @"DownloadTasksDidChangeNotification";
 
+@interface DownloadTask ()
+@property (nonatomic) long long lastSampleBytes;
+@property (nonatomic) NSTimeInterval lastSampleTime;
+@property (nonatomic) float lastNotifiedProgress;
+@property (nonatomic) BOOL hasNotifiedProgress;
+@end
+
 @implementation DownloadTask
 @end
 
 @interface DownloadManager ()
 @property (nonatomic) NSMutableArray<DownloadTask *> *activeTasks;
+@property (nonatomic) NSMutableArray<DownloadTask *> *finishedTasks;
 @end
+
+static const NSUInteger kMaxFinishedTasks = 60;
 
 @implementation DownloadManager
 
@@ -28,6 +38,7 @@ NSString * const DownloadTasksDidChangeNotification = @"DownloadTasksDidChangeNo
     self = [super init];
     if (self) {
         _activeTasks = [NSMutableArray array];
+        _finishedTasks = [NSMutableArray array];
     }
     return self;
 }
@@ -40,6 +51,12 @@ NSString * const DownloadTasksDidChangeNotification = @"DownloadTasksDidChangeNo
 
 - (NSArray<DownloadTask *> *)activeTasks {
     return [_activeTasks copy];
+}
+
+- (NSArray<DownloadTask *> *)allTasks {
+    NSMutableArray *all = [NSMutableArray arrayWithArray:_activeTasks];
+    [all addObjectsFromArray:_finishedTasks];
+    return [all copy];
 }
 
 - (DownloadTask *)beginTaskWithName:(NSString *)name type:(DownloadType)type {
@@ -59,21 +76,37 @@ NSString * const DownloadTasksDidChangeNotification = @"DownloadTasksDidChangeNo
     float clamped = MAX(0.0f, MIN(progress, 1.0f));
     // Throttle: only notify on meaningful steps to avoid notification storms.
     static const float kStep = 0.02f;
-    static NSMutableDictionary<NSString *, NSNumber *> *lastSteps = nil;
-    static dispatch_once_t once;
-    dispatch_once(&once, ^{ lastSteps = [NSMutableDictionary dictionary]; });
-    NSString *key = NSStringFromClass(task.class);
-    key = [key stringByAppendingFormat:@"/%@", task.name];
-    NSNumber *last = lastSteps[key];
-    if (clamped < 1.0f && last && fabs(clamped - last.floatValue) < kStep) {
+    if (clamped < 1.0f && task.hasNotifiedProgress && fabs(clamped - task.lastNotifiedProgress) < kStep) {
         task.progress = clamped;
         return;
     }
-    lastSteps[key] = @(clamped);
+    task.hasNotifiedProgress = YES;
+    task.lastNotifiedProgress = clamped;
     dispatch_async(dispatch_get_main_queue(), ^{
         task.progress = clamped;
         [self notifyChange];
     });
+}
+
+- (void)updateProgressBytes:(float)progress received:(long long)received total:(long long)total forTask:(DownloadTask *)task {
+    if (!task || task.cancelled) return;
+    NSTimeInterval now = NSProcessInfo.processInfo.systemUptime;
+    if (task.lastSampleTime <= 0) {
+        task.lastSampleTime = now;
+        task.lastSampleBytes = received;
+    } else if (now - task.lastSampleTime >= 0.4) {
+        double dt = now - task.lastSampleTime;
+        long long delta = received - task.lastSampleBytes;
+        if (dt > 0 && delta > 0) {
+            double rate = (double)delta / dt;
+            task.bytesPerSecond = task.bytesPerSecond > 0 ? task.bytesPerSecond * 0.6 + rate * 0.4 : rate;
+        }
+        task.lastSampleTime = now;
+        task.lastSampleBytes = received;
+    }
+    task.receivedBytes = received;
+    task.totalBytes = total;
+    [self updateProgress:progress forTask:task];
 }
 
 - (void)completeTask:(DownloadTask *)task error:(NSError *)error {
@@ -82,6 +115,7 @@ NSString * const DownloadTasksDidChangeNotification = @"DownloadTasksDidChangeNo
         task.isFinished = YES;
         task.error = error;
         [self->_activeTasks removeObject:task];
+        [self moveToFinished:task];
         [self notifyChange];
     });
 }
@@ -91,7 +125,9 @@ NSString * const DownloadTasksDidChangeNotification = @"DownloadTasksDidChangeNo
     task.cancelled = YES;
     if (task.cancelBlock) task.cancelBlock();
     dispatch_async(dispatch_get_main_queue(), ^{
+        task.isFinished = YES;
         [self->_activeTasks removeObject:task];
+        [self moveToFinished:task];
         [self notifyChange];
     });
 }
@@ -99,6 +135,21 @@ NSString * const DownloadTasksDidChangeNotification = @"DownloadTasksDidChangeNo
 - (void)cancelAllTasks {
     for (DownloadTask *t in [self.activeTasks copy]) {
         [self cancelTask:t];
+    }
+}
+
+- (void)clearFinishedTasks {
+    dispatch_async(dispatch_get_main_queue(), ^{
+        [self->_finishedTasks removeAllObjects];
+        [self notifyChange];
+    });
+}
+
+- (void)moveToFinished:(DownloadTask *)task {
+    [_finishedTasks removeObject:task];
+    [_finishedTasks insertObject:task atIndex:0];
+    if (_finishedTasks.count > kMaxFinishedTasks) {
+        [_finishedTasks removeObjectsInRange:NSMakeRange(kMaxFinishedTasks, _finishedTasks.count - kMaxFinishedTasks)];
     }
 }
 

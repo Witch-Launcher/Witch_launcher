@@ -710,8 +710,10 @@ assets: logos
 	fi
 	echo '[Witch v$(VERSION)] assets - end'
 
-# Generate the legacy CFBundleIconFiles PNGs (AppIcon-Light60x60@2x.png,
-# AppIcon-Light76x76@2x~ipad.png, ...) from the master logos in Natives/logo/.
+# Generate the legacy CFBundleIconFiles PNGs (AppIcon-Witch60x60@2x.png, ...)
+# from the master logos in Natives/logo/. The file names change when the
+# artwork changes so SpringBoard drops its stale icon cache after updates
+# (TrollStore installs reuse the same bundle id + icon paths otherwise).
 # APP_ICON=AppIcon-Development is set for development builds (GitHub
 # development workflow); it substitutes the dev logo in place of the official
 # blue one so non-release builds carry the dev branding.
@@ -722,17 +724,8 @@ logos:
 	else \
 		PRIMARY="$(SOURCEDIR)/Natives/logo/logo-main-light.png"; \
 	fi; \
-	DARK="$(SOURCEDIR)/Natives/logo/logo-main-dark.png"; \
-	DEV="$(SOURCEDIR)/Natives/logo/logo-dev.png"; \
-	sips -z 120 120 "$$PRIMARY" --out $(SOURCEDIR)/Natives/resources/AppIcon-Light60x60@2x.png >/dev/null; \
-	sips -z 152 152 "$$PRIMARY" --out $(SOURCEDIR)/Natives/resources/AppIcon-Light76x76@2x~ipad.png >/dev/null; \
-	sips -z 120 120 "$$DARK" --out $(SOURCEDIR)/Natives/resources/AppIcon-Dark60x60@2x.png >/dev/null; \
-	sips -z 152 152 "$$DARK" --out $(SOURCEDIR)/Natives/resources/AppIcon-Dark76x76@2x~ipad.png >/dev/null; \
-	sips -z 120 120 "$$DEV" --out $(SOURCEDIR)/Natives/resources/AppIcon-Development60x60@2x.png >/dev/null; \
-	sips -z 152 152 "$$DEV" --out $(SOURCEDIR)/Natives/resources/AppIcon-Development76x76@2x~ipad.png >/dev/null; \
-	PURPLE="$(SOURCEDIR)/Natives/logo/logo-purple-light.png"; \
-	sips -z 120 120 "$$PURPLE" --out $(SOURCEDIR)/Natives/resources/AppIcon-Purple60x60@2x.png >/dev/null; \
-	sips -z 152 152 "$$PURPLE" --out $(SOURCEDIR)/Natives/resources/AppIcon-Purple76x76@2x~ipad.png >/dev/null; \
+	sips -z 120 120 "$$PRIMARY" --out $(SOURCEDIR)/Natives/resources/AppIcon-Witch60x60@2x.png >/dev/null; \
+	sips -z 152 152 "$$PRIMARY" --out $(SOURCEDIR)/Natives/resources/AppIcon-Witch76x76@2x~ipad.png >/dev/null; \
 	echo "[Witch v$(VERSION)] logos - done (primary=$$PRIMARY)"
 	echo '[Witch v$(VERSION)] logos - end'
 

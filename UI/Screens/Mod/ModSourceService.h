@@ -35,6 +35,15 @@ NS_ASSUME_NONNULL_BEGIN
                                            completion:(void(^)(NSString * _Nullable path,
                                                               NSError * _Nullable error))completion;
 
+/// Same as above but also reports byte counts so callers can show MB/s.
++ (nullable NSURLSessionDownloadTask *)downloadVersion:(NSDictionary *)version
+                                                ofMod:(NSDictionary *)mod
+                                        progressBytes:(nullable void(^)(float progress,
+                                                                        long long received,
+                                                                        long long expected))progressBytes
+                                           completion:(void(^)(NSString * _Nullable path,
+                                                              NSError * _Nullable error))completion;
+
 @end
 
 NS_ASSUME_NONNULL_END

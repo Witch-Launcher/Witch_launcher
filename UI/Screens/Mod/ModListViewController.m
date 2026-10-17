@@ -1293,37 +1293,48 @@ static const NSInteger kModActionLoadingTag = 9001;
 }
 
 - (void)installDependencies:(NSArray *)deps index:(NSInteger)index version:(NSDictionary *)mainVersion completion:(void(^)(BOOL))completion {
-    if (index >= deps.count) {
+    if (deps.count == 0) {
         completion(YES);
         return;
     }
-    
-    NSDictionary *dep = deps[index];
-    NSString *depProjectId = dep[@"project_id"];
-    if (!depProjectId) {
-        [self installDependencies:deps index:index + 1 version:mainVersion completion:completion];
-        return;
+    // Parallel fan-out: every required dependency resolves and downloads on
+    // its own, reporting into the top-bar hub so the launch button morphs to
+    // cancel and the download list shows live progress and speeds.
+    dispatch_group_t group = dispatch_group_create();
+    for (NSDictionary *dep in deps) {
+        if (![dep isKindOfClass:[NSDictionary class]]) continue;
+        NSString *depProjectId = dep[@"project_id"];
+        if (![depProjectId isKindOfClass:[NSString class]] || depProjectId.length == 0) continue;
+        dispatch_group_enter(group);
+        [self installSingleDependency:dep completion:^{
+            dispatch_group_leave(group);
+        }];
     }
-    
-    __weak typeof(self) weakSelf = self;
+    dispatch_group_notify(group, dispatch_get_main_queue(), ^{
+        completion(YES);
+    });
+}
+
+- (void)installSingleDependency:(NSDictionary *)dep completion:(void(^)(void))completion {
+    NSString *depProjectId = dep[@"project_id"];
     NSString *depSource = [ModSourceService isCurseForgeMod:_downloadMod] ? @"curseforge" : @"modrinth";
     [ModSourceService loadDetailsForProjectId:depProjectId source:depSource completion:^(NSDictionary *project, NSError *error) {
         if (error || !project) {
-            [weakSelf installDependencies:deps index:index + 1 version:mainVersion completion:completion];
+            if (completion) completion();
             return;
         }
 
         NSDictionary *depMod = @{@"project_id": depProjectId, @"_source": depSource};
         [ModSourceService loadVersionsForMod:depMod completion:^(NSArray<NSDictionary *> *depVersions, NSError *vError) {
             if (vError || depVersions.count == 0) {
-                [weakSelf installDependencies:deps index:index + 1 version:mainVersion completion:completion];
+                if (completion) completion();
                 return;
             }
-            
+
             VersionProfile *profile = VersionDirectoryManager.shared.currentProfile;
             NSString *targetVersion = profile.mcVersion ?: VersionDirectoryManager.shared.currentVersion ?: @"";
             NSString *targetLoader = [profile.modLoader lowercaseString] ?: @"";
-            
+
             NSDictionary *bestVer = nil;
             for (NSDictionary *dv in depVersions) {
                 BOOL vm = targetVersion.length == 0 || [dv[@"game_versions"] containsObject:targetVersion];
@@ -1334,10 +1345,13 @@ static const NSInteger kModActionLoadingTag = 9001;
                 }
             }
             if (!bestVer) bestVer = depVersions.firstObject;
-            
+
             dispatch_async(dispatch_get_main_queue(), ^{
                 NSString *depTitle = project[@"title"] ?: @"Unknown";
-                [_dependencyOverlay updateProgress:(float)index / deps.count message:[NSString stringWithFormat:localize(@"progress.msg.installing_item", nil), depTitle]];
+                if (_dependencyOverlay) {
+                    [_dependencyOverlay dismiss];
+                    _dependencyOverlay = nil;
+                }
 
                 NSString *filename = bestVer[@"filename"] ?: @"mod.jar";
                 NSString *mcVersion = VersionDirectoryManager.shared.currentVersion;
@@ -1345,10 +1359,13 @@ static const NSInteger kModActionLoadingTag = 9001;
                     mcVersion = VersionDirectoryManager.shared.currentProfile.mcVersion ?: @"1.21.4";
                 }
 
+                __weak typeof(self) weakSelf = self;
                 NSDictionary *depVerMod = @{@"project_id": depProjectId, @"_source": depSource};
-                NSURLSessionDownloadTask *task = [ModSourceService downloadVersion:bestVer ofMod:depVerMod progress:^(float p) {
-                    // Progress handled by overlay
+                DownloadTask *hubTask = [[DownloadManager shared] beginTaskWithName:depTitle type:DownloadTypeMod];
+                NSURLSessionDownloadTask *task = [ModSourceService downloadVersion:bestVer ofMod:depVerMod progressBytes:^(float p, long long received, long long total) {
+                    [[DownloadManager shared] updateProgressBytes:p received:received total:total forTask:hubTask];
                 } completion:^(NSString *path, NSError *dlError) {
+                    [[DownloadManager shared] completeTask:hubTask error:dlError];
                     if (path) {
                         NSString *modsDir = [VersionDirectoryManager.shared modsPathForVersion:mcVersion];
                         NSString *targetPath = [modsDir stringByAppendingPathComponent:filename];
@@ -1359,17 +1376,20 @@ static const NSInteger kModActionLoadingTag = 9001;
                         NSString *depIcon = [project[@"icon_url"] isKindOfClass:[NSString class]] ? project[@"icon_url"] : @"";
                         [[InstalledModsManager shared] recordProjectId:depProjectId
                                                                  title:depTitle
-                                                        versionNumber:bestVer[@"version_number"]
-                                                              filename:targetPath.lastPathComponent
-                                                               iconURL:depIcon
-                                                                source:depSource
-                                                              category:InstalledItemCategoryMod
-                                                             mcVersion:mcVersion
-                                                                loader:targetLoader
+                                                         versionNumber:bestVer[@"version_number"]
+                                                               filename:targetPath.lastPathComponent
+                                                                iconURL:depIcon
+                                                                 source:depSource
+                                                               category:InstalledItemCategoryMod
+                                                              mcVersion:mcVersion
+                                                                 loader:targetLoader
                                                            projectType:@"mod"
                                                                profile:nil];
                     }
-                    [weakSelf installDependencies:deps index:index + 1 version:mainVersion completion:completion];
+                    if (completion) completion();
+                }];
+                [hubTask setCancelBlock:^{
+                    [task cancel];
                 }];
                 if (task) [weakSelf.dependencyInstallTasks addObject:task];
             });
@@ -1397,8 +1417,8 @@ static const NSInteger kModActionLoadingTag = 9001;
         for (NSURLSessionDownloadTask *t in weakSelf.dependencyInstallTasks) [t cancel];
     }];
 
-    NSURLSessionDownloadTask *task = [ModSourceService downloadVersion:version ofMod:_downloadMod progress:^(float p) {
-        [[DownloadManager shared] updateProgress:p forTask:hubTask];
+    NSURLSessionDownloadTask *task = [ModSourceService downloadVersion:version ofMod:_downloadMod progressBytes:^(float p, long long received, long long total) {
+        [[DownloadManager shared] updateProgressBytes:p received:received total:total forTask:hubTask];
     } completion:^(NSString *path, NSError *dlError) {
         [[DownloadManager shared] completeTask:hubTask error:dlError];
         if (!path) return;

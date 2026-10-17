@@ -229,16 +229,19 @@
     return isPortrait ? @"bottom" : @"left";
 }
 
-- (CGRect)sidebarFrameForPosition:(NSString *)pos frameX:(CGFloat)frameX frameW:(CGFloat)frameW contentTop:(CGFloat)contentTop contentHeight:(CGFloat)contentHeight safeArea:(UIEdgeInsets)safeArea bounds:(CGRect)bounds {
+- (CGRect)sidebarFrameForPosition:(NSString *)pos frameX:(CGFloat)frameX frameW:(CGFloat)frameW contentTop:(CGFloat)contentTop contentHeight:(CGFloat)contentHeight rightPanelWidth:(CGFloat)rightPanelWidth safeArea:(UIEdgeInsets)safeArea bounds:(CGRect)bounds {
     const CGFloat rail = 48.0;
     const CGFloat barH = 64.0;
     BOOL bottom = [pos isEqualToString:@"bottom"];
     _sidebarVC.horizontal = bottom;
+    // The right panel is a fixed overlay on the right edge of the shell; the
+    // sidebar must never render under it (bottom bar would lose its last
+    // tabs, a right rail would slide behind the panel).
     if (bottom) {
-        return CGRectMake(frameX, bounds.size.height - safeArea.bottom - barH, frameW, barH);
+        return CGRectMake(frameX, bounds.size.height - safeArea.bottom - barH, frameW - rightPanelWidth, barH);
     }
     if ([pos isEqualToString:@"right"]) {
-        return CGRectMake(frameX + frameW - rail, contentTop, rail, contentHeight);
+        return CGRectMake(frameX + frameW - rightPanelWidth - rail, contentTop, rail, contentHeight);
     }
     return CGRectMake(frameX, contentTop, rail, contentHeight);
 }
@@ -342,7 +345,8 @@
     _sidebarVC.view.frame = [self sidebarFrameForPosition:[self sidebarPositionForPortrait:isPortrait]
                                                                                  frameX:frameX frameW:frameW
                                                                               contentTop:contentTop contentHeight:contentHeight
-                                                                                 safeArea:safeArea bounds:bounds];
+                                                                         rightPanelWidth:rightPanelWidth
+                                                                                safeArea:safeArea bounds:bounds];
     // Square top corners: the bar sits flush under the top bar — rounding the
     // T-junction leaves ugly notches.
     if ([[self sidebarPositionForPortrait:isPortrait] isEqualToString:@"right"]) {
@@ -612,6 +616,10 @@
 
 - (void)topBarDidTapDownloadHub {
     [self.coordinator showDownloadHub];
+}
+
+- (void)topBarDidTapDownloads {
+    [self.coordinator showDownloadTasks];
 }
 
 #pragma mark - RightPanelDelegate

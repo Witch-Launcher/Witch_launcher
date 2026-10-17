@@ -404,6 +404,7 @@ egl_bridge.m
    ../UI/Screens/ProfileSettings/ProfileWorldsVC.m
    ../UI/Screens/ProfileSettings/ProfileItemCell.m
    ../UI/Screens/Download/DownloadHubViewController.m
+   ../UI/Screens/Download/DownloadTasksViewController.m
    ../UI/Screens/Download/VersionBrowserViewController.m
     ../UI/Screens/Download/MapListViewController.m
     ../UI/Screens/Download/ResourcePackListViewController.m

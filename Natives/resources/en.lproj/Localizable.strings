@@ -551,6 +551,10 @@
 "account.no_account" = "No account";
 "launcher.checking" = "Checking...";
 "launcher.download" = "Downloading...";
+"launcher.launching" = "Launching";
+"Downloads" = "Downloads";
+"Downloading" = "Downloading";
+"No downloads" = "No downloads";
 "preference.title.gamepad_sensitivity" = "Gamepad Sensitivity";
 "preference.title.lwjgl_version" = "LWJGL Version";
 
