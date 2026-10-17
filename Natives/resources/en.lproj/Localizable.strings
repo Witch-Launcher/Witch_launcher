@@ -381,6 +381,9 @@
 "preference.title.gesture_mouse" = "Mouse gestures";
 "preference.detail.gesture_mouse" = "Enables gestures, such as tap to place block, hold to break block, scrolling with 2 fingers";
 "preference.title.gesture_hotbar" = "Hotbar gestures";
+"preference.title.gesture_hold" = "Hold screen to break blocks";
+"preference.title.doubletap_offhand" = "Double-tap hotbar to swap offhand (F)";
+"preference.title.gesture_scroll" = "Gesture to control mouse wheel";
 "preference.detail.gesture_hotbar" = "Enables gestures, such as touch the hotbar slot, swap items between hand, throw items";
 "preference.title.disable_haptics" = "Disable on-screen haptics";
 "preference.title.press_duration" = "Long-press duration (ms)";

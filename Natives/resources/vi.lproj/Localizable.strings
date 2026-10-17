@@ -253,6 +253,9 @@
 "preference.title.gesture_mouse" = "Mouse gestures";
 "preference.detail.gesture_mouse" = "Bật các cử chỉ, chẳng hạn như nhấn để đặt khối, giữ để phá khối, cuộn bằng 2";
 "preference.title.gesture_hotbar" = "Cử Chỉ Hotbar";
+"preference.title.gesture_hold" = "Giữ màn hình để đập/đặt khối";
+"preference.title.doubletap_offhand" = "Nhấn đôi hotbar để đổi tay trái (F)";
+"preference.title.gesture_scroll" = "Cử chỉ điều khiển con lăn chuột";
 "preference.detail.gesture_hotbar" = "Cho phép các cử chỉ, chẳng hạn như chạm vào khe thanh nóng, trao đổi vật phẩm giữa các tay, ném vật phẩm";
 "preference.title.press_duration" = "Độ dài nhấn giữ (ms)";
 "preference.detail.press_duration" = "Khoảng thời gian chạm giữ để phá khối và ném đồ vật.";

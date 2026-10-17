@@ -81,6 +81,7 @@ static GameSurfaceView* pojavWindow;
     shouldTriggerClick, shouldTriggerHaptic, slideableHotbar, toggleHidden;
 
 @property(nonatomic) BOOL enableMouseGestures, enableHotbarGestures;
+@property(nonatomic) BOOL enableHoldGesture, enableDoubleTapOffhand, enableScrollGesture;
 
 @property(nonatomic) UIImpactFeedbackGenerator *lightHaptic;
 @property(nonatomic) UIImpactFeedbackGenerator *mediumHaptic;
@@ -489,9 +490,12 @@ static GameSurfaceView* pojavWindow;
     self.slideableHotbar = getPrefBool(@"control.slideable_hotbar");
     self.enableMouseGestures = getPrefBool(@"control.gesture_mouse");
     self.enableHotbarGestures = getPrefBool(@"control.gesture_hotbar");
+    self.enableHoldGesture = getPrefBool(@"control.gesture_hold");
+    self.enableDoubleTapOffhand = getPrefBool(@"control.doubletap_offhand");
+    self.enableScrollGesture = getPrefBool(@"control.gesture_scroll");
     self.shouldTriggerHaptic = !getPrefBool(@"control.disable_haptics");
 
-    self.scrollPanGesture.enabled = self.enableMouseGestures;
+    self.scrollPanGesture.enabled = self.enableScrollGesture;
     self.doubleTapGesture.enabled = self.enableHotbarGestures;
     self.longPressGesture.minimumPressDuration = getPrefFloat(@"control.press_duration") / 1000.0;
 
@@ -623,7 +627,7 @@ static GameSurfaceView* pojavWindow;
     // Update cursor type based on grab state
     [CursorTypeManager setCursorHidden:(isGrabbing == JNI_TRUE)];
 
-    self.scrollPanGesture.enabled = !isGrabbing;
+    self.scrollPanGesture.enabled = self.enableScrollGesture && !isGrabbing;
     self.mousePointerView.hidden = isGrabbing || !virtualMouseEnabled;
     [self setNeedsUpdateOfPrefersPointerLocked];
 
@@ -1030,7 +1034,7 @@ static GameSurfaceView* pojavWindow;
         CGPoint point = [sender locationInView:self.rootView];
         int hotbarSlot = self.enableHotbarGestures ?
             callback_SurfaceViewController_touchHotbar(point.x * screenScale, point.y * screenScale) : -1;
-        if (hotbarSlot != -1 && currentHotbarSlot == hotbarSlot) {
+        if (self.enableDoubleTapOffhand && hotbarSlot != -1 && currentHotbarSlot == hotbarSlot) {
             CallbackBridge_nativeSendKey(GLFW_KEY_F, 0, 1, 0);
             CallbackBridge_nativeSendKey(GLFW_KEY_F, 0, 0, 0);
         }
@@ -1100,7 +1104,7 @@ static GameSurfaceView* pojavWindow;
         self.shouldTriggerClick = NO;
         if (currentHotbarSlot == -1) {
 
-            if (self.enableMouseGestures)
+            if (self.enableHoldGesture)
                 CallbackBridge_nativeSendMouseButton(GLFW_MOUSE_BUTTON_LEFT, 1, 0);
         } else {
             CallbackBridge_nativeSendKey(GLFW_KEY_Q, 0, 1, 0);
@@ -1112,7 +1116,7 @@ static GameSurfaceView* pojavWindow;
             || sender.state == UIGestureRecognizerStateEnded)
     {
         if (currentHotbarSlot == -1) {
-            if (self.enableMouseGestures)
+            if (self.enableHoldGesture)
                 CallbackBridge_nativeSendMouseButton(GLFW_MOUSE_BUTTON_LEFT, 0, 0);
         } else {
             CallbackBridge_nativeSendKey(GLFW_KEY_Q, 0, 0, 0);
