@@ -259,8 +259,9 @@
             @{@"type": @"slider", @"label": localize(@"appearance.top_bar_blur", nil), @"key": @"amethyst_topbar_blur", @"min": @0, @"max": @100, @"suffix": @"%"},
             @{@"type": @"slider", @"label": localize(@"appearance.left_bar_blur", nil), @"key": @"amethyst_sidebar_blur", @"min": @0, @"max": @100, @"suffix": @"%"},
             @{@"type": @"slider", @"label": localize(@"appearance.right_panel_blur", nil), @"key": @"amethyst_rightpanel_blur", @"min": @0, @"max": @100, @"suffix": @"%"},
-            @{@"type": @"slider", @"label": localize(@"appearance.bar_border_thickness", nil), @"key": @"amethyst_bar_border_width", @"min": @0, @"max": @4, @"suffix": @" pt"},
+            @{@"type": @"slider", @"label": localize(@"appearance.bar_border_thickness", nil), @"key": @"amethyst_ui_border_width", @"min": @0, @"max": @4, @"suffix": @" pt"},
             @{@"type": @"switch", @"label": localize(@"appearance.ui_border", nil), @"key": @"amethyst_ui_border_enabled"},
+            @{@"type": @"color", @"label": localize(@"appearance.border_color", nil), @"key": @"amethyst_ui_border_color"},
             @{@"type": @"slider", @"label": localize(@"appearance.border_radius", nil), @"key": @"amethyst_ui_border_radius", @"min": @0, @"max": @24, @"suffix": @" pt"},
             @{@"type": @"slider", @"label": localize(@"appearance.shell_gap", nil), @"key": @"amethyst_shell_gap", @"min": @0, @"max": @12, @"suffix": @" pt"},
             @{@"type": @"slider", @"label": localize(@"appearance.shell_inner_gap", nil), @"key": @"amethyst_shell_inner_gap", @"min": @0, @"max": @12, @"suffix": @" pt"},
@@ -1094,7 +1095,7 @@
                 setPrefFloat(@"java.allocated_memory", val);
             }
         }
-        if (val == 0 && ![item[@"key"] isEqualToString:@"amethyst_bg_blur"] && ![item[@"key"] isEqualToString:@"amethyst_ui_opacity"] && !([item[@"key"] hasPrefix:@"amethyst_"] && [item[@"key"] hasSuffix:@"_blur"]) && ![item[@"key"] isEqualToString:@"general.widget_bg_opacity"] && ![item[@"key"] isEqualToString:@"amethyst_ui_border_radius"] && ![item[@"key"] isEqualToString:@"amethyst_shell_gap"] && ![item[@"key"] isEqualToString:@"amethyst_shell_inner_gap"] && ![item[@"key"] isEqualToString:@"amethyst_bar_border_width"] && ![item[@"key"] isEqualToString:@"amethyst_ui_border_enabled"] && !disabled) val = [item[@"min"] floatValue] + ([item[@"max"] floatValue] - [item[@"min"] floatValue]) / 2;
+        if (val == 0 && ![item[@"key"] isEqualToString:@"amethyst_bg_blur"] && ![item[@"key"] isEqualToString:@"amethyst_ui_opacity"] && !([item[@"key"] hasPrefix:@"amethyst_"] && [item[@"key"] hasSuffix:@"_blur"]) && ![item[@"key"] isEqualToString:@"general.widget_bg_opacity"] && ![item[@"key"] isEqualToString:@"amethyst_ui_border_radius"] && ![item[@"key"] isEqualToString:@"amethyst_shell_gap"] && ![item[@"key"] isEqualToString:@"amethyst_shell_inner_gap"] && ![item[@"key"] isEqualToString:@"amethyst_ui_border_width"] && ![item[@"key"] isEqualToString:@"amethyst_ui_border_enabled"] && !disabled) val = [item[@"min"] floatValue] + ([item[@"max"] floatValue] - [item[@"min"] floatValue]) / 2;
         sl.minimumValue = [item[@"min"] floatValue];
         sl.maximumValue = [item[@"max"] floatValue];
         sl.value = val;
@@ -1145,6 +1146,9 @@
     }
     if ([key isEqualToString:@"amethyst_secondary_text_color"]) {
         return theme.secondaryTextColor;
+    }
+    if ([key isEqualToString:@"amethyst_ui_border_color"]) {
+        return theme.uiBorderColor;
     }
     return [UIColor clearColor];
 }
@@ -1351,12 +1355,11 @@
         ThemeManager.shared.uiBorderCornerRadius = val;
         [[NSUserDefaults standardUserDefaults] synchronize];
         [self broadcastThemeDebounced];
-    } else if ([item[@"key"] isEqualToString:@"amethyst_bar_border_width"]) {
-        // NOTE: layout reads this from NSUserDefaults (updateShellBorderPath),
-        // NOT the launcher plist — route it there or drags never take effect.
-        [[NSUserDefaults standardUserDefaults] setFloat:val forKey:@"amethyst_bar_border_width"];
+    } else if ([item[@"key"] isEqualToString:@"amethyst_ui_border_width"]) {
+        // Shell outline thickness: ThemeManager stores it and broadcasts, and
+        // updateShellBorderPath reads it back — dragging updates live.
+        ThemeManager.shared.uiBorderWidth = val;
         [[NSUserDefaults standardUserDefaults] synchronize];
-        [self broadcastThemeDebounced];
     } else if ([item[@"key"] isEqualToString:@"amethyst_shell_gap"] ||
                [item[@"key"] isEqualToString:@"amethyst_shell_inner_gap"]) {
         [[NSUserDefaults standardUserDefaults] setFloat:val forKey:item[@"key"]];
@@ -1381,7 +1384,7 @@
         }
         // Any *_blur slider drives realtime frosted surfaces; let them refresh.
         BOOL isBlurSlider = [item[@"key"] hasPrefix:@"amethyst_"] && [item[@"key"] hasSuffix:@"_blur"];
-        BOOL isBorderWidth = [item[@"key"] isEqualToString:@"amethyst_bar_border_width"];
+        BOOL isBorderWidth = [item[@"key"] isEqualToString:@"amethyst_ui_border_width"];
         if (isBorderWidth) {
             [self broadcastThemeDebounced];
         } else if (isBlurSlider) {

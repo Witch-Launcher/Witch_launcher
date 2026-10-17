@@ -166,7 +166,7 @@ NSString * const ThemeDidChangeNotification = @"ThemeDidChangeNotification";
 }
 
 - (void)setUiBorderWidth:(CGFloat)uiBorderWidth {
-    _uiBorderWidth = MAX(0.5, MIN(uiBorderWidth, 4.0));
+    _uiBorderWidth = MAX(0.0, MIN(uiBorderWidth, 4.0));
     [[NSUserDefaults standardUserDefaults] setFloat:_uiBorderWidth forKey:@"amethyst_ui_border_width"];
     [[NSUserDefaults standardUserDefaults] synchronize];
     [self broadcastThemeChange];

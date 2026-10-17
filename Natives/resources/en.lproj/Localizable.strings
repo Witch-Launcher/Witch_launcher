@@ -646,8 +646,19 @@
 "appearance.top_bar_blur" = "Top Bar Blur";
 "appearance.left_bar_blur" = "Left Bar Blur";
 "appearance.right_panel_blur" = "Right Panel Blur";
-"appearance.bar_border_thickness" = "Bar Border Thickness";
+"appearance.bar_border_thickness" = "Border Thickness";
 "appearance.export_theme" = "Export Appearance Theme";
+"runtime.title_cannot_download" = "Can't download";
+"runtime.status_downloading" = "Downloading %@…";
+"runtime.status_installing" = "Installing %@…";
+"runtime.status_extracting" = "Extracting %@";
+"runtime.error_no_manifest" = "No runtimes.json manifest available (runtimes-latest). Publish the JDK repo first, or import a .tar.xz manually in Manage Runtime.";
+"runtime.error_extract" = "Extraction failed: %@";
+"runtime.error_release_missing" = "Missing 'release' file after extraction.";
+"runtime.installed_toast" = "Installed.";
+"runtime.install_failed_toast" = "Install failed.";
+"runtime.error_builtin_jdk" = "The built-in runtime in the app can't be deleted (only downloads in POJAV_HOME can).";
+"runtime.error_builtin_lwjgl" = "The built-in LWJGL can't be deleted.";
 "appearance.import_theme" = "Import Appearance Theme";
 "appearance.reset" = "Reset Appearance";
 
@@ -1115,6 +1126,7 @@
 "profiles.tab_worlds" = "Worlds";
 "profiles.tab_packs_short" = "Packs";
 "appearance.ui_border" = "UI Border";
+"appearance.border_color" = "Border Color";
 "appearance.border_radius" = "Border radius";
 "appearance.shell_gap" = "Shell edge margin";
 "appearance.shell_inner_gap" = "Panel spacing";

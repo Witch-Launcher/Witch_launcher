@@ -210,6 +210,8 @@
     _shellBorder.fillColor = UIColor.clearColor.CGColor;
     _shellBorder.fillRule = kCAFillRuleEvenOdd;
     _shellBorder.lineJoin = kCALineJoinRound;
+    // Keep the stroke above every panel regardless of subview add order.
+    _shellBorder.zPosition = 100;
     [self.view.layer addSublayer:_shellBorder];
 }
 
@@ -396,26 +398,32 @@
 
 - (void)updateShellBorderPath {
     if (!_shellBorder) return;
-    if (!ThemeManager.shared.uiBorderEnabled) {
+    ThemeManager *theme = ThemeManager.shared;
+    CGFloat w = MAX(0.0f, MIN(theme.uiBorderWidth, 4.0f));
+    if (!theme.uiBorderEnabled || w <= 0.0f) {
         _shellBorder.hidden = YES;
         _shellBorder.path = NULL;
         return;
     }
     _shellBorder.hidden = NO;
-    CGFloat w = MAX(0.0f, MIN([[NSUserDefaults standardUserDefaults] floatForKey:@"amethyst_bar_border_width"], 4.0f));
     _shellBorder.lineWidth = w;
-    _shellBorder.strokeColor = [ThemeManager.shared.accentColor colorWithAlphaComponent:0.45].CGColor;
+    _shellBorder.strokeColor = theme.uiBorderColor.CGColor;
     _shellBorder.frame = self.view.bounds;
+
+    // The outline follows the user's border radius so 0 keeps the shell
+    // perfectly square (previously hardcoded 16/12 left it rounded).
+    CGFloat radius = MAX(0.0f, theme.uiBorderCornerRadius);
+    CGFloat innerRadius = MAX(0.0f, radius - 4.0f);
 
     CGRect outer = CGRectMake(_topBar.frame.origin.x, _topBar.frame.origin.y,
                               _topBar.frame.size.width,
                               MAX(CGRectGetMaxY(_rightPanelVC.view.frame), CGRectGetMaxY(_sidebarVC.view.frame)) - _topBar.frame.origin.y);
     UIBezierPath *outerPath = [UIBezierPath bezierPathWithRoundedRect:outer
                                                    byRoundingCorners:UIRectCornerTopLeft | UIRectCornerTopRight | UIRectCornerBottomRight | UIRectCornerBottomLeft
-                                                         cornerRadii:CGSizeMake(16, 16)];
+                                                         cornerRadii:CGSizeMake(radius, radius)];
     UIBezierPath *innerPath = [UIBezierPath bezierPathWithRoundedRect:_contentContainer.frame
                                                     byRoundingCorners:UIRectCornerAllCorners
-                                                          cornerRadii:CGSizeMake(12, 12)];
+                                                          cornerRadii:CGSizeMake(innerRadius, innerRadius)];
     UIBezierPath *combined = [UIBezierPath bezierPath];
     [combined appendPath:outerPath];
     [combined appendPath:innerPath];

@@ -766,19 +766,25 @@ int launchJVMWithArgs(NSString *username, id launchTarget, int width, int height
     // Add DH native library path if available
     NSString *javaLibraryPath = [NSBundle.mainBundle.bundlePath stringByAppendingPathComponent:@"Frameworks"];
     NSString *lwjglVersion = [VersionDirectoryManager resolveEffectiveLwjglVersion];
-    if ([lwjglVersion isEqualToString:@"3.4.1"]) {
-        javaLibraryPath = [NSString stringWithFormat:@"%@:%@",
-            [NSBundle.mainBundle.bundlePath stringByAppendingPathComponent:@"libs/lwjgl41_natives"],
-            javaLibraryPath];
-    } else if ([lwjglVersion isEqualToString:@"3.3.6"]) {
-        javaLibraryPath = [NSString stringWithFormat:@"%@:%@",
-            [NSBundle.mainBundle.bundlePath stringByAppendingPathComponent:@"libs/lwjgl36_natives"],
-            javaLibraryPath];
+    NSString *lwjglCode = [lwjglVersion isEqualToString:@"3.4.1"] ? @"41"
+        : ([lwjglVersion isEqualToString:@"3.3.6"] ? @"36" : @"33");
+    // User-installed LWJGL (Runtime Download screen) lives in
+    // POJAV_HOME/lwjgl/lwjgl<code>/{lwjgl.jar,natives,version.txt}. It only
+    // overrides the bundled copy when the full install marker exists.
+    NSString *externalLwjglDir = [NSString stringWithFormat:@"%s/lwjgl/lwjgl%@", getenv("POJAV_HOME"), lwjglCode];
+    NSString *externalLwjglJar = [externalLwjglDir stringByAppendingPathComponent:@"lwjgl.jar"];
+    NSString *externalLwjglNatives = [externalLwjglDir stringByAppendingPathComponent:@"natives"];
+    BOOL useExternalLwjgl =
+        [NSFileManager.defaultManager fileExistsAtPath:[externalLwjglDir stringByAppendingPathComponent:@"version.txt"]]
+        && [NSFileManager.defaultManager fileExistsAtPath:externalLwjglJar];
+    NSString *lwjglNativesDir;
+    if (useExternalLwjgl && [NSFileManager.defaultManager fileExistsAtPath:externalLwjglNatives]) {
+        lwjglNativesDir = externalLwjglNatives;
     } else {
-        javaLibraryPath = [NSString stringWithFormat:@"%@:%@",
-            [NSBundle.mainBundle.bundlePath stringByAppendingPathComponent:@"libs/lwjgl33_natives"],
-            javaLibraryPath];
+        lwjglNativesDir = [NSBundle.mainBundle.bundlePath stringByAppendingPathComponent:
+            [NSString stringWithFormat:@"libs/lwjgl%@_natives", lwjglCode]];
     }
+    javaLibraryPath = [NSString stringWithFormat:@"%@:%@", lwjglNativesDir, javaLibraryPath];
     if (dhNativeLibPath) {
         javaLibraryPath = [NSString stringWithFormat:@"%@:%@", javaLibraryPath, dhNativeLibPath];
     }
@@ -1157,7 +1163,10 @@ int launchJVMWithArgs(NSString *username, id launchTarget, int width, int height
 
     NSString *lwjglDirPath;
     NSString *lwjglJarPath;
-    if ([lwjglVersion isEqualToString:@"3.4.1"]) {
+    if (useExternalLwjgl) {
+        lwjglDirPath = externalLwjglDir;
+        lwjglJarPath = externalLwjglJar;
+    } else if ([lwjglVersion isEqualToString:@"3.4.1"]) {
         lwjglDirPath = [librariesPath stringByAppendingPathComponent:@"lwjgl41"];
         lwjglJarPath = [lwjglDirPath stringByAppendingPathComponent:@"lwjgl.jar"];
     } else if ([lwjglVersion isEqualToString:@"3.3.6"]) {

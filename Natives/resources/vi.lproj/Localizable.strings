@@ -491,8 +491,19 @@
 "appearance.top_bar_blur" = "Làm mờ thanh trên";
 "appearance.left_bar_blur" = "Làm mờ thanh trái";
 "appearance.right_panel_blur" = "Làm mờ panel phải";
-"appearance.bar_border_thickness" = "Độ dày viền thanh";
+"appearance.bar_border_thickness" = "Độ dày viền";
 "appearance.export_theme" = "Xuất chủ đề giao diện";
+"runtime.title_cannot_download" = "Không thể tải";
+"runtime.status_downloading" = "Đang tải %@…";
+"runtime.status_installing" = "Đang cài đặt %@…";
+"runtime.status_extracting" = "Đang giải nén %@";
+"runtime.error_no_manifest" = "Chưa có manifest runtimes.json (runtimes-latest). Hãy publish repo JDK trước, hoặc import tay file .tar.xz trong Manage Runtime.";
+"runtime.error_extract" = "Giải nén thất bại: %@";
+"runtime.error_release_missing" = "Thiếu file release sau khi giải nén.";
+"runtime.installed_toast" = "Đã cài đặt.";
+"runtime.install_failed_toast" = "Cài đặt thất bại.";
+"runtime.error_builtin_jdk" = "Bản built-in trong app không xóa được (chỉ xóa được bản tải thêm ở POJAV_HOME).";
+"runtime.error_builtin_lwjgl" = "LWJGL built-in trong app không xóa được.";
 "appearance.import_theme" = "Nhập chủ đề giao diện";
 "appearance.reset" = "Đặt lại giao diện";
 
@@ -1025,6 +1036,7 @@
 "profiles.tab_worlds" = "Thế giới";
 "profiles.tab_packs_short" = "Gói";
 "appearance.ui_border" = "Viền giao diện";
+"appearance.border_color" = "Màu viền";
 "appearance.border_radius" = "Độ cong viền";
 "appearance.shell_gap" = "Lề khung ngoài";
 "appearance.shell_inner_gap" = "Khoảng cách panel";
