@@ -1,6 +1,7 @@
 #import "WitchRuntimeService.h"
 #import "LauncherPreferences.h"
 #import "LauncherPrefManageJREViewController.h"
+#import "WitchJREPatcher.h"
 #import "utils.h"
 #import "UnzipKit.h"
 
@@ -283,6 +284,18 @@ didFinishDownloadingToURL:(NSURL *)location {
     if (![fm fileExistsAtPath:release]) {
         [fm removeItemAtPath:target error:nil];
         if (error) *error = WitchRuntimeError(5, localize(@"runtime.error_release_missing", nil));
+        return NO;
+    }
+    // Các archive trên JDK repo không đồng nhất: jre8 không có marker, jre17
+    // có marker nhưng libjvm chưa patch brk hooks — cả hai đều khiến launcher
+    // hiện dialog "runtime does not support JIT" hoặc treo trong JLI_Launch
+    // trên iOS 26+. Patch ngay trên file trước khi runtime được load lần đầu
+    // (sau khi load, __TEXT đã ký nên iOS 27 từ chối mọi ghi đè).
+    report(0.97f, WitchRuntimeStatus(@"runtime.status_installing", item.displayName));
+    if (!witch_jre_ensure_jit_ready(target.fileSystemRepresentation)) {
+        NSLog(@"[WitchRuntimeService] JIT readiness check failed for %@ (libjvm missing/not mirror-capable)", target);
+        [fm removeItemAtPath:target error:nil];
+        if (error) *error = WitchRuntimeError(6, localize(@"runtime.error_jit_patch_failed", nil));
         return NO;
     }
     [self registerInstalledJDKForItem:item];

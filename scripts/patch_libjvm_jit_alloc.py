@@ -11,10 +11,25 @@ the brk call. printf can clobber x19 on some iOS builds, which previously made t
 240 MB mirror superpage request arrive as 0x10 bytes.
 
 After brk succeeds, skip the original "Got JIT mapping" printf tail entirely and
-branch straight to vm_remap. A PC-relative bl copied from the Requesting-log printf
-was landing 4 bytes off the _printf stub and crashed in __isPlatformVersionAtLeast.
+branch straight to the post-map tail that vm_remaps src=x20 (the debugger-allocated
+RX region) and then stops at brk #0x6a. A PC-relative bl copied from the
+Requesting-log printf was landing 4 bytes off the _printf stub and crashed in
+__isPlatformVersionAtLeast.
 
-Idempotent — safe to re-run.
+Branch targets (verified by disassembling the shipped Java 25 libjvm):
+  patch_off + 0x54: `mov x0, #0` — start of the mmap(PROT_READ|PROT_EXEC) fallback
+  patch_off + 0x74: `cbz x0, err` — then `mov w21, #2` and the vm_remap(src=x20)
+                    tail followed by brk #0x6a; x20 must already hold the
+                    debugger RX base
+  patch_off + 0x48 is WRONG: it lands inside the getenv("XNU_HAS_TXM") check
+  (`b.ne`/`ldrb`), whose Z flag comes from printf leftovers; the flow then falls
+  into the app-side mmap fallback. On TXM devices the exec bit is silently
+  stripped from such mappings, so the JVM later SIGBUSes at the first stub fetch
+  while the debugger's prepared RX region sits unused. Likewise patch_off + 44
+  (`bl puts` with x0==0) is a NULL deref, so the failure cbz must target the
+  mmap fallback at +0x54 instead.
+
+Idempotent — safe to re-run (also refreshes files carrying the old +0x48 branch).
 """
 from __future__ import annotations
 
@@ -30,8 +45,12 @@ STR_X8_SP = 0xF90003E8  # str x8, [sp]
 NOP = 0xD503201F
 REQUEST_LOG = b"[JIT26] Requesting %zu MB for JIT mapping\n"
 PATCH_WINDOW = 44  # 11 instructions
-SUCCESS_BRANCH_OFF = 28  # patch_off + 28: b to vm_remap path
-VMREMAP_PATH_OFF = 0x48  # patch_off + 0x48
+SUCCESS_BRANCH_OFF = 28  # patch_off + 28: b to the vm_remap tail
+VMREMAP_PATH_OFF = 0x74  # patch_off + 0x74: cbz x0, err -> mov w21, #2 -> vm_remap(src=x20)
+MMAP_FALLBACK_OFF = 0x54  # patch_off + 0x54: mov x0, #0 — mmap() fallback entry
+CBZ_X0_ERR_INSN = 0xB4000400  # cbz x0, <+0x80> at VMREMAP_PATH_OFF (0x897d2c)
+MOV_W21_2_INSN = 0x52800055  # mov w21, #2 at VMREMAP_PATH_OFF + 4
+MOV_X0_0_INSN = 0xD2800000  # mov x0, #0 at MMAP_FALLBACK_OFF
 
 
 def decode_adrp_add(data: bytes, pc: int) -> int | None:
@@ -82,9 +101,28 @@ def success_branch_insn(patch_off: int) -> int:
     return 0x14000000 | (b_imm & 0x03FFFFFF)
 
 
+def verify_tail_layout(data: bytes, patch_off: int) -> bool:
+    """Confirm the code after the patch window matches the expected libjvm layout.
+
+    Guarantees the success/failure branch targets point at real instructions:
+      +0x54 mov x0, #0   (mmap fallback entry)
+      +0x74 cbz x0, err  (guard before the vm_remap tail)
+      +0x78 mov w21, #2  (vm_remap inheritance arg setup)
+    """
+    if patch_off + VMREMAP_PATH_OFF + 8 > len(data):
+        return False
+    if struct.unpack_from("<I", data, patch_off + MMAP_FALLBACK_OFF)[0] != MOV_X0_0_INSN:
+        return False
+    if struct.unpack_from("<I", data, patch_off + VMREMAP_PATH_OFF)[0] != CBZ_X0_ERR_INSN:
+        return False
+    if struct.unpack_from("<I", data, patch_off + VMREMAP_PATH_OFF + 4)[0] != MOV_W21_2_INSN:
+        return False
+    return True
+
+
 def patch_brk_sequence(data: bytearray, patch_off: int) -> None:
     cbz_pc = patch_off + 16
-    mmap_target = patch_off + PATCH_WINDOW
+    mmap_target = patch_off + MMAP_FALLBACK_OFF
     cbz_imm = (mmap_target - cbz_pc) // 4
     if cbz_imm <= 0 or cbz_imm >= 0x40000:
         raise ValueError(f"cbz offset out of range ({cbz_imm})")
@@ -111,6 +149,10 @@ def patch(path: Path) -> str:
     if patch_off is None:
         return "skip: get_debug_jit_mapping call site not found"
 
+    if not verify_tail_layout(data, patch_off):
+        return (f"warn: unexpected tail layout after {patch_off:#x}; branch targets "
+                f"(+{MMAP_FALLBACK_OFF:#x}/+{VMREMAP_PATH_OFF:#x}) unverified, not patching")
+
     size_store_off = patch_off - 0x10
     if size_store_off < 0:
         return f"warn: size store site before file start ({patch_off:#x})"
@@ -129,7 +171,7 @@ def patch(path: Path) -> str:
     cbz_insn = struct.unpack_from("<I", data, patch_off + 16)[0]
     branch_insn = struct.unpack_from("<I", data, patch_off + SUCCESS_BRANCH_OFF)[0]
     tail_insn = struct.unpack_from("<I", data, patch_off + 32)[0]
-    expected_cbz = 0xB4000000 | ((((patch_off + PATCH_WINDOW) - (patch_off + 16)) // 4) << 5)
+    expected_cbz = 0xB4000000 | ((((patch_off + MMAP_FALLBACK_OFF) - (patch_off + 16)) // 4) << 5)
     expected_branch = success_branch_insn(patch_off)
     already_ok = (
         first == LDR_X1_SP8

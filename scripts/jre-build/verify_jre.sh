@@ -72,29 +72,23 @@ if command -v vtool >/dev/null 2>&1; then
   fi
 fi
 
-# 5. mirror-mapping marker for 17/21/25 (launcher gates MirrorMappedCodeCache on it)
-if [[ "$VER" != "8" ]]; then
-  MARKER="$DIR/.witch-mirror-mapping"
-  if [[ -f "$MARKER" ]] && [[ "$(cat "$MARKER")" == "witch-mirror-mapping-v1" ]]; then
-    ok ".witch-mirror-mapping marker present (mirror mapped JIT)"
-  else
-    bad "missing/incorrect .witch-mirror-mapping"
-  fi
+# 5. mirror-mapping marker for all versions (the launcher gates both
+#    MirrorMappedCodeCache and the JIT26 handshake on it; Java 8 needs it
+#    too — its libjvm carries the baked-in mirror_mapping source patch).
+MARKER="$DIR/.witch-mirror-mapping"
+if [[ -f "$MARKER" ]] && [[ "$(cat "$MARKER")" == "witch-mirror-mapping-v1" ]]; then
+  ok ".witch-mirror-mapping marker present (mirror mapped JIT)"
 else
-  if [[ ! -e "$DIR/.witch-mirror-mapping" ]]; then
-    ok "no mirror marker expected for Java 8"
-  else
-    bad "Java 8 must NOT carry .witch-mirror-mapping"
-  fi
+  bad "missing/incorrect .witch-mirror-mapping (run: make jre — markers are written only after a successful brk patch)"
 fi
 
-# 6. patched libjvm for 21/25: printf replaced by brk #0x6a, and jit-alloc brk #0xf00d present
-if [[ "$VER" == "21" || "$VER" == "25" ]]; then
-  if python3 "$ROOT/scripts/jre-build/check_libjvm_patch.py" "$JVM"; [ "$?" -ne 1 ]; then
-    ok "libjvm binary-patched (mirror brk active)"
-  else
-    bad "libjvm binary-patch verification failed (run scripts/patch_libjvm_mirror_brk.py + scripts/patch_libjvm_jit_alloc.py)"
-  fi
+# 6. every runtime must have the mirror brk hooks: the printf replaced by
+#    brk #0x6a AND the jit-alloc brk #0xf00d present. Unpatched runtimes
+#    black-screen (or show the 'missing iOS 27 JIT patch' dialog) on iOS 26/27.
+if python3 "$ROOT/scripts/jre-build/check_libjvm_patch.py" "$JVM"; then
+  ok "libjvm binary-patched (mirror brk active)"
+else
+  bad "libjvm binary-patch verification failed (run scripts/patch_libjvm_mirror_brk.py + scripts/patch_libjvm_jit_alloc.py)"
 fi
 
 if [[ "$fails" -gt 0 ]]; then

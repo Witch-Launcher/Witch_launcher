@@ -367,6 +367,7 @@ egl_bridge.m
    ../UI/Managers/ModUpdateChecker.m
    ../UI/Managers/WitchUpdateService.m
    ../UI/Managers/WitchRuntimeService.m
+   ../UI/Managers/WitchJREPatcher.c
     ../UI/Screens/MainMenu/MainMenuViewController.m
      WitchAIService.m
      WitchLogReporter.m

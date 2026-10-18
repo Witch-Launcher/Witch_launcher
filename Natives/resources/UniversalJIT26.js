@@ -52,6 +52,12 @@ function log_verbose(msg) {
 
 // To avoid having to re-parse these in each function, we save some registers here
 let tid, x0, x1, x16, pc;
+// Last region JIT26PrepareRegion blessed via prepare_memory_region. The brk
+// 0x6a handler (this file + UniversalJIT26Extension.js) skips re-preparing the
+// same RX region: the write-blessing costs one debugger round trip per 16 KB
+// page (~30 s for a 240 MB CodeCache).
+let lastPreparedRx = null;
+let lastPreparedSize = 0n;
 let detached = false;
 let continuesWithSignal = true;
 let pid = get_pid();
@@ -238,18 +244,22 @@ function JIT26HandleBrk0x6a(brkResponse) {
         log(`Mirror prepare brk 0x6a: out-of-band rx=0x${rx.toString(16)} rw=0x${rw.toString(16)}, skipping (layout drift?)`);
         return;
     }
+    // Size: prefer the size JIT26PrepareRegion actually blessed for this RX
+    // region. NEVER derive it from rw-rx: the alias is vm_remap'd ANYWHERE, so
+    // the difference can be gigabytes and the prepare would run off the end
+    // (each page write silently fails but the walk takes minutes).
     let size = 0xf000000n; // 240 MB default
-    if (rw > rx) {
-        let diff = rw - rx;
-        if (diff >= 16n * 1024n * 1024n) {
-            size = diff;
-        }
+    if (typeof lastPreparedSize === 'bigint' && lastPreparedSize >= 0x4000n && lastPreparedSize < 0x40000000n) {
+        size = lastPreparedSize;
+    }
+    if (typeof lastPreparedRx === 'bigint' && lastPreparedRx === rx) {
+        log(`Mirror prepare brk 0x6a: RX=0x${rx.toString(16)} already blessed (size=0x${size.toString(16)}); RW alias 0x${rw.toString(16)} needs no prepare`);
+        return;
     }
     log(`Mirror prepare brk 0x6a: RX=0x${rx.toString(16)} RW=0x${rw.toString(16)} size=0x${size.toString(16)}`);
     try {
         let r1 = prepare_memory_region(rx, size);
-        let r2 = prepare_memory_region(rw, size);
-        log(`Prepared mirror pair RX=0x${rx.toString(16)} (${r1}) RW=0x${rw.toString(16)} (${r2})`);
+        log(`Prepared mirror RX=0x${rx.toString(16)} (${r1})`);
     } catch (e) {
         log(`ERROR: mirror prepare failed: ${e}`);
     }
@@ -327,17 +337,16 @@ function JIT26PrepareRegion(brkResponse) {
     }
     log(`prepareJITPageResponse = ${prepareJITPageResponse}`);
 
-    // Mirror-mapped code cache uses a paired RW view at RX+size on iOS 26+/27.
-    if (allocSize >= mirrorMin && jitPageAddress >= 0x100000000n && jitPageAddress < 0x800000000n) {
-        const rwAddress = jitPageAddress + allocSize;
-        try {
-            prepare_memory_region(rwAddress, allocSize);
-            prepare_memory_region(jitPageAddress, allocSize);
-            log(`Prepared mirror pair RX=0x${jitPageAddress.toString(16)} RW=0x${rwAddress.toString(16)}`);
-        } catch (e) {
-            log_verbose(`Mirror RW prepare deferred (vm_remap may not have run yet): ${e}`);
-        }
-    }
+    // Record the blessing so the brk 0x6a handler does not redo the per-page
+    // prepare for this region (libjvm raises 0x6a after its vm_remap).
+    lastPreparedRx = jitPageAddress;
+    lastPreparedSize = allocSize;
+
+    // NOTE: no "RW view at RX+size" prepare here. libjvm's vm_remap creates the
+    // RW alias AFTER this call at a kernel-picked (VM_FLAGS_ANYWHERE) address,
+    // so preparing RX+size would walk unmapped memory. The real alias arrives
+    // as x8 on the brk 0x6a (x20=RX); writes through the alias do not need any
+    // blessing — only the RX pages that will execute do.
 
     let putX0Response = send_command(`P0=${numberToLittleEndianHexString(jitPageAddress)};thread:${tid};`);
     log(`putX0Response = ${putX0Response}`);

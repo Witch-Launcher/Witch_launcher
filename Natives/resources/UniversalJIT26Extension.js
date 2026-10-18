@@ -12,6 +12,23 @@ legacyCommands[0x69] = function(brkResponse) {
     }
 };
 
+// JIT26SetDetachAfterFirstBr(BOOL) — command 3. Re-registered here because a
+// stale assigned base script (from an older launcher build) predates command 3
+// and would otherwise stop dead on the launcher's detach-policy brk.
+commands[3] = function(brkResponse) {
+    detachAfterFirstBr = x0 != 0;
+    log(`JIT26SetDetachAfterFirstBr(${detachAfterFirstBr}) called`);
+};
+
+// JIT26PrepareRegionForPatching(void *addr, size_t len) — command 4, used by
+// the runtime libjvm __TEXT patch fallback (write_rx_u32).
+commands[4] = function(brkResponse) {
+    let x0str = x0.toString(16);
+    let x1str = x1.toString(16);
+    let bytes = send_command(`m${x0str},${x1str}`);
+    send_command(`M${x0str},${x1str}:${bytes}`);
+};
+
 function readRegister(regNum) {
     const hexReg = regNum.toString(16);
     let regResponse = send_command(`p${hexReg};thread:${tid};`);
@@ -72,21 +89,25 @@ legacyCommands[0x6a] = function(brkResponse) {
         log(`Mirror prepare brk 0x6a: out-of-band rx=0x${rx.toString(16)} rw=0x${rw.toString(16)}, skipping (layout drift?)`);
         return;
     }
+    // Size: prefer the size the base script actually blessed for this RX
+    // region. NEVER derive it from rw-rx: the RW alias is vm_remap'd ANYWHERE
+    // (VM_FLAGS_ANYWHERE), so the difference can be gigabytes and the prepare
+    // would walk off the end of the region (minutes of doomed M writes).
     let size = 0xf000000n; // 240 MB default
-    if (rw > rx) {
-        let diff = rw - rx;
-        if (diff >= 16n * 1024n * 1024n) {
-            size = diff;
-        }
+    if (typeof lastPreparedSize === 'bigint' && lastPreparedSize >= 0x4000n && lastPreparedSize < 0x40000000n) {
+        size = lastPreparedSize;
+    }
+    if (typeof lastPreparedRx === 'bigint' && lastPreparedRx === rx) {
+        log(`Mirror prepare brk 0x6a: RX=0x${rx.toString(16)} already blessed (size=0x${size.toString(16)}); RW alias 0x${rw.toString(16)} needs no prepare`);
+        return;
     }
     log(`Mirror prepare brk 0x6a: RX=0x${rx.toString(16)} RW=0x${rw.toString(16)} size=0x${size.toString(16)}`);
     try {
         let r1 = prepare_memory_region(rx, size);
-        let r2 = prepare_memory_region(rw, size);
-        log(`Prepared mirror pair RX=0x${rx.toString(16)} (${r1}) RW=0x${rw.toString(16)} (${r2})`);
+        log(`Prepared mirror RX=0x${rx.toString(16)} (${r1})`);
     } catch (e) {
         log(`ERROR: mirror prepare failed: ${e}`);
     }
 };
 
-log('Amethyst UniversalJIT26 extension loaded (handlers 0x69/0x6a, detach disabled)');
+log('Amethyst UniversalJIT26 extension loaded (handlers 0x69/0x6a, commands 3/4, detach disabled)');

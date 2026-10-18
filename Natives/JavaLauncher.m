@@ -382,6 +382,31 @@ static void onUnservicedBrk(int sig) {
     }
 }
 
+// Send JIT26SetDetachAfterFirstBr (brk #0xf00d, command 3) under a SIGTRAP
+// guard. A stale assigned base script may not implement command 3; the brk
+// then either traps with the default disposition (debugger detached) or —
+// worse — the script logs "Unknown command 3" and leaves the thread stopped
+// forever. This guard catches the signal case; the callers below only send
+// command 3 once the script has proven it services brks (probe + extension).
+static void JIT26SetDetachAfterFirstBrGuarded(BOOL value) {
+    struct sigaction sa = {0};
+    struct sigaction oldSa;
+    sa.sa_handler = onUnservicedBrk;
+    sigemptyset(&sa.sa_mask);
+    sa.sa_flags = 0;
+    sigaction(SIGTRAP, &sa, &oldSa);
+    g_jitTrapArmed = 1;
+    if (sigsetjmp(g_jitTrapJmp, 1) == 0) {
+        JIT26SetDetachAfterFirstBr(value);
+    } else {
+        NSLog(@"[JavaLauncher] JIT26SetDetachAfterFirstBr(%d) brk was NOT serviced "
+              @"(script lacks command 3); continuing with the script's own detach policy",
+              value);
+    }
+    g_jitTrapArmed = 0;
+    sigaction(SIGTRAP, &oldSa, NULL);
+}
+
 static BOOL JIT26ProbeLooksValid(void *result) {
     if (!result || result == MAP_FAILED) {
         return NO;
@@ -435,9 +460,9 @@ int launchJVMWithArgs(NSString *username, id launchTarget, int width, int height
     DeviceGetJITFlags(YES);
     BOOL requiresDebugJITMapping = DeviceNeedsDebugJITMapping();
     BOOL jit26AlwaysAttached = getPrefBool(@"debug.debug_always_attached_jit");
-    // Patched Java 21/25 runtimes always route code-cache allocation through
-    // brk #0xf00d / brk #0x6a on iOS 26.6+/27 — even on TXM devices where RX
-    // mappings work directly (see patch_libjvm_jit_alloc.py /
+    // Patched Java 8/17/21/25 runtimes always route code-cache allocation
+    // through brk #0xf00d / brk #0x6a on iOS 26.6+/27 — even on TXM devices
+    // where RX mappings work directly (see patch_libjvm_jit_alloc.py /
     // patch_libjvm_mirror_brk.py). The launcher must therefore run the full
     // JIT26 handshake (script upload + probe + exception ports) on every
     // iOS 26+ device, regardless of the TXM classification. Skipping it on
@@ -485,11 +510,14 @@ int launchJVMWithArgs(NSString *username, id launchTarget, int width, int height
         sigemptyset(&jitTrapSa.sa_mask);
         jitTrapSa.sa_flags = 0;
         sigaction(SIGTRAP, &jitTrapSa, &oldTrapSa);
-        JIT26SetDetachAfterFirstBr(NO);
-        // The first brk must be the base-script probe.  StikDebug attaches and
-        // starts the assigned Universal JIT script while servicing that brk;
-        // sending our extension first can leave an unattached debugger waiting
-        // forever on command 2 (the black screen seen before "probe returned").
+        // The FIRST brk must be the base-script probe: StikDebug attaches and
+        // starts the assigned Universal JIT script while servicing that brk,
+        // and a stale assigned script (from an older launcher) only knows the
+        // probe/extension commands. Sending JIT26SetDetachAfterFirstBr (cmd 3)
+        // here made such scripts log "Unknown command 3" and leave the thread
+        // stopped forever — the black-screen freeze users hit with StikDebug.
+        // The detach policy is applied later, after the extension re-registered
+        // commands 3/4 (see JIT26SetDetachAfterFirstBrGuarded callers).
         // Use the same brk #0xf00d path as patched libjvm (not legacy brk #0x69).
         void *volatile probeMapping = NULL;
         g_jitTrapArmed = 1;
@@ -551,7 +579,9 @@ int launchJVMWithArgs(NSString *username, id launchTarget, int width, int height
         NSLog(@"[JavaLauncher] DyldLVBypass init completed during JIT26 handshake");
         JITReportLine(@"dyld mmap_matches=%d mmap_ok=%d fcntl_matches=%d fcntl_ok=%d",
             g_dyldMmapMatches, g_dyldMmapOK, g_dyldFcntlMatches, g_dyldFcntlOK);
-        JIT26SetDetachAfterFirstBr(!jit26AlwaysAttached);
+        // Safe here: the probe above proved the script services brks and the
+        // extension just re-registered command 3 even for stale base scripts.
+        JIT26SetDetachAfterFirstBrGuarded(!jit26AlwaysAttached);
         init_jit_vm_remap_hook();
         // make sure we don't get stuck in EXC_BAD_ACCESS
         task_set_exception_ports(mach_task_self(), EXC_MASK_BAD_ACCESS, 0, EXCEPTION_DEFAULT, MACHINE_THREAD_STATE);
@@ -660,12 +690,12 @@ int launchJVMWithArgs(NSString *username, id launchTarget, int width, int height
     }
 
     if (requiresDebugJITMapping && !RuntimeSupportsDebugJITMapping(javaHome)) {
-        NSLog(@"[JavaLauncher] Missing mirror marker: javaHome=%@ marker=.witch-mirror-mapping (txm=%d, flags=0x%X). Pick a bundled Java 21/25 runtime rebuilt with `make jre`.",
+        NSLog(@"[JavaLauncher] Missing mirror marker: javaHome=%@ marker=.witch-mirror-mapping (txm=%d, flags=0x%X). Pick a bundled Java 8/17/21/25 runtime rebuilt with `make jre`.",
             javaHome, DeviceHasTXM(), (unsigned)DeviceGetJITFlags(NO));
         UIKit_returnToSplitView();
         showDialog(localize(@"Error", nil),
             @"The selected Java runtime does not support JIT on this iOS version. "
-             "Open Settings and choose a bundled Java 21 or 25 runtime.");
+             "Open Settings and choose a bundled Java 8, 17, 21 or 25 runtime.");
         return 1;
     }
 
@@ -677,12 +707,19 @@ int launchJVMWithArgs(NSString *username, id launchTarget, int width, int height
     // devices (iPhone 12/13 & co.) and hung them inside JLI_Launch.
     BOOL needsMirrorJITPrepare = jit26Handshake && RuntimeSupportsDebugJITMapping(javaHome);
     if (needsMirrorJITPrepare) {
-        // Java 21/25 patched runtimes use mirror_w/x on every iOS 26.6+/27 device.
-        // StikDebug must stay attached through vm_remap and follow-up prepare calls.
-        JIT26SetDetachAfterFirstBr(NO);
-        NSLog(@"[JavaLauncher] Mirror-capable runtime: debugger kept attached for JIT prepare");
-    } else if (requiresDebugJITMapping && !jit26AlwaysAttached) {
-        JIT26SetDetachAfterFirstBr(YES);
+        // Mirror-capable patched runtimes use mirror_w/x on every iOS 26.6+/27
+        // device. StikDebug must stay attached through vm_remap and follow-up
+        // prepare calls. Only send the detach-policy command when the script
+        // proved it services brks — with a dead script the brk would trap with
+        // the default disposition (crash) or freeze a stale script thread.
+        if (jitScriptAlive) {
+            JIT26SetDetachAfterFirstBrGuarded(NO);
+            NSLog(@"[JavaLauncher] Mirror-capable runtime: debugger kept attached for JIT prepare");
+        } else {
+            NSLog(@"[JavaLauncher] Mirror-capable runtime but script is dead; skipping detach-policy command (mirror gate will decide)");
+        }
+    } else if (requiresDebugJITMapping && !jit26AlwaysAttached && jitScriptAlive) {
+        JIT26SetDetachAfterFirstBrGuarded(YES);
     }
 
     if ([javaHome hasPrefix:@(getenv("POJAV_HOME"))]) {
@@ -1219,8 +1256,15 @@ int launchJVMWithArgs(NSString *username, id launchTarget, int width, int height
 
     if (needsMirrorJITPrepare) {
         // Mirror setup needs prepare_memory_region on RX *and* RW after vm_remap.
-        // StikDebug must stay attached through those extra brk calls.
-        JIT26SetDetachAfterFirstBr(NO);
+        // StikDebug must stay attached through those extra brk calls. With
+        // debug.debug_mirror_mapped_code_cache=0 (classic diagnosis path) the
+        // script may be dead here — never send cmd 3 to a dead script: the
+        // brk would crash (detached) or freeze the stale script thread.
+        if (jitScriptAlive) {
+            JIT26SetDetachAfterFirstBrGuarded(NO);
+        } else {
+            NSLog(@"[JavaLauncher] Mirror JIT prepare: script dead; skipping detach-policy command");
+        }
         task_set_exception_ports(mach_task_self(), EXC_MASK_ALL & ~EXC_MASK_BREAKPOINT, 0,
             EXCEPTION_DEFAULT, THREAD_STATE_NONE);
         rebind_jit_vm_hooks_after_libjvm_load();

@@ -347,9 +347,6 @@ jre: native
 	rm -rf $(SOURCEDIR)/depends/java-{8,17,21,25}-openjdk/{ASSEMBLY_EXCEPTION,bin,include,jre,legal,LICENSE,man,THIRD_PARTY_README,lib/{ct.sym,jspawnhelper,libjsig.dylib,src.zip,tools.jar}}; \
 	rm -f $(SOURCEDIR)/depends/java-{8,17,21,25}-openjdk/.amethyst-mirror-mapping; \
 	rm -f $(SOURCEDIR)/depends/java-{8,17,21,25}-openjdk/.witch-mirror-mapping; \
-	printf 'witch-mirror-mapping-v1\n' > $(SOURCEDIR)/depends/java-17-openjdk/.witch-mirror-mapping; \
-	printf 'witch-mirror-mapping-v1\n' > $(SOURCEDIR)/depends/java-21-openjdk/.witch-mirror-mapping; \
-	printf 'witch-mirror-mapping-v1\n' > $(SOURCEDIR)/depends/java-25-openjdk/.witch-mirror-mapping; \
 	for ver in 17 21; do \
 		jvm="$(SOURCEDIR)/depends/java-$$ver-openjdk/lib/server/libjvm.dylib"; \
 		if [ -f "$$jvm" ]; then \
@@ -360,19 +357,24 @@ jre: native
 	if [ -f "$$jvm25" ]; then \
 		python3 $(SOURCEDIR)/scripts/patch_jre25_runtime.py "$$jvm25" || true; \
 	fi; \
-	for ver in 21 25; do \
+	for ver in $(JRE_VERSIONS); do \
 		jvm="$(SOURCEDIR)/depends/java-$$ver-openjdk/lib/server/libjvm.dylib"; \
+		marker="$(SOURCEDIR)/depends/java-$$ver-openjdk/.witch-mirror-mapping"; \
 		if [ -f "$$jvm" ]; then \
 			if python3 $(SOURCEDIR)/scripts/patch_libjvm_mirror_brk.py "$$jvm" && \
-			   python3 $(SOURCEDIR)/scripts/patch_libjvm_jit_alloc.py "$$jvm"; then \
-				echo "[jre] Java $$ver mirror brk patches OK"; \
+			   python3 $(SOURCEDIR)/scripts/patch_libjvm_jit_alloc.py "$$jvm" && \
+			   python3 $(SOURCEDIR)/scripts/jre-build/check_libjvm_patch.py "$$jvm"; then \
+				printf 'witch-mirror-mapping-v1\n' > "$$marker"; \
+				echo "[jre] Java $$ver mirror brk patches OK (marker written)"; \
 			else \
-				echo "[jre] WARNING: Java $$ver mirror brk patch failed — removing mirror marker so the launcher falls back to classic JIT26"; \
-				rm -f $(SOURCEDIR)/depends/java-$$ver-openjdk/.witch-mirror-mapping; \
+				rm -f "$$marker"; \
+				echo "[jre] ERROR: Java $$ver libjvm is not mirror-patched (no brk #0x6a/#0xf00d hooks)"; \
+				echo "[jre] ERROR: no marker written — the launcher will refuse this runtime on iOS 26+ instead of black-screening"; \
+				echo "[jre] ERROR: the source build must include the JIT26 mirror patches (see scripts/jre-build/patches); the published assets are used with JRE_BUILD_MODE=download"; \
 			fi; \
 		fi; \
 	done; \
-	for ver in 21 25; do \
+	for ver in $(JRE_VERSIONS); do \
 		jvm="$(SOURCEDIR)/depends/java-$$ver-openjdk/lib/server/libjvm.dylib"; \
 		if [ -f "$$jvm" ]; then \
 			if ! otool -l "$$jvm" >/dev/null 2>&1; then \
