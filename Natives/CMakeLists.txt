@@ -46,6 +46,7 @@ include_directories(
    "../UI/Screens/Account"
    "../UI/Screens/Download"
    "../UI/Screens/FileBrowser"
+   "../UI/Screens/Perf"
    "../UI/Screens/ProfileSettings"
    "../UI/Screens/AI"
   "installer/modpack"
@@ -400,6 +401,11 @@ egl_bridge.m
    ../UI/Screens/Settings/LauncherUpdateViewController.m
    ../UI/Screens/Settings/RuntimeDownloadViewController.m
    ../UI/Screens/Account/AccountViewController.m
+   ../UI/Screens/Perf/PerfSettingsViewController.m
+   ../UI/Screens/Perf/PerfHistoryViewController.m
+   ../UI/Screens/Perf/PerfChartViewController.m
+   ../UI/Screens/Perf/PerfChartRenderer.m
+   ../UI/Screens/Perf/PerfSessionStore.m
    ../UI/Screens/ProfileSettings/ProfileSettingsViewController.m
    ../UI/Screens/ProfileSettings/ProfileTabbedPageViewController.m
    ../UI/Screens/ProfileSettings/ProfileOverviewVC.m

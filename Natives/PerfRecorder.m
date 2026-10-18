@@ -18,23 +18,13 @@
 extern uint64_t pojavSwapCount(void);
 
 // Metric identifiers: index 0 is the timestamp column, 1...8 match the CSV.
-static NSArray<NSString *> *PerfMetricNames(void) {
+NSArray<NSString *> *PerfMetricNames(void) {
     static NSArray<NSString *> *names;
     static dispatch_once_t once;
     dispatch_once(&once, ^{
         names = @[@"fps", @"cpu", @"gpu", @"ram", @"devram", @"battery", @"battemp", @"thermal"];
     });
     return names;
-}
-
-static NSArray<NSString *> *PerfMetricPrefKeys(void) {
-    static NSArray<NSString *> *keys;
-    static dispatch_once_t once;
-    dispatch_once(&once, ^{
-        keys = @[@"perf.metric_fps", @"perf.metric_cpu", @"perf.metric_gpu", @"perf.metric_ram",
-                 @"perf.metric_devram", @"perf.metric_battery", @"perf.metric_battemp", @"perf.metric_thermal"];
-    });
-    return keys;
 }
 
 typedef struct {
@@ -169,10 +159,9 @@ static double PerfCurrentThermalState(void) {
         dataUsingEncoding:NSUTF8StringEncoding]];
 
     NSMutableDictionary *metrics = [NSMutableDictionary new];
-    NSArray *prefKeys = PerfMetricPrefKeys();
-    NSArray *names = PerfMetricNames();
-    for (NSUInteger i = 0; i < prefKeys.count; i++) {
-        metrics[names[i]] = @(getPrefBool(prefKeys[i]));
+    for (NSString *name in PerfMetricNames()) {
+        NSString *prefKey = [@"perf.metric_" stringByAppendingString:name];
+        metrics[name] = @(getPrefBool(prefKey));
     }
     _enabledMetrics = metrics;
 

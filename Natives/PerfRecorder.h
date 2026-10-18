@@ -7,6 +7,10 @@
 // Samples are flushed to disk as they are taken, so a session survives a
 // crash, a jetsam kill or a force close; leftover "recording" sessions are
 // finalized as "crashed"/"interrupted" on the next app launch.
+// Metric identifiers in CSV column order: fps, cpu, gpu, ram, devram,
+// battery, battemp, thermal. Pref key for each metric is "perf.metric_<name>".
+NSArray<NSString *> *PerfMetricNames(void);
+
 typedef NS_ENUM(NSInteger, PerfStopReason) {
     PerfStopReasonUser = 0,   // user pressed "stop recording" in-game
     PerfStopReasonExited,     // JVM returned (game closed normally)
