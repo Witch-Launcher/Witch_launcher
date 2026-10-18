@@ -1,4 +1,5 @@
 #import "PLLogOutputView.h"
+#import "PerfRecorder.h"
 #import "SurfaceViewController.h"
 #import "utils.h"
 #import "CrashScreenViewController.h"
@@ -169,6 +170,9 @@ static PLLogOutputView* current;
 }
 
 + (void)handleExitCode:(int)code {
+    if (code != 0) {
+        [[PerfRecorder shared] noteCrash];
+    }
     dispatch_async(dispatch_get_main_queue(), ^(void){
         UIWindow *window = UIWindow.mainWindow;
         if (!window) {

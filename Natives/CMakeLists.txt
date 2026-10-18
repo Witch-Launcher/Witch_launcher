@@ -248,6 +248,7 @@ add_executable(Witch
   external/fishhook/fishhook.c
   UIKit+hook.m
   MemSampler.m
+  PerfRecorder.m
 
   authenticator/BaseAuthenticator.m
   authenticator/LocalAuthenticator.m

@@ -204,6 +204,17 @@
             @"debug_server_token": @"",
             @"debug_server_localhost_only": @NO
         }.mutableCopy;
+        defaults[@"perf"] = @{
+            @"record": @YES,
+            @"metric_fps": @YES,
+            @"metric_cpu": @YES,
+            @"metric_gpu": @YES,
+            @"metric_ram": @YES,
+            @"metric_devram": @YES,
+            @"metric_battery": @YES,
+            @"metric_battemp": @YES,
+            @"metric_thermal": @YES
+        }.mutableCopy;
         defaults[@"launcher"] = @{
             @"language": @"auto",
             @"theme": @"System",

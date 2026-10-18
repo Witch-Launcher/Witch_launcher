@@ -1,5 +1,7 @@
 #import "CustomControlsViewController.h"
+#import "ErrorPresenter.h"
 #import "LauncherPreferences.h"
+#import "PerfRecorder.h"
 #import "SettingsViewController.h"
 #import "PLProfiles.h"
 #import "SurfaceViewController.h"
@@ -67,6 +69,16 @@ static CGPoint lastCenterPoint;
     }];
 }
 
+- (void)refreshMenuItems {
+    NSMutableArray *items = [NSMutableArray arrayWithObject:@"game.menu.force_close"];
+    if (PerfRecorder.shared.isRecording) {
+        [items addObject:@"game.menu.perf_stop"];
+    }
+    [items addObjectsFromArray:@[@"game.menu.log_output", @"game.menu.custom_controls", @"Settings"]];
+    self.menuArray = items;
+    [self.menuView reloadData];
+}
+
 - (void)handleRightEdge:(UIPanGestureRecognizer *)sender {
     if (lastCenterPoint.y == 0) {
         lastCenterPoint.x = self.rootView.center.x;
@@ -79,6 +91,7 @@ static CGPoint lastCenterPoint;
     CGPoint translation = [sender translationInView:sender.view];
 
     if (sender.state == UIGestureRecognizerStateBegan) {
+        [self refreshMenuItems];
         self.menuView.hidden = NO;
     } else if (sender.state == UIGestureRecognizerStateChanged) {
         self.rootView.center = CGPointMake(lastCenterPoint.x + translation.x/2, centerY + translation.y/10.0);
@@ -114,6 +127,7 @@ static CGPoint lastCenterPoint;
             self.rootView.center = CGPointMake(self.rootView.bounds.size.width/-2, self.rootView.center.y);
             self.menuView.frame = CGRectMake(self.view.frame.size.width, 0, 0, 0);
         } completion:^(BOOL finished) {
+            [[PerfRecorder shared] stopWithReason:PerfStopReasonForceClose];
             if (fatalExitGroup == nil) {
                 exit(0);
             } else {
@@ -194,20 +208,24 @@ static CGPoint lastCenterPoint;
 }
 
 - (void)didSelectMenuItem:(int)item {
-    switch (item) {
-        case 0:
-            [self actionForceClose];
-            break;
-        case 1:
-            [self.logOutputView actionToggleLogOutput];
-            break;
-        case 2:
-            [self actionOpenCustomControls];
-            break;
-        case 3:
-            [self actionOpenPreferences];
-            break;
+    NSString *key = (item >= 0 && item < (int)self.menuArray.count) ? self.menuArray[item] : @"";
+    if ([key isEqualToString:@"game.menu.force_close"]) {
+        [self actionForceClose];
+    } else if ([key isEqualToString:@"game.menu.perf_stop"]) {
+        [self actionStopRecording];
+    } else if ([key isEqualToString:@"game.menu.log_output"]) {
+        [self.logOutputView actionToggleLogOutput];
+    } else if ([key isEqualToString:@"game.menu.custom_controls"]) {
+        [self actionOpenCustomControls];
+    } else if ([key isEqualToString:@"Settings"]) {
+        [self actionOpenPreferences];
     }
+}
+
+- (void)actionStopRecording {
+    [[PerfRecorder shared] stopWithReason:PerfStopReasonUser];
+    [self animateMenuScale:1 duration:0.5];
+    [ErrorPresenter showToast:localize(@"perf.toast.saved", nil) success:YES];
 }
 
 - (void)viewWillTransitionToSize_Navigation:(CGRect)frame {

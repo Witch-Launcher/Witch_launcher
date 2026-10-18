@@ -10,6 +10,7 @@
 "game.menu.force_close" = "Force close";
 "game.menu.confirm.force_close" = "Are you sure you want to force close?";
 "game.menu.log_output" = "Log output";
+"game.menu.perf_stop" = "Stop performance recording";
 "game.menu.custom_controls" = "Custom controls";
 
 "In-Game Widget" = "In-Game Widget";
@@ -1183,3 +1184,4 @@
 "quickpanel.title" = "Versions & Account";
 "appearance.mainbar_portrait" = "Main bar (portrait)";
 "appearance.mainbar_landscape" = "Main bar (landscape)";
+"perf.toast.saved" = "Performance recording saved";

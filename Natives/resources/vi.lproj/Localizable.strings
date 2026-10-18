@@ -10,6 +10,7 @@
 "game.menu.force_close" = "Đóng chương trình";
 "game.menu.confirm.force_close" = "Bạn có chắc muốn bắt buộc thoát?";
 "game.menu.log_output" = "Nhật ký";
+"game.menu.perf_stop" = "Dừng đo hiệu năng";
 "game.menu.custom_controls" = "Tùy chỉnh điều khiển";
 
 "In-Game Widget" = "Tiện ích trong game";
@@ -1093,3 +1094,4 @@
 "quickpanel.title" = "Phiên bản & Tài khoản";
 "appearance.mainbar_portrait" = "Thanh chính (dọc)";
 "appearance.mainbar_landscape" = "Thanh chính (ngang)";
+"perf.toast.saved" = "Đã lưu bản ghi hiệu năng";

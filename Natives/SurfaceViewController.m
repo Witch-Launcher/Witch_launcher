@@ -16,6 +16,7 @@
 #import "JavaLauncher.h"
 #import "LauncherPreferences.h"
 #import "MinecraftResourceUtils.h"
+#import "PerfRecorder.h"
 #import "PLProfiles.h"
 #import "SurfaceViewController.h"
 #import "TrackedTextField.h"
@@ -636,6 +637,10 @@ static GameSurfaceView* pojavWindow;
 }
 
 - (void)launchMinecraft {
+    [[PerfRecorder shared] startWithMetadata:@{
+        @"version": self.metadata[@"id"] ?: @"",
+        @"instance": self.metadata[@"instanceName"] ?: @""
+    }];
     dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
         int ret;
         if (self.jarPath) {
@@ -659,6 +664,7 @@ static GameSurfaceView* pojavWindow;
             );
         }
         dispatch_async(dispatch_get_main_queue(), ^{
+            [[PerfRecorder shared] stopWithReason:PerfStopReasonExited];
             UIKit_returnToSplitView();
         });
     });
