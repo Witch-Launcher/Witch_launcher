@@ -77,6 +77,13 @@ void* JIT26PrepareRegion(void *addr, size_t len);
 // same as JIT26PrepareRegion, but used for smaller memory regions
 // and retain content instead of filling 0x69
 void JIT26PrepareRegionForPatching(void *addr, size_t len);
+// offers the launcher's pre-blessed + exec-probed full-size mirror region to
+// the script (brk cmd 5); libjvm's 240 MB request is then served from it
+void JIT26OfferMirrorRegion(void *addr, size_t size);
+// echoes the script's stored mirror offer back through the return value
+// (brk cmd 6): equals the offered address when the script took the offer,
+// 0/NULL when the offer was dropped (stale script / missing handler)
+void* JIT26VerifyMirrorOffer(void *sentinel);
 void JIT26SetDetachAfterFirstBr(BOOL value);
 void JIT26SendJITScript(NSString* script);
 
@@ -104,6 +111,22 @@ void start_jit_mirror_prepare_poll_thread(void);
 void prewarm_jit_mirror_superpage(void);
 void AmethystJIT26PrepareMirrorPair(void *rx, void *rw, size_t size);
 BOOL JIT26ExecPreflight(void);
+// Size the launcher reserves AND offers for the JVM's CodeCache mirror (see
+// JIT26MirrorRegionPreflight). Must be >= what libjvm later requests through
+// get_debug_jit_mapping: the script only serves the offer when
+// offeredSize >= requestedSize. JDK 21's ergonomic segmented total is exactly
+// 0xF000000 (240 MB), but JDK 25 rounds it up by one 16 KB page —
+// ReservedCodeCacheSize = 251674624 = 0xF004000 (hs_err_pid9437) — and a
+// 240 MB offer is refused there; libjvm then falls back to a fresh _M mapping
+// in the non-executable 0x7000_0000_0000 band and SIGBUSes in
+// StubRoutines::call_stub. 244 MB keeps a 4 MB margin over every bundled
+// runtime's request while staying easy to place low + cheap to bless.
+#define JIT26_MIRROR_REGION_SIZE (0xf000000u + 0x400000u)
+// Big mirror preflight: reserve + prove a full-size executable region
+// and offer it to the script (brk cmd 5) so libjvm serves it for its own
+// CodeCache request. Returns YES with *outAddr set when a region was
+// blessed and proven executable. See jit_vm_remap_hook.m for the strategies.
+BOOL JIT26MirrorRegionPreflight(size_t size, void **outAddr);
 void init_hookFunctions();
 void init_hookUIKitConstructor();
 void init_setupMultiDir();

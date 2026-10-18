@@ -563,11 +563,8 @@ dep_moltenvk:
 dep_mesa_zink:
 	echo '[Witch v$(VERSION)] dep_mesa_zink - start'
 	# Build Mesa 25.0.7 (OSMesa+Zink)
-	MESA_SRC="$(SOURCEDIR)/source/mesa-25.0.7"
-	MESA_BUILD="$(SOURCEDIR)/source/mesa-build-25.0.7"
-	MVK_DIR="$(SOURCEDIR)/Natives/external/MoltenVK/MoltenVK"
-	rm -rf "$$MESA_BUILD"; mkdir -p "$$MESA_BUILD"
-	cd "$$MESA_SRC" && meson setup "$$MESA_BUILD" . \
+	rm -rf "$(SOURCEDIR)/source/mesa-build-25.0.7"; mkdir -p "$(SOURCEDIR)/source/mesa-build-25.0.7"
+	cd "$(SOURCEDIR)/source/mesa-25.0.7" && meson setup "$(SOURCEDIR)/source/mesa-build-25.0.7" . \
 		--cross-file cross-ios-arm64.txt \
 		-Dplatforms= \
 		-Dosmesa=true \
@@ -578,18 +575,20 @@ dep_mesa_zink:
 		-Dvulkan-drivers= \
 		-Dgbm=disabled \
 		-Dshader-cache=disabled \
-		-Dmoltenvk-dir="$$MVK_DIR" \
+		-Dmoltenvk-dir="$(SOURCEDIR)/Natives/external/MoltenVK/MoltenVK" \
 		-Dprefix="$(SOURCEDIR)/Natives/resources/Frameworks" \
 		-Dlibdir=lib \
 		-Dbindir=bin
-	ninja -C "$$MESA_BUILD" -j$(JOBS)
-	cp "$$MESA_BUILD/src/gallium/targets/osmesa/libOSMesa.8.dylib" "$(SOURCEDIR)/Natives/resources/Frameworks/"
+	ninja -C "$(SOURCEDIR)/source/mesa-build-25.0.7" -j$(JOBS)
+	# Guard: refuse to ship an OSMesa built without zink. If driver_zink is
+	# missing from the osmesa target deps, GALLIUM_DRIVER=zink gets a NULL
+	# pipe_screen and st_api_create_context segfaults at launch.
+	nm -a "$(SOURCEDIR)/source/mesa-build-25.0.7/src/gallium/targets/osmesa/libOSMesa.8.dylib" 2>/dev/null | grep -q '_zink_internal_create_screen' || \
+		{ echo 'ERROR: libOSMesa.8.dylib built WITHOUT zink (driver_zink missing in osmesa meson.build)'; exit 1; }
+	cp "$(SOURCEDIR)/source/mesa-build-25.0.7/src/gallium/targets/osmesa/libOSMesa.8.dylib" "$(SOURCEDIR)/Natives/resources/Frameworks/"
 	# Build Mesa 26.2.2 (EGL)
-	MESA26_SRC="$(SOURCEDIR)/source/mesa-26.2.2"
-	MESA26_BUILD="$(SOURCEDIR)/source/mesa26-build"
-	rm -rf "$$MESA26_BUILD"; mkdir -p "$$MESA26_BUILD"
-	export PATH="/usr/local/opt/bison/bin:$$PATH"
-	cd "$$MESA26_SRC" && meson setup "$$MESA26_BUILD" . \
+	rm -rf "$(SOURCEDIR)/source/mesa26-build"; mkdir -p "$(SOURCEDIR)/source/mesa26-build"
+	cd "$(SOURCEDIR)/source/mesa-26.2.2" && PATH="/usr/local/opt/bison/bin:$$PATH" meson setup "$(SOURCEDIR)/source/mesa26-build" . \
 		--cross-file ../mesa-25.0.7/cross-ios-arm64.txt \
 		-Dplatforms= \
 		-Degl=enabled \
@@ -606,13 +605,13 @@ dep_mesa_zink:
 		-Dlibunwind=disabled \
 		-Dexpat=disabled \
 		-Dvideo-codecs=av1dec \
-		-Dmoltenvk-dir="$$MVK_DIR" \
+		-Dmoltenvk-dir="$(SOURCEDIR)/Natives/external/MoltenVK/MoltenVK" \
 		-Dprefix="$(SOURCEDIR)/Natives/resources/Frameworks" \
 		-Dlibdir=lib \
 		-Dbindir=bin
-	ninja -C "$$MESA26_BUILD" -j$(JOBS)
-	cp "$$MESA26_BUILD/src/egl/libEGL.1.dylib" "$(SOURCEDIR)/Natives/resources/Frameworks/libEGL_Mesa26.dylib"
-	cp "$$MESA26_BUILD/src/gallium/targets/dri/libgallium-26.2.2.dylib" "$(SOURCEDIR)/Natives/resources/Frameworks/"
+	PATH="/usr/local/opt/bison/bin:$$PATH" ninja -C "$(SOURCEDIR)/source/mesa26-build" -j$(JOBS)
+	cp "$(SOURCEDIR)/source/mesa26-build/src/egl/libEGL.1.dylib" "$(SOURCEDIR)/Natives/resources/Frameworks/libEGL_Mesa26.dylib"
+	cp "$(SOURCEDIR)/source/mesa26-build/src/gallium/targets/dri/libgallium-26.2.2.dylib" "$(SOURCEDIR)/Natives/resources/Frameworks/"
 	echo '[Witch v$(VERSION)] dep_mesa_zink - end'
 
 dep_kkosmic:

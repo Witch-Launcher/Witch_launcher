@@ -1077,6 +1077,46 @@ int launchJVMWithArgs(NSString *username, id launchTarget, int width, int height
     if (mirrorEnabled) {
         margv[++margc] = "-XX:+MirrorMappedCodeCache";
         NSLog(@"[JavaLauncher] MirrorMappedCodeCache enabled on iOS %ld.%ld", (long)NSProcessInfo.processInfo.operatingSystemVersion.majorVersion, (long)NSProcessInfo.processInfo.operatingSystemVersion.minorVersion);
+
+        // Big mirror preflight: reserve + PROVE the full-size mirror region
+        // before the JVM exists and offer it to the script, so libjvm's own
+        // CodeCache request (brk cmd 1, addr=0 at ~1.0 s) is served from this
+        // region instead of a fresh _M mapping. The small preflight earlier
+        // only proves 2 pages; on A13/A14/A15 TXM devices the JVM's own
+        // request can land at 0x7000_0000_0000 where the exec blessing is
+        // ineffective → SIGBUS in StubRoutines::call_stub (hs_err BUS_ADRALN
+        // pc=0x70075340bc / 0x70075380bc). The offered size must be >= what
+        // the JVM asks for: JDK 21 requests exactly 240 MB (0xF000000, served
+        // OK — iPhone13,4 run of 2026-10-18) but JDK 25 requests 240 MB +
+        // 16 KB (ReservedCodeCacheSize = 251674624 = 0xF004000,
+        // hs_err_pid9437) and the script refuses to serve an offer smaller
+        // than the request, so the old 240 MB offer made java-25 fall back to
+        // the dead high band. JIT26_MIRROR_REGION_SIZE (244 MB) covers every
+        // bundled runtime with margin; the script serves requests of at most
+        // the offered size from this region.
+        // Guarded: a stale/dead script that does not service the brk must not
+        // kill the launch — mirror gates above already required a live script,
+        // this only covers it dying in between.
+        {
+            struct sigaction bigSa = {0};
+            struct sigaction bigOldSa;
+            bigSa.sa_handler = onUnservicedBrk;
+            sigemptyset(&bigSa.sa_mask);
+            bigSa.sa_flags = 0;
+            sigaction(SIGTRAP, &bigSa, &bigOldSa);
+            void *mirrorRegion = NULL;
+            CFAbsoluteTime bigStart = CFAbsoluteTimeGetCurrent();
+            g_jitTrapArmed = 1;
+            if (sigsetjmp(g_jitTrapJmp, 1) == 0) {
+                JIT26MirrorRegionPreflight((size_t)JIT26_MIRROR_REGION_SIZE, &mirrorRegion);
+            } else {
+                NSLog(@"[JavaLauncher] mirror preflight brk was NOT serviced (script died mid-launch)");
+            }
+            g_jitTrapArmed = 0;
+            sigaction(SIGTRAP, &bigOldSa, NULL);
+            NSLog(@"[JavaLauncher] mirror preflight done in %.2fs: region=%p",
+                  CFAbsoluteTimeGetCurrent() - bigStart, mirrorRegion);
+        }
     } else {
         NSLog(@"[JavaLauncher] MirrorMappedCodeCache disabled on iOS %ld.%ld (classic JIT26 path)", (long)NSProcessInfo.processInfo.operatingSystemVersion.majorVersion, (long)NSProcessInfo.processInfo.operatingSystemVersion.minorVersion);
     }

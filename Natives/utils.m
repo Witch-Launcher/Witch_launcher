@@ -379,6 +379,18 @@ void JIT26PrepareRegionForPatching(void *addr, size_t size) {
        "brk #0xf00d \n"
        "ret");
 }
+__attribute__((noinline,optnone,naked))
+void JIT26OfferMirrorRegion(void *addr, size_t size) {
+   asm("mov x16, #5 \n"
+       "brk #0xf00d \n"
+       "ret");
+}
+__attribute__((noinline,optnone,naked))
+void* JIT26VerifyMirrorOffer(void *sentinel) {
+   asm("mov x16, #6 \n"
+       "brk #0xf00d \n"
+       "ret");
+}
 void JIT26SendJITScript(NSString* script) {
     NSCAssert(script, @"Script must not be nil");
     // script.length counts UTF-16 units; the debugger reads raw bytes, so use

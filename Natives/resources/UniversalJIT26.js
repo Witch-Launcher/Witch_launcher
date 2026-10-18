@@ -27,10 +27,14 @@ void BreakSendJITScript(char* script, size_t len) {
 const CMD_DETACH = 0;
 const CMD_PREPARE_REGION = 1;
 const CMD_NEW_BREAKPOINTS = 2;
+const CMD_OFFER_MIRROR_REGION = 5;
+const CMD_VERIFY_MIRROR_OFFER = 6;
 const commands = {
     [CMD_DETACH]: JIT26Detach,
     [CMD_PREPARE_REGION]: JIT26PrepareRegion,
-    [CMD_NEW_BREAKPOINTS]: JIT26NewBreakpoints
+    [CMD_NEW_BREAKPOINTS]: JIT26NewBreakpoints,
+    [CMD_OFFER_MIRROR_REGION]: JIT26OfferMirrorRegion,
+    [CMD_VERIFY_MIRROR_OFFER]: JIT26VerifyMirrorOffer
 };
 const legacyCommands = {
     [0x68]: JIT26NewBreakpoints,
@@ -58,6 +62,15 @@ let tid, x0, x1, x16, pc;
 // page (~30 s for a 240 MB CodeCache).
 let lastPreparedRx = null;
 let lastPreparedSize = 0n;
+// Mirror region offered by the launcher's big preflight (brk cmd 5): a
+// full-size region the launcher already blessed + exec-probed BEFORE the JVM
+// started. When libjvm later asks for its 240 MB CodeCache (brk cmd 1 with
+// addr=0) we serve this region instead of a fresh _M mapping, so the code
+// cache cannot land in a band where the exec blessing is ineffective
+// (iPad9/A13 TXM: 0x7000000000 prepare reports OK but every stub call SIGBUSes).
+let offeredRx = null;
+let offeredSize = 0n;
+let offeredServed = false;
 let detached = false;
 let continuesWithSignal = true;
 let pid = get_pid();
@@ -287,6 +300,31 @@ function JIT26HandleBrk0xf00d(brkResponse) {
     command(brkResponse);
 }
 
+// brk 0xf00d cmd 5 — JIT26OfferMirrorRegion(void *addr, size_t size): the
+// launcher reserved, blessed and exec-probed a full-size mirror region before
+// the JVM started; remember it so JIT26PrepareRegion can serve it for the
+// JVM's own 240 MB CodeCache request.
+function JIT26OfferMirrorRegion(brkResponse) {
+    offeredRx = x0;
+    offeredSize = x1;
+    offeredServed = false;
+    log(`Launcher-offered mirror region: addr=0x${offeredRx.toString(16)} size=0x${offeredSize.toString(16)} (pre-blessed + exec-probed)`);
+}
+
+// brk 0xf00d cmd 6 — JIT26VerifyMirrorOffer(): echo the stored offer back
+// through x0. The offer brk is otherwise fire-and-forget: a stale assigned
+// script (evaluated without the extension) drops it silently and the JVM
+// falls back to an unblessable high _M region. The launcher compares the
+// echo against the region it offered and reports offer_verify=0|1.
+function JIT26VerifyMirrorOffer(brkResponse) {
+    let rx = 0n;
+    if (typeof offeredRx === 'bigint' && offeredRx > 0n) {
+        rx = offeredRx;
+    }
+    send_command(`P0=${numberToLittleEndianHexString(rx)};thread:${tid};`);
+    log(`Mirror offer verify: rx=0x${rx.toString(16)}`);
+}
+
 function JIT26PrepareRegion(brkResponse) {
     let instructionResponse = send_command(`m${pc.toString(16)},4`);
     log(`instruction at pc: ${instructionResponse}`);
@@ -312,6 +350,26 @@ function JIT26PrepareRegion(brkResponse) {
 
     let jitPageAddress = x0;
     if (x0 == 0n) {
+        // Prefer the launcher's pre-checked region for large mirror requests
+        // (libjvm's 240 MB CodeCache). The launcher blessed it and proved it
+        // executes before the JVM started (see JIT26MirrorRegionPreflight);
+        // that call also recorded lastPreparedRx/Size through the x0 != 0 path
+        // below, so the brk 0x6a handler skips re-preparing this region.
+        if (typeof offeredRx === 'bigint' && offeredRx > 0n && !offeredServed &&
+            allocSize >= mirrorMin && offeredSize >= allocSize) {
+            offeredServed = true;
+            log(`Serving launcher-prechecked mirror region for request size=0x${allocSize.toString(16)} — skipping _M allocation`);
+            jitPageAddress = offeredRx;
+            lastPreparedRx = offeredRx;
+            lastPreparedSize = offeredSize;
+            log(`Allocated JIT page at address: 0x${jitPageAddress.toString(16)} (size=0x${offeredSize.toString(16)}) [served from launcher offer]`);
+            let servedPutX0Response = send_command(`P0=${numberToLittleEndianHexString(jitPageAddress)};thread:${tid};`);
+            log(`putX0Response = ${servedPutX0Response}`);
+            return;
+        }
+        if (typeof offeredRx === 'bigint' && offeredRx > 0n && !offeredServed) {
+            log(`Launcher-offer not served: req=0x${allocSize.toString(16)} offer=0x${offeredSize.toString(16)} (size mismatch?)`);
+        }
         let requestRXResponse = send_command(`_M${allocSize.toString(16)},rx`);
         log_verbose(`requestRXResponse = ${requestRXResponse}`);
         
