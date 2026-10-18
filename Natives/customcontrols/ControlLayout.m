@@ -52,8 +52,6 @@
     return action == @selector(actionMenuExit:) ||
         action == @selector(actionMenuSave:) ||
         action == @selector(actionMenuLoad:) ||
-        action == @selector(actionMenuImport) ||
-        action == @selector(actionMenuExport) ||
         action == @selector(actionMenuSetDef:) ||
         action == @selector(actionMenuAddButton:) ||
         action == @selector(actionMenuAddDrawer:) ||
