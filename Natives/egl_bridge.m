@@ -32,27 +32,20 @@ void aasdl_setMainReady(NSString *nativesDir);
 int clientAPI;
 __thread basic_render_window_t* currentBundle;
 
-// Counts every game frame swap so the in-game widget can show real FPS.
-// The game may present through different paths depending on renderer:
-//   * pojavSwapBuffers() called straight from the game's JNI (GL renderers)
-//   * libmobileglues.dylib's exported eglSwapBuffers (mobileglues_swap_count)
-//   * MoltenVK/Vulkan (e.g. Minecraft 26.3 snapshot): frames bypass the bridge
-//     entirely and only surface as a Metal drawable, so we also count
-//     CAMetalLayer -nextDrawable calls, which every renderer makes once per
-//     presented frame. MAX() is safe: for GL renderers the drawable count is
-//     identical to the swap count, and for Vulkan the swap counts stay 0.
+// Counts presented game frames at the Metal layer: whichever backend renders
+// (Zink/MoltenVK, MobileGlues, ANGLE-Metal, TGLMT), every presented frame
+// passes through -[CAMetalLayer nextDrawable], so counting there is both
+// accurate and renderer-independent. The old render-side counters
+// (pojavSwapBuffers swaps, mobileglues_swap_count dlsym) were removed: the
+// shipped libmobileglues no longer exports its symbol.
 #include <dlfcn.h>
 #include <stdatomic.h>
 #import <objc/runtime.h>
 #import <QuartzCore/QuartzCore.h>
 
-static atomic_uint_fast64_t widgetSwapCountOwn;
 static atomic_uint_fast64_t widgetMetalFrameCount;
 
-// Metal drawables: every Metal-backed renderer (MoltenVK/Vulkan, MobileGlues,
-// ANGLE-Metal, TGLMT) presents by calling -[CAMetalLayer nextDrawable] once
-// per frame, so counting it keeps FPS renderer-independent. Installed at
-// image load, before any window exists.
+// Installed at image load, before any window exists.
 static id (*widgetOriginalNextDrawable)(id, SEL);
 
 static id widgetCountedNextDrawable(id self, SEL _cmd) {
@@ -121,19 +114,7 @@ static NSString* getANGLEHostEGLDylibPath(void) {
 }
 
 uint64_t pojavSwapCount(void) {
-    static uint64_t (*mobilegluesSwapCountFn)(void);
-    if (!mobilegluesSwapCountFn) {
-        mobilegluesSwapCountFn = (uint64_t (*)(void))dlsym(RTLD_DEFAULT, "mobileglues_swap_count");
-    }
-    uint64_t mg = mobilegluesSwapCountFn ? mobilegluesSwapCountFn() : 0;
-    uint64_t own = atomic_load_explicit(&widgetSwapCountOwn, memory_order_relaxed);
-    uint64_t metal = atomic_load_explicit(&widgetMetalFrameCount, memory_order_relaxed);
-    static BOOL loggedSource;
-    if (!loggedSource) {
-        loggedSource = YES;
-        NSLog(@"[WidgetFPS] mobileglues=%llu own=%llu metal=%llu", mg, own, metal);
-    }
-    return MAX(MAX(mg, own), metal);
+    return atomic_load_explicit(&widgetMetalFrameCount, memory_order_relaxed);
 }
 
 void JNI_LWJGL_changeRenderer(const char* value_c) {
@@ -402,7 +383,6 @@ void pojavSetWindowHint(int hint, int value) {
 }
 
 void pojavSwapBuffers() {
-    atomic_fetch_add_explicit(&widgetSwapCountOwn, 1, memory_order_relaxed);
     if (!br_swap_buffers) return;
     br_swap_buffers();
 }

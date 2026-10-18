@@ -41,6 +41,10 @@ static CGPoint lastCenterPoint;
     self.menuView.layer.cornerRadius = 12;
     self.menuView.scrollEnabled = NO;
     self.menuView.separatorInset = UIEdgeInsetsZero;
+    // Fixed metrics: default cells adopt the device's Dynamic Type body font,
+    // which at accessibility sizes blew the rows up ~3x and wrapped each
+    // menu word onto its own line.
+    self.menuView.rowHeight = 52;
     [self.view addSubview:self.menuView];
 }
 
@@ -198,6 +202,8 @@ static CGPoint lastCenterPoint;
     cell.backgroundColor = UIColor.systemFillColor;
 
     cell.textLabel.text = localize(self.menuArray[indexPath.row], nil);
+    cell.textLabel.font = [UIFont systemFontOfSize:17 weight:UIFontWeightMedium];
+    cell.textLabel.adjustsFontForContentSizeCategory = NO;
 
     return cell;
 }
