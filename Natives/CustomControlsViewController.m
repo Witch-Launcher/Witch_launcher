@@ -7,16 +7,19 @@
 
 #import "customcontrols/ControlDrawer.h"
 #import "customcontrols/ControlJoystick.h"
+#import "customcontrols/ControlLayoutConverter.h"
 #import "customcontrols/CustomControlsUtils.h"
 
 #include "glfw_keycodes.h"
 #include "utils.h"
 
+#import <UniformTypeIdentifiers/UniformTypeIdentifiers.h>
+
 @implementation ControlHandleView
 // Nothing
 @end
 
-@interface CustomControlsViewController () <UIGestureRecognizerDelegate, UIPopoverPresentationControllerDelegate>{
+@interface CustomControlsViewController () <UIGestureRecognizerDelegate, UIPopoverPresentationControllerDelegate, UIDocumentPickerDelegate>{
 }
 
 @property(nonatomic) NSString* currentFileName;
@@ -222,11 +225,13 @@
         UIMenuItem *actionExit = [[UIMenuItem alloc] initWithTitle:localize(@"custom_controls.control_menu.exit", nil) action:@selector(actionMenuExit)];
         UIMenuItem *actionSave = [[UIMenuItem alloc] initWithTitle:localize(@"custom_controls.control_menu.save", nil) action:@selector(actionMenuSave)];
         UIMenuItem *actionLoad = [[UIMenuItem alloc] initWithTitle:localize(@"custom_controls.control_menu.load", nil) action:@selector(actionMenuLoad)];
+        UIMenuItem *actionImport = [[UIMenuItem alloc] initWithTitle:localize(@"custom_controls.control_menu.import", nil) action:@selector(actionMenuImport)];
+        UIMenuItem *actionExport = [[UIMenuItem alloc] initWithTitle:localize(@"custom_controls.control_menu.export", nil) action:@selector(actionMenuExport)];
         UIMenuItem *actionSafeArea = [[UIMenuItem alloc] initWithTitle:localize(@"custom_controls.control_menu.safe_area", nil) action:@selector(actionMenuSafeArea)];
         UIMenuItem *actionAddButton = [[UIMenuItem alloc] initWithTitle:localize(@"custom_controls.control_menu.add_button", nil) action:@selector(actionMenuAddButton)];
         UIMenuItem *actionAddDrawer = [[UIMenuItem alloc] initWithTitle:localize(@"custom_controls.control_menu.add_drawer", nil) action:@selector(actionMenuAddDrawer)];
         UIMenuItem *actionAddJoystick = [[UIMenuItem alloc] initWithTitle:localize(@"custom_controls.control_menu.add_joystick", nil) action:@selector(actionMenuAddJoystick)];
-        [menuController setMenuItems:@[actionExit, actionSave, actionLoad, actionSafeArea, actionAddButton, actionAddDrawer, actionAddJoystick]];
+        [menuController setMenuItems:@[actionExit, actionSave, actionLoad, actionImport, actionExport, actionSafeArea, actionAddButton, actionAddDrawer, actionAddJoystick]];
 
         CGPoint point = [sender locationInView:sender.view];
         self.selectedPoint = CGRectMake(point.x, point.y, 1.0, 1.0);
@@ -276,20 +281,100 @@
     [self promptSaveNameWithExit:NO];
 }
 
+- (NSDictionary *)currentInfo {
+    NSDictionary *info = self.ctrlView.layoutDictionary[@"info"];
+    return [info isKindOfClass:NSDictionary.class] ? info : nil;
+}
+
+- (NSString *)infoStringForKey:(NSString *)key {
+    id value = [self currentInfo][key];
+    if ([value isKindOfClass:NSDictionary.class] && [value[@"default"] isKindOfClass:NSString.class]) {
+        return value[@"default"];
+    }
+    if ([value isKindOfClass:NSString.class]) {
+        return value;
+    }
+    return nil;
+}
+
+- (void)setInfoWithName:(NSString *)name author:(NSString *)author description:(NSString *)description {
+    NSDictionary *existing = [self currentInfo];
+    NSMutableDictionary *info = existing ? [existing mutableCopy] : [NSMutableDictionary dictionary];
+
+    NSArray * (^queueFor)(NSString *) = ^NSArray *(NSString *key) {
+        id value = existing[key];
+        if ([value isKindOfClass:NSDictionary.class] && [value[@"matchQueue"] isKindOfClass:NSArray.class]) {
+            return value[@"matchQueue"];
+        }
+        return @[];
+    };
+
+    info[@"name"] = @{@"default": name ?: @"", @"matchQueue": queueFor(@"name")};
+    info[@"author"] = @{@"default": author ?: @"", @"matchQueue": queueFor(@"author")};
+    info[@"description"] = @{@"default": description ?: @"", @"matchQueue": queueFor(@"description")};
+    info[@"versionCode"] = [info[@"versionCode"] isKindOfClass:NSNumber.class] ? info[@"versionCode"] : @0;
+    info[@"versionName"] = [info[@"versionName"] isKindOfClass:NSString.class] ? info[@"versionName"] : @"";
+
+    self.ctrlView.layoutDictionary[@"info"] = info;
+}
+
+- (NSDictionary *)zalithLayoutFromCurrentState {
+    NSMutableDictionary *buttonFrames = [NSMutableDictionary dictionary];
+    NSMutableDictionary *joystickFrames = [NSMutableDictionary dictionary];
+    NSArray *controlList = self.ctrlView.layoutDictionary[@"mControlDataList"] ?: @[];
+    NSArray *joystickList = self.ctrlView.layoutDictionary[@"mJoystickDataList"] ?: @[];
+
+    for (UIView *view in self.ctrlView.subviews) {
+        if (![view isKindOfClass:ControlButton.class]) continue;
+        ControlButton *button = (ControlButton *)view;
+
+        if ([button isKindOfClass:ControlJoystick.class]) {
+            if ([joystickList indexOfObjectIdenticalTo:button.properties] != NSNotFound) {
+                joystickFrames[button.properties] = [NSValue valueWithCGRect:button.frame];
+            }
+            continue;
+        }
+        if ([button isKindOfClass:ControlSubButton.class] || [button isKindOfClass:ControlDrawer.class]) continue;
+        if ([controlList indexOfObjectIdenticalTo:button.properties] != NSNotFound) {
+            buttonFrames[button.properties] = [NSValue valueWithCGRect:button.frame];
+        }
+    }
+
+    return [ControlLayoutConverter zalithLayoutFromInternal:self.ctrlView.layoutDictionary
+                                               buttonFrames:buttonFrames
+                                             joystickFrames:joystickFrames
+                                                 screenSize:self.ctrlView.bounds.size];
+}
+
+- (BOOL)writeCurrentLayoutToFile:(NSString *)name error:(NSError **)error {
+    id payload = self.ctrlView.layoutDictionary;
+    if (self.ctrlView.sourceSyntax == ControlLayoutSyntaxZalith) {
+        payload = [self zalithLayoutFromCurrentState];
+    }
+    NSData *jsonData = [NSJSONSerialization dataWithJSONObject:payload options:NSJSONWritingPrettyPrinted error:error];
+    if (jsonData == nil) return NO;
+    return [jsonData writeToFile:amethyst_hidden_path([NSString stringWithFormat:@"controlmap/%@.json", name]) options:NSDataWritingAtomic error:error];
+}
+
 - (void)promptSaveNameWithExit:(BOOL)exit {
-    [AppSheet showPromptWithTitle:localize(@"custom_controls.control_menu.save", nil)
-                          message:exit ? localize(@"custom_controls.control_menu.exit.warn", nil) : @""
-                      placeholder:@"Name"
-                      initialText:self.currentFileName
-                        onConfirm:^(NSString *name) {
-        NSError *error;
-        NSData *jsonData = [NSJSONSerialization dataWithJSONObject:self.ctrlView.layoutDictionary options:NSJSONWritingPrettyPrinted error:&error];
-        if (jsonData == nil) {
-            showDialog(localize(@"custom_controls.control_menu.save.error.json", nil), error.localizedDescription);
+    [AppSheet showPrompt3WithTitle:localize(@"custom_controls.control_menu.save", nil)
+                           message:exit ? localize(@"custom_controls.control_menu.exit.warn", nil) : @""
+                      placeholder1:@"Name"
+                      placeholder2:localize(@"custom_controls.save.field.author", nil)
+                      placeholder3:localize(@"custom_controls.save.field.description", nil)
+                      initialText1:self.currentFileName
+                      initialText2:[self infoStringForKey:@"author"]
+                      initialText3:[self infoStringForKey:@"description"]
+                        onConfirm:^(NSString *name, NSString *author, NSString *description) {
+        name = [name stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
+        if (name.length == 0) {
+            showDialog(localize(@"Error", nil), localize(@"custom_controls.save.error.name", nil));
             return;
         }
-        BOOL success = [jsonData writeToFile:amethyst_hidden_path([NSString stringWithFormat:@"controlmap/%@.json", name]) options:NSDataWritingAtomic error:&error];
-        if (!success) {
+        [self setInfoWithName:name author:author description:description];
+
+        NSError *error;
+        if (![self writeCurrentLayoutToFile:name error:&error]) {
             showDialog(localize(@"custom_controls.control_menu.save.error.write", nil), error.localizedDescription);
             return;
         }
@@ -311,6 +396,23 @@
     FileListViewController *vc = [[FileListViewController alloc] init];
     vc.listPath = amethyst_hidden_dir(@"controlmap");
     vc.whenItemSelected = handler;
+    vc.confirmDeleteBeforeRemoving = YES;
+    vc.whenDelete = ^(NSString *path) {
+        NSString *deletedName = [[path lastPathComponent] stringByDeletingPathExtension];
+        NSString *defaultName = self.getDefaultCtrl() ?: @"default.json";
+        if ([[defaultName stringByDeletingPathExtension] isEqualToString:deletedName]) {
+            self.setDefaultCtrl(@"default.json");
+        }
+        if ([deletedName isEqualToString:self.currentFileName]) {
+            if (![[NSFileManager defaultManager] fileExistsAtPath:amethyst_hidden_path(@"controlmap/default.json")]) {
+                generateAndSaveDefaultControl();
+            }
+            self.currentFileName = @"default";
+            [self loadControlFile:@"default.json"];
+            self.setDefaultCtrl(@"default.json");
+            [self.undoManager removeAllActions];
+        }
+    };
     vc.modalPresentationStyle = UIModalPresentationPopover;
     vc.preferredContentSize = CGSizeMake(350, 250);
 
@@ -329,6 +431,130 @@
         [self loadControlFile:name];
         self.setDefaultCtrl(name);
     }];
+}
+
+- (NSString *)uniqueControlNameFrom:(NSString *)base {
+    NSFileManager *fm = [NSFileManager defaultManager];
+    NSString *name = base;
+    int i = 2;
+    while ([fm fileExistsAtPath:amethyst_hidden_path([NSString stringWithFormat:@"controlmap/%@.json", name])]) {
+        name = [NSString stringWithFormat:@"%@ %d", base, i++];
+    }
+    return name;
+}
+
+- (void)finishImportWithName:(NSString *)name upgradeToZalith:(BOOL)upgrade {
+    self.currentFileName = name;
+    [self loadControlFile:[NSString stringWithFormat:@"%@.json", name]];
+    self.setDefaultCtrl([NSString stringWithFormat:@"%@.json", name]);
+    [self.undoManager removeAllActions];
+
+    if (upgrade) {
+        [self setInfoWithName:name author:[self infoStringForKey:@"author"] description:[self infoStringForKey:@"description"]];
+        self.ctrlView.sourceSyntax = ControlLayoutSyntaxZalith;
+        NSError *error;
+        if (![self writeCurrentLayoutToFile:name error:&error]) {
+            showDialog(localize(@"custom_controls.control_menu.save.error.write", nil), error.localizedDescription);
+        }
+    }
+}
+
+- (void)actionMenuImport {
+    if (@available(iOS 14.0, *)) {
+        UTType *jsonType = [UTType typeWithFilenameExtension:@"json"];
+        UIDocumentPickerViewController *doc = [[UIDocumentPickerViewController alloc] initForOpeningContentTypes:@[jsonType]];
+        doc.delegate = self;
+        doc.allowsMultipleSelection = NO;
+        [self presentViewController:doc animated:YES completion:nil];
+    } else {
+        UIDocumentPickerViewController *doc = [[UIDocumentPickerViewController alloc]
+            initWithDocumentTypes:@[@"public.json"] inMode:UIDocumentPickerModeImport];
+        doc.delegate = self;
+        [self presentViewController:doc animated:YES completion:nil];
+    }
+}
+
+- (void)documentPicker:(UIDocumentPickerViewController *)controller didPickDocumentsAtURLs:(NSArray<NSURL *> *)urls {
+    [controller dismissViewControllerAnimated:YES completion:nil];
+    NSURL *url = urls.firstObject;
+    if (!url) return;
+
+    BOOL accessing = [url startAccessingSecurityScopedResource];
+    NSData *data = [NSData dataWithContentsOfURL:url options:0 error:nil];
+    if (accessing) [url stopAccessingSecurityScopedResource];
+
+    if (data.length == 0) {
+        showDialog(localize(@"Error", nil), localize(@"custom_controls.import.error.read", nil));
+        return;
+    }
+    NSError *error;
+    id parsed = [NSJSONSerialization JSONObjectWithData:data options:0 error:&error];
+    if (![parsed isKindOfClass:NSDictionary.class]) {
+        showDialog(localize(@"Error", nil), localize(@"custom_controls.import.error.invalid", nil));
+        return;
+    }
+
+    ControlLayoutSyntax syntax = [ControlLayoutConverter syntaxOfLayout:parsed];
+    if (syntax == ControlLayoutSyntaxUnknown) {
+        showDialog(localize(@"Error", nil), localize(@"custom_controls.import.error.invalid", nil));
+        return;
+    }
+
+    NSString *baseName = [[url.lastPathComponent stringByDeletingPathExtension] stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
+    if (baseName.length == 0) baseName = @"imported";
+
+    if (syntax == ControlLayoutSyntaxZalith) {
+        NSString *name = baseName;
+        id infoName = parsed[@"info"][@"name"][@"default"];
+        if ([infoName isKindOfClass:NSString.class] && [infoName length] > 0) {
+            name = infoName;
+        }
+        name = [self uniqueControlNameFrom:name];
+        [data writeToFile:amethyst_hidden_path([NSString stringWithFormat:@"controlmap/%@.json", name]) options:NSDataWritingAtomic error:nil];
+        [self finishImportWithName:name upgradeToZalith:NO];
+        return;
+    }
+
+    NSString *name = [self uniqueControlNameFrom:baseName];
+    [AppSheet showOptionsWithTitle:localize(@"custom_controls.import.prompt.title", nil)
+                           message:localize(@"custom_controls.import.prompt.message", nil)
+                           options:@[
+        @{@"title": localize(@"custom_controls.import.prompt.upgrade", nil), @"icon": @"arrow.up.doc"},
+        @{@"title": localize(@"custom_controls.import.prompt.keep", nil), @"icon": @"doc"},
+    ] selectedIndex:NSNotFound selection:^(NSInteger idx) {
+        [data writeToFile:amethyst_hidden_path([NSString stringWithFormat:@"controlmap/%@.json", name]) options:NSDataWritingAtomic error:nil];
+        [self finishImportWithName:name upgradeToZalith:(idx == 0)];
+    }];
+}
+
+- (void)documentPickerWasCancelled:(UIDocumentPickerViewController *)controller {
+    [controller dismissViewControllerAnimated:YES completion:nil];
+}
+
+- (void)actionMenuExport {
+    [self setInfoWithName:self.currentFileName author:[self infoStringForKey:@"author"] description:[self infoStringForKey:@"description"]];
+
+    NSDictionary *zalith = [self zalithLayoutFromCurrentState];
+    NSError *error;
+    NSData *jsonData = [NSJSONSerialization dataWithJSONObject:zalith options:NSJSONWritingPrettyPrinted error:&error];
+    if (jsonData == nil) {
+        showDialog(localize(@"custom_controls.export.error", nil), error.localizedDescription);
+        return;
+    }
+    NSString *fileName = [NSString stringWithFormat:@"%@.json", self.currentFileName.length > 0 ? self.currentFileName : @"control"];
+    NSString *path = [NSTemporaryDirectory() stringByAppendingPathComponent:fileName];
+    if (![jsonData writeToFile:path options:NSDataWritingAtomic error:&error]) {
+        showDialog(localize(@"custom_controls.export.error", nil), error.localizedDescription);
+        return;
+    }
+
+    UIActivityViewController *avc = [[UIActivityViewController alloc] initWithActivityItems:@[[NSURL fileURLWithPath:path]] applicationActivities:nil];
+    UIPopoverPresentationController *popover = avc.popoverPresentationController;
+    if (popover) {
+        popover.sourceView = self.view;
+        popover.sourceRect = self.selectedPoint;
+    }
+    [self presentViewController:avc animated:YES completion:nil];
 }
 
 - (void)actionMenuSafeArea {

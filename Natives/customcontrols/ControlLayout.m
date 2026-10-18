@@ -1,5 +1,6 @@
 #import "ControlButton.h"
 #import "ControlLayout.h"
+#import "ControlLayoutConverter.h"
 #import "ControlSubButton.h"
 #import "CustomControlsUtils.h"
 #import "../LauncherPreferences.h"
@@ -12,6 +13,13 @@
 @implementation ControlLayout
 
 - (void)loadControlLayout:(NSMutableDictionary *)layoutDictionary {
+    self.sourceSyntax = [ControlLayoutConverter syntaxOfLayout:layoutDictionary];
+    if (self.sourceSyntax == ControlLayoutSyntaxZalith) {
+        NSMutableDictionary *converted = [ControlLayoutConverter internalLayoutFromZalith:layoutDictionary];
+        [layoutDictionary removeAllObjects];
+        [layoutDictionary addEntriesFromDictionary:converted];
+    }
+
     self.layoutDictionary = layoutDictionary;
 
     CGFloat currentScale = [self.layoutDictionary[@"scaledAt"] floatValue];
@@ -44,6 +52,8 @@
     return action == @selector(actionMenuExit:) ||
         action == @selector(actionMenuSave:) ||
         action == @selector(actionMenuLoad:) ||
+        action == @selector(actionMenuImport) ||
+        action == @selector(actionMenuExport) ||
         action == @selector(actionMenuSetDef:) ||
         action == @selector(actionMenuAddButton:) ||
         action == @selector(actionMenuAddDrawer:) ||

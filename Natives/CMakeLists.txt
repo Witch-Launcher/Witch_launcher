@@ -268,6 +268,7 @@ add_executable(Witch
   customcontrols/ControlLayout.m
   customcontrols/ControlSubButton.m
   customcontrols/CustomControlsUtils.m
+  customcontrols/ControlLayoutConverter.m
   customcontrols/NSPredicateUtilitiesExternal.m
 
   external/DBNumberedSlider/Classes/DBNumberedSlider.m

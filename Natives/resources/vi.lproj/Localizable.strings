@@ -100,6 +100,19 @@
 "custom_controls.control_menu.safe_area" = "Vùng an toàn";
 "custom_controls.control_menu.add_button" = "Thêm nút";
 "custom_controls.control_menu.add_drawer" = "Thêm ngăn kéo phím";
+"custom_controls.control_menu.import" = "Nhập";
+"custom_controls.control_menu.export" = "Xuất";
+"custom_controls.control_menu.delete.warn" = "Xoá bố cục điều khiển này?";
+"custom_controls.import.prompt.title" = "Cập nhật cú pháp mới?";
+"custom_controls.import.prompt.message" = "File này dùng cú pháp điều khiển cũ. Cập nhật sang cú pháp mới (Android/Zalith)?";
+"custom_controls.import.prompt.upgrade" = "Cập nhật cú pháp mới";
+"custom_controls.import.prompt.keep" = "Giữ cú pháp cũ";
+"custom_controls.import.error.read" = "Không thể đọc file.";
+"custom_controls.import.error.invalid" = "File bố cục điều khiển không hợp lệ.";
+"custom_controls.export.error" = "Không thể xuất bố cục điều khiển";
+"custom_controls.save.field.author" = "Tác giả (không bắt buộc)";
+"custom_controls.save.field.description" = "Mô tả (không bắt buộc)";
+"custom_controls.save.error.name" = "Cần nhập tên bố cục điều khiển.";
 "custom_controls.error.incompatible" = "Phiên bản điều khiển (code %d) không tương thích với bản launcher này.";
 "custom_controls.hint" = "Nhấn giữ trên màn hình để hiện thêm tùy chọn";
 

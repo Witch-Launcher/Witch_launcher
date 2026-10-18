@@ -107,6 +107,19 @@
 "custom_controls.control_menu.add_button" = "Add button";
 "custom_controls.control_menu.add_drawer" = "Add drawer";
 "custom_controls.control_menu.add_joystick" = "Add joystick";
+"custom_controls.control_menu.import" = "Import";
+"custom_controls.control_menu.export" = "Export";
+"custom_controls.control_menu.delete.warn" = "Delete this control layout?";
+"custom_controls.import.prompt.title" = "Update to new format?";
+"custom_controls.import.prompt.message" = "This file uses the old control format. Update it to the new (Android/Zalith) format?";
+"custom_controls.import.prompt.upgrade" = "Update to new format";
+"custom_controls.import.prompt.keep" = "Keep old format";
+"custom_controls.import.error.read" = "Could not read the file.";
+"custom_controls.import.error.invalid" = "Invalid control layout file.";
+"custom_controls.export.error" = "Could not export control layout";
+"custom_controls.save.field.author" = "Author (optional)";
+"custom_controls.save.field.description" = "Description (optional)";
+"custom_controls.save.error.name" = "Control name is required.";
 "custom_controls.error.incompatible" = "This control version (code %d) is not implemented in this launcher build.";
 "custom_controls.hint" = "Long-press anywhere on screen for more options";
 

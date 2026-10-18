@@ -48,6 +48,17 @@ NS_ASSUME_NONNULL_BEGIN
             placeholder2:(nullable NSString *)placeholder2
                    onConfirm:(nullable void(^)(NSString *text1, NSString *text2))onConfirm;
 
+// Text prompt with three fields (e.g. name + author + description).
++ (void)showPrompt3WithTitle:(nullable NSString *)title
+                     message:(nullable NSString *)message
+                placeholder1:(nullable NSString *)placeholder1
+                placeholder2:(nullable NSString *)placeholder2
+                placeholder3:(nullable NSString *)placeholder3
+                initialText1:(nullable NSString *)text1
+                initialText2:(nullable NSString *)text2
+                initialText3:(nullable NSString *)text3
+                   onConfirm:(nullable void(^)(NSString *text1, NSString *text2, NSString *text3))onConfirm;
+
 @end
 
 NS_ASSUME_NONNULL_END

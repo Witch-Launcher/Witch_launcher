@@ -10,6 +10,7 @@ typedef NS_ENUM(NSUInteger, AppSheetMode) {
     AppSheetModeConfirm,
     AppSheetModePrompt,
     AppSheetModePrompt2,
+    AppSheetModePrompt3,
 };
 
 @interface AppSheetHostVC : UIViewController <UITableViewDelegate, UITableViewDataSource, UITextFieldDelegate>
@@ -23,12 +24,17 @@ typedef NS_ENUM(NSUInteger, AppSheetMode) {
 @property (nonatomic, copy) void(^onConfirmAction)(void);
 @property (nonatomic, copy) void(^onPromptConfirm)(NSString *);
 @property (nonatomic, copy) void(^onPrompt2Confirm)(NSString *, NSString *);
+@property (nonatomic, copy) void(^onPrompt3Confirm)(NSString *, NSString *, NSString *);
 @property (nonatomic) NSString *confirmTitle;
 @property (nonatomic) BOOL destructive;
 @property (nonatomic) NSString *placeholder;
 @property (nonatomic) NSString *placeholder2;
+@property (nonatomic) NSString *placeholder3;
 @property (nonatomic) NSString *initialText;
+@property (nonatomic) NSString *initialText2;
+@property (nonatomic) NSString *initialText3;
 @property (nonatomic) UITextField *textField2;
+@property (nonatomic) UITextField *textField3;
 @property (nonatomic) UIView *dimView;
 @property (nonatomic) UIView *cardView;
 @property (nonatomic) NSLayoutConstraint *cardBottomConstraint;
@@ -173,7 +179,7 @@ typedef NS_ENUM(NSUInteger, AppSheetMode) {
             [okBtn.leadingAnchor constraintEqualToAnchor:row.centerXAnchor constant:6],
             [okBtn.trailingAnchor constraintEqualToAnchor:row.trailingAnchor],
         ]];
-    } else if (_mode == AppSheetModePrompt || _mode == AppSheetModePrompt2) {
+    } else if (_mode == AppSheetModePrompt || _mode == AppSheetModePrompt2 || _mode == AppSheetModePrompt3) {
         _textField = [[UITextField alloc] init];
         _textField.translatesAutoresizingMaskIntoConstraints = NO;
         _textField.font = [UIFont systemFontOfSize:16];
@@ -204,7 +210,7 @@ typedef NS_ENUM(NSUInteger, AppSheetMode) {
             [_textField.heightAnchor constraintEqualToConstant:46],
             nil];
         UIView *belowField = _textField;
-        if (_mode == AppSheetModePrompt2) {
+        if (_mode == AppSheetModePrompt2 || _mode == AppSheetModePrompt3) {
             _textField2 = [[UITextField alloc] init];
             _textField2.translatesAutoresizingMaskIntoConstraints = NO;
             _textField2.font = [UIFont systemFontOfSize:16];
@@ -214,6 +220,7 @@ typedef NS_ENUM(NSUInteger, AppSheetMode) {
             _textField2.leftView = [[UIView alloc] initWithFrame:CGRectMake(0, 0, 12, 0)];
             _textField2.leftViewMode = UITextFieldViewModeAlways;
             _textField2.placeholder = _placeholder2;
+            _textField2.text = _initialText2;
             _textField2.returnKeyType = UIReturnKeyDone;
             _textField2.delegate = self;
             [_cardView addSubview:_textField2];
@@ -224,6 +231,28 @@ typedef NS_ENUM(NSUInteger, AppSheetMode) {
                 [_textField2.heightAnchor constraintEqualToConstant:46],
             ]];
             belowField = _textField2;
+        }
+        if (_mode == AppSheetModePrompt3) {
+            _textField3 = [[UITextField alloc] init];
+            _textField3.translatesAutoresizingMaskIntoConstraints = NO;
+            _textField3.font = [UIFont systemFontOfSize:16];
+            _textField3.textColor = theme.primaryTextColor;
+            _textField3.backgroundColor = [theme.separatorColor colorWithAlphaComponent:0.35];
+            _textField3.layer.cornerRadius = 12;
+            _textField3.leftView = [[UIView alloc] initWithFrame:CGRectMake(0, 0, 12, 0)];
+            _textField3.leftViewMode = UITextFieldViewModeAlways;
+            _textField3.placeholder = _placeholder3;
+            _textField3.text = _initialText3;
+            _textField3.returnKeyType = UIReturnKeyDone;
+            _textField3.delegate = self;
+            [_cardView addSubview:_textField3];
+            [pc addObjectsFromArray:@[
+                [_textField3.topAnchor constraintEqualToAnchor:_textField2.bottomAnchor constant:8],
+                [_textField3.leadingAnchor constraintEqualToAnchor:_cardView.leadingAnchor constant:16],
+                [_textField3.trailingAnchor constraintEqualToAnchor:_cardView.trailingAnchor constant:-16],
+                [_textField3.heightAnchor constraintEqualToConstant:46],
+            ]];
+            belowField = _textField3;
         }
         [pc addObjectsFromArray:@[
             [row.topAnchor constraintEqualToAnchor:belowField.bottomAnchor constant:12],
@@ -306,7 +335,7 @@ typedef NS_ENUM(NSUInteger, AppSheetMode) {
         self->_cardView.transform = CGAffineTransformIdentity;
         self->_dimView.alpha = 1;
     } completion:nil];
-    if (_mode == AppSheetModePrompt || _mode == AppSheetModePrompt2) {
+    if (_mode == AppSheetModePrompt || _mode == AppSheetModePrompt2 || _mode == AppSheetModePrompt3) {
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.35 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
             [self->_textField becomeFirstResponder];
         });
@@ -378,13 +407,17 @@ typedef NS_ENUM(NSUInteger, AppSheetMode) {
     [HapticManager.shared play:HapticTypeMedium];
     NSString *text = _textField.text ?: @"";
     NSString *text2 = _textField2.text ?: @"";
+    NSString *text3 = _textField3.text ?: @"";
     void (^cb)(NSString *) = _onPromptConfirm;
     void (^cb2)(NSString *, NSString *) = _onPrompt2Confirm;
-    BOOL isTwo = (_mode == AppSheetModePrompt2);
+    void (^cb3)(NSString *, NSString *, NSString *) = _onPrompt3Confirm;
+    AppSheetMode mode = _mode;
     [_textField resignFirstResponder];
     [_textField2 resignFirstResponder];
+    [_textField3 resignFirstResponder];
     [self dismissWithCompletion:^{
-        if (isTwo) { if (cb2) cb2(text, text2); }
+        if (mode == AppSheetModePrompt3) { if (cb3) cb3(text, text2, text3); }
+        else if (mode == AppSheetModePrompt2) { if (cb2) cb2(text, text2); }
         else if (cb) cb(text);
     }];
 }
@@ -524,6 +557,24 @@ typedef NS_ENUM(NSUInteger, AppSheetMode) {
         host.placeholder = placeholder1;
         host.placeholder2 = placeholder2;
         host.onPrompt2Confirm = onConfirm;
+        [self presentHost:host];
+    });
+}
+
++ (void)showPrompt3WithTitle:(NSString *)title message:(NSString *)message placeholder1:(NSString *)placeholder1 placeholder2:(NSString *)placeholder2 placeholder3:(NSString *)placeholder3 initialText1:(NSString *)text1 initialText2:(NSString *)text2 initialText3:(NSString *)text3 onConfirm:(void(^)(NSString *, NSString *, NSString *))onConfirm {
+    dispatch_async(dispatch_get_main_queue(), ^{
+        AppSheetHostVC *host = [[AppSheetHostVC alloc] init];
+        host.mode = AppSheetModePrompt3;
+        host.sheetTitle = title;
+        host.sheetMessage = message;
+        host.confirmTitle = @"OK";
+        host.placeholder = placeholder1;
+        host.placeholder2 = placeholder2;
+        host.placeholder3 = placeholder3;
+        host.initialText = text1;
+        host.initialText2 = text2;
+        host.initialText3 = text3;
+        host.onPrompt3Confirm = onConfirm;
         [self presentHost:host];
     });
 }
