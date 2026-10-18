@@ -18,6 +18,8 @@
 @property (nonatomic) UISwitch *combineSwitch;
 @property (nonatomic) UIImageView *previewView;
 @property (nonatomic) UIActivityIndicatorView *spinner;
+@property (nonatomic) UIView *exportBar;
+@property (nonatomic) NSArray<UIButton *> *exportButtons;
 @property (nonatomic, copy) UIImage *renderedImage;
 @end
 
@@ -97,14 +99,32 @@
         [_spinner.centerYAnchor constraintEqualToAnchor:_previewView.centerYAnchor],
     ]];
 
-    UIStackView *exportRow = [[UIStackView alloc] init];
+    _exportBar = [[UIView alloc] init];
+    _exportBar.translatesAutoresizingMaskIntoConstraints = NO;
+    _exportBar.backgroundColor = ThemeManager.shared.cardBackgroundColor;
+    _exportBar.layer.cornerRadius = 14;
+    _exportBar.layer.cornerCurve = kCACornerCurveContinuous;
+
+    UIStackView *exportRow = [[UIStackView alloc] initWithArrangedSubviews:@[
+        [self makeExportButton:localize(@"perf.chart.export_png", nil) icon:@"photo" action:@selector(exportPNG)],
+        [self makeExportButton:localize(@"perf.chart.export_pdf", nil) icon:@"doc.richtext" action:@selector(exportPDF)],
+        [self makeExportButton:localize(@"perf.chart.share", nil) icon:@"square.and.arrow.up" action:@selector(shareImage)],
+    ]];
+    exportRow.translatesAutoresizingMaskIntoConstraints = NO;
     exportRow.axis = UILayoutConstraintAxisHorizontal;
     exportRow.distribution = UIStackViewDistributionFillEqually;
-    exportRow.spacing = 10;
-    [exportRow addArrangedSubview:[self makeExportButton:localize(@"perf.chart.export_png", nil) icon:@"photo" action:@selector(exportPNG)]];
-    [exportRow addArrangedSubview:[self makeExportButton:localize(@"perf.chart.export_pdf", nil) icon:@"doc.richtext" action:@selector(exportPDF)]];
-    [exportRow addArrangedSubview:[self makeExportButton:localize(@"perf.chart.share", nil) icon:@"square.and.arrow.up" action:@selector(shareImage)]];
-    [stack addArrangedSubview:exportRow];
+    exportRow.spacing = 8;
+    [_exportBar addSubview:exportRow];
+    _exportButtons = (NSArray<UIButton *> *)exportRow.arrangedSubviews;
+
+    [NSLayoutConstraint activateConstraints:@[
+        [exportRow.topAnchor constraintEqualToAnchor:_exportBar.topAnchor],
+        [exportRow.bottomAnchor constraintEqualToAnchor:_exportBar.bottomAnchor],
+        [exportRow.leadingAnchor constraintEqualToAnchor:_exportBar.leadingAnchor constant:8],
+        [exportRow.trailingAnchor constraintEqualToAnchor:_exportBar.trailingAnchor constant:-8],
+        [_exportBar.heightAnchor constraintEqualToConstant:52],
+    ]];
+    [stack addArrangedSubview:_exportBar];
 
     UILayoutGuide *safe = self.view.safeAreaLayoutGuide;
     [NSLayoutConstraint activateConstraints:@[
@@ -156,23 +176,22 @@
 
 - (UIButton *)makeExportButton:(NSString *)title icon:(NSString *)icon action:(SEL)action {
     UIButton *button = [UIButton buttonWithType:UIButtonTypeSystem];
-    button.backgroundColor = ThemeManager.shared.accentColor;
-    button.tintColor = UIColor.whiteColor;
-    button.layer.cornerRadius = 10;
-    button.layer.cornerCurve = kCACornerCurveContinuous;
+    button.tintColor = ThemeManager.shared.accentColor;
     [button setTitle:title forState:UIControlStateNormal];
-    [button setTitleColor:UIColor.whiteColor forState:UIControlStateNormal];
     [button setImage:[UIImage systemImageNamed:icon] forState:UIControlStateNormal];
-    button.titleLabel.font = [UIFont systemFontOfSize:13 weight:UIFontWeightSemibold];
-    button.titleLabel.adjustsFontSizeToFitWidth = YES;
-    button.titleEdgeInsets = UIEdgeInsetsMake(0, 6, 0, 0);
-    [button.heightAnchor constraintEqualToConstant:42].active = YES;
+    button.titleLabel.font = [UIFont systemFontOfSize:13 weight:UIFontWeightMedium];
+    button.titleEdgeInsets = UIEdgeInsetsMake(0, 7, 0, 0);
     [button addTarget:self action:action forControlEvents:UIControlEventTouchUpInside];
     return button;
 }
 
 - (void)onTheme {
     self.view.backgroundColor = ThemeManager.shared.contentBackgroundColor;
+    _exportBar.backgroundColor = ThemeManager.shared.cardBackgroundColor;
+    for (UIButton *button in _exportButtons) {
+        button.tintColor = ThemeManager.shared.accentColor;
+    }
+    _previewView.layer.borderColor = ThemeManager.shared.separatorColor.CGColor;
 }
 
 #pragma mark - Controls
@@ -267,7 +286,7 @@
 #pragma mark - Export
 
 - (NSString *)writeTempFile:(NSData *)data extension:(NSString *)extension {
-    NSString *name = [NSString stringWithFormat:@"amethyst_perf_%.0f.%@", NSDate.date.timeIntervalSince1970, extension];
+    NSString *name = [NSString stringWithFormat:@"witch_perf_%.0f.%@", NSDate.date.timeIntervalSince1970, extension];
     NSString *path = [NSTemporaryDirectory() stringByAppendingPathComponent:name];
     [data writeToFile:path atomically:YES];
     return path;

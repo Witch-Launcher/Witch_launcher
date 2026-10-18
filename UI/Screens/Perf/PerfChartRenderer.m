@@ -465,7 +465,7 @@ static void PerfDrawTile(CGContextRef ctx, CGRect tile, NSArray<PerfSession *> *
         stampFormatter = [NSDateFormatter new];
         stampFormatter.dateFormat = @"dd/MM/yyyy HH:mm";
     });
-    PerfDrawText(@"AMETHYST · PERFORMANCE", footer, PerfMono(9, YES), UIColor.blackColor, NSTextAlignmentLeft);
+    PerfDrawText(@"WITCH · PERFORMANCE", footer, PerfMono(9, YES), UIColor.blackColor, NSTextAlignmentLeft);
     PerfDrawText([NSString stringWithFormat:@"generated %@", [stampFormatter stringFromDate:NSDate.date]],
                  footer, PerfMono(9, NO), [UIColor colorWithWhite:0.45 alpha:1], NSTextAlignmentRight);
 

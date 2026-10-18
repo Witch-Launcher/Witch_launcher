@@ -49,6 +49,27 @@ __thread basic_render_window_t* currentBundle;
 static atomic_uint_fast64_t widgetSwapCountOwn;
 static atomic_uint_fast64_t widgetMetalFrameCount;
 
+// Metal drawables: every Metal-backed renderer (MoltenVK/Vulkan, MobileGlues,
+// ANGLE-Metal, TGLMT) presents by calling -[CAMetalLayer nextDrawable] once
+// per frame, so counting it keeps FPS renderer-independent. Installed at
+// image load, before any window exists.
+static id (*widgetOriginalNextDrawable)(id, SEL);
+
+static id widgetCountedNextDrawable(id self, SEL _cmd) {
+    atomic_fetch_add_explicit(&widgetMetalFrameCount, 1, memory_order_relaxed);
+    return widgetOriginalNextDrawable(self, _cmd);
+}
+
+__attribute__((constructor)) static void installMetalFrameCounter(void) {
+    Method nextDrawable = class_getInstanceMethod(CAMetalLayer.class, @selector(nextDrawable));
+    if (nextDrawable == NULL) {
+        NSLog(@"[WidgetFPS] CAMetalLayer nextDrawable missing, Metal frame counting disabled");
+        return;
+    }
+    widgetOriginalNextDrawable = (id (*)(id, SEL))method_getImplementation(nextDrawable);
+    method_setImplementation(nextDrawable, (IMP)widgetCountedNextDrawable);
+}
+
 static void* egl_checked_dlopen(NSString *path, const char *label) {
     if (!path) {
         NSLog(@"[EGLBridge] dlopen %s: nil path, skipped", label);
