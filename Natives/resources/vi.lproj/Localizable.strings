@@ -1139,3 +1139,16 @@
 "perf.metric.battery" = "Pin";
 "perf.metric.battemp" = "Nhiệt độ pin";
 "perf.metric.thermal" = "Nhiệt hệ thống";
+
+/* F3 debug overlay metadata (javaagent) */
+"f3.title" = "Thông tin F3";
+"f3.settings.section" = "Lớp phủ F3";
+"f3.settings.enable" = "Hiện thông tin launcher trong F3";
+"f3.settings.lines" = "Dòng thông tin";
+"f3.settings.show_chip" = "Chip";
+"f3.settings.show_ios" = "Phiên bản iOS";
+"f3.settings.show_launcher_name" = "Tên launcher";
+"f3.settings.show_launcher_version" = "Phiên bản launcher";
+"f3.settings.show_build" = "Số build";
+"f3.settings.show_build_type" = "Loại build";
+"f3.settings.footer" = "Các dòng được chọn sẽ thêm vào lớp phủ F3 của game ở lần mở game kế tiếp.";

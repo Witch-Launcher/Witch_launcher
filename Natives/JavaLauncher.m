@@ -18,6 +18,7 @@
 #include <unistd.h>
 
 #include "utils.h"
+#include "config.h"
 #include "ZinkConfig.h"
 #include "MobileGLConfig.h"
 #include "TGLMTConfig.h"
@@ -969,6 +970,43 @@ int launchJVMWithArgs(NSString *username, id launchTarget, int width, int height
     NSString *librariesPath = [NSString stringWithFormat:@"%@/libs", NSBundle.mainBundle.bundlePath];
     margv[++margc] = [NSString stringWithFormat:@"-javaagent:%@/cacio-init-agent.jar=", librariesPath].UTF8String;
     margv[++margc] = [NSString stringWithFormat:@"-javaagent:%@/patchjna_agent.jar=", librariesPath].UTF8String;
+
+    // F3 debug overlay metadata. The agent patches the game's debug screen at
+    // class-load time (obfuscation-proof "Java: %s" marker); the values are
+    // passed as system properties, one -D per enabled line. Gated per toggle
+    // so a disabled line can never appear in-game.
+    if (getPrefBool(@"f3.enabled")) {
+        margv[++margc] = [NSString stringWithFormat:@"-javaagent:%@/f3agent.jar=", librariesPath].UTF8String;
+        if (getPrefBool(@"f3.show_chip")) {
+            NSString *chip = WitchChipName();
+            if (chip.length > 0) {
+                margv[++margc] = [NSString stringWithFormat:@"-Dwitch.f3.chip=%@", chip].UTF8String;
+            }
+        }
+        if (getPrefBool(@"f3.show_ios")) {
+            NSString *ios = UIDevice.currentDevice.systemVersion;
+            if (ios.length > 0) {
+                margv[++margc] = [NSString stringWithFormat:@"-Dwitch.f3.ios=%@", ios].UTF8String;
+            }
+        }
+        NSDictionary *appInfo = NSBundle.mainBundle.infoDictionary;
+        if (getPrefBool(@"f3.show_launcher_name")) {
+            NSString *name = appInfo[@"CFBundleDisplayName"] ?: appInfo[@"CFBundleName"] ?: @"Witch";
+            margv[++margc] = [NSString stringWithFormat:@"-Dwitch.f3.launcher=%@", name].UTF8String;
+        }
+        if (getPrefBool(@"f3.show_launcher_version")) {
+            NSString *version = appInfo[@"CFBundleShortVersionString"] ?: @"?";
+            margv[++margc] = [NSString stringWithFormat:@"-Dwitch.f3.version=%@", version].UTF8String;
+        }
+        if (getPrefBool(@"f3.show_build")) {
+            NSString *build = appInfo[@"CFBundleVersion"] ?: @"?";
+            margv[++margc] = [NSString stringWithFormat:@"-Dwitch.f3.build=%@", build].UTF8String;
+        }
+        if (getPrefBool(@"f3.show_build_type")) {
+            NSString *buildType = CONFIG_RELEASE ? @"Release" : @"Development";
+            margv[++margc] = [NSString stringWithFormat:@"-Dwitch.f3.buildtype=%@", buildType].UTF8String;
+        }
+    }
     if(getPrefBool(@"general.cosmetica")) {
         margv[++margc] = [NSString stringWithFormat:@"-javaagent:%@/arc_dns_injector.jar=23.95.137.176", librariesPath].UTF8String;
     }

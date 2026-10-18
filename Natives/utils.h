@@ -111,6 +111,9 @@ void init_setupUniversalJITScript(BOOL copyToClipboard);
 void JITReportInit(void);
 void JITReportLine(NSString *format, ...);
 NSString* WitchHardwareMachine(void);
+// Friendly Apple SoC name from MobileGestalt's ChipID, or nil when
+// MobileGestalt is unavailable on this system.
+NSString* WitchChipName(void);
 // Last dyld-bypass outcome, for the one-page JIT report (-1/NO = not attempted).
 extern int g_dyldMmapMatches, g_dyldFcntlMatches;
 extern BOOL g_dyldMmapOK, g_dyldFcntlOK;

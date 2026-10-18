@@ -1229,3 +1229,16 @@
 "perf.metric.battery" = "Battery";
 "perf.metric.battemp" = "Battery temp";
 "perf.metric.thermal" = "Thermal state";
+
+/* F3 debug overlay metadata (javaagent) */
+"f3.title" = "F3 Debug Info";
+"f3.settings.section" = "F3 Debug Overlay";
+"f3.settings.enable" = "Show launcher info in F3";
+"f3.settings.lines" = "Lines";
+"f3.settings.show_chip" = "Chip";
+"f3.settings.show_ios" = "iOS version";
+"f3.settings.show_launcher_name" = "Launcher name";
+"f3.settings.show_launcher_version" = "Launcher version";
+"f3.settings.show_build" = "Build number";
+"f3.settings.show_build_type" = "Build type";
+"f3.settings.footer" = "The selected lines are added to the game's F3 debug overlay on the next game launch.";

@@ -142,6 +142,11 @@ $(OUTPUTDIR)/cacio-init-agent.jar: $(CLASSES)
 	@echo "Creating $@"
 	@$(BOOTJDK)/jar -cfm $@ $(SOURCEDIR)/cacio_init_agent.txt -C $(basename $@) .
 
+$(OUTPUTDIR)/f3agent.jar: $(CLASSES)
+	@set -e
+	@echo "Creating $@"
+	@$(BOOTJDK)/jar -cfm $@ $(SOURCEDIR)/f3agent.txt -C $(basename $@) .
+
 clean:
 	rm -rf $(OUTPUTDIR)
 

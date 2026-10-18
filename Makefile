@@ -775,7 +775,7 @@ payload: native dep_mg dep_mobilegl dep_tgles dep_tglmt lwgjl java jre assets
 	cp -R $(SOURCEDIR)/Natives/resources/* $(WORKINGDIR)/Witch.app/ || exit 1
 	cp $(WORKINGDIR)/*.dylib $(WORKINGDIR)/Witch.app/Frameworks/ || exit 1
 	cp -R $(SOURCEDIR)/JavaApp/libs/others/* $(WORKINGDIR)/Witch.app/libs/ || exit 1
-	cp $(SOURCEDIR)/JavaApp/build/launcher.jar $(SOURCEDIR)/JavaApp/build/patchjna_agent.jar $(SOURCEDIR)/JavaApp/build/cacio-init-agent.jar $(WORKINGDIR)/Witch.app/libs/ || exit 1
+	cp $(SOURCEDIR)/JavaApp/build/launcher.jar $(SOURCEDIR)/JavaApp/build/patchjna_agent.jar $(SOURCEDIR)/JavaApp/build/cacio-init-agent.jar $(SOURCEDIR)/JavaApp/build/f3agent.jar $(WORKINGDIR)/Witch.app/libs/ || exit 1
 	mkdir -p $(WORKINGDIR)/Witch.app/libs/lwjgl33 $(WORKINGDIR)/Witch.app/libs/lwjgl36 $(WORKINGDIR)/Witch.app/libs/lwjgl41
 	cp $(SOURCEDIR)/JavaApp/build/lwjgl-3.3.3.jar $(WORKINGDIR)/Witch.app/libs/lwjgl33/lwjgl.jar || exit 1
 	cp $(SOURCEDIR)/JavaApp/build/lwjgl-3.3.6.jar $(WORKINGDIR)/Witch.app/libs/lwjgl36/lwjgl.jar || exit 1

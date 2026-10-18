@@ -400,6 +400,7 @@ egl_bridge.m
     ../UI/Screens/Settings/CursorHitboxEditorViewController.m
    ../UI/Screens/Settings/LauncherUpdateViewController.m
    ../UI/Screens/Settings/RuntimeDownloadViewController.m
+   ../UI/Screens/Settings/F3SettingsViewController.m
    ../UI/Screens/Account/AccountViewController.m
    ../UI/Screens/Perf/PerfSettingsViewController.m
    ../UI/Screens/Perf/PerfHistoryViewController.m

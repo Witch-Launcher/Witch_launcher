@@ -215,6 +215,17 @@
             @"metric_battemp": @YES,
             @"metric_thermal": @YES
         }.mutableCopy;
+        // F3 debug overlay metadata (javaagent patches the game's debug screen
+        // so the launcher cannot set these at runtime; all feed JVM -D flags).
+        defaults[@"f3"] = @{
+            @"enabled": @YES,
+            @"show_chip": @YES,
+            @"show_ios": @YES,
+            @"show_launcher_name": @YES,
+            @"show_launcher_version": @YES,
+            @"show_build": @YES,
+            @"show_build_type": @YES
+        }.mutableCopy;
         defaults[@"launcher"] = @{
             @"language": @"auto",
             @"theme": @"System",

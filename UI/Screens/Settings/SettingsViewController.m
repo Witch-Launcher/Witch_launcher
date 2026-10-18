@@ -81,6 +81,7 @@
             @{@"type": @"navigate", @"label": @"Tải Runtime JDK/LWJGL", @"vc": @"RuntimeDownloadViewController"},
             @{@"type": @"navigate", @"label": localize(@"settings.storage", nil), @"vc": @"StorageManagerViewController"},
             @{@"type": @"navigate", @"label": localize(@"perf.title", nil), @"vc": @"PerfSettingsViewController"},
+            @{@"type": @"navigate", @"label": localize(@"f3.title", nil), @"vc": @"F3SettingsViewController"},
             @{@"type": @"picker", @"label": @"Kênh cập nhật", @"key": @"launcher.update_channel", @"options": @[
                 @{@"key": @"0", @"name": @"Tự động"},
                 @{@"key": @"1", @"name": @"Beta (pre-release)"},

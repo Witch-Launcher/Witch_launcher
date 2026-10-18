@@ -425,6 +425,27 @@ NSString* WitchHardwareMachine(void) {
     return @(buffer);
 }
 
+NSString* WitchChipName(void) {
+    NSUInteger (*MGGetSInt64Answer)(NSString *) = dlsym(RTLD_DEFAULT, "MGGetSint64Answer");
+    if (MGGetSInt64Answer == NULL) return nil;
+
+    long long chip = (long long)MGGetSInt64Answer(@"ChipID");
+    switch (chip) {
+        case 0x8010: return @"A10 Fusion";
+        case 0x8011: return @"A10X Fusion";
+        case 0x8015: return @"A11 Bionic";
+        case 0x8020: return @"A12 Bionic";
+        case 0x8027: return @"A12X / A12Z";
+        case 0x8030: return @"A13 Bionic";
+        case 0x8101: return @"A14 Bionic";
+        case 0x8103: return @"M1";
+        case 0x8110: return @"A15 Bionic";
+        case 0x8112: return @"A16 Bionic";
+        case 0x8120: return @"A17 Pro";
+        default: return [NSString stringWithFormat:@"Unknown (0x%llx)", chip];
+    }
+}
+
 BOOL DeviceCanCreateRXMap(void) {
     // This is only guaranteed to be accurate when JIT is already enabled. Obviously this is only useful for vphone and similar internal environments where JIT is always enabled.
     uint32_t *map = mmap(NULL, getpagesize(), PROT_READ | PROT_WRITE, MAP_ANONYMOUS | MAP_SHARED, -1, 0);
