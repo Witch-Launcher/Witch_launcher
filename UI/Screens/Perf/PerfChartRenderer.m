@@ -49,6 +49,70 @@ static void PerfDrawText(NSString *text, CGRect rect, UIFont *font, UIColor *col
     }];
 }
 
+#pragma mark - Witch brand watermark
+
+// The launcher logo mark: the rhombus from the brand SVG (618 x 955 units).
+static const CGFloat kPerfWitchMarkAspect = 618.0 / 955.0;
+
+static void PerfDrawWitchMark(CGRect rect, UIColor *color) {
+    CGContextRef ctx = UIGraphicsGetCurrentContext();
+    CGContextSaveGState(ctx);
+    CGContextSetFillColorWithColor(ctx, color.CGColor);
+    CGContextBeginPath(ctx);
+    CGContextMoveToPoint(ctx, CGRectGetMidX(rect), CGRectGetMinY(rect));
+    CGContextAddLineToPoint(ctx, CGRectGetMaxX(rect), CGRectGetMidY(rect));
+    CGContextAddLineToPoint(ctx, CGRectGetMidX(rect), CGRectGetMaxY(rect));
+    CGContextAddLineToPoint(ctx, CGRectGetMinX(rect), CGRectGetMidY(rect));
+    CGContextClosePath(ctx);
+    CGContextFillPath(ctx);
+    CGContextRestoreGState(ctx);
+}
+
+// WITCH in brand weight, LAUNCHER at 60% opacity, exactly like the SVG lockup.
+static NSAttributedString *PerfWitchWordmark(CGFloat fontSize, UIColor *color) {
+    UIFont *witch = [UIFont fontWithName:@"AvenirNext-Heavy" size:fontSize]
+        ?: [UIFont systemFontOfSize:fontSize weight:UIFontWeightHeavy];
+    UIFont *launcher = [UIFont fontWithName:@"AvenirNext-Medium" size:fontSize]
+        ?: [UIFont systemFontOfSize:fontSize weight:UIFontWeightMedium];
+    NSMutableAttributedString *text = [[NSMutableAttributedString alloc] initWithString:@"WITCH LAUNCHER" attributes:@{
+        NSFontAttributeName: witch,
+        NSForegroundColorAttributeName: color,
+        NSKernAttributeName: @(fontSize * 0.12),
+    }];
+    [text addAttributes:@{
+        NSFontAttributeName: launcher,
+        NSForegroundColorAttributeName: [color colorWithAlphaComponent:CGColorGetAlpha(color.CGColor) * 0.6],
+    } range:NSMakeRange(6, 8)];
+    return text;
+}
+
+// Draws the full lockup (mark + wordmark) centered vertically in frame,
+// shrinking to fit maxWidth. alpha drives everything, so the same drawing
+// serves as footer branding at full opacity and as the watermark stamped
+// across the chart canvas at low opacity.
+static void PerfDrawWitchLogo(CGRect frame, CGFloat markHeight, CGFloat maxWidth, CGFloat alpha, BOOL leftAligned) {
+    UIColor *color = [UIColor colorWithWhite:0 alpha:alpha];
+    CGFloat fontSize = markHeight * 0.90;
+    CGFloat gap = markHeight * 0.30;
+    CGFloat markWidth = markHeight * kPerfWitchMarkAspect;
+    NSAttributedString *wordmark = PerfWitchWordmark(fontSize, color);
+    CGFloat totalWidth = markWidth + gap + wordmark.size.width;
+    if (maxWidth > 0 && totalWidth > maxWidth) {
+        CGFloat scale = maxWidth / totalWidth;
+        markHeight *= scale;
+        markWidth *= scale;
+        gap *= scale;
+        fontSize *= scale;
+        wordmark = PerfWitchWordmark(fontSize, color);
+        totalWidth = markWidth + gap + wordmark.size.width;
+    }
+    CGSize textSize = wordmark.size;
+    CGFloat startX = leftAligned ? CGRectGetMinX(frame) : CGRectGetMidX(frame) - totalWidth / 2;
+    CGFloat midY = CGRectGetMidY(frame);
+    PerfDrawWitchMark(CGRectMake(startX, midY - markHeight / 2, markWidth, markHeight), color);
+    [wordmark drawAtPoint:CGPointMake(startX + markWidth + gap, midY - textSize.height / 2)];
+}
+
 static NSString *PerfFormatDuration(NSTimeInterval seconds) {
     NSInteger total = (NSInteger)llround(seconds);
     if (total < 60) {
@@ -433,6 +497,9 @@ static void PerfDrawTile(CGContextRef ctx, CGRect tile, NSArray<PerfSession *> *
     CGRect grid = content;
     grid.size.height = content.size.height - footerHeight;
 
+    // Watermark first so every chart element draws on top of it.
+    PerfDrawWitchLogo(grid, grid.size.height * 0.075, grid.size.width * 0.8, 0.06, NO);
+
     if (combined && metrics.count > 1) {
         NSUInteger columns = metrics.count <= 4 ? 2 : 3;
         CGFloat tileSide = grid.size.width / columns;
@@ -465,7 +532,7 @@ static void PerfDrawTile(CGContextRef ctx, CGRect tile, NSArray<PerfSession *> *
         stampFormatter = [NSDateFormatter new];
         stampFormatter.dateFormat = @"dd/MM/yyyy HH:mm";
     });
-    PerfDrawText(@"WITCH · PERFORMANCE", footer, PerfMono(9, YES), UIColor.blackColor, NSTextAlignmentLeft);
+    PerfDrawWitchLogo(footer, 13, footer.size.width * 0.45, 1.0, YES);
     PerfDrawText([NSString stringWithFormat:@"generated %@", [stampFormatter stringFromDate:NSDate.date]],
                  footer, PerfMono(9, NO), [UIColor colorWithWhite:0.45 alpha:1], NSTextAlignmentRight);
 
