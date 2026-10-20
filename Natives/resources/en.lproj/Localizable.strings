@@ -914,6 +914,7 @@
 "settings.group.dev_server" = "Debug Server";
 "preference.title.moltenvk_version" = "MoltenVK Version";
 "preference.title.angle_backend" = "ANGLE Backend";
+"preference.title.mobileglues_backend" = "MobileGlues Backend";
 "preference.title.zink_mesa_version" = "Mesa Version";
 "preference.title.ltw_angle_backend" = "LTW ANGLE Backend";
 "settings.language.auto" = "Auto (device language)";
