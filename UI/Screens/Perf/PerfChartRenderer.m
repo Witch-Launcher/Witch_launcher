@@ -497,9 +497,6 @@ static void PerfDrawTile(CGContextRef ctx, CGRect tile, NSArray<PerfSession *> *
     CGRect grid = content;
     grid.size.height = content.size.height - footerHeight;
 
-    // Watermark first so every chart element draws on top of it.
-    PerfDrawWitchLogo(grid, grid.size.height * 0.075, grid.size.width * 0.8, 0.06, NO);
-
     if (combined && metrics.count > 1) {
         NSUInteger columns = metrics.count <= 4 ? 2 : 3;
         CGFloat tileSide = grid.size.width / columns;
