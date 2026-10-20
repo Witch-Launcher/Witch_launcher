@@ -1,6 +1,7 @@
 #import "LauncherPreferences.h"
 #import "PLPreferences.h"
 #import "UIKit+hook.h"
+#import "WitchBranchDefaults.h"
 #import "config.h"
 #import "utils.h"
 #import "ZinkConfig.h"
@@ -16,7 +17,7 @@
         @"general": @{
             @"check_sha": @YES,
             @"cosmetica": @YES,
-            @"debug_logging": @(!CONFIG_RELEASE),
+            @"debug_logging": @(WitchFeatureDefaultEnabled(@"logs")),
             @"liquid_glass": @NO,
             @"widget_menu": @NO,
             @"widget_show_fps": @NO,
@@ -197,8 +198,8 @@
             @"debug_hide_home_indicator": @NO,
             @"debug_ipad_ui": @(realUIIdiom == UIUserInterfaceIdiomPad),
             @"debug_auto_correction": @YES,
-            @"debug_render_log": @NO,
-            @"mem_sample_log": @YES,
+            @"debug_render_log": @(WitchFeatureDefaultEnabled(@"logs")),
+            @"mem_sample_log": @(WitchFeatureDefaultEnabled(@"logs")),
             @"debug_server_enabled": @NO,
             @"debug_server_port": @(9090),
             @"debug_server_token": @"",
@@ -322,6 +323,23 @@
             id value = defaults[section][key];
             NSDebugLog(@"[PLPreferences] Set default vaule: %@: %@", key, value);
             pref[section][key] = value;
+        }
+    }
+
+    // Branch-scoped feature defaults are applied once per branch switch:
+    // beta builds enable the log options while main (and any other branch)
+    // turns them off. Stored values are only replaced on that transition, so
+    // manual toggles made on the same branch survive relaunches.
+    if (global) {
+        NSString *branch = WitchBuildBranch();
+        NSMutableDictionary *internal = pref[@"internal"];
+        if ([internal isKindOfClass:NSMutableDictionary.class] &&
+            ![branch isEqualToString:internal[@"branch_defaults_branch"]]) {
+            BOOL logs = WitchFeatureDefaultEnabled(@"logs");
+            pref[@"general"][@"debug_logging"] = @(logs);
+            pref[@"debug"][@"debug_render_log"] = @(logs);
+            pref[@"debug"][@"mem_sample_log"] = @(logs);
+            internal[@"branch_defaults_branch"] = branch;
         }
     }
 

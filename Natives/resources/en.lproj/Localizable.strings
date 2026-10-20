@@ -462,9 +462,9 @@
 "preference.title.debug_auto_correction" = "Auto correction";
 "preference.detail.debug_auto_correction" = "Enable auto correction when typing text in game.";
 "preference.title.debug_render_log" = "Render error logging";
-"preference.detail.debug_render_log" = "When ON, all render error logs are recorded (LTW wrapper + EGL diagnostics). Keep OFF (default) to fully disable render logging and avoid CPU/GPU overhead.";
+"preference.detail.debug_render_log" = "When ON, all render error logs are recorded (LTW wrapper + EGL diagnostics). Default follows the build branch: ON for beta builds, OFF otherwise. Turn OFF to fully disable render logging and avoid CPU/GPU overhead.";
 "preference.title.debug_mem_sample_log" = "Memory sampling log";
-"preference.detail.debug_mem_sample_log" = "When ON (default), memory footprint is logged every 5s for Jetsam diagnosis. Turn OFF to fully disable all memory-measurement logging.";
+"preference.detail.debug_mem_sample_log" = "When ON, memory footprint is logged every 5s for Jetsam diagnosis. Default follows the build branch: ON for beta builds, OFF otherwise. Turn OFF to fully disable all memory-measurement logging.";
 "preference.title.debug_hide_home_indicator" = "Hide home indicator";
 "preference.detail.debug_hide_home_indicator" = "This will disable home indicator locking. You will need to use Guided Access to hide and lock home indicator at the same time.";
 

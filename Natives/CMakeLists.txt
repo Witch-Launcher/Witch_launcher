@@ -324,6 +324,7 @@ egl_bridge.m
     input_bridge_v3.m
     ios_uikit_bridge.m
     utils.m
+    WitchBranchDefaults.m
 
    # UI
    ../UI/Common/ThemeManager.m

@@ -320,9 +320,9 @@
 "preference.title.debug_auto_correction" = "Tự động sửa";
 "preference.detail.debug_auto_correction" = "Cho phép tự động sửa khi nhập văn bản trong game.";
 "preference.title.debug_render_log" = "Ghi nhật kí lỗi Render";
-"preference.detail.debug_render_log" = "Khi BẬT, toàn bộ nhật kí lỗi của Render sẽ được ghi lại (LTW + chẩn đoán EGL). Giữ TẮT (mặc định) để tắt hoàn toàn, tránh gây giới hạn cho CPU/GPU khi render dòng log.";
+"preference.detail.debug_render_log" = "Khi BẬT, toàn bộ nhật kí lỗi của Render sẽ được ghi lại (LTW + chẩn đoán EGL). Mặc định theo nhánh build: BẬT với bản beta, TẮT với nhánh khác. TẮT để tắt hoàn toàn, tránh gây giới hạn cho CPU/GPU khi render dòng log.";
 "preference.title.debug_mem_sample_log" = "Nhật kí đo bộ nhớ";
-"preference.detail.debug_mem_sample_log" = "Khi BẬT (mặc định), mức dùng bộ nhớ được ghi mỗi 5 giây để chẩn đoán Jetsam. TẮT để tắt hoàn toàn mọi log đo bộ nhớ.";
+"preference.detail.debug_mem_sample_log" = "Khi BẬT, mức dùng bộ nhớ được ghi mỗi 5 giây để chẩn đoán Jetsam. Mặc định theo nhánh build: BẬT với bản beta, TẮT với nhánh khác. TẮT để tắt hoàn toàn mọi log đo bộ nhớ.";
 "preference.title.debug_hide_home_indicator" = "Ẩn thanh home";
 "preference.detail.debug_hide_home_indicator" = "Tùy chọn này sẽ tắt khoá thanh điều hướng. Sử dụng tính năng \"Truy cập được hướng dẫn\" để ẩn và khoá thanh điều hướng cùng lúc.";
 "preference.title.debug_show_layout_bounds" = "Hiển thị đường viền bố cục";
