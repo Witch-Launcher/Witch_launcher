@@ -859,6 +859,10 @@ payload: native dep_mg dep_mobilegl dep_tgles dep_tglmt lwgjl java jre assets
 	# Mach-O inside ad-hoc with no entitlement blob, so running it last used to
 	# silently WIPE the keys above — the installed app then reported
 	# "memorystatus=0 increased-memory-limit=0" and died at the 2 GiB Jetsam cap.
+	# Drop any bundle seal copied from the build tree or left by an
+	# interrupted run: ldid -S recursively walks the bundle and fails while
+	# re-signing when a stale _CodeSignature/CodeResources is present.
+	rm -rf $(OUTPUTDIR)/Payload/Witch.app/_CodeSignature;
 	ldid -S $(OUTPUTDIR)/Payload/Witch.app;
 	if [ '$(TROLLSTORE_JIT_ENT)' == '1' ]; then \
 		ldid -S$(SOURCEDIR)/entitlements.trollstore.xml $(OUTPUTDIR)/Payload/Witch.app/Witch; \
