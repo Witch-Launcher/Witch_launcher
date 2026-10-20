@@ -331,6 +331,10 @@ static NSArray<NSDictionary *> *_cursorTypeDefinitions;
     return [CursorManager compositeImageForType:typeId];
 }
 
++ (UIImage *)imageForType:(NSString *)typeId displaySize:(CGSize)displaySize {
+    return [CursorManager compositeImageForType:typeId displaySize:displaySize];
+}
+
 + (NSString *)localizedNameForType:(NSString *)typeId {
     NSString *key = [NSString stringWithFormat:@"cursor.type.%@", typeId];
     NSString *localized = localize(key, nil);

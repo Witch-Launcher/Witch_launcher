@@ -151,11 +151,13 @@ void AWTInputBridge_sendKey(int keycode) {
     self.mousePointerView = [[UIImageView alloc] initWithFrame:self.virtualMouseFrame];
     self.mousePointerView.hidden = !virtualMouseEnabled;
     NSString *activeTypeId = [CursorTypeManager currentActiveTypeId];
-    self.mousePointerView.image = [CursorTypeManager imageForType:activeTypeId];
-    self.mousePointerView.contentMode = UIViewContentModeCenter;
-    self.mousePointerView.layer.magnificationFilter = kCAFilterNearest;
+    self.mousePointerView.contentMode = UIViewContentModeScaleAspectFit;
+    self.mousePointerView.layer.minificationFilter = kCAFilterLinear;
+    self.mousePointerView.layer.magnificationFilter = kCAFilterLinear;
+    CGRect displayFrame = [CursorManager displayFrameForMouseFrame:self.virtualMouseFrame typeId:activeTypeId];
+    self.mousePointerView.image = [CursorTypeManager imageForType:activeTypeId displaySize:displayFrame.size];
     [surfaceView addSubview:self.mousePointerView];
-    self.mousePointerView.frame = [CursorManager displayFrameForMouseFrame:self.virtualMouseFrame typeId:activeTypeId];
+    self.mousePointerView.frame = displayFrame;
 
     return self;
 }
@@ -267,10 +269,9 @@ void AWTInputBridge_sendKey(int keycode) {
         if (!virtualMouseEnabled) return;
         NSString *typeId = note.userInfo[@"typeId"];
         if (typeId) {
-            UIImage *img = [CursorTypeManager imageForType:typeId];
-
-            self.surfaceScrollView.mousePointerView.image = img;
-            self.surfaceScrollView.mousePointerView.frame = [CursorManager displayFrameForMouseFrame:self.surfaceScrollView.virtualMouseFrame typeId:typeId];
+            CGRect displayFrame = [CursorManager displayFrameForMouseFrame:self.surfaceScrollView.virtualMouseFrame typeId:typeId];
+            self.surfaceScrollView.mousePointerView.image = [CursorTypeManager imageForType:typeId displaySize:displayFrame.size];
+            self.surfaceScrollView.mousePointerView.frame = displayFrame;
         }
     }];
 

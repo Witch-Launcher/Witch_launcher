@@ -1,4 +1,5 @@
 #import "CursorManager.h"
+#import "CursorShapeRenderer.h"
 #import "LauncherPreferences.h"
 #import "WindowsCursorParser.h"
 #import "utils.h"
@@ -325,6 +326,13 @@ static NSString *const kImageGifName = @"image.gif";
 
 #pragma mark - Display
 
+static CGSize CursorPixelAlignedSize(CGSize size) {
+    CGFloat scale = [UIScreen mainScreen].scale;
+    if (scale <= 0) return size;
+    return CGSizeMake(round(size.width * scale) / scale,
+                      round(size.height * scale) / scale);
+}
+
 + (CGFloat)displayScaleForImage:(UIImage *)image mouseScale:(CGFloat)mouseScale isCustomCursor:(BOOL)isCustom {
     if (!image) return mouseScale;
     CGFloat w = image.size.width;
@@ -351,7 +359,7 @@ static NSString *const kImageGifName = @"image.gif";
     CGFloat mouseScale = getPrefFloat(@"control.mouse_scale") / 100.0;
     BOOL isCustom = ![self isDefaultCursor:name];
     CGFloat scale = [self displayScaleForImage:image mouseScale:mouseScale isCustomCursor:isCustom];
-    CGSize displaySize = CGSizeMake(image.size.width * scale, image.size.height * scale);
+    CGSize displaySize = CursorPixelAlignedSize(CGSizeMake(image.size.width * scale, image.size.height * scale));
 
     CGFloat imgW = MAX(image.size.width, 1);
     CGFloat imgH = MAX(image.size.height, 1);
@@ -373,7 +381,7 @@ static NSString *const kImageGifName = @"image.gif";
     CGFloat mouseScale = getPrefFloat(@"control.mouse_scale") / 100.0;
     BOOL isCustom = ![self isDefaultCursor:cursorName];
     CGFloat scale = [self displayScaleForImage:image mouseScale:mouseScale isCustomCursor:isCustom];
-    CGSize displaySize = CGSizeMake(image.size.width * scale, image.size.height * scale);
+    CGSize displaySize = CursorPixelAlignedSize(CGSizeMake(image.size.width * scale, image.size.height * scale));
 
     CGFloat imgW = MAX(image.size.width, 1);
     CGFloat imgH = MAX(image.size.height, 1);
@@ -491,7 +499,8 @@ static NSString *const kCursorTypesDirName = @"cursor_types";
 
 + (UIImage *)imageForCursor:(NSString *)name inType:(NSString *)typeId {
     if ([self isDefaultCursor:name]) {
-        return [self defaultCursorImage];
+        UIImage *shape = [self defaultShapeImageForType:typeId];
+        return shape ?: [self defaultCursorImage];
     }
     NSString *path = [self imagePathForCursor:name inType:typeId];
     if ([[NSFileManager defaultManager] fileExistsAtPath:path]) {
@@ -507,42 +516,27 @@ static NSString *const kCursorTypesDirName = @"cursor_types";
     NSData *data = [NSData dataWithContentsOfFile:path];
     if (!data) {
         if ([name isEqualToString:@"default"]) {
-            // Hotspots of the bundled Windows 10 cursors (32pt points).
-            // Decoded from the real .cur/.ani files (see HOTSPOTS manifest).
-            if ([typeId isEqualToString:@"normal"] || [typeId isEqualToString:@"help"]) {
-                return CGPointZero;
-            }
-            if ([typeId isEqualToString:@"working"]) {
-                return CGPointMake(0, 8);
+            // Hotspots are in the viewBox coordinates of CursorShapeRenderer.
+            // Arrow-shaped cursors point at (1.5, 1.5); the link hand at its
+            // fingertip; text at the caret; everything else is centered.
+            if ([typeId isEqualToString:@"normal"] ||
+                [typeId isEqualToString:@"working"] ||
+                [typeId isEqualToString:@"help"]) {
+                return CGPointMake(1.5, 1.5);
             }
             if ([typeId isEqualToString:@"link"]) {
-                return CGPointMake(6, 0);
+                return CGPointMake(8.0, 2.2);
             }
             if ([typeId isEqualToString:@"text"]) {
-                return CGPointMake(15, 16);
+                return CGPointMake(10, 14);
             }
-            if ([typeId isEqualToString:@"precision"] || [typeId isEqualToString:@"crosshair"]) {
-                return CGPointMake(14, 15);
+            if ([typeId isEqualToString:@"precision"] || [typeId isEqualToString:@"crosshair"] ||
+                [typeId isEqualToString:@"busy"] || [typeId isEqualToString:@"unavailable"] ||
+                [typeId isEqualToString:@"vresize"] || [typeId isEqualToString:@"hresize"] ||
+                [typeId isEqualToString:@"diagonal"] || [typeId isEqualToString:@"move"]) {
+                return CGPointMake(12, 12);
             }
-            if ([typeId isEqualToString:@"busy"]) {
-                return CGPointMake(16, 16);
-            }
-            if ([typeId isEqualToString:@"unavailable"]) {
-                return CGPointMake(8, 8);
-            }
-            if ([typeId isEqualToString:@"vresize"]) {
-                return CGPointMake(4, 11);
-            }
-            if ([typeId isEqualToString:@"hresize"]) {
-                return CGPointMake(11, 4);
-            }
-            if ([typeId isEqualToString:@"diagonal"]) {
-                return CGPointMake(8, 8);
-            }
-            if ([typeId isEqualToString:@"move"]) {
-                return CGPointMake(11, 11);
-            }
-            return CGPointMake(16, 16);
+            return CGPointMake(1.5, 1.5);
         }
         // Custom cursor without a hitbox: default to top-left corner
         return CGPointZero;
@@ -675,6 +669,7 @@ static BOOL gDiagonalUsesNESW = NO;
 
 + (void)setDiagonalUsesNESW:(BOOL)useNESW {
     gDiagonalUsesNESW = useNESW;
+    [CursorShapeRenderer setDiagonalUsesNESW:useNESW];
 }
 
 + (BOOL)diagonalUsesNESW {
@@ -748,7 +743,13 @@ static BOOL gDiagonalUsesNESW = NO;
     UIImage *cached = _shapeImageCache[cacheKey];
     if (cached) return cached;
 
-    UIImage *img = [self bundledWindowsImageForType:typeId];
+    UIImage *img = nil;
+    if ([CursorShapeRenderer hasShapeForType:typeId]) {
+        CGSize viewBox = [CursorShapeRenderer viewBoxSizeForType:typeId];
+        CGFloat renderScale = MAX(1.0, [UIScreen mainScreen].scale * 4.0);
+        img = [CursorShapeRenderer imageForType:typeId size:viewBox scale:renderScale];
+    }
+    if (!img) img = [self bundledWindowsImageForType:typeId];
     if (!img) img = [self generateDefaultShapeForType:typeId];
     if (img) _shapeImageCache[cacheKey] = img;
     return img;
@@ -1088,6 +1089,46 @@ static BOOL gDiagonalUsesNESW = NO;
 
     UIImage *shape = [self defaultShapeImageForType:typeId];
     return shape;
+}
+
++ (UIImage *)compositeImageForType:(NSString *)typeId displaySize:(CGSize)displaySize {
+    if (displaySize.width <= 0 || displaySize.height <= 0) return nil;
+
+    if ([typeId isEqualToString:@"hidden"]) {
+        return [self generateDefaultShapeForType:@"hidden"];
+    }
+
+    NSString *cursorName = [self currentCursorForType:typeId];
+    if (![self isDefaultCursor:cursorName]) {
+        UIImage *customImage = [self imageForCursor:cursorName inType:typeId];
+        if (customImage) {
+            // Animated cursors keep their frames; the image view scales them
+            // with linear filtering. Static cursors are resampled once at the
+            // exact display size so they stay crisp.
+            if (customImage.images.count > 1) return customImage;
+
+            CGFloat scale = [UIScreen mainScreen].scale;
+            UIGraphicsBeginImageContextWithOptions(displaySize, NO, scale);
+            CGContextRef ctx = UIGraphicsGetCurrentContext();
+            if (!ctx) {
+                UIGraphicsEndImageContext();
+                return customImage;
+            }
+            CGContextSetInterpolationQuality(ctx, kCGInterpolationHigh);
+            [customImage drawInRect:CGRectMake(0, 0, displaySize.width, displaySize.height)];
+            UIImage *resized = UIGraphicsGetImageFromCurrentImageContext();
+            UIGraphicsEndImageContext();
+            return resized ?: customImage;
+        }
+    }
+
+    if ([CursorShapeRenderer hasShapeForType:typeId]) {
+        CGFloat scale = [UIScreen mainScreen].scale;
+        UIImage *image = [CursorShapeRenderer imageForType:typeId size:displaySize scale:scale];
+        if (image) return image;
+    }
+
+    return [self defaultShapeImageForType:@"normal"];
 }
 
 @end

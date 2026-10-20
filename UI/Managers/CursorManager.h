@@ -37,7 +37,7 @@ NS_ASSUME_NONNULL_BEGIN
 + (NSString *)currentCursorForType:(NSString *)typeId;
 + (void)setCurrentCursor:(NSString *)cursorName forType:(NSString *)typeId;
 
-/// Ảnh cursor trong 1 type (hỗ trợ PNG/GIF); default dùng MousePointer.
+/// Ảnh cursor trong 1 type (hỗ trợ PNG/GIF); default dùng shape vector.
 + (UIImage *)imageForCursor:(NSString *)name inType:(NSString *)typeId;
 
 /// Hitbox trong 1 type.
@@ -56,6 +56,10 @@ NS_ASSUME_NONNULL_BEGIN
 /// Tạo ảnh composited: cursor shape mặc định làm nền + custom cursor overlay lên trên.
 /// typeId xác định cursor shape nào dùng làm nền (arrow cho normal, hand cho link...).
 + (UIImage *)compositeImageForType:(NSString *)typeId;
+
+/// Render cursor ở đúng kích thước hiển thị (point), giữ nét ở mọi mouse scale.
+/// Custom PNG được resample high-quality; custom GIF giữ nguyên animation.
++ (nullable UIImage *)compositeImageForType:(NSString *)typeId displaySize:(CGSize)displaySize;
 
 /// Ảnh cursor shape mặc định cho từng type.
 + (nullable UIImage *)defaultShapeImageForType:(NSString *)typeId;

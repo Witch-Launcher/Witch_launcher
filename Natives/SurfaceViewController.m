@@ -236,12 +236,15 @@ static GameSurfaceView* pojavWindow;
     self.mousePointerView = [[UIImageView alloc] initWithFrame:virtualMouseFrame];
     self.mousePointerView.autoresizingMask = UIViewAutoresizingFlexibleLeftMargin | UIViewAutoresizingFlexibleTopMargin | UIViewAutoresizingFlexibleRightMargin |UIViewAutoresizingFlexibleBottomMargin;
     self.mousePointerView.hidden = !virtualMouseEnabled;
-    self.mousePointerView.image = [CursorManager imageForCursor:[CursorManager currentCursorName]];
     self.mousePointerView.userInteractionEnabled = NO;
-    self.mousePointerView.contentMode = UIViewContentModeCenter;
-    self.mousePointerView.layer.magnificationFilter = kCAFilterNearest;
+    self.mousePointerView.contentMode = UIViewContentModeScaleAspectFit;
+    self.mousePointerView.layer.minificationFilter = kCAFilterLinear;
+    self.mousePointerView.layer.magnificationFilter = kCAFilterLinear;
+    NSString *initialTypeId = [CursorTypeManager currentActiveTypeId];
+    CGRect initialDisplayFrame = [CursorManager displayFrameForMouseFrame:virtualMouseFrame typeId:initialTypeId];
+    self.mousePointerView.image = [CursorTypeManager imageForType:initialTypeId displaySize:initialDisplayFrame.size];
     [self.touchView addSubview:self.mousePointerView];
-    self.mousePointerView.frame = [CursorManager displayFrameForMouseFrame:virtualMouseFrame];
+    self.mousePointerView.frame = initialDisplayFrame;
 
     // Keep the tracked field inside the visible bounds: iOS attaches the
     // hardware-keyboard text input session (UIFieldEditor) only when the first
@@ -301,10 +304,9 @@ static GameSurfaceView* pojavWindow;
         if (!virtualMouseEnabled) return;
         NSString *typeId = note.userInfo[@"typeId"];
         if (typeId) {
-            UIImage *img = [CursorTypeManager imageForType:typeId];
-
-            self.mousePointerView.image = img;
-            self.mousePointerView.frame = [CursorManager displayFrameForMouseFrame:virtualMouseFrame typeId:typeId];
+            CGRect displayFrame = [CursorManager displayFrameForMouseFrame:virtualMouseFrame typeId:typeId];
+            self.mousePointerView.image = [CursorTypeManager imageForType:typeId displaySize:displayFrame.size];
+            self.mousePointerView.frame = displayFrame;
         }
     }];
 
@@ -481,8 +483,9 @@ static GameSurfaceView* pojavWindow;
     CGFloat mouseScale = getPrefFloat(@"control.mouse_scale") / 100.0;
     virtualMouseFrame = CGRectMake(self.view.frame.size.width / 2, self.view.frame.size.height / 2, 18.0 * mouseScale, 27 * mouseScale);
     NSString *activeTypeId = [CursorTypeManager currentActiveTypeId];
-    self.mousePointerView.image = [CursorTypeManager imageForType:activeTypeId];
-    self.mousePointerView.frame = [CursorManager displayFrameForMouseFrame:virtualMouseFrame typeId:activeTypeId];
+    CGRect displayFrame = [CursorManager displayFrameForMouseFrame:virtualMouseFrame typeId:activeTypeId];
+    self.mousePointerView.image = [CursorTypeManager imageForType:activeTypeId displaySize:displayFrame.size];
+    self.mousePointerView.frame = displayFrame;
 
     self.shouldHideControlsFromRecording = getPrefFloat(@"control.recording_hide");
     [self.ctrlView hideViewFromCapture:self.shouldHideControlsFromRecording];
@@ -534,9 +537,9 @@ static GameSurfaceView* pojavWindow;
     virtualMouseFrame.origin.x = clamp(virtualMouseFrame.origin.x, 0, self.view.frame.size.width - w);
     virtualMouseFrame.origin.y = clamp(virtualMouseFrame.origin.y, 0, self.view.frame.size.height - h);
     NSString *activeTypeId = [CursorTypeManager currentActiveTypeId];
-    UIImage *img = [CursorTypeManager imageForType:activeTypeId];
-    self.mousePointerView.image = img;
-    self.mousePointerView.frame = [CursorManager displayFrameForMouseFrame:virtualMouseFrame typeId:activeTypeId];
+    CGRect displayFrame = [CursorManager displayFrameForMouseFrame:virtualMouseFrame typeId:activeTypeId];
+    self.mousePointerView.image = [CursorTypeManager imageForType:activeTypeId displaySize:displayFrame.size];
+    self.mousePointerView.frame = displayFrame;
     self.mousePointerView.hidden = isGrabbing || !getPrefBool(@"control.virtmouse_enable");
     self.mouseSpeed = getPrefFloat(@"control.mouse_speed") / 100.0;
     // Button scale live update: refresh control layout (ControlButton reads control.button_scale)
@@ -1081,9 +1084,9 @@ static GameSurfaceView* pojavWindow;
             // Reset cursor to normal when mouse leaves the game area
             if (virtualMouseEnabled) {
                 NSString *normalTypeId = @"normal";
-                UIImage *normalImg = [CursorTypeManager imageForType:normalTypeId];
-                self.mousePointerView.image = normalImg;
-                self.mousePointerView.frame = [CursorManager displayFrameForMouseFrame:virtualMouseFrame typeId:normalTypeId];
+                CGRect displayFrame = [CursorManager displayFrameForMouseFrame:virtualMouseFrame typeId:normalTypeId];
+                self.mousePointerView.image = [CursorTypeManager imageForType:normalTypeId displaySize:displayFrame.size];
+                self.mousePointerView.frame = displayFrame;
                 // Notify the game to reset cursor shape
                 [CursorTypeManager handleCursorShapeChange:0x6001 isSDL3:NO]; // GLFW_ARROW_CURSOR
             }

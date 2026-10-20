@@ -362,6 +362,7 @@ egl_bridge.m
    ../UI/Managers/VersionDirectoryManager.m
    ../UI/Managers/DownloadManager.m
     ../UI/Managers/CursorManager.m
+    ../UI/Managers/CursorShapeRenderer.m
     ../UI/Managers/CursorTypeManager.m
     ../UI/Managers/WindowsCursorParser.m
     ../UI/Managers/InstalledModsManager.m
