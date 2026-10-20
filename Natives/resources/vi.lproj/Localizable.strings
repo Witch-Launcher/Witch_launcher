@@ -11,7 +11,13 @@
 "game.menu.confirm.force_close" = "Bạn có chắc muốn bắt buộc thoát?";
 "game.menu.log_output" = "Nhật ký";
 "game.menu.perf_stop" = "Dừng đo hiệu năng";
+"game.menu.perf_start" = "Đo hiệu năng";
 "game.menu.custom_controls" = "Tùy chỉnh điều khiển";
+"hang.title" = "Màn hình đen?";
+"hang.message" = "Game chưa vẽ được khung hình nào sau 3 phút và nhật ký đã đứng im. Chia sẻ latestlog để được kiểm tra nhé?";
+"hang.accept" = "Đồng ý";
+"hang.decline" = "Từ chối";
+"perf.toast.started" = "Đã bắt đầu đo hiệu năng";
 
 "In-Game Widget" = "Tiện ích trong game";
 "preference.title.widget_menu" = "Menu tiện ích";

@@ -310,6 +310,7 @@ add_executable(Witch
   SceneDelegate.m
   SceneExternalDelegate.m
   SurfaceViewController.m
+  SurfaceViewController+HangDetect.m
   SurfaceViewController+ExternalDisplay.m
   SurfaceViewController+LogView.m
   SurfaceViewController+Navigation.m

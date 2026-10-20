@@ -13,6 +13,7 @@ CGPoint lastVirtualMousePoint;
 
 @interface SurfaceViewController : UIViewController
 
+@property(nonatomic, readonly) NSDictionary *metadata;
 @property(nonatomic) ControlLayout *ctrlView;
 @property(nonatomic) GameSurfaceView* surfaceView;
 @property(nonatomic) UIView *touchView;

@@ -11,7 +11,13 @@
 "game.menu.confirm.force_close" = "Are you sure you want to force close?";
 "game.menu.log_output" = "Log output";
 "game.menu.perf_stop" = "Stop performance recording";
+"game.menu.perf_start" = "Start performance recording";
 "game.menu.custom_controls" = "Custom controls";
+"hang.title" = "Black screen?";
+"hang.message" = "The game hasn't drawn a single frame in 3 minutes and the log has gone quiet. Share latestlog so we can check what happened?";
+"hang.accept" = "Agree";
+"hang.decline" = "Decline";
+"perf.toast.started" = "Performance recording started";
 
 "In-Game Widget" = "In-Game Widget";
 "preference.title.widget_menu" = "Widget Menu";

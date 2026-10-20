@@ -118,8 +118,16 @@ static double PerfCurrentThermalState(void) {
 #pragma mark - Session lifecycle
 
 - (void)startWithMetadata:(NSDictionary *)metadata {
+    [self startWithMetadata:metadata force:NO];
+}
+
+- (void)startManuallyWithMetadata:(NSDictionary *)metadata {
+    [self startWithMetadata:metadata force:YES];
+}
+
+- (void)startWithMetadata:(NSDictionary *)metadata force:(BOOL)force {
     void (^begin)(void) = ^{
-        [self beginSession:metadata];
+        [self beginSession:metadata force:force];
     };
     if (NSThread.isMainThread) {
         begin();
@@ -128,8 +136,8 @@ static double PerfCurrentThermalState(void) {
     }
 }
 
-- (void)beginSession:(NSDictionary *)metadata {
-    if (_recording || !getPrefBool(@"perf.record")) {
+- (void)beginSession:(NSDictionary *)metadata force:(BOOL)force {
+    if (_recording || (!force && !getPrefBool(@"perf.record"))) {
         return;
     }
 

@@ -75,8 +75,12 @@ static CGPoint lastCenterPoint;
 
 - (void)refreshMenuItems {
     NSMutableArray *items = [NSMutableArray arrayWithObject:@"game.menu.force_close"];
+    // Performance recording is togglable from the in-game menu: offer "start"
+    // when idle and "stop" while a session is active.
     if (PerfRecorder.shared.isRecording) {
         [items addObject:@"game.menu.perf_stop"];
+    } else {
+        [items addObject:@"game.menu.perf_start"];
     }
     [items addObjectsFromArray:@[@"game.menu.log_output", @"game.menu.custom_controls", @"Settings"]];
     self.menuArray = items;
@@ -219,6 +223,8 @@ static CGPoint lastCenterPoint;
         [self actionForceClose];
     } else if ([key isEqualToString:@"game.menu.perf_stop"]) {
         [self actionStopRecording];
+    } else if ([key isEqualToString:@"game.menu.perf_start"]) {
+        [self actionStartRecording];
     } else if ([key isEqualToString:@"game.menu.log_output"]) {
         [self.logOutputView actionToggleLogOutput];
     } else if ([key isEqualToString:@"game.menu.custom_controls"]) {
@@ -226,6 +232,15 @@ static CGPoint lastCenterPoint;
     } else if ([key isEqualToString:@"Settings"]) {
         [self actionOpenPreferences];
     }
+}
+
+- (void)actionStartRecording {
+    [[PerfRecorder shared] startManuallyWithMetadata:@{
+        @"version": self.metadata[@"id"] ?: @"",
+        @"instance": self.metadata[@"instanceName"] ?: @""
+    }];
+    [self animateMenuScale:1 duration:0.5];
+    [ErrorPresenter showToast:localize(@"perf.toast.started", nil) success:YES];
 }
 
 - (void)actionStopRecording {

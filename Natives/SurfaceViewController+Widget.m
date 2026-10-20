@@ -8,6 +8,10 @@
 #import <QuartzCore/QuartzCore.h>
 #import <math.h>
 
+@interface SurfaceViewController (WidgetNavigationItems)
+- (void)refreshMenuItems;
+@end
+
 static NSTimer *widgetTimer;
 static BOOL widgetLastMenuOn;
 static uint64_t widgetLastSwapCount;
@@ -359,8 +363,6 @@ static NSString *widgetShortBytes(uint64_t bytes) {
 
 - (void)buildWidgetPanel {
     CGFloat panelW = MIN(220, self.view.bounds.size.width * 0.6);
-    NSInteger count = self.menuArray.count;
-    CGFloat panelH = 6 + count * 46 + 6;
 
     self.widgetPanelBackdrop = [[UIView alloc] initWithFrame:self.view.bounds];
     self.widgetPanelBackdrop.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
@@ -370,11 +372,30 @@ static NSString *widgetShortBytes(uint64_t bytes) {
     [self.widgetPanelBackdrop addGestureRecognizer:backdropTap];
     [self.view addSubview:self.widgetPanelBackdrop];
 
-    self.widgetPanelView = [[UIView alloc] initWithFrame:CGRectMake(-panelW, 0, panelW, panelH)];
+    self.widgetPanelView = [[UIView alloc] initWithFrame:CGRectMake(-panelW, 0, panelW, 58)];
     self.widgetPanelView.backgroundColor = [UIColor colorWithWhite:0.09 alpha:0.85];
     self.widgetPanelView.layer.cornerRadius = 16;
     self.widgetPanelView.clipsToBounds = YES;
     self.widgetPanelView.hidden = YES;
+    [self.view addSubview:self.widgetPanelView];
+
+    [self widgetPanelReloadItems];
+}
+
+// The action list is not static: performance recording flips between
+// "start" and "stop" while the game runs. Rebuild the buttons from the
+// current menuArray every time the panel opens instead of freezing the
+// snapshot taken at setup time (which never showed the perf entry).
+- (void)widgetPanelReloadItems {
+    if (!self.widgetPanelView) return;
+    CGFloat panelW = self.widgetPanelView.bounds.size.width;
+    for (UIView *sub in self.widgetPanelView.subviews.copy) {
+        [sub removeFromSuperview];
+    }
+    NSInteger count = self.menuArray.count;
+    CGRect frame = self.widgetPanelView.frame;
+    frame.size.height = 6 + count * 46 + 6;
+    self.widgetPanelView.frame = frame;
 
     CGFloat py = 6;
     for (NSInteger i = 0; i < count; i++) {
@@ -392,7 +413,7 @@ static NSString *widgetShortBytes(uint64_t bytes) {
         [self.widgetPanelView addSubview:btn];
         py += 46;
     }
-    [self.view addSubview:self.widgetPanelView];
+    if (self.widgetPanelView.hidden) [self widgetLayoutPanel:YES];
 }
 
 - (UILabel *)widgetMakeLabelWithFontSize:(CGFloat)size weight:(UIFontWeight)weight {
@@ -515,6 +536,10 @@ static NSString *widgetShortBytes(uint64_t bytes) {
 
 - (void)widgetOpenPanel {
     if (!self.widgetPanelView.hidden) return;
+    // Recompute the action list first (start/stop recording depends on the
+    // live recorder state) and rebuild the buttons to match it.
+    [self refreshMenuItems];
+    [self widgetPanelReloadItems];
     self.widgetPanelView.hidden = NO;
     self.widgetPanelBackdrop.hidden = NO;
     [self widgetLayoutPanel:YES];

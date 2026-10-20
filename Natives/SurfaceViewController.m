@@ -19,6 +19,7 @@
 #import "PerfRecorder.h"
 #import "PLProfiles.h"
 #import "SurfaceViewController.h"
+#import "SurfaceViewController+HangDetect.h"
 #import "TrackedTextField.h"
 #import "UIKit+hook.h"
 #import "ios_uikit_bridge.h"
@@ -637,6 +638,7 @@ static GameSurfaceView* pojavWindow;
 }
 
 - (void)launchMinecraft {
+    [self startBlackScreenWatchdog];
     [[PerfRecorder shared] startWithMetadata:@{
         @"version": self.metadata[@"id"] ?: @"",
         @"instance": self.metadata[@"instanceName"] ?: @""

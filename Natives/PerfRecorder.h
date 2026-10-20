@@ -28,6 +28,11 @@ typedef NS_ENUM(NSInteger, PerfStopReason) {
 // Safe to call from any thread. metadata may carry @"version" / @"instance".
 - (void)startWithMetadata:(NSDictionary *)metadata;
 
+// Manual start from the in-game menu: ignores the "perf.record" launch pref
+// (that pref only controls automatic recording on every launch). No-op when
+// already recording. Safe to call from any thread.
+- (void)startManuallyWithMetadata:(NSDictionary *)metadata;
+
 // Finalizes the active session. Safe to call from any thread; no-op when
 // nothing is being recorded. A pending crash note overrides the reason.
 - (void)stopWithReason:(PerfStopReason)reason;
