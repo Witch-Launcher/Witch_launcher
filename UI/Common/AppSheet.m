@@ -42,6 +42,7 @@ typedef NS_ENUM(NSUInteger, AppSheetMode) {
 @property (nonatomic) NSLayoutConstraint *tableHeightConstraint;
 @property (nonatomic) UITextField *textField;
 @property (nonatomic) BOOL didAnimateEntrance;
+@property (nonatomic) BOOL didScrollToSelection;
 @end
 
 @implementation AppSheetHostVC
@@ -134,7 +135,7 @@ typedef NS_ENUM(NSUInteger, AppSheetMode) {
         _tableView.backgroundColor = [UIColor clearColor];
         _tableView.separatorStyle = UITableViewCellSeparatorStyleNone;
         _tableView.rowHeight = 54;
-        _tableView.showsVerticalScrollIndicator = NO;
+        _tableView.showsVerticalScrollIndicator = YES;
         [_cardView addSubview:_tableView];
         UIView *cancelBtn = [self makeButtonWithTitle:localize(@"Cancel", nil) primary:NO destructive:NO action:@selector(dismissCancelled)];
         [_cardView addSubview:cancelBtn];
@@ -281,14 +282,17 @@ typedef NS_ENUM(NSUInteger, AppSheetMode) {
 }
 
 // The option list never takes more than ~45% of the safe-area height;
-// the rest scrolls inside the table so 3 options and 60 options both
-// keep the Cancel button on screen.
+// the rest scrolls inside the table so 3 options and 900 options both
+// keep the Cancel button on screen. Round down to whole rows so the
+// bottom row is never sliced in half (which looked like a clipped list).
 - (CGFloat)cappedOptionsHeight {
     CGFloat safeH = self.view.safeAreaLayoutGuide.layoutFrame.size.height;
     if (safeH < 1) safeH = UIScreen.mainScreen.bounds.size.height;
-    CGFloat maxH = safeH * 0.45;
-    CGFloat want = _options.count * 54;
-    return MAX(MIN(want, maxH), 0);
+    CGFloat rowHeight = 54;
+    CGFloat maxRows = floor((safeH * 0.45) / rowHeight);
+    if (maxRows < 1) maxRows = 1;
+    CGFloat rows = MIN((CGFloat)_options.count, maxRows);
+    return rows * rowHeight;
 }
 
 - (void)viewDidLayoutSubviews {
@@ -338,6 +342,18 @@ typedef NS_ENUM(NSUInteger, AppSheetMode) {
     if (_mode == AppSheetModePrompt || _mode == AppSheetModePrompt2 || _mode == AppSheetModePrompt3) {
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.35 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
             [self->_textField becomeFirstResponder];
+        });
+    }
+    // Open long lists at the current selection instead of always at row 0.
+    // Runs after the entrance layout so the table has a content size.
+    if (_mode == AppSheetModeOptions && !_didScrollToSelection &&
+        _selectedIndex != NSNotFound && _selectedIndex >= 0 &&
+        _selectedIndex < (NSInteger)_options.count) {
+        _didScrollToSelection = YES;
+        NSIndexPath *ip = [NSIndexPath indexPathForRow:_selectedIndex inSection:0];
+        dispatch_async(dispatch_get_main_queue(), ^{
+            [self->_tableView layoutIfNeeded];
+            [self->_tableView scrollToRowAtIndexPath:ip atScrollPosition:UITableViewScrollPositionMiddle animated:NO];
         });
     }
 }
