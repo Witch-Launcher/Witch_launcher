@@ -31,7 +31,9 @@
 // Search
 @property (nonatomic, strong) UISearchBar *settingsSearchBar;
 @property (nonatomic, strong) UITableView *searchResultsTable;
+@property (nonatomic, strong) UIView *searchBackdrop;
 @property (nonatomic, strong) NSArray *searchResults; // array of @{@"tab":title, @"tabIndex":@, @"item":dict, @"row":@}
+@property (nonatomic) BOOL searchActive;
 @end
 
 @implementation SettingsViewController
@@ -441,17 +443,23 @@
 - (void)setup {
     self.view.clipsToBounds = YES;
     self.navigationItem.title = localize(@"Settings", nil);
-    self.navigationItem.rightBarButtonItem = [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemDone target:self action:@selector(dismissSettings)];
+    UIBarButtonItem *doneItem = [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemDone target:self action:@selector(dismissSettings)];
+    // Search lives in the navigation bar so the page gets the full height
+    // below it; tapping the magnifier floats the field in on demand.
+    UIBarButtonItem *searchItem = [[UIBarButtonItem alloc] initWithImage:[UIImage systemImageNamed:@"magnifyingglass"] style:UIBarButtonItemStylePlain target:self action:@selector(toggleSearch)];
+    searchItem.accessibilityLabel = localize(@"Search settings...", nil);
+    self.navigationItem.rightBarButtonItems = @[doneItem, searchItem];
     self.navigationItem.leftBarButtonItem = [[UIBarButtonItem alloc] initWithTitle:localize(@"preference.title.reset_settings", nil) style:UIBarButtonItemStylePlain target:self action:@selector(resetSettings)];
 
-    // Settings search bar (flat list, grouped by tab)
+    // Settings search (flat list, grouped by tab). Hidden until the nav-bar
+    // magnifier is tapped; the pages below use the reclaimed height.
     _settingsSearchBar = [[UISearchBar alloc] init];
     _settingsSearchBar.translatesAutoresizingMaskIntoConstraints = NO;
     _settingsSearchBar.placeholder = localize(@"Search settings...", nil);
     _settingsSearchBar.searchBarStyle = UISearchBarStyleMinimal;
     _settingsSearchBar.delegate = self;
     _settingsSearchBar.showsCancelButton = NO;
-    [self.view addSubview:_settingsSearchBar];
+    _settingsSearchBar.hidden = YES;
 
     _searchResultsTable = [[UITableView alloc] initWithFrame:CGRectZero style:UITableViewStyleGrouped];
     _searchResultsTable.translatesAutoresizingMaskIntoConstraints = NO;
@@ -460,11 +468,20 @@
     _searchResultsTable.backgroundColor = [UIColor clearColor];
     _searchResultsTable.hidden = YES;
     [_searchResultsTable registerClass:[UITableViewCell class] forCellReuseIdentifier:@"SearchCell"];
-    [self.view addSubview:_searchResultsTable];
+
+    _searchBackdrop = [[UIView alloc] initWithFrame:CGRectZero];
+    _searchBackdrop.translatesAutoresizingMaskIntoConstraints = NO;
+    _searchBackdrop.backgroundColor = [UIColor colorWithWhite:0 alpha:0.22];
+    _searchBackdrop.hidden = YES;
+    [_searchBackdrop addGestureRecognizer:[[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(hideSearch)]];
 
     [self setupTabBar];
     [self setupPages];
     [self setupBackgroundBlur];
+    // Added last so the search chrome sits above the tab rail and pages.
+    [self.view addSubview:_searchBackdrop];
+    [self.view addSubview:_searchResultsTable];
+    [self.view addSubview:_settingsSearchBar];
 
     _tabWidthConstraint = [_tabBarScroll.widthAnchor constraintEqualToConstant:132];
     _chromeIsPortrait = NO;
@@ -475,11 +492,17 @@
 // landscape keeps the left rail. Same floating-card language either way.
 - (void)rebuildChromeConstraints {
     if (_chromeConstraints) [NSLayoutConstraint deactivateConstraints:_chromeConstraints];
+    UILayoutGuide *safe = self.view.safeAreaLayoutGuide;
     NSMutableArray *c = [NSMutableArray arrayWithObjects:
-        [_settingsSearchBar.topAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.topAnchor constant:4],
+        [_settingsSearchBar.topAnchor constraintEqualToAnchor:safe.topAnchor constant:4],
         [_settingsSearchBar.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor constant:8],
         [_settingsSearchBar.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor constant:-8],
         [_settingsSearchBar.heightAnchor constraintEqualToConstant:36],
+
+        [_searchBackdrop.topAnchor constraintEqualToAnchor:self.view.topAnchor],
+        [_searchBackdrop.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor],
+        [_searchBackdrop.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor],
+        [_searchBackdrop.bottomAnchor constraintEqualToAnchor:self.view.bottomAnchor],
 
         [_searchResultsTable.topAnchor constraintEqualToAnchor:_settingsSearchBar.bottomAnchor constant:4],
         [_searchResultsTable.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor],
@@ -488,22 +511,22 @@
         nil];
     if (_chromeIsPortrait) {
         [c addObjectsFromArray:@[
-            [_pageScroll.topAnchor constraintEqualToAnchor:_settingsSearchBar.bottomAnchor constant:4],
+            [_pageScroll.topAnchor constraintEqualToAnchor:safe.topAnchor constant:4],
             [_pageScroll.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor],
             [_pageScroll.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor],
             [_pageScroll.bottomAnchor constraintEqualToAnchor:_tabBarScroll.topAnchor constant:-8],
             [_tabBarScroll.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor constant:8],
             [_tabBarScroll.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor constant:-8],
-            [_tabBarScroll.bottomAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.bottomAnchor constant:-8],
+            [_tabBarScroll.bottomAnchor constraintEqualToAnchor:safe.bottomAnchor constant:-8],
             [_tabBarScroll.heightAnchor constraintEqualToConstant:56],
         ]];
     } else {
         [c addObjectsFromArray:@[
-            [_tabBarScroll.topAnchor constraintEqualToAnchor:_settingsSearchBar.bottomAnchor constant:8],
+            [_tabBarScroll.topAnchor constraintEqualToAnchor:safe.topAnchor constant:8],
             [_tabBarScroll.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor constant:8],
-            [_tabBarScroll.bottomAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.bottomAnchor constant:-8],
+            [_tabBarScroll.bottomAnchor constraintEqualToAnchor:safe.bottomAnchor constant:-8],
             _tabWidthConstraint,
-            [_pageScroll.topAnchor constraintEqualToAnchor:_settingsSearchBar.bottomAnchor constant:4],
+            [_pageScroll.topAnchor constraintEqualToAnchor:safe.topAnchor constant:4],
             [_pageScroll.leadingAnchor constraintEqualToAnchor:_tabBarScroll.trailingAnchor constant:8],
             [_pageScroll.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor],
             [_pageScroll.bottomAnchor constraintEqualToAnchor:self.view.bottomAnchor],
@@ -678,6 +701,7 @@
 - (void)updateColors {
     ThemeManager *theme = ThemeManager.shared;
     self.view.backgroundColor = theme.contentBackgroundColor;
+    _settingsSearchBar.tintColor = theme.accentColor;
     [_panelBlur applyCurrentIntensity];
     [self refreshTableBackdrops];
     for (UIButton *btn in _tabButtons) {
@@ -752,6 +776,51 @@
     [_tabBarScroll scrollRectToVisible:CGRectInset(btn.frame, 0, -40) animated:YES];
 }
 
+#pragma mark - Search mode
+
+- (void)toggleSearch {
+    if (self.searchActive) [self hideSearch];
+    else [self showSearch];
+}
+
+- (void)showSearch {
+    if (self.searchActive) return;
+    self.searchActive = YES;
+    self.searchResults = nil;
+    [_searchResultsTable reloadData];
+    _searchBackdrop.hidden = NO;
+    _searchResultsTable.hidden = YES;
+    _tabBarScroll.hidden = YES;
+    _pageScroll.hidden = YES;
+    _settingsSearchBar.hidden = NO;
+    _settingsSearchBar.alpha = 0;
+    _settingsSearchBar.transform = CGAffineTransformMakeTranslation(0, -6);
+    [UIView animateWithDuration:0.2 delay:0 options:UIViewAnimationOptionCurveEaseOut animations:^{
+        self->_settingsSearchBar.alpha = 1;
+        self->_settingsSearchBar.transform = CGAffineTransformIdentity;
+    } completion:^(BOOL finished) {
+        if (self.searchActive) [self->_settingsSearchBar becomeFirstResponder];
+    }];
+}
+
+- (void)hideSearch {
+    if (!self.searchActive) return;
+    self.searchActive = NO;
+    [_settingsSearchBar resignFirstResponder];
+    _settingsSearchBar.text = @"";
+    [self searchBar:_settingsSearchBar textDidChange:@""];
+    _searchBackdrop.hidden = YES;
+    _searchResultsTable.hidden = YES;
+    [UIView animateWithDuration:0.18 delay:0 options:UIViewAnimationOptionCurveEaseIn animations:^{
+        self->_settingsSearchBar.alpha = 0;
+        self->_settingsSearchBar.transform = CGAffineTransformMakeTranslation(0, -6);
+    } completion:^(BOOL finished) {
+        if (self.searchActive) return;
+        self->_settingsSearchBar.hidden = YES;
+        self->_settingsSearchBar.transform = CGAffineTransformIdentity;
+    }];
+}
+
 #pragma mark - Settings Search (flat list grouped by tab)
 
 - (void)searchBar:(UISearchBar *)searchBar textDidChange:(NSString *)searchText {
@@ -765,8 +834,12 @@
     if (query.length == 0) {
         self.searchResults = nil;
         self.searchResultsTable.hidden = YES;
-        _tabBarScroll.hidden = NO;
-        _pageScroll.hidden = NO;
+        // While search mode is open the pages stay covered by the backdrop;
+        // they only come back when search is dismissed.
+        if (!self.searchActive) {
+            _tabBarScroll.hidden = NO;
+            _pageScroll.hidden = NO;
+        }
         return;
     }
     NSMutableArray *results = [NSMutableArray array];
@@ -795,12 +868,7 @@
 }
 
 - (void)searchBarCancelButtonClicked:(UISearchBar *)searchBar {
-    if (searchBar == _settingsSearchBar) {
-        searchBar.text = @"";
-        [self searchBar:searchBar textDidChange:@""];
-        [searchBar resignFirstResponder];
-        searchBar.showsCancelButton = NO;
-    }
+    if (searchBar == _settingsSearchBar) [self hideSearch];
 }
 
 - (void)searchBarTextDidBeginEditing:(UISearchBar *)searchBar {
@@ -1347,10 +1415,8 @@
 - (void)jumpToSearchResult:(NSDictionary *)entry {
     NSInteger tabIdx = [entry[@"tabIndex"] integerValue];
     NSInteger row = [entry[@"row"] integerValue];
-    // Hide search and jump to tab
-    _settingsSearchBar.text = @"";
-    [self searchBar:_settingsSearchBar textDidChange:@""];
-    [_settingsSearchBar resignFirstResponder];
+    // Close search mode and jump to the tab.
+    [self hideSearch];
     [self setPage:tabIdx animated:YES];
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.35 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         UITableView *targetTable = self.pageTables[tabIdx];
