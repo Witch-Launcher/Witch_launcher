@@ -1263,6 +1263,30 @@ static const NSInteger kModActionLoadingTag = 9001;
     return [[NSFileManager defaultManager] fileExistsAtPath:modPath];
 }
 
+- (NSString *)dependencyModsDirectory {
+    NSString *version = VersionDirectoryManager.shared.currentVersion;
+    if (version.length == 0) {
+        version = VersionDirectoryManager.shared.currentProfile.mcVersion ?: @"1.21.4";
+    }
+    return [VersionDirectoryManager.shared modsPathForVersion:version];
+}
+
+- (BOOL)isDependencyInstalled:(NSString *)projectId inModsDir:(NSString *)modsDir {
+    if (projectId.length == 0 || modsDir.length == 0) return NO;
+
+    // The tracker is keyed by project id, so renamed jars are still found.
+    NSDictionary *info = [[InstalledModsManager shared] infoForProjectId:projectId
+                                                               category:InstalledItemCategoryMod];
+    NSString *filename = [info[@"filename"] isKindOfClass:[NSString class]] ? info[@"filename"] : nil;
+    if (filename.length == 0) return NO;
+
+    NSFileManager *fm = [NSFileManager defaultManager];
+    if ([fm fileExistsAtPath:[modsDir stringByAppendingPathComponent:filename]]) return YES;
+    // Disabled mods live in <mods>/off; still installed, just turned off.
+    NSString *offPath = [[modsDir stringByAppendingPathComponent:@"off"] stringByAppendingPathComponent:filename];
+    return [fm fileExistsAtPath:offPath];
+}
+
 - (void)installModWithDependencies:(NSDictionary *)version {
     _dependencyInstallTasks = [NSMutableArray array];
     
@@ -1318,6 +1342,12 @@ static const NSInteger kModActionLoadingTag = 9001;
 - (void)installSingleDependency:(NSDictionary *)dep completion:(void(^)(void))completion {
     NSString *depProjectId = dep[@"project_id"];
     NSString *depSource = [ModSourceService isCurseForgeMod:_downloadMod] ? @"curseforge" : @"modrinth";
+
+    // Skip before any network work when the dependency is already present.
+    if ([self isDependencyInstalled:depProjectId inModsDir:[self dependencyModsDirectory]]) {
+        if (completion) completion();
+        return;
+    }
     [ModSourceService loadDetailsForProjectId:depProjectId source:depSource completion:^(NSDictionary *project, NSError *error) {
         if (error || !project) {
             if (completion) completion();
@@ -1358,6 +1388,17 @@ static const NSInteger kModActionLoadingTag = 9001;
                 if (mcVersion.length == 0) {
                     mcVersion = VersionDirectoryManager.shared.currentProfile.mcVersion ?: @"1.21.4";
                 }
+                NSString *modsDir = [VersionDirectoryManager.shared modsPathForVersion:mcVersion];
+                NSString *targetPath = [modsDir stringByAppendingPathComponent:filename];
+                if (![targetPath hasSuffix:@".jar"]) targetPath = [targetPath stringByAppendingPathExtension:@"jar"];
+                // Untracked but already on disk (manual install or old
+                // manifest): keep it and skip the redundant download.
+                NSString *offPath = [[modsDir stringByAppendingPathComponent:@"off"] stringByAppendingPathComponent:targetPath.lastPathComponent];
+                if ([[NSFileManager defaultManager] fileExistsAtPath:targetPath] ||
+                    [[NSFileManager defaultManager] fileExistsAtPath:offPath]) {
+                    if (completion) completion();
+                    return;
+                }
 
                 __weak typeof(self) weakSelf = self;
                 NSDictionary *depVerMod = @{@"project_id": depProjectId, @"_source": depSource};
@@ -1367,9 +1408,6 @@ static const NSInteger kModActionLoadingTag = 9001;
                 } completion:^(NSString *path, NSError *dlError) {
                     [[DownloadManager shared] completeTask:hubTask error:dlError];
                     if (path) {
-                        NSString *modsDir = [VersionDirectoryManager.shared modsPathForVersion:mcVersion];
-                        NSString *targetPath = [modsDir stringByAppendingPathComponent:filename];
-                        if (![targetPath hasSuffix:@".jar"]) targetPath = [targetPath stringByAppendingPathExtension:@"jar"];
                         [[NSFileManager defaultManager] createDirectoryAtPath:modsDir withIntermediateDirectories:YES attributes:nil error:nil];
                         [[NSFileManager defaultManager] removeItemAtPath:targetPath error:nil];
                         [[NSFileManager defaultManager] moveItemAtPath:path toPath:targetPath error:nil];
