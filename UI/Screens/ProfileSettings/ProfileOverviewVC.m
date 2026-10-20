@@ -551,8 +551,12 @@
         }
     }
     NSMutableDictionary *profiles = PLProfiles.current.profiles;
+    // Same guard as the detail editor: a freshly created profile is already
+    // stored, so its own entry must not count as a duplicate when the user
+    // opens the editor and saves without renaming.
     BOOL isRename = _originalName && ![name isEqualToString:_originalName];
-    if ((isRename && profiles[name]) || (_isNewProfile && profiles[name])) {
+    BOOL keepingName = _originalName && [name isEqualToString:_originalName];
+    if (profiles[name] && !keepingName) {
         [ErrorPresenter showError:@"Error" message:@"A profile with this name already exists."];
         return NO;
     }

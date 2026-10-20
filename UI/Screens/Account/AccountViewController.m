@@ -685,7 +685,12 @@ extern NSString *ELY_OAUTH_REDIRECT_URI;
 
     UIViewController *editVC = [[UIViewController alloc] init];
     editVC.title = [NSString stringWithFormat:@"Edit Account - %@", account[@"username"]];
-    editVC.view.backgroundColor = ThemeManager.shared.backgroundColor;
+    // Same page treatment as the rest of the launcher: translucent content
+    // over a real frosted backdrop. A bare backgroundColor left the page
+    // fully see-through when the user's UI opacity was below 100%, which
+    // looked like the sheet had lost its background.
+    editVC.view.backgroundColor = ThemeManager.shared.contentBackgroundColor;
+    [AmethystBlurView installInView:editVC.view];
 
     UIScrollView *scroll = [[UIScrollView alloc] init];
     scroll.translatesAutoresizingMaskIntoConstraints = NO;
@@ -694,7 +699,10 @@ extern NSString *ELY_OAUTH_REDIRECT_URI;
     UIImageView *skinPreview = [[UIImageView alloc] init];
     skinPreview.translatesAutoresizingMaskIntoConstraints = NO;
     skinPreview.contentMode = UIViewContentModeScaleAspectFit;
-    skinPreview.backgroundColor = ThemeManager.shared.cardBackgroundColor;
+    // Skin renders are transparent PNGs; a card-coloured image background
+    // painted an opaque dark box around the character (most visible on the
+    // head), so keep these views transparent.
+    skinPreview.backgroundColor = UIColor.clearColor;
     skinPreview.layer.cornerRadius = 12;
     skinPreview.clipsToBounds = YES;
     skinPreview.image = [UIImage systemImageNamed:@"person.circle.fill"];
@@ -704,7 +712,7 @@ extern NSString *ELY_OAUTH_REDIRECT_URI;
     UIImageView *headView = [[UIImageView alloc] init];
     headView.translatesAutoresizingMaskIntoConstraints = NO;
     headView.contentMode = UIViewContentModeScaleAspectFit;
-    headView.backgroundColor = ThemeManager.shared.cardBackgroundColor;
+    headView.backgroundColor = UIColor.clearColor;
     headView.layer.cornerRadius = 8;
     headView.clipsToBounds = YES;
     headView.image = [UIImage systemImageNamed:@"person.fill"];
@@ -1042,16 +1050,25 @@ extern NSString *ELY_OAUTH_REDIRECT_URI;
 }
 
 - (void)equipCapeWithId:(NSString *)capeId isActive:(BOOL)isActive accessToken:(NSString *)accessToken {
-    NSMutableURLRequest *request = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:[NSString stringWithFormat:@"https://api.minecraftservices.com/minecraft/profile/capes/%@", capeId]]];
-    request.HTTPMethod = @"PUT";
-    request.HTTPBody = [@"" dataUsingEncoding:NSUTF8StringEncoding];
+    // Official API: the active cape is addressed as .../capes/active with the
+    // cape id in a JSON body — /capes/<capeId> is not a route and returns
+    // HTTP 404 (NOT_FOUND). Removing the cape is a DELETE of the same URL.
+    NSMutableURLRequest *request = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:@"https://api.minecraftservices.com/minecraft/profile/capes/active"]];
+    if (isActive) {
+        request.HTTPMethod = @"DELETE";
+    } else {
+        request.HTTPMethod = @"PUT";
+        NSData *body = [NSJSONSerialization dataWithJSONObject:@{@"capeId": capeId ?: @""} options:0 error:nil];
+        request.HTTPBody = body;
+        [request setValue:@"application/json" forHTTPHeaderField:@"Content-Type"];
+    }
     [request setValue:[NSString stringWithFormat:@"Bearer %@", accessToken] forHTTPHeaderField:@"Authorization"];
 
     DownloadProgressOverlay *overlay = [DownloadProgressOverlay showInView:self.view title:localize(@"progress.changing_cape", nil)];
     NSURLSessionDataTask *task = [NSURLSession.sharedSession dataTaskWithRequest:request completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
         dispatch_async(dispatch_get_main_queue(), ^{
             NSHTTPURLResponse *httpResp = (NSHTTPURLResponse *)response;
-            if (!error && httpResp.statusCode == 200) {
+            if (!error && (httpResp.statusCode == 200 || httpResp.statusCode == 204)) {
                 [overlay finishWithMessage:isActive ? @"Cape removed!" : @"Cape equipped!"];
                 dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 1.2 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
                     [overlay dismiss];

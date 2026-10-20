@@ -1667,8 +1667,14 @@ typedef NS_ENUM(NSInteger, ProfileContentFilter) {
         }
     }
     NSMutableDictionary *profiles = PLProfiles.current.profiles;
+    // A newly created profile is already in PLProfiles when its editor opens,
+    // so "isNew" must not treat the profile's own entry as a duplicate:
+    // keeping the name untouched saves it back over itself. Only a rename
+    // onto a different existing profile (or a create with a taken name) is
+    // an error.
     BOOL isRename = _originalName && ![name isEqualToString:_originalName];
-    if ((isRename && profiles[name]) || (_isNewProfile && profiles[name])) {
+    BOOL keepingName = _originalName && [name isEqualToString:_originalName];
+    if (profiles[name] && !keepingName) {
         [ErrorPresenter showError:@"Error" message:@"A profile with this name already exists."];
         return;
     }
