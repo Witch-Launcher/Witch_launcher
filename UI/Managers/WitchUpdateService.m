@@ -106,6 +106,42 @@
     return NSBundle.mainBundle.infoDictionary[@"CFBundleShortVersionString"] ?: @"1.0";
 }
 
+// Release tags are rolling ("release"/"pre-release"), so the version only
+// lives in the release name or the asset filenames. Extract the first
+// dotted numeric component (e.g. Witch-slimmed-0.0.4-ios.ipa -> 0.0.4).
+- (NSString *)versionStringForRelease:(WitchReleaseInfo *)info {
+    static NSRegularExpression *regex = nil;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        regex = [NSRegularExpression regularExpressionWithPattern:@"v?(\\d+(?:\\.\\d+)+)" options:0 error:nil];
+    });
+
+    NSMutableArray<NSString *> *candidates = [NSMutableArray array];
+    if (info.name.length > 0) [candidates addObject:info.name];
+    if (info.tagName.length > 0) [candidates addObject:info.tagName];
+    for (WitchReleaseAsset *asset in info.assets) {
+        if (asset.name.length > 0) [candidates addObject:asset.name];
+    }
+    for (NSString *candidate in candidates) {
+        NSTextCheckingResult *match = [regex firstMatchInString:candidate options:0 range:NSMakeRange(0, candidate.length)];
+        if (match) return [candidate substringWithRange:[match rangeAtIndex:1]];
+    }
+    return nil;
+}
+
+- (NSComparisonResult)compareVersion:(NSString *)lhs toVersion:(NSString *)rhs {
+    NSArray<NSString *> *a = [lhs componentsSeparatedByString:@"."];
+    NSArray<NSString *> *b = [rhs componentsSeparatedByString:@"."];
+    NSUInteger count = MAX(a.count, b.count);
+    for (NSUInteger i = 0; i < count; i++) {
+        NSInteger x = i < a.count ? a[i].integerValue : 0;
+        NSInteger y = i < b.count ? b[i].integerValue : 0;
+        if (x < y) return NSOrderedAscending;
+        if (x > y) return NSOrderedDescending;
+    }
+    return NSOrderedSame;
+}
+
 - (void)checkForUpdateForce:(BOOL)force completion:(void(^)(WitchReleaseInfo *, BOOL, NSError *))completion {
     NSString *tag = [self effectiveTag];
     NSString *urlStr = [NSString stringWithFormat:@"https://api.github.com/repos/%@/releases/tags/%@", [self githubRepo], tag];
@@ -139,6 +175,16 @@
         NSString *lastSeen = getPrefObject(key);
         BOOL hasUpdate = YES;
         if ([lastSeen isKindOfClass:[NSString class]] && [lastSeen isEqualToString:updatedAt]) {
+            hasUpdate = NO;
+        }
+        // A rebuilt release (rolling tag) bumps updated_at even when the
+        // version did not change. Fresh installs have no last-seen marker,
+        // so without this they were told "Có bản mới" on first launch even
+        // though they had just downloaded this exact build.
+        NSString *releaseVersion = [self versionStringForRelease:info];
+        NSString *installedVersion = [self currentVersion];
+        if (releaseVersion.length > 0 && installedVersion.length > 0 &&
+            [self compareVersion:releaseVersion toVersion:installedVersion] != NSOrderedDescending) {
             hasUpdate = NO;
         }
         // Always mark as seen when checking (force or not) so user won't be nagged again for same release
@@ -301,8 +347,16 @@
     NSTimeInterval now = [[NSDate date] timeIntervalSince1970];
     NSTimeInterval lastPrompt = [getPrefObject(@"witch.update_last_prompt") doubleValue];
     if (now - lastPrompt < 3*24*3600) return;
+
+    // Fresh install: no baseline yet. Let this check record the current
+    // release silently instead of greeting a new user with an update sheet.
+    NSString *seenKey = [NSString stringWithFormat:@"witch.update_last_seen_%@", [self effectiveTag]];
+    id seen = getPrefObject(seenKey);
+    BOOL hasBaseline = ([seen isKindOfClass:[NSString class]] && [(NSString *)seen length] > 0) || lastPrompt > 0;
+
     [self checkForUpdateForce:NO completion:^(WitchReleaseInfo *info, BOOL hasUpdate, NSError *error) {
         if (error || !hasUpdate || !info) return;
+        if (!hasBaseline) return;
         // Only prompt if there is at least one installable asset
         WitchReleaseAsset *any = [info assetForVariant:WitchAppVariantFull isTrollStore:[self isTrollStoreInstall]];
         if (!any) any = info.assets.firstObject;
