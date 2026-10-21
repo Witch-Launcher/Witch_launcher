@@ -1123,3 +1123,12 @@
 "f3.settings.show_build" = "Rakennusnumero";
 "f3.settings.show_build_type" = "Rakennetyyppi";
 "f3.settings.footer" = "Valitut rivit lisätään pelin F3 debug-peittokuvaan seuraavan pelin käynnistyksen yhteydessä.";
+
+/* Missing translations generated from en.lproj. */
+"mod.install_prompt" = "Asennetaanko %@ %@ nykyiseen profiiliin?";
+"mod.requires_dependencies" = "Tämä modi vaatii %ld riippuvuuksia:";
+"mod.dependency_row" = "• %@ — %@";
+"mod.dependency_installed" = "Jo asennettu";
+"mod.dependency_missing" = "Ei asennettu";
+"mod.resolving_dependencies" = "Riippuvuuksien ratkaiseminen";
+"mod.resolve_deps_failed" = "Ei voitu ratkaista riippuvuuksia: %@";

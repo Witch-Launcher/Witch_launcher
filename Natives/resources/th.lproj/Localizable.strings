@@ -1138,3 +1138,12 @@
 "f3.settings.show_build" = "หมายเลขการสร้าง";
 "f3.settings.show_build_type" = "ประเภทการสร้าง";
 "f3.settings.footer" = "บรรทัดที่เลือกจะถูกเพิ่มลงในโอเวอร์เลย์ดีบัก F3 ของเกมในการเปิดตัวเกมครั้งถัดไป";
+
+/* Missing translations generated from en.lproj. */
+"mod.install_prompt" = "ติดตั้ง %@ %@ ไปยังโปรไฟล์ปัจจุบันหรือไม่";
+"mod.requires_dependencies" = "mod นี้ต้องการการพึ่งพา %ld:";
+"mod.dependency_row" = "• %@ — %@";
+"mod.dependency_installed" = "ติดตั้งแล้ว";
+"mod.dependency_missing" = "ไม่ได้ติดตั้ง";
+"mod.resolving_dependencies" = "การแก้ปัญหาการพึ่งพา";
+"mod.resolve_deps_failed" = "ไม่สามารถแก้ไขการขึ้นต่อกัน: %@";

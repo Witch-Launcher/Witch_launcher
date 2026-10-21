@@ -1137,3 +1137,12 @@
 "f3.settings.show_build" = "Konstrukcijos numeris";
 "f3.settings.show_build_type" = "Konstrukcijos tipas";
 "f3.settings.footer" = "Pasirinktos eilutės pridedamos prie žaidimo F3 derinimo perdangos kito žaidimo paleidimo metu.";
+
+/* Missing translations generated from en.lproj. */
+"mod.install_prompt" = "Install %@ %@ to current profile?";
+"mod.requires_dependencies" = "This mod requires %ld dependencies:";
+"mod.dependency_row" = "• %@ — %@";
+"mod.dependency_installed" = "Already installed";
+"mod.dependency_missing" = "Neįdiegta";
+"mod.resolving_dependencies" = "Resolving dependencies";
+"mod.resolve_deps_failed" = "Could not resolve dependencies: %@";

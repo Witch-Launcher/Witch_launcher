@@ -1141,3 +1141,12 @@
 "f3.settings.show_build" = "Ehitise number";
 "f3.settings.show_build_type" = "Ehitustüüp";
 "f3.settings.footer" = "Valitud read lisatakse mängu F3 silumisülekattele järgmisel mängu käivitamisel.";
+
+/* Missing translations generated from en.lproj. */
+"mod.install_prompt" = "Kas installida %@ %@ praegusele profiilile?";
+"mod.requires_dependencies" = "See mod nõuab %ld sõltuvusi:";
+"mod.dependency_row" = "• %@ — %@";
+"mod.dependency_installed" = "Juba paigaldatud";
+"mod.dependency_missing" = "Pole installitud";
+"mod.resolving_dependencies" = "Sõltuvuste lahendamine";
+"mod.resolve_deps_failed" = "Sõltuvusi ei õnnestunud lahendada: %@";

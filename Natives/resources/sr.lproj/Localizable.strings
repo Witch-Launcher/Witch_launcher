@@ -1135,3 +1135,12 @@
 "f3.settings.show_build" = "Број градње";
 "f3.settings.show_build_type" = "Тип градње";
 "f3.settings.footer" = "Изабране линије се додају у F3 преклапање грешке игре при следећем покретању игре.";
+
+/* Missing translations generated from en.lproj. */
+"mod.install_prompt" = "Инсталирати %@ %@ на тренутни профил?";
+"mod.requires_dependencies" = "Овај мод захтева %ld зависности:";
+"mod.dependency_row" = "• %@ — %@";
+"mod.dependency_installed" = "Већ инсталиран";
+"mod.dependency_missing" = "Није инсталирано";
+"mod.resolving_dependencies" = "Решавање зависности";
+"mod.resolve_deps_failed" = "Није могуће решити зависности: %@";

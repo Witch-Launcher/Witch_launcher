@@ -88,6 +88,7 @@ static NSString *readInstallerVersionId(NSString *jarPath) {
 @property (nonatomic) UIButton *mcVersionBtn;
 @property (nonatomic) NSString *selectedMcVersion;
 @property (nonatomic) NSArray *availableMcVersions;
+- (BOOL)isDependencyInstalled:(NSString *)projectId filename:(NSString *)filename;
 @end
 
 static NSString *const kVerCell = @"VerCell";
@@ -795,23 +796,57 @@ static NSString *const kVerCell = @"VerCell";
                 if (!bestVer) bestVer = depVersions.firstObject;
 
                 dispatch_async(dispatch_get_main_queue(), ^{
+                    NSString *filename = bestVer[@"filename"] ?: @"mod.jar";
+                    BOOL installed = [self isDependencyInstalled:depProjectId filename:filename];
                     [self.dependencyMods addObject:@{
                         @"project_id": depProjectId,
-                        @"title": project[@"title"] ?: @"Unknown",
+                        @"title": project[@"title"] ?: localize(@"Unknown", nil),
                         @"icon_url": project[@"icon_url"] ?: @"",
                         @"version": bestVer[@"version_number"] ?: @"",
                         @"url": bestVer[@"url"] ?: @"",
-                        @"filename": bestVer[@"filename"] ?: @"mod.jar",
+                        @"filename": filename,
                         @"game_versions": bestVer[@"game_versions"] ?: @[],
                         @"loaders": bestVer[@"loaders"] ?: @[],
                         @"_cfFileId": bestVer[@"_cfFileId"] ?: @0,
                         @"_source": source,
+                        @"installed": @(installed),
                     }];
                     [self rebuildDependencyViews];
                 });
             }];
         }];
     }
+}
+
+- (NSString *)dependencyModsDirectory {
+    NSString *version = VersionDirectoryManager.shared.currentVersion;
+    if (version.length == 0) {
+        version = VersionDirectoryManager.shared.currentProfile.mcVersion ?: @"";
+    }
+    return version.length > 0 ? [VersionDirectoryManager.shared modsPathForVersion:version] : @"";
+}
+
+- (BOOL)isDependencyInstalled:(NSString *)projectId filename:(NSString *)filename {
+    if (![projectId isKindOfClass:[NSString class]] || projectId.length == 0) return NO;
+    NSString *modsDir = [self dependencyModsDirectory];
+    if (modsDir.length == 0) return NO;
+
+    NSMutableArray<NSString *> *candidates = [NSMutableArray array];
+    NSDictionary *info = [[InstalledModsManager shared] infoForProjectId:projectId category:InstalledItemCategoryMod];
+    NSString *trackedFilename = [info[@"filename"] isKindOfClass:[NSString class]] ? info[@"filename"] : nil;
+    if (trackedFilename.length > 0) [candidates addObject:trackedFilename];
+    if ([filename isKindOfClass:[NSString class]] && filename.length > 0) {
+        NSString *normalized = [filename hasSuffix:@".jar"] ? filename : [filename stringByAppendingPathExtension:@"jar"];
+        if (![candidates containsObject:normalized]) [candidates addObject:normalized];
+    }
+
+    NSFileManager *fm = [NSFileManager defaultManager];
+    for (NSString *candidate in candidates) {
+        if ([fm fileExistsAtPath:[modsDir stringByAppendingPathComponent:candidate]]) return YES;
+        NSString *offPath = [[modsDir stringByAppendingPathComponent:@"off"] stringByAppendingPathComponent:candidate];
+        if ([fm fileExistsAtPath:offPath]) return YES;
+    }
+    return NO;
 }
 
 - (void)rebuildDependencyViews {
@@ -850,23 +885,35 @@ static NSString *const kVerCell = @"VerCell";
 
         NSString *verStr = dep[@"version"];
         NSString *mcVers = [dep[@"game_versions"] componentsJoinedByString:@", "];
+        BOOL installed = [dep[@"installed"] boolValue];
         UILabel *depVer = [[UILabel alloc] init];
         depVer.translatesAutoresizingMaskIntoConstraints = NO;
         depVer.font = [UIFont systemFontOfSize:11];
         depVer.textColor = ThemeManager.shared.secondaryTextColor;
-        depVer.text = [NSString stringWithFormat:@"%@ — %@", verStr, mcVers];
+        if (installed) {
+            depVer.text = [NSString stringWithFormat:@"%@ — %@", verStr, localize(@"mod.dependency_installed", nil)];
+        } else {
+            depVer.text = [NSString stringWithFormat:@"%@ — %@", verStr, mcVers];
+        }
         depVer.numberOfLines = 1;
         [card addSubview:depVer];
 
         UIButton *dlBtn = [UIButton buttonWithType:UIButtonTypeSystem];
         dlBtn.translatesAutoresizingMaskIntoConstraints = NO;
-        [dlBtn setTitle:localize(@"Download", nil) forState:UIControlStateNormal];
-        [dlBtn setTitleColor:ThemeManager.shared.buttonTextColor forState:UIControlStateNormal];
-        dlBtn.backgroundColor = ThemeManager.shared.accentColor;
+        if (installed) {
+            [dlBtn setTitle:localize(@"mod.dependency_installed", nil) forState:UIControlStateNormal];
+            [dlBtn setTitleColor:ThemeManager.shared.secondaryTextColor forState:UIControlStateDisabled];
+            dlBtn.backgroundColor = [ThemeManager.shared.accentColor colorWithAlphaComponent:0.15];
+            dlBtn.enabled = NO;
+        } else {
+            [dlBtn setTitle:localize(@"Download", nil) forState:UIControlStateNormal];
+            [dlBtn setTitleColor:ThemeManager.shared.buttonTextColor forState:UIControlStateNormal];
+            dlBtn.backgroundColor = ThemeManager.shared.accentColor;
+            [dlBtn addTarget:self action:@selector(downloadDependency:) forControlEvents:UIControlEventTouchUpInside];
+        }
         dlBtn.layer.cornerRadius = 6;
         dlBtn.titleLabel.font = [UIFont systemFontOfSize:13 weight:UIFontWeightSemibold];
         dlBtn.tag = [_dependencyMods indexOfObject:dep];
-        [dlBtn addTarget:self action:@selector(downloadDependency:) forControlEvents:UIControlEventTouchUpInside];
         [card addSubview:dlBtn];
 
         [NSLayoutConstraint activateConstraints:@[
@@ -918,7 +965,7 @@ static NSString *const kVerCell = @"VerCell";
 
 - (void)downloadDependency:(UIButton *)sender {
     NSDictionary *dep = _dependencyMods[sender.tag];
-    if (!dep) return;
+    if (!dep || [dep[@"installed"] boolValue]) return;
 
     [HapticManager.shared play:HapticTypeMedium];
     NSString *filename = dep[@"filename"] ?: @"mod.jar";
@@ -950,7 +997,7 @@ static NSString *const kVerCell = @"VerCell";
             NSString *depLoader = [VersionDirectoryManager.shared.currentProfile.modLoader lowercaseString] ?: @"";
             NSString *depIcon = [dep[@"icon_url"] isKindOfClass:[NSString class]] ? dep[@"icon_url"] : @"";
             [[InstalledModsManager shared] recordProjectId:dep[@"project_id"]
-                                                     title:dep[@"title"]
+                                                     title:dep[@"title"] ?: localize(@"Unknown", nil)
                                             versionNumber:dep[@"version"]
                                                   filename:targetPath.lastPathComponent
                                                    iconURL:depIcon
@@ -960,6 +1007,15 @@ static NSString *const kVerCell = @"VerCell";
                                                     loader:depLoader
                                                projectType:@"mod"
                                                    profile:nil];
+            dispatch_async(dispatch_get_main_queue(), ^{
+                NSMutableDictionary *updated = [dep mutableCopy];
+                updated[@"installed"] = @YES;
+                NSUInteger index = [weakSelf.dependencyMods indexOfObject:dep];
+                if (index != NSNotFound) {
+                    weakSelf.dependencyMods[index] = updated;
+                    [weakSelf rebuildDependencyViews];
+                }
+            });
         }
     }];
 }

@@ -1123,3 +1123,12 @@
 "f3.settings.show_build" = "Aedificate numerum";
 "f3.settings.show_build_type" = "Genus aedificate";
 "f3.settings.footer" = "Lineae selectae adduntur F3 debug operies in proximo ludo launch.";
+
+/* Missing translations generated from en.lproj. */
+"mod.install_prompt" = "Instrue %@ %@ ad hodiernam profile?";
+"mod.requires_dependencies" = "Modus hic requirit %ld clientelas;";
+"mod.dependency_row" = "• %@ - %@";
+"mod.dependency_installed" = "iam installed";
+"mod.dependency_missing" = "Non installed";
+"mod.resolving_dependencies" = "Solvendis clientibus";
+"mod.resolve_deps_failed" = "Non poterat clientelas resolvere: %@";

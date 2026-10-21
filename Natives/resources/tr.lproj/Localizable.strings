@@ -1168,3 +1168,12 @@ Bu seçenek varsayılan JitStreamer sunucusunu kullanıyorsanız olduğu gibi b�
 "f3.settings.show_build" = "Yapı numarası";
 "f3.settings.show_build_type" = "Yapı türü";
 "f3.settings.footer" = "Seçilen satırlar bir sonraki oyun açılışında oyunun F3 hata ayıklama arayüzüne eklenir.";
+
+/* Missing translations generated from en.lproj. */
+"mod.install_prompt" = "Mevcut profile %@ %@ yüklensin mi?";
+"mod.requires_dependencies" = "Bu mod %ld bağımlılık gerektirir:";
+"mod.dependency_row" = "• %@ — %@";
+"mod.dependency_installed" = "Zaten yüklü";
+"mod.dependency_missing" = "Kurulu değil";
+"mod.resolving_dependencies" = "Bağımlılıkları çözme";
+"mod.resolve_deps_failed" = "Bağımlılıklar çözülemedi: %@";

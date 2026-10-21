@@ -1150,3 +1150,12 @@
 "f3.settings.show_build" = "빌드 번호";
 "f3.settings.show_build_type" = "빌드 유형";
 "f3.settings.footer" = "선택한 줄은 다음 게임 실행 시 게임의 F3 디버그 오버레이에 추가됩니다.";
+
+/* Missing translations generated from en.lproj. */
+"mod.install_prompt" = "현재 프로필에 %@ %@를 설치하시겠습니까?";
+"mod.requires_dependencies" = "이 모드에는 %ld 종속성이 필요합니다:";
+"mod.dependency_row" = "• %@ - %@";
+"mod.dependency_installed" = "이미 설치됨";
+"mod.dependency_missing" = "설치되지 않음";
+"mod.resolving_dependencies" = "종속성 해결";
+"mod.resolve_deps_failed" = "종속성을 해결할 수 없습니다: %@";

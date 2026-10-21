@@ -1125,3 +1125,12 @@
 "f3.settings.show_build" = "Broj gradnje";
 "f3.settings.show_build_type" = "Tip gradnje";
 "f3.settings.footer" = "Izabrane linije se dodaju u F3 preklapanje greške igre pri sledećem pokretanju igre.";
+
+/* Missing translations generated from en.lproj. */
+"mod.install_prompt" = "Instalirati %@ %@ na trenutni profil?";
+"mod.requires_dependencies" = "Ovaj mod zahteva %ld zavisnosti:";
+"mod.dependency_row" = "• %@ — %@";
+"mod.dependency_installed" = "Već instaliran";
+"mod.dependency_missing" = "Nije instalirano";
+"mod.resolving_dependencies" = "Rešavanje zavisnosti";
+"mod.resolve_deps_failed" = "Nije moguće rešiti zavisnosti: %@";

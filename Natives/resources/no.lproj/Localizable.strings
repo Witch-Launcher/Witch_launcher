@@ -1134,3 +1134,12 @@
 "f3.settings.show_build" = "Byggenummer";
 "f3.settings.show_build_type" = "Byggetype";
 "f3.settings.footer" = "De valgte linjene legges til spillets F3 feilsøkingsoverlegg ved neste spilllansering.";
+
+/* Missing translations generated from en.lproj. */
+"mod.install_prompt" = "Vil du installere %@ %@ til gjeldende profil?";
+"mod.requires_dependencies" = "Denne moden krever %ld avhengigheter:";
+"mod.dependency_row" = "• %@ — %@";
+"mod.dependency_installed" = "Allerede installert";
+"mod.dependency_missing" = "Ikke installert";
+"mod.resolving_dependencies" = "Løse avhengigheter";
+"mod.resolve_deps_failed" = "Kunne ikke løse avhengigheter: %@";

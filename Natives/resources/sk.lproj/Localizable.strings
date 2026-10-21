@@ -1137,3 +1137,12 @@
 "f3.settings.show_build" = "Číslo zostavy";
 "f3.settings.show_build_type" = "Typ zostavy";
 "f3.settings.footer" = "Vybrané riadky sa pridajú do F3 ladiaceho prekrytia hry pri ďalšom spustení hry.";
+
+/* Missing translations generated from en.lproj. */
+"mod.install_prompt" = "Inštalovať %@ %@ do aktuálneho profilu?";
+"mod.requires_dependencies" = "Tento mod vyžaduje %ld závislosti:";
+"mod.dependency_row" = "• %@ — %@";
+"mod.dependency_installed" = "Už nainštalované";
+"mod.dependency_missing" = "Nie je nainštalované";
+"mod.resolving_dependencies" = "Riešenie závislostí";
+"mod.resolve_deps_failed" = "Nepodarilo sa vyriešiť závislosti: %@";

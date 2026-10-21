@@ -1164,3 +1164,12 @@
 "f3.settings.show_build" = "Numer kompilacji";
 "f3.settings.show_build_type" = "Typ kompilacji";
 "f3.settings.footer" = "Wybrane linie zostaną dodane do nakładki debugowania F3 gry przy następnym uruchomieniu gry.";
+
+/* Missing translations generated from en.lproj. */
+"mod.install_prompt" = "Zainstalować %@ %@ do bieżącego profilu?";
+"mod.requires_dependencies" = "Ten mod wymaga zależności %ld:";
+"mod.dependency_row" = "• %@ — %@";
+"mod.dependency_installed" = "Już zainstalowany";
+"mod.dependency_missing" = "Nie zainstalowano";
+"mod.resolving_dependencies" = "Rozwiązywanie zależności";
+"mod.resolve_deps_failed" = "Nie można rozwiązać zależności: %@";

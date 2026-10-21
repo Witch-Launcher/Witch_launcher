@@ -1178,3 +1178,12 @@
 "f3.settings.show_build" = "内部版本号";
 "f3.settings.show_build_type" = "建造类型";
 "f3.settings.footer" = "选定的行将在下一次游戏启动时添加到游戏的 F3 调试叠加层中。";
+
+/* Missing translations generated from en.lproj. */
+"mod.install_prompt" = "将 %@ %@ 安装到当前配置文件？";
+"mod.requires_dependencies" = "此 mod 需要 %ld 依赖项：";
+"mod.dependency_row" = "• %@ — %@";
+"mod.dependency_installed" = "已安装";
+"mod.dependency_missing" = "未安装";
+"mod.resolving_dependencies" = "解决依赖关系";
+"mod.resolve_deps_failed" = "无法解析依赖项：%@";

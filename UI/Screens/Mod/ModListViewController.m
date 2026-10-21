@@ -449,6 +449,7 @@
 @property (nonatomic) NSArray *downloadDependencies;
 @property (nonatomic) NSMutableArray *dependencyInstallTasks;
 @property (nonatomic) DownloadProgressOverlay *dependencyOverlay;
+- (void)presentDependencyPopupForVersion:(NSDictionary *)version downloadMod:(NSDictionary *)downloadMod requiredDeps:(NSArray *)requiredDeps titles:(NSDictionary *)titles;
 @end
 
 @implementation ModListViewController
@@ -1211,7 +1212,8 @@ static const NSInteger kModActionLoadingTag = 9001;
 
 - (void)showDependencyPopupWithVersion:(NSDictionary *)version {
     __weak typeof(self) weakSelf = self;
-    
+    NSDictionary *downloadMod = _downloadMod;
+
     NSArray *deps = version[@"dependencies"];
     NSMutableArray *requiredDeps = [NSMutableArray array];
     for (NSDictionary *dep in deps) {
@@ -1219,26 +1221,59 @@ static const NSInteger kModActionLoadingTag = 9001;
             [requiredDeps addObject:dep];
         }
     }
-    
-    NSString *modTitle = _downloadMod[@"title"] ?: @"Mod";
+
+    NSString *source = [ModSourceService isCurseForgeMod:downloadMod] ? @"curseforge" : @"modrinth";
+    NSMutableDictionary *titles = [NSMutableDictionary dictionary];
+    dispatch_group_t group = dispatch_group_create();
+    for (NSDictionary *dep in requiredDeps) {
+        NSString *projectId = dep[@"project_id"];
+        if (![projectId isKindOfClass:[NSString class]] || projectId.length == 0) continue;
+        dispatch_group_enter(group);
+        [ModSourceService loadDetailsForProjectId:projectId source:source completion:^(NSDictionary *project, NSError *error) {
+            NSString *title = project[@"title"];
+            @synchronized(titles) {
+                titles[projectId] = [title isKindOfClass:[NSString class]] && title.length > 0 ? title : projectId;
+            }
+            dispatch_group_leave(group);
+        }];
+    }
+
+    dispatch_group_notify(group, dispatch_get_main_queue(), ^{
+        [weakSelf presentDependencyPopupForVersion:version downloadMod:downloadMod requiredDeps:requiredDeps titles:titles];
+    });
+}
+
+- (void)presentDependencyPopupForVersion:(NSDictionary *)version downloadMod:(NSDictionary *)downloadMod requiredDeps:(NSArray *)requiredDeps titles:(NSDictionary *)titles {
+    __weak typeof(self) weakSelf = self;
+
+    NSString *modTitle = downloadMod[@"title"] ?: localize(@"Mod", nil);
     NSString *versionNumber = version[@"version_number"] ?: @"";
-    NSString *message = [NSString stringWithFormat:@"Install %@ %@ to current profile?", modTitle, versionNumber];
-    
+    NSString *message = [NSString stringWithFormat:localize(@"mod.install_prompt", nil), modTitle, versionNumber];
+
     if (requiredDeps.count > 0) {
-        message = [message stringByAppendingString:[NSString stringWithFormat:@"\n\nThis mod requires %ld dependencies:", (long)requiredDeps.count]];
+        message = [message stringByAppendingString:@"\n\n"];
+        message = [message stringByAppendingString:[NSString stringWithFormat:localize(@"mod.requires_dependencies", nil), (long)requiredDeps.count]];
+        NSString *modsDir = [self dependencyModsDirectory];
         for (NSDictionary *dep in requiredDeps) {
-            message = [message stringByAppendingString:[NSString stringWithFormat:@"\n• %@", dep[@"project_id"] ?: @"Unknown"]];
+            NSString *projectId = [dep[@"project_id"] isKindOfClass:[NSString class]] ? dep[@"project_id"] : nil;
+            NSString *title = projectId.length > 0 ? titles[projectId] : nil;
+            if (title.length == 0) title = localize(@"Unknown", nil);
+            BOOL installed = [self isDependencyInstalled:projectId inModsDir:modsDir];
+            NSString *status = installed ? localize(@"mod.dependency_installed", nil) : localize(@"mod.dependency_missing", nil);
+            message = [message stringByAppendingString:@"\n"];
+            message = [message stringByAppendingString:[NSString stringWithFormat:localize(@"mod.dependency_row", nil), title, status]];
         }
     }
-    
+
     // Check if mod is already installed
     BOOL isInstalled = [self isModInstalled:version];
     NSString *installTitle = isInstalled ? localize(@"mod.reinstall", nil) : localize(@"mod.install_to_profile", nil);
-    
+
     [AppSheet showOptionsWithTitle:modTitle message:message options:@[
         @{@"title": installTitle, @"icon": @"tray.and.arrow.down"},
         @{@"title": localize(@"mod.download_only", nil), @"icon": @"arrow.down.circle"},
     ] selectedIndex:NSNotFound selection:^(NSInteger idx) {
+        weakSelf.downloadMod = downloadMod;
         if (idx == 0) [weakSelf installModWithDependencies:version];
         else [weakSelf downloadModOnly:version];
     }];

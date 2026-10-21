@@ -1134,3 +1134,12 @@
 "f3.settings.show_build" = "Número de construcció";
 "f3.settings.show_build_type" = "Tipus de construcció";
 "f3.settings.footer" = "Les línies seleccionades s'afegeixen a la superposició de depuració F3 del joc en el proper llançament del joc.";
+
+/* Missing translations generated from en.lproj. */
+"mod.install_prompt" = "Instal·lar %@ %@ al perfil actual?";
+"mod.requires_dependencies" = "Aquest mod requereix %ld dependències:";
+"mod.dependency_row" = "• %@ — %@";
+"mod.dependency_installed" = "Ja instal·lat";
+"mod.dependency_missing" = "No instal·lat";
+"mod.resolving_dependencies" = "Resolució de dependències";
+"mod.resolve_deps_failed" = "No s'han pogut resoldre les dependències: %@";

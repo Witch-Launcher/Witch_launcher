@@ -1167,3 +1167,12 @@
 "f3.settings.show_build" = "內部版本號";
 "f3.settings.show_build_type" = "建造類型";
 "f3.settings.footer" = "選定的行將在下一次遊戲啟動時添加到遊戲的 F3 調試疊加層中。";
+
+/* Missing translations generated from en.lproj. */
+"mod.install_prompt" = "將 %@ %@ 安裝到目前設定檔？";
+"mod.requires_dependencies" = "此 mod 需要 %ld 依賴項：";
+"mod.dependency_row" = "• %@ — %@";
+"mod.dependency_installed" = "已安裝";
+"mod.dependency_missing" = "未安裝";
+"mod.resolving_dependencies" = "解決依賴關係";
+"mod.resolve_deps_failed" = "無法解析依賴項：%@";

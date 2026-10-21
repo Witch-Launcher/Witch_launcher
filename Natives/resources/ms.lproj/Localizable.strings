@@ -1139,3 +1139,12 @@
 "f3.settings.show_build" = "Nombor binaan";
 "f3.settings.show_build_type" = "Jenis binaan";
 "f3.settings.footer" = "Baris yang dipilih ditambahkan pada tindanan nyahpepijat F3 permainan pada pelancaran permainan seterusnya.";
+
+/* Missing translations generated from en.lproj. */
+"mod.install_prompt" = "Pasang %@ %@ pada profil semasa?";
+"mod.requires_dependencies" = "Mod ini memerlukan %ld kebergantungan:";
+"mod.dependency_row" = "• %@ — %@";
+"mod.dependency_installed" = "Sudah dipasang";
+"mod.dependency_missing" = "Tidak dipasang";
+"mod.resolving_dependencies" = "Menyelesaikan kebergantungan";
+"mod.resolve_deps_failed" = "Tidak dapat menyelesaikan kebergantungan: %@";

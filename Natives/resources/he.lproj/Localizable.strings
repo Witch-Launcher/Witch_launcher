@@ -1137,3 +1137,12 @@
 "f3.settings.show_build" = "מספר בנייה";
 "f3.settings.show_build_type" = "סוג בנייה";
 "f3.settings.footer" = "השורות שנבחרו מתווספות לשכבת ניפוי הבאגים F3 של המשחק בהשקת המשחק הבאה.";
+
+/* Missing translations generated from en.lproj. */
+"mod.install_prompt" = "האם להתקין את %@ %@ בפרופיל הנוכחי?";
+"mod.requires_dependencies" = "מוד זה דורש תלות %ld:";
+"mod.dependency_row" = "• %@ — %@";
+"mod.dependency_installed" = "כבר מותקן";
+"mod.dependency_missing" = "לא מותקן";
+"mod.resolving_dependencies" = "פתרון תלות";
+"mod.resolve_deps_failed" = "לא ניתן היה לפתור תלות: %@";

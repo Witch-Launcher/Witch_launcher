@@ -1166,3 +1166,12 @@
 "f3.settings.show_build" = "Numero ng build";
 "f3.settings.show_build_type" = "Uri ng build";
 "f3.settings.footer" = "Ang mga napiling linya ay idinagdag sa F3 debug overlay ng laro sa susunod na paglulunsad ng laro.";
+
+/* Missing translations generated from en.lproj. */
+"mod.install_prompt" = "I-install ang %@ %@ sa kasalukuyang profile?";
+"mod.requires_dependencies" = "Nangangailangan ang mod na ito ng %ld dependencies:";
+"mod.dependency_row" = "• %@ — %@";
+"mod.dependency_installed" = "Naka-install na";
+"mod.dependency_missing" = "Hindi naka-install";
+"mod.resolving_dependencies" = "Paglutas ng mga dependency";
+"mod.resolve_deps_failed" = "Hindi malutas ang mga dependency: %@";

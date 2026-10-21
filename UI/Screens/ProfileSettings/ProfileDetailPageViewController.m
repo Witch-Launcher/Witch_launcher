@@ -1475,7 +1475,7 @@ typedef NS_ENUM(NSInteger, ProfileContentFilter) {
     NSString *mc = [self profileMcVersion];
     NSString *loader = [self profileLoader];
 
-    UIAlertController *loading = [UIAlertController alertControllerWithTitle:@"Resolving dependencies" message:nil preferredStyle:UIAlertControllerStyleAlert];
+    UIAlertController *loading = [UIAlertController alertControllerWithTitle:localize(@"mod.resolving_dependencies", nil) message:nil preferredStyle:UIAlertControllerStyleAlert];
     UIActivityIndicatorView *spinner = [[UIActivityIndicatorView alloc] initWithActivityIndicatorStyle:UIActivityIndicatorViewStyleLarge];
     spinner.translatesAutoresizingMaskIntoConstraints = NO;
     [spinner startAnimating];
@@ -1495,7 +1495,7 @@ typedef NS_ENUM(NSInteger, ProfileContentFilter) {
         dispatch_async(dispatch_get_main_queue(), ^{
             [loading dismissViewControllerAnimated:YES completion:^{
                 if (error) {
-                    [ErrorPresenter showError:@"Error" message:[NSString stringWithFormat:@"Could not resolve dependencies: %@", error.localizedDescription]];
+                    [ErrorPresenter showError:localize(@"Error", nil) message:[NSString stringWithFormat:localize(@"mod.resolve_deps_failed", nil), error.localizedDescription]];
                     if (done) done();
                     return;
                 }

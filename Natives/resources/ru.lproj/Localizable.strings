@@ -1173,3 +1173,12 @@
 "f3.settings.show_build" = "Номер сборки";
 "f3.settings.show_build_type" = "Тип сборки";
 "f3.settings.footer" = "Выбранные строки добавляются в оверлей отладки игры F3 при следующем запуске игры.";
+
+/* Missing translations generated from en.lproj. */
+"mod.install_prompt" = "Установить %@ %@ в текущий профиль?";
+"mod.requires_dependencies" = "Этот мод требует %ld зависимостей:";
+"mod.dependency_row" = "• %@ — %@";
+"mod.dependency_installed" = "Уже установлено";
+"mod.dependency_missing" = "Не установлено";
+"mod.resolving_dependencies" = "Разрешение зависимостей";
+"mod.resolve_deps_failed" = "Не удалось разрешить зависимости: %@";

@@ -1167,3 +1167,12 @@
 "f3.settings.show_build" = "Numéro de build";
 "f3.settings.show_build_type" = "Type de construction";
 "f3.settings.footer" = "Les lignes sélectionnées sont ajoutées à la superposition de débogage F3 du jeu lors du prochain lancement du jeu.";
+
+/* Missing translations generated from en.lproj. */
+"mod.install_prompt" = "Installer %@ %@ sur le profil actuel ?";
+"mod.requires_dependencies" = "Ce mod nécessite %ld dépendances :";
+"mod.dependency_row" = "• %@ — %@";
+"mod.dependency_installed" = "Déjà installé";
+"mod.dependency_missing" = "Non installé";
+"mod.resolving_dependencies" = "Résoudre les dépendances";
+"mod.resolve_deps_failed" = "Impossible de résoudre les dépendances : %@";

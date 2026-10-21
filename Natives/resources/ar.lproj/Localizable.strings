@@ -1175,3 +1175,12 @@
 "f3.settings.show_build" = "رقم البناء";
 "f3.settings.show_build_type" = "نوع البناء";
 "f3.settings.footer" = "تتم إضافة الأسطر المحددة إلى تراكب تصحيح الأخطاء F3 الخاص باللعبة عند إطلاق اللعبة التالية.";
+
+/* Missing translations generated from en.lproj. */
+"mod.install_prompt" = "هل تريد تثبيت %@ %@ على الملف الشخصي الحالي؟";
+"mod.requires_dependencies" = "يتطلب هذا الوضع تبعيات %ld:";
+"mod.dependency_row" = "• %@ — %@";
+"mod.dependency_installed" = "تم تثبيته بالفعل";
+"mod.dependency_missing" = "غير مثبت";
+"mod.resolving_dependencies" = "حل التبعيات";
+"mod.resolve_deps_failed" = "لا يمكن حل التبعيات: %@";

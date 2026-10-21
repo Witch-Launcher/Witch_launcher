@@ -1166,3 +1166,12 @@
 "f3.settings.show_build" = "ビルド番号";
 "f3.settings.show_build_type" = "ビルドタイプ";
 "f3.settings.footer" = "選択した行は、次回のゲーム起動時にゲームの F3 デバッグ オーバーレイに追加されます。";
+
+/* Missing translations generated from en.lproj. */
+"mod.install_prompt" = "現在のプロファイルに %@ %@ をインストールしますか?";
+"mod.requires_dependencies" = "この MOD には %ld の依存関係が必要です。";
+"mod.dependency_row" = "• %@ — %@";
+"mod.dependency_installed" = "すでにインストールされています";
+"mod.dependency_missing" = "インストールされていません";
+"mod.resolving_dependencies" = "依存関係の解決";
+"mod.resolve_deps_failed" = "依存関係を解決できませんでした: %@";

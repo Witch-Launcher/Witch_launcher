@@ -1186,3 +1186,12 @@
 "f3.settings.show_build" = "ɹǝqɯnu plᴉn𐐒";
 "f3.settings.show_build_type" = "ǝdʎʇ plᴉn𐐒";
 "f3.settings.footer" = "˙ɥɔunɐl ǝɯɐƃ ʇxǝu ǝɥʇ uo ʎɐlɹǝʌo ƃnqǝp F3 s,ǝɯɐƃ ǝɥʇ oʇ pǝppɐ ǝɹɐ sǝuᴉl pǝʇɔǝlǝs ǝɥ⊥";
+
+/* Missing translations generated from en.lproj. */
+"mod.install_prompt" = "¿ǝlᴉɟoɹd ʇuǝɹɹnɔ oʇ %@ %@ llɐʇsuI";
+"mod.requires_dependencies" = ":sǝᴉɔuǝpuǝdǝp %ld sǝɹᴉnbǝɹ poɯ sᴉɥ⊥";
+"mod.dependency_row" = "%@ — %@ •";
+"mod.dependency_installed" = "pǝllɐʇsuᴉ ʎpɐǝɹl∀";
+"mod.dependency_missing" = "pǝllɐʇsuᴉ ʇoN";
+"mod.resolving_dependencies" = "sǝᴉɔuǝpuǝdǝp ƃuᴉʌlosǝᴚ";
+"mod.resolve_deps_failed" = "%@ :sǝᴉɔuǝpuǝdǝp ǝʌlosǝɹ ʇou plnoƆ";

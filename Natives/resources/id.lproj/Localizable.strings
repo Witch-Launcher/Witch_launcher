@@ -1169,3 +1169,12 @@
 "f3.settings.show_build" = "Nomor pembuatan";
 "f3.settings.show_build_type" = "Tipe bangunan";
 "f3.settings.footer" = "Baris yang dipilih akan ditambahkan ke hamparan debug F3 game pada peluncuran game berikutnya.";
+
+/* Missing translations generated from en.lproj. */
+"mod.install_prompt" = "Instal %@ %@ ke profil saat ini?";
+"mod.requires_dependencies" = "Mod ini memerlukan dependensi %ld:";
+"mod.dependency_row" = "• %@ — %@";
+"mod.dependency_installed" = "Sudah terpasang";
+"mod.dependency_missing" = "Tidak dipasang";
+"mod.resolving_dependencies" = "Menyelesaikan ketergantungan";
+"mod.resolve_deps_failed" = "Tidak dapat menyelesaikan ketergantungan: %@";

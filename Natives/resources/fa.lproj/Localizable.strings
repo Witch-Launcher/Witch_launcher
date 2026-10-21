@@ -1166,3 +1166,12 @@
 "f3.settings.show_build" = "شماره ساخت";
 "f3.settings.show_build_type" = "نوع ساخت";
 "f3.settings.footer" = "خطوط انتخاب شده در راه اندازی بازی بعدی به پوشش اشکال زدایی F3 بازی اضافه می شوند.";
+
+/* Missing translations generated from en.lproj. */
+"mod.install_prompt" = "%@ %@ در نمایه فعلی نصب شود؟";
+"mod.requires_dependencies" = "این مد به %ld وابستگی نیاز دارد:";
+"mod.dependency_row" = "• %@ - %@";
+"mod.dependency_installed" = "قبلاً نصب شده است";
+"mod.dependency_missing" = "نصب نشده است";
+"mod.resolving_dependencies" = "رفع وابستگی ها";
+"mod.resolve_deps_failed" = "نمی توان وابستگی ها را حل کرد: %@";

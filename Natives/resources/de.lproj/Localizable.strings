@@ -1176,3 +1176,12 @@ der Minecraft-Version zu wählen. Verringerte Auflösung reduziert die Arbeitsla
 "f3.settings.show_build" = "Build-Nummer";
 "f3.settings.show_build_type" = "Build-Typ";
 "f3.settings.footer" = "Die ausgewählten Zeilen werden beim nächsten Spielstart zum Debug-Overlay F3 des Spiels hinzugefügt.";
+
+/* Missing translations generated from en.lproj. */
+"mod.install_prompt" = "%@ %@ im aktuellen Profil installieren?";
+"mod.requires_dependencies" = "Dieser Mod erfordert %ld Abhängigkeiten:";
+"mod.dependency_row" = "• %@ — %@";
+"mod.dependency_installed" = "Bereits installiert";
+"mod.dependency_missing" = "Nicht installiert";
+"mod.resolving_dependencies" = "Abhängigkeiten auflösen";
+"mod.resolve_deps_failed" = "Abhängigkeiten konnten nicht aufgelöst werden: %@";

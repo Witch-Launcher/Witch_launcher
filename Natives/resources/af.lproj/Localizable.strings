@@ -1125,3 +1125,12 @@
 "f3.settings.show_build" = "Bou nommer";
 "f3.settings.show_build_type" = "Bou tipe";
 "f3.settings.footer" = "Die geselekteerde reëls word by die speletjie se F3 ontfoutingsoorlegging gevoeg op die volgende speletjie-bekendstelling.";
+
+/* Missing translations generated from en.lproj. */
+"mod.install_prompt" = "Installeer %@ %@ op huidige profiel?";
+"mod.requires_dependencies" = "Hierdie mod vereis %ld afhanklikhede:";
+"mod.dependency_row" = "• %@ — %@";
+"mod.dependency_installed" = "Reeds geïnstalleer";
+"mod.dependency_missing" = "Nie geïnstalleer nie";
+"mod.resolving_dependencies" = "Oplossing van afhanklikhede";
+"mod.resolve_deps_failed" = "Kon nie afhanklikhede oplos nie: %@";

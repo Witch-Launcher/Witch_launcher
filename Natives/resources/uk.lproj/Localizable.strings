@@ -1173,3 +1173,12 @@
 "f3.settings.show_build" = "Номер збірки";
 "f3.settings.show_build_type" = "Тип збірки";
 "f3.settings.footer" = "Вибрані рядки додаються до накладення налагодження гри F3 під час наступного запуску гри.";
+
+/* Missing translations generated from en.lproj. */
+"mod.install_prompt" = "Встановити %@ %@ до поточного профілю?";
+"mod.requires_dependencies" = "Цей мод потребує %ld залежностей:";
+"mod.dependency_row" = "• %@ — %@";
+"mod.dependency_installed" = "Вже встановлено";
+"mod.dependency_missing" = "Не встановлено";
+"mod.resolving_dependencies" = "Вирішення залежностей";
+"mod.resolve_deps_failed" = "Не вдалося вирішити залежності: %@";

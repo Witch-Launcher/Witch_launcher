@@ -1128,3 +1128,12 @@
 "f3.settings.show_build" = "1-се һанлы төҙөлөш.";
 "f3.settings.show_build_type" = "Тип төҙөү";
 "f3.settings.footer" = "Һайланған юлдар уйындың F3 отладка өҫтәүенә киләһе уйынды башлағанда өҫтәлә.";
+
+/* Missing translations generated from en.lproj. */
+"mod.install_prompt" = "%@ %@ ағымдағы профилгә ҡуйырғамы?";
+"mod.requires_dependencies" = "Был модҡа %ld бәйлелектәр кәрәк:";
+"mod.dependency_row" = "• %@ — %@.";
+"mod.dependency_installed" = "Инде ҡуйылған";
+"mod.dependency_missing" = "Ҡуйылмаған";
+"mod.resolving_dependencies" = "Бәйләнештәрҙе хәл итеү";
+"mod.resolve_deps_failed" = "Бойондороҡлолоҡтарҙы хәл итә алманы: %@";

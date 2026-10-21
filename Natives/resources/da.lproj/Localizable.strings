@@ -1124,3 +1124,12 @@
 "f3.settings.show_build" = "Byg nummer";
 "f3.settings.show_build_type" = "Byg type";
 "f3.settings.footer" = "De valgte linjer føjes til spillets F3 debug-overlay ved næste spillancering.";
+
+/* Missing translations generated from en.lproj. */
+"mod.install_prompt" = "Vil du installere %@ %@ til den aktuelle profil?";
+"mod.requires_dependencies" = "Denne mod kræver %ld afhængigheder:";
+"mod.dependency_row" = "• %@ — %@";
+"mod.dependency_installed" = "Allerede installeret";
+"mod.dependency_missing" = "Ikke installeret";
+"mod.resolving_dependencies" = "Løsning af afhængigheder";
+"mod.resolve_deps_failed" = "Kunne ikke løse afhængigheder: %@";

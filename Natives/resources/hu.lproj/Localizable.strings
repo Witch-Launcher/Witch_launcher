@@ -1125,3 +1125,12 @@
 "f3.settings.show_build" = "Build száma";
 "f3.settings.show_build_type" = "Építési típus";
 "f3.settings.footer" = "A kiválasztott sorok a játék következő indításakor hozzáadódnak a játék F3 hibakereső fedvényéhez.";
+
+/* Missing translations generated from en.lproj. */
+"mod.install_prompt" = "A %@ %@ telepítése az aktuális profilra?";
+"mod.requires_dependencies" = "Ehhez a modhoz %ld függőségek szükségesek:";
+"mod.dependency_row" = "• %@ — %@";
+"mod.dependency_installed" = "Már telepítve";
+"mod.dependency_missing" = "Nincs telepítve";
+"mod.resolving_dependencies" = "Függőségek feloldása";
+"mod.resolve_deps_failed" = "Nem sikerült feloldani a függőségeket: %@";

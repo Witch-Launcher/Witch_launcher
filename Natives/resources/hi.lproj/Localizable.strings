@@ -1123,3 +1123,12 @@
 "f3.settings.show_build" = "निर्माण संख्या";
 "f3.settings.show_build_type" = "निर्माण प्रकार";
 "f3.settings.footer" = "चयनित पंक्तियाँ अगले गेम लॉन्च पर गेम के F3 डिबग ओवरले में जोड़ दी जाती हैं।";
+
+/* Missing translations generated from en.lproj. */
+"mod.install_prompt" = "%@ %@ को वर्तमान प्रोफ़ाइल में स्थापित करें?";
+"mod.requires_dependencies" = "इस मॉड के लिए %ld निर्भरता की आवश्यकता है:";
+"mod.dependency_row" = "• %@ — %@";
+"mod.dependency_installed" = "पहले से ही स्थापित है";
+"mod.dependency_missing" = "स्थापित नहीं";
+"mod.resolving_dependencies" = "निर्भरता का समाधान";
+"mod.resolve_deps_failed" = "निर्भरताएँ हल नहीं कर सका: %@";

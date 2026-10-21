@@ -1239,3 +1239,12 @@
 "profile.title.separate_preference" = "Cài đặt cách ly";
 "profile.detail.separate_preference" = "Bật tùy chọn này để tách biệt mọi thay đổi được thực hiện trong cài đặt. Thực hiện Đặt lại sẽ khôi phục về cài đặt chung thay vì cài đặt mặc định.";
 "profile.title.install_fabric_quilt" = "Cài đặt vải/chăn";
+
+/* Mod dependency install flow */
+"mod.install_prompt" = "Cài %@ %@ vào hồ sơ hiện tại?";
+"mod.requires_dependencies" = "Mod này cần %ld thành phần phụ thuộc:";
+"mod.dependency_row" = "• %@ — %@";
+"mod.dependency_installed" = "Đã cài đặt";
+"mod.dependency_missing" = "Chưa cài đặt";
+"mod.resolving_dependencies" = "Đang phân giải thành phần phụ thuộc";
+"mod.resolve_deps_failed" = "Không thể phân giải thành phần phụ thuộc: %@";

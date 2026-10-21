@@ -1134,3 +1134,12 @@
 "f3.settings.show_build" = "Build number";
 "f3.settings.show_build_type" = "Build type";
 "f3.settings.footer" = "The selected lines are added to the game's F3 debug overlay on the next game launch.";
+
+/* Missing translations generated from en.lproj. */
+"mod.install_prompt" = "Install %@ %@ to current profile?";
+"mod.requires_dependencies" = "This mod requires %ld dependencies:";
+"mod.dependency_row" = "• %@ — %@";
+"mod.dependency_installed" = "Already installed";
+"mod.dependency_missing" = "Not installed";
+"mod.resolving_dependencies" = "Resolving dependencies";
+"mod.resolve_deps_failed" = "Could not resolve dependencies: %@";

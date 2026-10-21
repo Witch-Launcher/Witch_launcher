@@ -1134,3 +1134,12 @@
 "f3.settings.show_build" = "Құрылым нөмірі";
 "f3.settings.show_build_type" = "Құрастыру түрі";
 "f3.settings.footer" = "Таңдалған жолдар келесі ойынды іске қосқанда ойынның F3 жөндеу қабатына қосылады.";
+
+/* Missing translations generated from en.lproj. */
+"mod.install_prompt" = "Ағымдағы профильге %@ %@ орнату керек пе?";
+"mod.requires_dependencies" = "Бұл мод %ld тәуелділікті қажет етеді:";
+"mod.dependency_row" = "• %@ — %@";
+"mod.dependency_installed" = "Қазірдің өзінде орнатылған";
+"mod.dependency_missing" = "Орнатылмаған";
+"mod.resolving_dependencies" = "Тәуелділіктерді шешу";
+"mod.resolve_deps_failed" = "Тәуелділіктерді шешу мүмкін болмады: %@";

@@ -1124,3 +1124,12 @@
 "f3.settings.show_build" = "Quruluş nömrəsi";
 "f3.settings.show_build_type" = "Quraşdırma növü";
 "f3.settings.footer" = "Seçilmiş sətirlər növbəti oyunun başlanğıcında oyunun F3 debug örtüyünə əlavə edilir.";
+
+/* Missing translations generated from en.lproj. */
+"mod.install_prompt" = "%@ %@ cari profilə quraşdırılsın?";
+"mod.requires_dependencies" = "Bu mod %ld asılılıq tələb edir:";
+"mod.dependency_row" = "• %@ — %@";
+"mod.dependency_installed" = "Artıq quraşdırılıb";
+"mod.dependency_missing" = "Quraşdırılmayıb";
+"mod.resolving_dependencies" = "Asılılıqların həlli";
+"mod.resolve_deps_failed" = "Asılılıqları həll etmək mümkün olmadı: %@";

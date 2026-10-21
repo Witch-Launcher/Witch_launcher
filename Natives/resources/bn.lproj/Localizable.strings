@@ -1124,3 +1124,12 @@
 "f3.settings.show_build" = "বিল্ড নম্বর";
 "f3.settings.show_build_type" = "বিল্ড টাইপ";
 "f3.settings.footer" = "পরবর্তী গেম লঞ্চের সময় নির্বাচিত লাইনগুলি গেমের F3 ডিবাগ ওভারলেতে যোগ করা হয়।";
+
+/* Missing translations generated from en.lproj. */
+"mod.install_prompt" = "বর্তমান প্রোফাইলে %@ %@ ইনস্টল করবেন?";
+"mod.requires_dependencies" = "এই মোডের জন্য %ld নির্ভরতা প্রয়োজন:";
+"mod.dependency_row" = "• %@ - %@";
+"mod.dependency_installed" = "ইতিমধ্যে ইনস্টল করা হয়েছে";
+"mod.dependency_missing" = "ইনস্টল করা হয়নি";
+"mod.resolving_dependencies" = "নির্ভরতা সমাধান করা";
+"mod.resolve_deps_failed" = "নির্ভরতা সমাধান করা যায়নি: %@";

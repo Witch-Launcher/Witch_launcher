@@ -1144,3 +1144,12 @@
 "f3.settings.show_build" = "Număr de construcție";
 "f3.settings.show_build_type" = "Tipul de construcție";
 "f3.settings.footer" = "Liniile selectate sunt adăugate la suprapunerea de depanare F3 a jocului la următoarea lansare a jocului.";
+
+/* Missing translations generated from en.lproj. */
+"mod.install_prompt" = "Instalați %@ %@ în profilul actual?";
+"mod.requires_dependencies" = "Acest mod necesită %ld dependențe:";
+"mod.dependency_row" = "• %@ — %@";
+"mod.dependency_installed" = "Deja instalat";
+"mod.dependency_missing" = "Neinstalat";
+"mod.resolving_dependencies" = "Rezolvarea dependențelor";
+"mod.resolve_deps_failed" = "Nu s-au putut rezolva dependențele: %@";

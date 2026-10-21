@@ -1148,3 +1148,12 @@
 "f3.settings.show_build" = "Номер төзү";
 "f3.settings.show_build_type" = "Төзү төре";
 "f3.settings.footer" = "Сайланган сызыклар киләсе уен стартында уенның F3 төзәтмәләренә өстәлә.";
+
+/* Missing translations generated from en.lproj. */
+"mod.install_prompt" = "Хәзерге профильгә %@ %@ урнаштырыгыз?";
+"mod.requires_dependencies" = "Бу режим %ld бәйләнешне таләп итә:";
+"mod.dependency_row" = "• %@ - %@";
+"mod.dependency_installed" = "Инде урнаштырылган";
+"mod.dependency_missing" = "Урнаштырылмаган";
+"mod.resolving_dependencies" = "Бәйләнешләрне чишү";
+"mod.resolve_deps_failed" = "Бәйләнешләрне чишә алмады: %@";

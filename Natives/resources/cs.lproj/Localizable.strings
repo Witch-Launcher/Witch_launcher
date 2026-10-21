@@ -1175,3 +1175,12 @@
 "f3.settings.show_build" = "Číslo sestavení";
 "f3.settings.show_build_type" = "Typ sestavení";
 "f3.settings.footer" = "Vybrané řádky jsou přidány do F3 překryvného ladění hry při příštím spuštění hry.";
+
+/* Missing translations generated from en.lproj. */
+"mod.install_prompt" = "Instalovat %@ %@ do aktuálního profilu?";
+"mod.requires_dependencies" = "Tento mod vyžaduje %ld závislosti:";
+"mod.dependency_row" = "• %@ — %@";
+"mod.dependency_installed" = "Již nainstalováno";
+"mod.dependency_missing" = "Není nainstalováno";
+"mod.resolving_dependencies" = "Řešení závislostí";
+"mod.resolve_deps_failed" = "Nelze vyřešit závislosti: %@";

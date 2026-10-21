@@ -1133,3 +1133,12 @@
 "f3.settings.show_build" = "Byggnummer";
 "f3.settings.show_build_type" = "Byggtyp";
 "f3.settings.footer" = "De valda raderna läggs till spelets F3 felsökningsöverlägg vid nästa spelstart.";
+
+/* Missing translations generated from en.lproj. */
+"mod.install_prompt" = "Installera %@ %@ till nuvarande profil?";
+"mod.requires_dependencies" = "Denna mod kräver %ld beroenden:";
+"mod.dependency_row" = "• %@ — %@";
+"mod.dependency_installed" = "Redan installerad";
+"mod.dependency_missing" = "Ej installerad";
+"mod.resolving_dependencies" = "Att lösa beroenden";
+"mod.resolve_deps_failed" = "Kunde inte lösa beroenden: %@";

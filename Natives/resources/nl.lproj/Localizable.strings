@@ -1134,3 +1134,12 @@
 "f3.settings.show_build" = "Bouwnummer";
 "f3.settings.show_build_type" = "Bouwtype";
 "f3.settings.footer" = "De geselecteerde regels worden toegevoegd aan de F3 debug-overlay van de game bij de volgende lancering van de game.";
+
+/* Missing translations generated from en.lproj. */
+"mod.install_prompt" = "%@ %@ installeren op huidig profiel?";
+"mod.requires_dependencies" = "Deze mod vereist %ld afhankelijkheden:";
+"mod.dependency_row" = "• %@ — %@";
+"mod.dependency_installed" = "Al geïnstalleerd";
+"mod.dependency_missing" = "Niet geïnstalleerd";
+"mod.resolving_dependencies" = "Afhankelijkheden oplossen";
+"mod.resolve_deps_failed" = "Kan afhankelijkheden niet oplossen: %@";

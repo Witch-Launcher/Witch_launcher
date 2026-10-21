@@ -1136,3 +1136,12 @@
 "f3.settings.show_build" = "Αριθμός κατασκευής";
 "f3.settings.show_build_type" = "Τύπος κατασκευής";
 "f3.settings.footer" = "Οι επιλεγμένες γραμμές προστίθενται στην επικάλυψη εντοπισμού σφαλμάτων F3 του παιχνιδιού στην επόμενη κυκλοφορία του παιχνιδιού.";
+
+/* Missing translations generated from en.lproj. */
+"mod.install_prompt" = "Εγκατάσταση του %@ %@ στο τρέχον προφίλ;";
+"mod.requires_dependencies" = "Αυτό το mod απαιτεί %ld εξαρτήσεις:";
+"mod.dependency_row" = "• %@ — %@";
+"mod.dependency_installed" = "Έχει ήδη εγκατασταθεί";
+"mod.dependency_missing" = "Δεν έχει εγκατασταθεί";
+"mod.resolving_dependencies" = "Επίλυση εξαρτήσεων";
+"mod.resolve_deps_failed" = "Δεν ήταν δυνατή η επίλυση εξαρτήσεων: %@";
