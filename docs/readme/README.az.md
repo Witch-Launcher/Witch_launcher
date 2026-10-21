@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="../Natives/logo/logo-dev.png" width="120" alt="Witch Launcher logo">
+  <img src="../../Natives/logo/logo-dev.png" width="120" alt="Witch Launcher logo">
 </p>
 
 <h1 align="center">Witch Launcher</h1>
@@ -17,16 +17,24 @@ DuyAnh662 (Za_d626) tərəfindən idarə olunan iOS və Amethyst icma tərəfind
 ![Languages](https://img.shields.io/badge/languages-52-f59e0b?style=for-the-badge)
 ![License](https://img.shields.io/badge/license-GPL--3.0-22c55e?style=for-the-badge)
 
-[Features](#features) · [Screenshots](#screenshots) · [Requirements](#requirements) · [Installation](#installation) · [Languages](#languages) · [Credits](#credits) · [License](#license)
+[Xüsusiyyətlər](#features) · [Ekran görüntüləri](#screenshots) · [Tələblər](#requirements) · [Quraşdırma](#installation) · [Dillər](#languages) · [Kreditlər](#credits) · [Lisenziya](#license)
 
 <details>
 <summary><strong>Dillər</strong></summary>
 
-[العربية](README.ar.md) · [azərbaycan](README.az.md) · [বাংলা](README.bn.md) · [čeština](README.cs.md)<br>
-[Deutsch](README.de.md) · [English](../README.md) · [español](README.es.md) · [فارسی](README.fa.md)<br>
-[Filipino](README.fil.md) · [français](README.fr.md) · [עברית](README.he.md) · [हिन्दी](README.hi.md)<br>
+[Afrikaans](README.af.md) · [العربية](README.ar.md) · [azərbaycan](README.az.md) · [башҡорт теле](README.ba.md)<br>
+[বাংলা](README.bn.md) · [বাংলা (ভারত)](README.bn-IN.md) · [català](README.ca.md) · [čeština](README.cs.md)<br>
+[dansk](README.da.md) · [Deutsch](README.de.md) · [Ελληνικά](README.el.md) · [English](../../README.md)<br>
+[English (United Kingdom)](README.en-GB.md) · [Pirate English](README.en-PT.md) · [English (Upside Down)](README.en-UD.md) · [español](README.es.md)<br>
+[eesti](README.et.md) · [فارسی](README.fa.md) · [suomi](README.fi.md) · [Filipino](README.fil.md)<br>
+[français](README.fr.md) · [עברית](README.he.md) · [हिन्दी](README.hi.md) · [magyar](README.hu.md)<br>
 [Indonesia](README.id.md) · [italiano](README.it.md) · [日本語](README.ja.md) · [қазақ тілі](README.kk.md)<br>
-[한국어](README.ko.md) · [Tiếng Việt](README.vi.md) · [简体中文](README.zh-Hans.md)
+[한국어](README.ko.md) · [Latin](README.la.md) · [LOLCAT](README.lol.md) · [lietuvių](README.lt.md)<br>
+[Bahasa Melayu](README.ms.md) · [Nederlands](README.nl.md) · [norsk](README.no.md) · [polski](README.pl.md)<br>
+[Pirate](README.pr.md) · [português](README.pt.md) · [português (Brasil)](README.pt-BR.md) · [română](README.ro.md)<br>
+[русский](README.ru.md) · [slovenčina](README.sk.md) · [српски](README.sr.md) · [srpski (latinica)](README.sr-Latn.md)<br>
+[svenska](README.sv.md) · [ไทย](README.th.md) · [Türkçe](README.tr.md) · [татар](README.tt.md)<br>
+[українська](README.uk.md) · [Tiếng Việt](README.vi.md) · [简体中文](README.zh-Hans.md) · [繁體中文](README.zh-Hant.md)
 
 </details>
 
@@ -41,7 +49,7 @@ DuyAnh662 (Za_d626) tərəfindən idarə olunan iOS və Amethyst icma tərəfind
 
 Witch Boardwalk](https://github.com/zhuowei/Boardwalk), PojavLauncher](https://github.com/PojavLauncherTeam) icmasının, Amethyst-iOS və Amethyst-iOS-25-ün işi üzərində qurulmuşdur. Bu, müstəqil layihədir və Mojang Studios, Microsoft və ya yuxarı Amethyst komandası ilə əlaqəli deyil.
 
-> **Cari versiya:** 0.0.4 · Buraxılış qeydləri üçün [`news.md`](../news.md)-ə baxın.
+> **Cari versiya:** 0.0.4 · Buraxılış qeydləri üçün [`news.md`](../../news.md)-ə baxın.
 
 ---
 
@@ -108,13 +116,13 @@ Witch Launcher 0.0.4 inkişaf quruluşundan skrinşotlar. İnterfeys versiyalar 
 
 | | |
 |---|---|
-| <img src="../media/IMG_2690.png" width="400" alt="Witch Launcher screenshot 1"> | <img src="../media/IMG_2691.png" width="400" alt="Witch Launcher screenshot 2"> |
-| <img src="../media/IMG_2692.png" width="400" alt="Witch Launcher screenshot 3"> | <img src="../media/IMG_2693.png" width="400" alt="Witch Launcher screenshot 4"> |
-| <img src="../media/IMG_2694.png" width="400" alt="Witch Launcher screenshot 5"> | <img src="../media/IMG_2695.png" width="400" alt="Witch Launcher screenshot 6"> |
-| <img src="../media/IMG_2696.png" width="400" alt="Witch Launcher screenshot 7"> | <img src="../media/IMG_2697.png" width="400" alt="Witch Launcher screenshot 8"> |
-| <img src="../media/IMG_2698.png" width="400" alt="Witch Launcher screenshot 9"> | <img src="../media/IMG_2699.png" width="400" alt="Witch Launcher screenshot 10"> |
-| <img src="../media/IMG_2700.png" width="400" alt="Witch Launcher screenshot 11"> | <img src="../media/IMG_2701.png" width="400" alt="Witch Launcher screenshot 12"> |
-| <img src="../media/IMG_2702.png" width="400" alt="Witch Launcher screenshot 13"> | <img src="../media/IMG_2703.png" width="400" alt="Witch Launcher screenshot 14"> |
+| <img src="../../media/IMG_2690.png" width="400" alt="Witch Launcher screenshot 1"> | <img src="../../media/IMG_2691.png" width="400" alt="Witch Launcher screenshot 2"> |
+| <img src="../../media/IMG_2692.png" width="400" alt="Witch Launcher screenshot 3"> | <img src="../../media/IMG_2693.png" width="400" alt="Witch Launcher screenshot 4"> |
+| <img src="../../media/IMG_2694.png" width="400" alt="Witch Launcher screenshot 5"> | <img src="../../media/IMG_2695.png" width="400" alt="Witch Launcher screenshot 6"> |
+| <img src="../../media/IMG_2696.png" width="400" alt="Witch Launcher screenshot 7"> | <img src="../../media/IMG_2697.png" width="400" alt="Witch Launcher screenshot 8"> |
+| <img src="../../media/IMG_2698.png" width="400" alt="Witch Launcher screenshot 9"> | <img src="../../media/IMG_2699.png" width="400" alt="Witch Launcher screenshot 10"> |
+| <img src="../../media/IMG_2700.png" width="400" alt="Witch Launcher screenshot 11"> | <img src="../../media/IMG_2701.png" width="400" alt="Witch Launcher screenshot 12"> |
+| <img src="../../media/IMG_2702.png" width="400" alt="Witch Launcher screenshot 13"> | <img src="../../media/IMG_2703.png" width="400" alt="Witch Launcher screenshot 14"> |
 
 ---
 
@@ -164,7 +172,7 @@ TrollStore konstruksiyaları əlavə hüquqlardan istifadə edir və normal yan 
 Witch-nı tərtib etmək üçün macOS Xcode əmr xətti alətləri, iOS SDK 14.0 və ya daha yeni, CMake, JDK 8, `ldid`, `wget`, `zip` tələb olunur.
 
 ```bash
-git clone --recursive https://github.com/Witch-Launcher/Witch_launcher.git
+git clone --rekursiv https://github.com/Witch-Launcher/Witch_launcher.git
 cd Witch_launcher
 make jre-download
 make -j"$(sysctl -n hw.ncpu)" package
@@ -178,7 +186,7 @@ Bunun əvəzinə TrollStore paketi yaratmaq üçün:
 make package TROLLSTORE_JIT_ENT=1
 ```
 
-Renderer mənbə keçidləri və tərtib qeydləri üçün bax [`note.md`](../note.md).
+Renderer mənbə keçidləri və tərtib qeydləri üçün bax [`note.md`](../../note.md).
 
 ---
 
@@ -189,20 +197,38 @@ Witch Launcher **52 dil paketi** ilə göndərilir. **Parametrlər → Ümumi �
 
 | Code | Language | Code | Language |
 |---|---|---|---|
-| `ar` | [العربية](README.ar.md) | `az` | [azərbaycan](README.az.md) |
-| `bn` | [বাংলা](README.bn.md) | `cs` | [čeština](README.cs.md) |
-| `de` | [Deutsch](README.de.md) | `en` | [English](../README.md) |
-| `es` | [español](README.es.md) | `fa` | [فارسی](README.fa.md) |
-| `fil` | [Filipino](README.fil.md) | `fr` | [français](README.fr.md) |
-| `he` | [עברית](README.he.md) | `hi` | [हिन्दी](README.hi.md) |
+| `af` | [Afrikaans](README.af.md) | `ar` | [العربية](README.ar.md) |
+| `az` | [azərbaycan](README.az.md) | `ba` | [башҡорт теле](README.ba.md) |
+| `bn` | [বাংলা](README.bn.md) | `bn-IN` | [বাংলা (ভারত)](README.bn-IN.md) |
+| `ca` | [català](README.ca.md) | `cs` | [čeština](README.cs.md) |
+| `da` | [dansk](README.da.md) | `de` | [Deutsch](README.de.md) |
+| `el` | [Ελληνικά](README.el.md) | `en` | [English](../../README.md) |
+| `en-GB` | [English (United Kingdom)](README.en-GB.md) | `en-PT` | [Pirate English](README.en-PT.md) |
+| `en-UD` | [English (Upside Down)](README.en-UD.md) | `es` | [español](README.es.md) |
+| `et` | [eesti](README.et.md) | `fa` | [فارسی](README.fa.md) |
+| `fi` | [suomi](README.fi.md) | `fil` | [Filipino](README.fil.md) |
+| `fr` | [français](README.fr.md) | `he` | [עברית](README.he.md) |
+| `hi` | [हिन्दी](README.hi.md) | `hu` | [magyar](README.hu.md) |
 | `id` | [Indonesia](README.id.md) | `it` | [italiano](README.it.md) |
 | `ja` | [日本語](README.ja.md) | `kk` | [қазақ тілі](README.kk.md) |
-| `ko` | [한국어](README.ko.md) | `vi` | [Tiếng Việt](README.vi.md) |
-| `zh-Hans` | [简体中文](README.zh-Hans.md) |
+| `ko` | [한국어](README.ko.md) | `la` | [Latin](README.la.md) |
+| `lol` | [LOLCAT](README.lol.md) | `lt` | [lietuvių](README.lt.md) |
+| `ms` | [Bahasa Melayu](README.ms.md) | `nl` | [Nederlands](README.nl.md) |
+| `no` | [norsk](README.no.md) | `pl` | [polski](README.pl.md) |
+| `pr` | [Pirate](README.pr.md) | `pt` | [português](README.pt.md) |
+| `pt-BR` | [português (Brasil)](README.pt-BR.md) | `ro` | [română](README.ro.md) |
+| `ru` | [русский](README.ru.md) | `sk` | [slovenčina](README.sk.md) |
+| `sr` | [српски](README.sr.md) | `sr-Latn` | [srpski (latinica)](README.sr-Latn.md) |
+| `sv` | [svenska](README.sv.md) | `th` | [ไทย](README.th.md) |
+| `tr` | [Türkçe](README.tr.md) | `tt` | [татар](README.tt.md) |
+| `uk` | [українська](README.uk.md) | `vi` | [Tiếng Việt](README.vi.md) |
+| `zh-Hans` | [简体中文](README.zh-Hans.md) | `zh-Hant` | [繁體中文](README.zh-Hant.md) |
+
+Tətbiq bütün **52 dil paketini** göndərir. README tərcümələri ingilis dili də daxil olmaqla **bütün 52 dildə** mövcuddur.
 
 Bəzi tərcümələr maşınla işləyir və yöndəmsiz texniki terminlər ehtiva edə bilər. Düzəlişlər xoşdur.
 
-İngilis dili bu README üçün mənbə dilidir. Lokallaşdırılmış README-lər bu səhifənin yuxarısındakı dil seçicisindən və [`docs/`](../docs/) kataloqunda mövcuddur.
+İngilis dili bu README üçün mənbə dilidir. Lokallaşdırılmış README-lər bu səhifənin yuxarısındakı dil seçicisindən və [`docs/readme/`](./) kataloqunda mövcuddur.
 
 ---
 
@@ -291,16 +317,16 @@ Witch Launcher və onun yuxarı layihələri bir çox töhfə verənlərin əmə
 
 [MCHeads](https://mc-heads.net)-a Minecraft avatar xidmətləri təqdim etdiyinə görə xüsusi təşəkkürlər.
 
-Tam üçüncü tərəf komponenti və lisenziya siyahısı [`credits.md`](../credits.md)-də mövcuddur.
+Tam üçüncü tərəf komponenti və lisenziya siyahısı [`credits.md`](../../credits.md)-də mövcuddur.
 
 ---
 
 <a id="license"></a>
 ## Lisenziya
 
-Witch Launcher, [`credits.md`](../credits.md)-də sadalanan üçüncü tərəf komponentlərinin lisenziyaları və müəllif hüquqları tələblərinə uyğun olaraq **GNU General Public License v3.0** altında paylanır.
+Witch Launcher, [`credits.md`](../../credits.md)-də sadalanan üçüncü tərəf komponentlərinin lisenziyaları və müəllif hüquqları tələblərinə uyğun olaraq **GNU General Public License v3.0** altında paylanır.
 
-Tam lisenziya mətni üçün [`LICENSE`](../LICENSE) baxın.
+Tam lisenziya mətni üçün [`LICENSE`](../../LICENSE) baxın.
 
 ---
 

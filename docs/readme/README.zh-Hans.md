@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="../Natives/logo/logo-dev.png" width="120" alt="Witch Launcher logo">
+  <img src="../../Natives/logo/logo-dev.png" width="120" alt="Witch Launcher logo">
 </p>
 
 <h1 align="center">Witch Launcher</h1>
@@ -22,11 +22,19 @@
 <details>
 <summary><strong>语言</strong></summary>
 
-[العربية](README.ar.md) · [azərbaycan](README.az.md) · [বাংলা](README.bn.md) · [čeština](README.cs.md)<br>
-[Deutsch](README.de.md) · [English](../README.md) · [español](README.es.md) · [فارسی](README.fa.md)<br>
-[Filipino](README.fil.md) · [français](README.fr.md) · [עברית](README.he.md) · [हिन्दी](README.hi.md)<br>
+[Afrikaans](README.af.md) · [العربية](README.ar.md) · [azərbaycan](README.az.md) · [башҡорт теле](README.ba.md)<br>
+[বাংলা](README.bn.md) · [বাংলা (ভারত)](README.bn-IN.md) · [català](README.ca.md) · [čeština](README.cs.md)<br>
+[dansk](README.da.md) · [Deutsch](README.de.md) · [Ελληνικά](README.el.md) · [English](../../README.md)<br>
+[English (United Kingdom)](README.en-GB.md) · [Pirate English](README.en-PT.md) · [English (Upside Down)](README.en-UD.md) · [español](README.es.md)<br>
+[eesti](README.et.md) · [فارسی](README.fa.md) · [suomi](README.fi.md) · [Filipino](README.fil.md)<br>
+[français](README.fr.md) · [עברית](README.he.md) · [हिन्दी](README.hi.md) · [magyar](README.hu.md)<br>
 [Indonesia](README.id.md) · [italiano](README.it.md) · [日本語](README.ja.md) · [қазақ тілі](README.kk.md)<br>
-[한국어](README.ko.md) · [Tiếng Việt](README.vi.md) · [简体中文](README.zh-Hans.md)
+[한국어](README.ko.md) · [Latin](README.la.md) · [LOLCAT](README.lol.md) · [lietuvių](README.lt.md)<br>
+[Bahasa Melayu](README.ms.md) · [Nederlands](README.nl.md) · [norsk](README.no.md) · [polski](README.pl.md)<br>
+[Pirate](README.pr.md) · [português](README.pt.md) · [português (Brasil)](README.pt-BR.md) · [română](README.ro.md)<br>
+[русский](README.ru.md) · [slovenčina](README.sk.md) · [српски](README.sr.md) · [srpski (latinica)](README.sr-Latn.md)<br>
+[svenska](README.sv.md) · [ไทย](README.th.md) · [Türkçe](README.tr.md) · [татар](README.tt.md)<br>
+[українська](README.uk.md) · [Tiếng Việt](README.vi.md) · [简体中文](README.zh-Hans.md) · [繁體中文](README.zh-Hant.md)
 
 </details>
 
@@ -41,7 +49,7 @@
 
 Witch 建立在 [Boardwalk](https://github.com/zhuowei/Boardwalk)、[PojavLauncher](https://github.com/PojavLauncherTeam) 社区、Amethyst-iOS 和 Amethyst-iOS-25 的工作基础上。它是一个独立的项目，不隶属于 Mojang Studios、Microsoft 或上游 Amethyst 团队。
 
-> **当前版本：** 0.0.4 · 请参阅 [`news.md`](../news.md) 了解发行说明。
+> **当前版本：** 0.0.4 · 请参阅 [`news.md`](../../news.md) 了解发行说明。
 
 ---
 
@@ -108,13 +116,13 @@ Witch Launcher0.0.4 开发版本的屏幕截图。界面可以在版本和主题
 
 | | |
 |---|---|
-| <img src="../media/IMG_2690.png" width="400" alt="Witch Launcher screenshot 1"> | <img src="../media/IMG_2691.png" width="400" alt="Witch Launcher screenshot 2"> |
-| <img src="../media/IMG_2692.png" width="400" alt="Witch Launcher screenshot 3"> | <img src="../media/IMG_2693.png" width="400" alt="Witch Launcher screenshot 4"> |
-| <img src="../media/IMG_2694.png" width="400" alt="Witch Launcher screenshot 5"> | <img src="../media/IMG_2695.png" width="400" alt="Witch Launcher screenshot 6"> |
-| <img src="../media/IMG_2696.png" width="400" alt="Witch Launcher screenshot 7"> | <img src="../media/IMG_2697.png" width="400" alt="Witch Launcher screenshot 8"> |
-| <img src="../media/IMG_2698.png" width="400" alt="Witch Launcher screenshot 9"> | <img src="../media/IMG_2699.png" width="400" alt="Witch Launcher screenshot 10"> |
-| <img src="../media/IMG_2700.png" width="400" alt="Witch Launcher screenshot 11"> | <img src="../media/IMG_2701.png" width="400" alt="Witch Launcher screenshot 12"> |
-| <img src="../media/IMG_2702.png" width="400" alt="Witch Launcher screenshot 13"> | <img src="../media/IMG_2703.png" width="400" alt="Witch Launcher screenshot 14"> |
+| <img src="../../media/IMG_2690.png" width="400" alt="Witch Launcher screenshot 1"> | <img src="../../media/IMG_2691.png" width="400" alt="Witch Launcher screenshot 2"> |
+| <img src="../../media/IMG_2692.png" width="400" alt="Witch Launcher screenshot 3"> | <img src="../../media/IMG_2693.png" width="400" alt="Witch Launcher screenshot 4"> |
+| <img src="../../media/IMG_2694.png" width="400" alt="Witch Launcher screenshot 5"> | <img src="../../media/IMG_2695.png" width="400" alt="Witch Launcher screenshot 6"> |
+| <img src="../../media/IMG_2696.png" width="400" alt="Witch Launcher screenshot 7"> | <img src="../../media/IMG_2697.png" width="400" alt="Witch Launcher screenshot 8"> |
+| <img src="../../media/IMG_2698.png" width="400" alt="Witch Launcher screenshot 9"> | <img src="../../media/IMG_2699.png" width="400" alt="Witch Launcher screenshot 10"> |
+| <img src="../../media/IMG_2700.png" width="400" alt="Witch Launcher screenshot 11"> | <img src="../../media/IMG_2701.png" width="400" alt="Witch Launcher screenshot 12"> |
+| <img src="../../media/IMG_2702.png" width="400" alt="Witch Launcher screenshot 13"> | <img src="../../media/IMG_2703.png" width="400" alt="Witch Launcher screenshot 14"> |
 
 ---
 
@@ -164,7 +172,7 @@ TrollStore 构建使用额外的权利，不应使用普通的侧面加载签名
 编译Witch需要macOS与Xcode命令行工具、iOSSDK14.0或更新版本、CMake、JDK8、`ldid`、`wget`、`zip`和Git。
 
 ```bash
-git clone --recursive https://github.com/Witch-Launcher/Witch_launcher.git
+git克隆--递归https://github.com/Witch-Launcher/Witch_launcher.git
 cd Witch_launcher
 make jre-download
 make -j"$(sysctl -n hw.ncpu)" package
@@ -178,7 +186,7 @@ make -j"$(sysctl -n hw.ncpu)" package
 make package TROLLSTORE_JIT_ENT=1
 ```
 
-有关渲染器源链接和构建说明，请参阅 [`note.md`](../note.md)。
+有关渲染器源链接和构建说明，请参阅 [`note.md`](../../note.md)。
 
 ---
 
@@ -189,20 +197,38 @@ Witch Launcher 附带 **52 种语言包**。打开**设置→常规→语言**�
 
 | Code | Language | Code | Language |
 |---|---|---|---|
-| `ar` | [العربية](README.ar.md) | `az` | [azərbaycan](README.az.md) |
-| `bn` | [বাংলা](README.bn.md) | `cs` | [čeština](README.cs.md) |
-| `de` | [Deutsch](README.de.md) | `en` | [English](../README.md) |
-| `es` | [español](README.es.md) | `fa` | [فارسی](README.fa.md) |
-| `fil` | [Filipino](README.fil.md) | `fr` | [français](README.fr.md) |
-| `he` | [עברית](README.he.md) | `hi` | [हिन्दी](README.hi.md) |
+| `af` | [Afrikaans](README.af.md) | `ar` | [العربية](README.ar.md) |
+| `az` | [azərbaycan](README.az.md) | `ba` | [башҡорт теле](README.ba.md) |
+| `bn` | [বাংলা](README.bn.md) | `bn-IN` | [বাংলা (ভারত)](README.bn-IN.md) |
+| `ca` | [català](README.ca.md) | `cs` | [čeština](README.cs.md) |
+| `da` | [dansk](README.da.md) | `de` | [Deutsch](README.de.md) |
+| `el` | [Ελληνικά](README.el.md) | `en` | [English](../../README.md) |
+| `en-GB` | [English (United Kingdom)](README.en-GB.md) | `en-PT` | [Pirate English](README.en-PT.md) |
+| `en-UD` | [English (Upside Down)](README.en-UD.md) | `es` | [español](README.es.md) |
+| `et` | [eesti](README.et.md) | `fa` | [فارسی](README.fa.md) |
+| `fi` | [suomi](README.fi.md) | `fil` | [Filipino](README.fil.md) |
+| `fr` | [français](README.fr.md) | `he` | [עברית](README.he.md) |
+| `hi` | [हिन्दी](README.hi.md) | `hu` | [magyar](README.hu.md) |
 | `id` | [Indonesia](README.id.md) | `it` | [italiano](README.it.md) |
 | `ja` | [日本語](README.ja.md) | `kk` | [қазақ тілі](README.kk.md) |
-| `ko` | [한국어](README.ko.md) | `vi` | [Tiếng Việt](README.vi.md) |
-| `zh-Hans` | [简体中文](README.zh-Hans.md) |
+| `ko` | [한국어](README.ko.md) | `la` | [Latin](README.la.md) |
+| `lol` | [LOLCAT](README.lol.md) | `lt` | [lietuvių](README.lt.md) |
+| `ms` | [Bahasa Melayu](README.ms.md) | `nl` | [Nederlands](README.nl.md) |
+| `no` | [norsk](README.no.md) | `pl` | [polski](README.pl.md) |
+| `pr` | [Pirate](README.pr.md) | `pt` | [português](README.pt.md) |
+| `pt-BR` | [português (Brasil)](README.pt-BR.md) | `ro` | [română](README.ro.md) |
+| `ru` | [русский](README.ru.md) | `sk` | [slovenčina](README.sk.md) |
+| `sr` | [српски](README.sr.md) | `sr-Latn` | [srpski (latinica)](README.sr-Latn.md) |
+| `sv` | [svenska](README.sv.md) | `th` | [ไทย](README.th.md) |
+| `tr` | [Türkçe](README.tr.md) | `tt` | [татар](README.tt.md) |
+| `uk` | [українська](README.uk.md) | `vi` | [Tiếng Việt](README.vi.md) |
+| `zh-Hans` | [简体中文](README.zh-Hans.md) | `zh-Hant` | [繁體中文](README.zh-Hant.md) |
+
+该应用程序附带所有 **52 种语言包**。README 翻译涵盖**所有 52 种语言**，包括英语。
 
 有些翻译是机器辅助的，可能包含尴尬的技术术语。欢迎指正。
 
-英语是本自述文件的源语言。可以从本页顶部的语言选择器和 [`docs/`](../docs/) 目录中获取本地化自述文件。
+英语是本自述文件的源语言。可以从本页顶部的语言选择器和 [`docs/readme/`](./) 目录中获取本地化自述文件。
 
 ---
 
@@ -281,7 +307,7 @@ Witch Launcher 及其上游项目建立在许多贡献者的工作之上，包�
 - **@khanhduytran0** — iOS 端口开发商
 - **@artdeell**
 - **@Mathius-Boulay**
-- **@卓伟**
+- **@zhuowei**
 - **@jkcoxson**
 - **@Diatrus**
 - **@Catsruledogs**
@@ -291,16 +317,16 @@ Witch Launcher 及其上游项目建立在许多贡献者的工作之上，包�
 
 特别感谢[MCHeads](https://mc-heads.net)提供Minecraft头像服务。
 
-完整的第三方组件和许可证列表可在 [`credits.md`](../credits.md) 中找到。
+完整的第三方组件和许可证列表可在 [`credits.md`](../../credits.md) 中找到。
 
 ---
 
 <a id="license"></a>
 ## 许可证
 
-Witch Launcher 根据 **GNU 通用公共许可证 v3.0** 分发，并遵守 [`credits.md`](../credits.md) 中列出的第三方组件的许可证和版权要求。
+Witch Launcher 根据 **GNU 通用公共许可证 v3.0** 分发，并遵守 [`credits.md`](../../credits.md) 中列出的第三方组件的许可证和版权要求。
 
-请参阅 [`LICENSE`](../LICENSE) 了解完整的许可文本。
+请参阅 [`LICENSE`](../../LICENSE) 了解完整的许可文本。
 
 ---
 

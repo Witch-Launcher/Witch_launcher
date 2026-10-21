@@ -10,7 +10,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 SOURCE = ROOT / "README.md"
-DOCS = ROOT / "docs"
+DOCS = ROOT / "docs" / "readme"
 GOOGLE = "https://translate.googleapis.com/translate_a/single"
 LANG_TABLE_HEADER = "| Code | Language | Code | Language |"
 LANG_TABLE_PLACEHOLDER = "ZXQLANGTABLEQXZ"
@@ -71,11 +71,8 @@ LANGUAGES = [
     ("zh-Hant", "繁體中文", "zh-TW"),
 ]
 
-PRIMARY_CODES = [
-    "en", "zh-Hans", "hi", "es", "ar", "bn", "ja", "de",
-    "fr", "id", "ko", "it", "vi", "fa", "fil", "az", "kk", "cs", "he",
-]
-PRIMARY = [entry for entry in LANGUAGES if entry[0] in set(PRIMARY_CODES)]
+PRIMARY_CODES = [code for code, _, _ in LANGUAGES]
+PRIMARY = LANGUAGES
 
 SUMMARY = {
     "af": "Tale",
@@ -232,8 +229,8 @@ def finish(text):
 
 def language_link(code, from_docs):
     if code == "en":
-        return "../README.md" if from_docs else "README.md"
-    return f"README.{code}.md" if from_docs else f"docs/README.{code}.md"
+        return "../../README.md" if from_docs else "README.md"
+    return f"README.{code}.md" if from_docs else f"docs/readme/README.{code}.md"
 
 
 def render_selector(code, from_docs):
@@ -376,7 +373,7 @@ class TokenStore:
         self.values = {}
 
     def add(self, value):
-        token = f"§{self.next_id}§"
+        token = f"ZXQ{self.next_id}QXZ"
         self.next_id += 1
         self.items.append((token, value))
         self.values[token] = value
@@ -384,10 +381,10 @@ class TokenStore:
 
     def repair(self, text):
         def replace(match):
-            token = f"§{match.group(1)}§"
+            token = f"ZXQ{match.group(1)}QXZ"
             return token if token in self.values else match.group(0)
 
-        return re.sub(r"§(\d+)§?", replace, text)
+        return re.sub(r"ZXQ(\d+)(?:QXZ)?", replace, text)
 
     def restore(self, text):
         for token, value in self.items:
@@ -523,7 +520,7 @@ def translate_document(text, target):
 
     translated = {}
     for batch_number, batch in enumerate(batch_units([(i, protected[i]) for i, _ in units])):
-        separator = f"§#{batch_number}#§"
+        separator = f"ZXQBATCH{batch_number}QXZ"
         payload = f"\n{separator}\n".join(line for _, line in batch)
         try:
             output = request_translation(payload, target)
@@ -567,7 +564,7 @@ def translate_document(text, target):
 
     for index in list(translated):
         translated[index] = tokens.restore(translated[index])
-        if "§" in translated[index]:
+        if re.search(r"ZXQ\d+(?:QXZ)?", translated[index]):
             translated[index] = lines[index]
 
     out = lines[:]
@@ -577,11 +574,18 @@ def translate_document(text, target):
 
 
 def rewrite_docs_paths(text):
-    text = text.replace('src="Natives/', 'src="../Natives/')
-    text = text.replace('src="media/', 'src="../media/')
-    text = re.sub(r"\]\((credits|news|note)\.md\)", r"](../\1.md)", text)
-    text = text.replace("](LICENSE)", "](../LICENSE)")
-    text = text.replace("](docs/)", "](../docs/)")
+    text = text.replace('src="Natives/', 'src="../../Natives/')
+    text = text.replace('src="media/', 'src="../../media/')
+    text = re.sub(r"\]\((credits|news|note)\.md\)", r"](../../\1.md)", text)
+    text = text.replace("](LICENSE)", "](../../LICENSE)")
+    text = text.replace("](docs/readme/)", "](./)")
+    text = text.replace("](docs/)", "](../)")
+    text = text.replace('src="../Natives/', 'src="../../Natives/')
+    text = text.replace('src="../media/', 'src="../../media/')
+    text = re.sub(r"\]\(\.\./(credits|news|note)\.md\)", r"](../../\1.md)", text)
+    text = text.replace("](../LICENSE)", "](../../LICENSE)")
+    text = text.replace("[`docs/`](../docs/)", "[`docs/readme/`](./)")
+    text = text.replace("](../docs/)", "](./)")
     return text
 
 
@@ -618,7 +622,7 @@ def main():
             raise SystemExit("unknown locale(s): " + ", ".join(missing))
     source_text = render_main()
     codes = requested or [code for code, _, _ in PRIMARY if code != "en"]
-    DOCS.mkdir(exist_ok=True)
+    DOCS.mkdir(parents=True, exist_ok=True)
     for code in codes:
         if code == "en":
             continue

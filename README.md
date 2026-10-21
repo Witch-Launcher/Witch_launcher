@@ -22,11 +22,19 @@
 <details>
 <summary><strong>Languages</strong></summary>
 
-[العربية](docs/README.ar.md) · [azərbaycan](docs/README.az.md) · [বাংলা](docs/README.bn.md) · [čeština](docs/README.cs.md)<br>
-[Deutsch](docs/README.de.md) · [English](README.md) · [español](docs/README.es.md) · [فارسی](docs/README.fa.md)<br>
-[Filipino](docs/README.fil.md) · [français](docs/README.fr.md) · [עברית](docs/README.he.md) · [हिन्दी](docs/README.hi.md)<br>
-[Indonesia](docs/README.id.md) · [italiano](docs/README.it.md) · [日本語](docs/README.ja.md) · [қазақ тілі](docs/README.kk.md)<br>
-[한국어](docs/README.ko.md) · [Tiếng Việt](docs/README.vi.md) · [简体中文](docs/README.zh-Hans.md)
+[Afrikaans](docs/readme/README.af.md) · [العربية](docs/readme/README.ar.md) · [azərbaycan](docs/readme/README.az.md) · [башҡорт теле](docs/readme/README.ba.md)<br>
+[বাংলা](docs/readme/README.bn.md) · [বাংলা (ভারত)](docs/readme/README.bn-IN.md) · [català](docs/readme/README.ca.md) · [čeština](docs/readme/README.cs.md)<br>
+[dansk](docs/readme/README.da.md) · [Deutsch](docs/readme/README.de.md) · [Ελληνικά](docs/readme/README.el.md) · [English](README.md)<br>
+[English (United Kingdom)](docs/readme/README.en-GB.md) · [Pirate English](docs/readme/README.en-PT.md) · [English (Upside Down)](docs/readme/README.en-UD.md) · [español](docs/readme/README.es.md)<br>
+[eesti](docs/readme/README.et.md) · [فارسی](docs/readme/README.fa.md) · [suomi](docs/readme/README.fi.md) · [Filipino](docs/readme/README.fil.md)<br>
+[français](docs/readme/README.fr.md) · [עברית](docs/readme/README.he.md) · [हिन्दी](docs/readme/README.hi.md) · [magyar](docs/readme/README.hu.md)<br>
+[Indonesia](docs/readme/README.id.md) · [italiano](docs/readme/README.it.md) · [日本語](docs/readme/README.ja.md) · [қазақ тілі](docs/readme/README.kk.md)<br>
+[한국어](docs/readme/README.ko.md) · [Latin](docs/readme/README.la.md) · [LOLCAT](docs/readme/README.lol.md) · [lietuvių](docs/readme/README.lt.md)<br>
+[Bahasa Melayu](docs/readme/README.ms.md) · [Nederlands](docs/readme/README.nl.md) · [norsk](docs/readme/README.no.md) · [polski](docs/readme/README.pl.md)<br>
+[Pirate](docs/readme/README.pr.md) · [português](docs/readme/README.pt.md) · [português (Brasil)](docs/readme/README.pt-BR.md) · [română](docs/readme/README.ro.md)<br>
+[русский](docs/readme/README.ru.md) · [slovenčina](docs/readme/README.sk.md) · [српски](docs/readme/README.sr.md) · [srpski (latinica)](docs/readme/README.sr-Latn.md)<br>
+[svenska](docs/readme/README.sv.md) · [ไทย](docs/readme/README.th.md) · [Türkçe](docs/readme/README.tr.md) · [татар](docs/readme/README.tt.md)<br>
+[українська](docs/readme/README.uk.md) · [Tiếng Việt](docs/readme/README.vi.md) · [简体中文](docs/readme/README.zh-Hans.md) · [繁體中文](docs/readme/README.zh-Hant.md)
 
 </details>
 
@@ -189,22 +197,38 @@ Witch Launcher ships with **52 language packs**. Open **Settings → General →
 
 | Code | Language | Code | Language |
 |---|---|---|---|
-| `ar` | [العربية](docs/README.ar.md) | `az` | [azərbaycan](docs/README.az.md) |
-| `bn` | [বাংলা](docs/README.bn.md) | `cs` | [čeština](docs/README.cs.md) |
-| `de` | [Deutsch](docs/README.de.md) | `en` | [English](README.md) |
-| `es` | [español](docs/README.es.md) | `fa` | [فارسی](docs/README.fa.md) |
-| `fil` | [Filipino](docs/README.fil.md) | `fr` | [français](docs/README.fr.md) |
-| `he` | [עברית](docs/README.he.md) | `hi` | [हिन्दी](docs/README.hi.md) |
-| `id` | [Indonesia](docs/README.id.md) | `it` | [italiano](docs/README.it.md) |
-| `ja` | [日本語](docs/README.ja.md) | `kk` | [қазақ тілі](docs/README.kk.md) |
-| `ko` | [한국어](docs/README.ko.md) | `vi` | [Tiếng Việt](docs/README.vi.md) |
-| `zh-Hans` | [简体中文](docs/README.zh-Hans.md) |
+| `af` | [Afrikaans](docs/readme/README.af.md) | `ar` | [العربية](docs/readme/README.ar.md) |
+| `az` | [azərbaycan](docs/readme/README.az.md) | `ba` | [башҡорт теле](docs/readme/README.ba.md) |
+| `bn` | [বাংলা](docs/readme/README.bn.md) | `bn-IN` | [বাংলা (ভারত)](docs/readme/README.bn-IN.md) |
+| `ca` | [català](docs/readme/README.ca.md) | `cs` | [čeština](docs/readme/README.cs.md) |
+| `da` | [dansk](docs/readme/README.da.md) | `de` | [Deutsch](docs/readme/README.de.md) |
+| `el` | [Ελληνικά](docs/readme/README.el.md) | `en` | [English](README.md) |
+| `en-GB` | [English (United Kingdom)](docs/readme/README.en-GB.md) | `en-PT` | [Pirate English](docs/readme/README.en-PT.md) |
+| `en-UD` | [English (Upside Down)](docs/readme/README.en-UD.md) | `es` | [español](docs/readme/README.es.md) |
+| `et` | [eesti](docs/readme/README.et.md) | `fa` | [فارسی](docs/readme/README.fa.md) |
+| `fi` | [suomi](docs/readme/README.fi.md) | `fil` | [Filipino](docs/readme/README.fil.md) |
+| `fr` | [français](docs/readme/README.fr.md) | `he` | [עברית](docs/readme/README.he.md) |
+| `hi` | [हिन्दी](docs/readme/README.hi.md) | `hu` | [magyar](docs/readme/README.hu.md) |
+| `id` | [Indonesia](docs/readme/README.id.md) | `it` | [italiano](docs/readme/README.it.md) |
+| `ja` | [日本語](docs/readme/README.ja.md) | `kk` | [қазақ тілі](docs/readme/README.kk.md) |
+| `ko` | [한국어](docs/readme/README.ko.md) | `la` | [Latin](docs/readme/README.la.md) |
+| `lol` | [LOLCAT](docs/readme/README.lol.md) | `lt` | [lietuvių](docs/readme/README.lt.md) |
+| `ms` | [Bahasa Melayu](docs/readme/README.ms.md) | `nl` | [Nederlands](docs/readme/README.nl.md) |
+| `no` | [norsk](docs/readme/README.no.md) | `pl` | [polski](docs/readme/README.pl.md) |
+| `pr` | [Pirate](docs/readme/README.pr.md) | `pt` | [português](docs/readme/README.pt.md) |
+| `pt-BR` | [português (Brasil)](docs/readme/README.pt-BR.md) | `ro` | [română](docs/readme/README.ro.md) |
+| `ru` | [русский](docs/readme/README.ru.md) | `sk` | [slovenčina](docs/readme/README.sk.md) |
+| `sr` | [српски](docs/readme/README.sr.md) | `sr-Latn` | [srpski (latinica)](docs/readme/README.sr-Latn.md) |
+| `sv` | [svenska](docs/readme/README.sv.md) | `th` | [ไทย](docs/readme/README.th.md) |
+| `tr` | [Türkçe](docs/readme/README.tr.md) | `tt` | [татар](docs/readme/README.tt.md) |
+| `uk` | [українська](docs/readme/README.uk.md) | `vi` | [Tiếng Việt](docs/readme/README.vi.md) |
+| `zh-Hans` | [简体中文](docs/readme/README.zh-Hans.md) | `zh-Hant` | [繁體中文](docs/readme/README.zh-Hant.md) |
 
-The app still ships all **52 language packs**. README translations are currently available in **19 languages**, including English. More localizations will be added in a later update.
+The app ships all **52 language packs**. README translations are available for **all 52 languages**, including English.
 
 Some translations are machine-assisted and may contain awkward technical terms. Corrections are welcome.
 
-English is the source language for this README. Localized READMEs are available from the language selector at the top of this page and in the [`docs/`](docs/) directory.
+English is the source language for this README. Localized READMEs are available from the language selector at the top of this page and in the [`docs/readme/`](docs/readme/) directory.
 
 ---
 
