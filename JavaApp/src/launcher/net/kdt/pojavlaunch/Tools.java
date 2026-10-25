@@ -332,16 +332,37 @@ public final class Tools {
     // the actual frame rate, so taps place blocks and only deliberate long
     // holds break. Only written when absent: in-game TouchController settings
     // take precedence and are never overwritten.
+    private static final float TOUCH_CONTROLLER_VIEW_SENSITIVITY = 800.0f;
+
     private static void seedTouchControllerConfig(File gameDir) {
         try {
             File cfgDir = new File(gameDir, "config/touchcontroller");
             File cfgFile = new File(cfgDir, "config.json");
             if (cfgFile.exists()) {
+                JsonObject root = JsonParser.parseString(
+                    Tools.read(cfgFile.getAbsolutePath())).getAsJsonObject();
+                JsonObject control;
+                if (root.has("control") && root.get("control").isJsonObject()) {
+                    control = root.getAsJsonObject("control");
+                } else {
+                    control = new JsonObject();
+                    root.add("control", control);
+                }
+                boolean missingSensitivity = !control.has("viewMovementSensitivity");
+                boolean defaultSensitivity = !missingSensitivity
+                    && control.get("viewMovementSensitivity").isJsonPrimitive()
+                    && control.get("viewMovementSensitivity").getAsFloat() == 495.0f;
+                if (missingSensitivity || defaultSensitivity) {
+                    control.addProperty("viewMovementSensitivity", TOUCH_CONTROLLER_VIEW_SENSITIVITY);
+                    Tools.write(cfgFile.getAbsolutePath(), Tools.GLOBAL_GSON.toJson(root));
+                    System.out.println("Raised TouchController view sensitivity: " + cfgFile.getAbsolutePath());
+                }
                 return;
             }
             cfgDir.mkdirs();
             String json = "{\n"
                 + "  \"control\": {\n"
+                + "    \"viewMovementSensitivity\": 800,\n"
                 + "    \"viewHoldDetectTicks\": 8,\n"
                 + "    \"creativeBreakDetectTicks\": 10\n"
                 + "  }\n"

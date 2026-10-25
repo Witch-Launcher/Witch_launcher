@@ -971,7 +971,7 @@ static GameSurfaceView* pojavWindow;
             CGFloat screenScale = self.screenScale;
             int slot = self.enableHotbarGestures ?
             callback_SurfaceViewController_touchHotbar(hotbarPoint.x * screenScale, hotbarPoint.y * screenScale) : -1;
-            if (slot != -1 && currentHotbarSlot != slot && (event == ACTION_DOWN || currentHotbarSlot != -1)) {
+            if (slot != -1 && (event == ACTION_DOWN || currentHotbarSlot != slot)) {
                 currentHotbarSlot = slot;
                 CallbackBridge_nativeSendKey(slot, 0, 1, 0);
                 CallbackBridge_nativeSendKey(slot, 0, 0, 0);

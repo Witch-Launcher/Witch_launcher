@@ -17,6 +17,7 @@
 #include <dlfcn.h>
 #include <libgen.h>
 #include <mach/mach.h>
+#include <math.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <stdatomic.h>
@@ -543,15 +544,22 @@ int callback_SurfaceViewController_touchHotbar(CGFloat x, CGFloat y) {
         return -1;
     }
 
+    if (guiScale <= 0 || resolutionScale <= 0.0f) return -1;
     int barHeight = mcscale(22);
-    int barY = physicalHeight - barHeight;
-    if (y < barY) return -1;
-
     int barWidth = mcscale(182);
-    int barX = (physicalWidth / 2) - (barWidth / 2);
+    int framebufferWidth = windowWidth > 0 ? windowWidth : (int)lroundf(physicalWidth * resolutionScale);
+    int framebufferHeight = windowHeight > 0 ? windowHeight : (int)lroundf(physicalHeight * resolutionScale);
+    int guiWidth = framebufferWidth / guiScale;
+    int guiHeight = framebufferHeight / guiScale;
+    int barX = (int)lroundf((guiWidth / 2 - 91) * (CGFloat)guiScale / resolutionScale);
+    int barY = (int)lroundf((guiHeight - 22) * (CGFloat)guiScale / resolutionScale);
+    if (y < barY) return -1;
     if (x < barX || x >= barX + barWidth) return -1;
 
-    int slot = hotbarKeys[(int) MathUtils_map(x, barX, barX + barWidth, 0, 9)];
+    int index = (int) ((x - barX - mcscale(1)) / (CGFloat) mcscale(20));
+    if (index < 0) index = 0;
+    if (index > 8) index = 8;
+    int slot = hotbarKeys[index];
     NSLog(@"[Hotbar] touch=(%.1f,%.1f) phys=%dx%d gui=%d res=%.2f bar=(%d,%d %dx%d) slot=%d",
           x, y, physicalWidth, physicalHeight, guiScale, resolutionScale,
           barX, barY, barWidth, barHeight, slot);
@@ -567,12 +575,17 @@ JNIEXPORT jstring JNICALL Java_org_lwjgl_glfw_CallbackBridge_nativeClipboard(JNI
     return UIKit_accessClipboard(env, action, copySrc);
 }
 
+static void aasdl_syncMousePositionSoon(void);
+
 JNIEXPORT void JNICALL Java_org_lwjgl_glfw_CallbackBridge_nativeSetGrabbing(JNIEnv* env, jclass clazz, jboolean grabbing, jfloat xset, jfloat yset) {
     isGrabbing = grabbing;
 
     dispatch_async(dispatch_get_main_queue(), ^{
         SurfaceViewController *vc = ((SurfaceViewController *)UIWindow.mainWindow.rootViewController);
         [vc updateGrabState];
+        if (!grabbing) {
+            aasdl_syncMousePositionSoon();
+        }
     });
 }
 
@@ -874,6 +887,8 @@ void AASDL_NoteWindow(uint32_t windowID, int w, int h) {
     aasdl_winH = h;
     if (isUp && !wasUp) {
         NSLog(@"[SDLInject] SDL window up: id=%u %dx%d", windowID, w, h);
+        cursorX = windowWidth > 0 ? windowWidth / 2.0 : w / 2.0;
+        cursorY = windowHeight > 0 ? windowHeight / 2.0 : h / 2.0;
     } else if (!isUp && wasUp) {
         NSLog(@"[SDLInject] SDL window gone");
     } else if (isUp) {
@@ -883,6 +898,9 @@ void AASDL_NoteWindow(uint32_t windowID, int w, int h) {
     NSLog(@"[SDLInject] SDL window metrics: sdl=%dx%d physical=%dx%d window=%dx%d guiScale=%d res=%.2f",
           aasdl_winW, aasdl_winH, physicalWidth, physicalHeight, windowWidth, windowHeight,
           guiScale, resolutionScale);
+    if (isUp) {
+        aasdl_syncMousePositionSoon();
+    }
 }
 
 /*
@@ -979,6 +997,27 @@ static void aasdl_pushMouseMotion(float x, float y, float xrel, float yrel, uint
     }
     m->xrel = xrel; m->yrel = yrel;
     aasdl_PushEvent(&ev);
+}
+
+static void aasdl_syncMousePosition(void) {
+    if (!aasdl_available() || aasdl_windowID() == 0 || isGrabbing) return;
+    float mx, my;
+    if ((cursorX == 0.0 && cursorY == 0.0) || !aasdl_coords(cursorX, cursorY, &mx, &my)) {
+        mx = (float) aasdl_winW * 0.5f;
+        my = (float) aasdl_winH * 0.5f;
+        if (mx < 1.0f || my < 1.0f) return;
+    }
+    aasdl_pushMouseMotion(mx, my, 0.0f, 0.0f, aasdl_buttons);
+}
+
+static void aasdl_syncMousePositionSoon(void) {
+    aasdl_syncMousePosition();
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 120 * NSEC_PER_MSEC), dispatch_get_main_queue(), ^{
+        aasdl_syncMousePosition();
+    });
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 350 * NSEC_PER_MSEC), dispatch_get_main_queue(), ^{
+        aasdl_syncMousePosition();
+    });
 }
 
 static void aasdl_pushMouseButton(int button, bool down, float x, float y) {
