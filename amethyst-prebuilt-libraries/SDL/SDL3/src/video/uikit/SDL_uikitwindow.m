@@ -310,8 +310,11 @@ void UIKit_ShowWindow(SDL_VideoDevice *_this, SDL_Window *window)
                 data.viewcontroller.view.hidden = NO;
             }
 
-            /* Local bridge: only the visible game window is live input. */
-            if (!(window->flags & SDL_WINDOW_HIDDEN)) {
+            /* Local bridge: only the real game window is live input.
+             * SDL_ShowWindow() calls the driver before it clears
+             * SDL_WINDOW_HIDDEN, so checking HIDDEN here would also skip the
+             * real window. RenderPearl's helpers are UTILITY/NOT_FOCUSABLE. */
+            if (!(window->flags & (SDL_WINDOW_UTILITY | SDL_WINDOW_NOT_FOCUSABLE))) {
                 UIKit_NoteWindow(window, window->w, window->h);
 
                 // Make this window the current mouse focus for touch input
