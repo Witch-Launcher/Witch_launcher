@@ -169,13 +169,22 @@ bool UIKit_CreateWindow(SDL_VideoDevice *_this, SDL_Window *window, SDL_Properti
             SDL_UIKitDisplayData *data = (__bridge SDL_UIKitDisplayData *)display->internal;
             SDL_Window *other;
 
+            // SDL_CreateWindowWithProperties temporarily marks every new
+            // window as hidden until SDL_FinishWindowCreation(), so
+            // window->flags cannot tell whether the caller requested a hidden
+            // window. Read the creation properties instead.
+            const SDL_WindowFlags requestedFlags =
+                (SDL_WindowFlags)SDL_GetNumberProperty(create_props, SDL_PROP_WINDOW_CREATE_FLAGS_NUMBER, 0);
+            const bool requestedHidden = (requestedFlags & SDL_WINDOW_HIDDEN) ||
+                SDL_GetBooleanProperty(create_props, SDL_PROP_WINDOW_CREATE_HIDDEN_BOOLEAN, false);
+
             // UIKit only shows one interactive window per display, but
             // RenderPearl creates hidden utility/test windows before the real
             // game window. Allow any number of hidden windows and at most one
             // visible window per display.
             for (other = _this->windows; other; other = other->next) {
                 if (other != window && SDL_GetVideoDisplayForWindow(other) == display &&
-                    !(window->flags & SDL_WINDOW_HIDDEN) &&
+                    !requestedHidden &&
                     !(other->flags & SDL_WINDOW_HIDDEN)) {
                     ret = SDL_SetError("Only one visible window allowed per display.");
                     return;
@@ -220,7 +229,7 @@ bool UIKit_CreateWindow(SDL_VideoDevice *_this, SDL_Window *window, SDL_Properti
              * the game renders inside the launcher's view hierarchy. */
             UIView *hostView = UIKit_GetHostView();
             if (data.uiscreen == [UIScreen mainScreen] &&
-                !(window->flags & SDL_WINDOW_HIDDEN) &&
+                !(window->flags & (SDL_WINDOW_UTILITY | SDL_WINDOW_NOT_FOCUSABLE)) &&
                 hostView != nil && hostView.window != nil) {
                 uiwindow = hostView.window;
                 hostWindow = YES;
@@ -248,6 +257,9 @@ bool UIKit_CreateWindow(SDL_VideoDevice *_this, SDL_Window *window, SDL_Properti
                 [uiwindow setScreen:data.uiscreen];
             }
     #endif
+
+            NSLog(@"[SDL] window '%s' id=%u host=%d flags=0x%x", window->title ?: "",
+                  (unsigned)window->id, hostWindow, (unsigned)window->flags);
 
             if (!SetupWindowData(_this, window, uiwindow, true, hostWindow)) {
                 return;
