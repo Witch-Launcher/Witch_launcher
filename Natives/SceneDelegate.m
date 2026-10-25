@@ -219,7 +219,8 @@ static NSString *const kMinecraftGPUBackgroundTaskPrefix = @"com.witch.zad626.mi
                     [wait dismissViewControllerAnimated:YES completion:^{
                         WitchAIChatViewController *vc = [[WitchAIChatViewController alloc] initWithAnalysis:analysis exitCode:1];
                         UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:vc];
-                        nav.modalPresentationStyle = UIModalPresentationFormSheet;
+                        nav.modalPresentationStyle = UIDevice.currentDevice.userInterfaceIdiom == UIUserInterfaceIdiomPad
+                            ? UIModalPresentationFormSheet : UIModalPresentationFullScreen;
                         [self.window.rootViewController presentViewController:nav animated:YES completion:nil];
                     }];
                 });

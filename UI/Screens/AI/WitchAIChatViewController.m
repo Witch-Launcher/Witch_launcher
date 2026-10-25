@@ -19,6 +19,7 @@
 @property (nonatomic, strong) UITableView *tableView;
 @property (nonatomic, strong) UITextView *inputView;
 @property (nonatomic, strong) UIView *inputContainer;
+@property (nonatomic, strong) NSLayoutConstraint *inputBottomConstraint;
 @property (nonatomic, strong) UIStackView *buttonStack;
 @property (nonatomic, strong) CustomButton *sendButton;
 @property (nonatomic, strong) CustomButton *sendLogButton;
@@ -56,10 +57,15 @@
 
 - (void)viewDidLoad {
     [super viewDidLoad];
-    self.title = localize(@"AI Chat", nil);
+    self.title = localize(@"crash.screen.ai_chat", nil);
     self.view.backgroundColor = ThemeManager.shared.backgroundColor;
     [self setupViews];
     [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(updateColors) name:ThemeDidChangeNotification object:nil];
+    [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(keyboardWillChangeFrame:) name:UIKeyboardWillChangeFrameNotification object:nil];
+    [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(keyboardWillHide:) name:UIKeyboardWillHideNotification object:nil];
+    self.navigationItem.rightBarButtonItem = [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemClose
+                                                                                          target:self
+                                                                                          action:@selector(actionClose)];
     [self updateColors];
     // If opened from crash, auto add a system message with log context
     if (_analysis) {
@@ -80,6 +86,7 @@
     _tableView.backgroundColor = [UIColor clearColor];
     _tableView.estimatedRowHeight = 60;
     _tableView.rowHeight = UITableViewAutomaticDimension;
+    _tableView.keyboardDismissMode = UIScrollViewKeyboardDismissModeInteractive;
     [self.view addSubview:_tableView];
 
     _inputContainer = [[UIView alloc] init];
@@ -154,7 +161,7 @@
 
         [inputContainer.leadingAnchor constraintEqualToAnchor:safe.leadingAnchor constant:8],
         [inputContainer.trailingAnchor constraintEqualToAnchor:safe.trailingAnchor constant:-8],
-        [inputContainer.bottomAnchor constraintEqualToAnchor:safe.bottomAnchor constant:-8],
+        _inputBottomConstraint = [inputContainer.bottomAnchor constraintEqualToAnchor:safe.bottomAnchor constant:-8],
         [inputContainer.heightAnchor constraintGreaterThanOrEqualToConstant:90],
 
         [_inputView.topAnchor constraintEqualToAnchor:inputContainer.topAnchor constant:8],
@@ -235,11 +242,55 @@
 }
 
 - (void)updateColors {
-    self.view.backgroundColor = ThemeManager.shared.backgroundColor;
+    ThemeManager *theme = ThemeManager.shared;
+    self.view.backgroundColor = theme.backgroundColor;
     _tableView.backgroundColor = [UIColor clearColor];
-    _inputView.textColor = ThemeManager.shared.primaryTextColor;
-    _inputContainer.backgroundColor = ThemeManager.shared.cardBackgroundColor;
+    _inputView.textColor = theme.primaryTextColor;
+    _inputContainer.backgroundColor = theme.cardBackgroundColor;
+    _inputContainer.layer.borderWidth = 1;
+    _inputContainer.layer.borderColor = [theme.separatorColor colorWithAlphaComponent:0.55].CGColor;
+    self.navigationController.navigationBar.tintColor = theme.accentColor;
+    UINavigationBarAppearance *appearance = [[UINavigationBarAppearance alloc] init];
+    [appearance configureWithOpaqueBackground];
+    appearance.backgroundColor = theme.topBarBackgroundColor;
+    appearance.titleTextAttributes = @{NSForegroundColorAttributeName: theme.primaryTextColor};
+    self.navigationController.navigationBar.standardAppearance = appearance;
+    self.navigationController.navigationBar.scrollEdgeAppearance = appearance;
     [_tableView reloadData];
+}
+
+- (void)viewWillAppear:(BOOL)animated {
+    [super viewWillAppear:animated];
+    [self updateColors];
+}
+
+- (void)actionClose {
+    if (self.navigationController.presentingViewController) {
+        [self.navigationController dismissViewControllerAnimated:YES completion:nil];
+    } else {
+        [self dismissViewControllerAnimated:YES completion:nil];
+    }
+}
+
+- (void)keyboardWillChangeFrame:(NSNotification *)note {
+    CGRect frame = [note.userInfo[UIKeyboardFrameEndUserInfoKey] CGRectValue];
+    CGRect inView = [self.view convertRect:frame fromView:nil];
+    CGFloat overlap = MAX(0, CGRectGetHeight(self.view.bounds) - CGRectGetMinY(inView) - self.view.safeAreaInsets.bottom);
+    _inputBottomConstraint.constant = -(8 + overlap);
+    NSTimeInterval duration = [note.userInfo[UIKeyboardAnimationDurationUserInfoKey] doubleValue];
+    UIViewAnimationCurve curve = [note.userInfo[UIKeyboardAnimationCurveUserInfoKey] integerValue];
+    [UIView animateWithDuration:duration delay:0 options:(curve << 16) animations:^{
+        [self.view layoutIfNeeded];
+    } completion:nil];
+}
+
+- (void)keyboardWillHide:(NSNotification *)note {
+    _inputBottomConstraint.constant = -8;
+    NSTimeInterval duration = [note.userInfo[UIKeyboardAnimationDurationUserInfoKey] doubleValue];
+    UIViewAnimationCurve curve = [note.userInfo[UIKeyboardAnimationCurveUserInfoKey] integerValue];
+    [UIView animateWithDuration:duration delay:0 options:(curve << 16) animations:^{
+        [self.view layoutIfNeeded];
+    } completion:nil];
 }
 
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section { return _messages.count; }
