@@ -153,5 +153,6 @@ public class PatchJNAAgent implements ClassFileTransformer {
         instrumentation.addTransformer(new PatchJNAAgent());
         instrumentation.addTransformer(new MetalCompatTransformer());
         instrumentation.addTransformer(new Vulkan14Transformer());
+        instrumentation.addTransformer(new ShadercSyncTransformer());
     }
 }
