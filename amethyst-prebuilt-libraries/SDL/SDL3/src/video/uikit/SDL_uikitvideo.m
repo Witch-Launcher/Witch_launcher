@@ -152,7 +152,7 @@ VideoBootStrap UIKIT_bootstrap = {
 
 static bool UIKit_VideoInit(SDL_VideoDevice *_this)
 {
-    _this->gl_config.driver_loaded = 1;
+    _this->gl_config.driver_loaded = 0;
 
     if (!UIKit_InitModes(_this)) {
         return false;

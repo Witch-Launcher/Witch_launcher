@@ -17,9 +17,12 @@ import java.nio.charset.Charset;
  * The constant pool is extended by six entries, branch offsets, switch tables,
  * exception table ranges and existing StackMapTable offset deltas are all
  * recomputed (the insertion is stack neutral, so the declared frames stay
- * valid; only their bytecode offsets shift). The class version is untouched.
- * Any unexpected structure aborts the patch and returns null, leaving the
- * class exactly as it was.
+ * valid; only their bytecode offsets shift). Local variable tables, local
+ * variable type tables and line number tables are remapped as well, because
+ * the HotSpot verifier rejects a local variable range that starts or ends in
+ * the middle of an instruction. The class version is untouched. Any
+ * unexpected structure aborts the patch and returns null, leaving the class
+ * exactly as it was.
  */
 public final class ClassPatcher {
 
@@ -274,19 +277,22 @@ public final class ClassPatcher {
         writeU2(out, code.attrs.length);
         for (Attr attr : code.attrs) {
             String name = (attr.nameIndex > 0 && attr.nameIndex < cp.count) ? cp.utf8[attr.nameIndex] : null;
+            byte[] remapped;
             if ("StackMapTable".equals(name)) {
-                byte[] remapped = remapStackMap(attr.data, areturns, newCode.length);
-                if (remapped == null) {
-                    return null;
-                }
-                writeU2(out, attr.nameIndex);
-                writeU4(out, remapped.length);
-                out.write(remapped);
+                remapped = remapStackMap(attr.data, areturns, newCode.length);
+            } else if ("LocalVariableTable".equals(name) || "LocalVariableTypeTable".equals(name)) {
+                remapped = remapLocalVariables(attr.data, areturns, code.code.length);
+            } else if ("LineNumberTable".equals(name)) {
+                remapped = remapLineNumbers(attr.data, areturns, code.code.length);
             } else {
-                writeU2(out, attr.nameIndex);
-                writeU4(out, attr.data.length);
-                out.write(attr.data);
+                return null;
             }
+            if (remapped == null) {
+                return null;
+            }
+            writeU2(out, attr.nameIndex);
+            writeU4(out, remapped.length);
+            out.write(remapped);
         }
         return out.toByteArray();
     }
@@ -296,13 +302,70 @@ public final class ClassPatcher {
         int hi = areturns.length;
         while (lo < hi) {
             int mid = (lo + hi) >>> 1;
-            if (areturns[mid] <= oldPos) {
+            if (areturns[mid] < oldPos) {
                 lo = mid + 1;
             } else {
                 hi = mid;
             }
         }
         return oldPos + 4 * lo;
+    }
+
+    private static byte[] remapLocalVariables(byte[] data, int[] areturns, int oldCodeLength) {
+        try {
+            Reader r = new Reader(data);
+            int count = r.u2();
+            ByteArrayOutputStream out = new ByteArrayOutputStream(data.length);
+            writeU2(out, count);
+            for (int i = 0; i < count; i++) {
+                int start = r.u2();
+                int length = r.u2();
+                int end = start + length;
+                if (start >= oldCodeLength || end > oldCodeLength) {
+                    return null;
+                }
+                int newStart = newPos(start, areturns);
+                int newEnd = newPos(end, areturns);
+                int newLength = newEnd - newStart;
+                if (newStart > 65535 || newLength < 0 || newLength > 65535) {
+                    return null;
+                }
+                writeU2(out, newStart);
+                writeU2(out, newLength);
+                out.write(data, r.pos, 6);
+                r.skip(6);
+            }
+            if (r.pos != data.length) {
+                return null;
+            }
+            return out.toByteArray();
+        } catch (Throwable t) {
+            return null;
+        }
+    }
+
+    private static byte[] remapLineNumbers(byte[] data, int[] areturns, int oldCodeLength) {
+        try {
+            Reader r = new Reader(data);
+            int count = r.u2();
+            ByteArrayOutputStream out = new ByteArrayOutputStream(data.length);
+            writeU2(out, count);
+            for (int i = 0; i < count; i++) {
+                int start = r.u2();
+                if (start >= oldCodeLength) {
+                    return null;
+                }
+                writeU2(out, newPos(start, areturns));
+                out.write(data, r.pos, 2);
+                r.skip(2);
+            }
+            if (r.pos != data.length) {
+                return null;
+            }
+            return out.toByteArray();
+        } catch (Throwable t) {
+            return null;
+        }
     }
 
     /* ---------------------------------------------------------------- */
@@ -484,13 +547,33 @@ public final class ClassPatcher {
                         }
                         if (i == expected.targetMethodIndex) {
                             sawCall |= containsCall(code.code, expected.targetMethodRef);
-                        }
-                        for (Attr attr : code.attrs) {
-                            String attrName = (attr.nameIndex > 0 && attr.nameIndex < cp.count)
-                                    ? cp.utf8[attr.nameIndex] : null;
-                            if ("StackMapTable".equals(attrName) && !checkStackMap(attr.data, code.code)) {
-                                System.out.println("[WitchF3] validate: method " + i + " stack map bad");
+                            if (!checkExceptionTable(code)) {
+                                System.out.println("[WitchF3] validate: method " + i + " exception table bad");
                                 return false;
+                            }
+                            for (Attr attr : code.attrs) {
+                                String attrName = (attr.nameIndex > 0 && attr.nameIndex < cp.count)
+                                        ? cp.utf8[attr.nameIndex] : null;
+                                if ("StackMapTable".equals(attrName)) {
+                                    if (!checkStackMap(attr.data, code.code)) {
+                                        System.out.println("[WitchF3] validate: method " + i + " stack map bad");
+                                        return false;
+                                    }
+                                } else if ("LocalVariableTable".equals(attrName)
+                                        || "LocalVariableTypeTable".equals(attrName)) {
+                                    if (!checkLocalVariables(attr.data, code.code)) {
+                                        System.out.println("[WitchF3] validate: method " + i + " local variables bad");
+                                        return false;
+                                    }
+                                } else if ("LineNumberTable".equals(attrName)) {
+                                    if (!checkLineNumbers(attr.data, code.code)) {
+                                        System.out.println("[WitchF3] validate: method " + i + " line numbers bad");
+                                        return false;
+                                    }
+                                } else {
+                                    System.out.println("[WitchF3] validate: method " + i + " unexpected code attribute " + attrName);
+                                    return false;
+                                }
                             }
                         }
                     } else {
@@ -546,6 +629,85 @@ public final class ClassPatcher {
                     return false;
                 }
                 prevAbs = abs;
+            }
+            return r.pos == data.length;
+        } catch (Throwable t) {
+            return false;
+        }
+    }
+
+    private static boolean checkExceptionTable(CodeAttr code) {
+        try {
+            int[] positions = Walk.positions(code.code);
+            boolean[] starts = new boolean[code.code.length];
+            for (int pos : positions) {
+                starts[pos] = true;
+            }
+            for (int i = 0; i < code.excStart.length; i++) {
+                int start = code.excStart[i];
+                int end = code.excEnd[i];
+                int handler = code.excHandler[i];
+                if (start < 0 || start >= code.code.length || !starts[start]) {
+                    return false;
+                }
+                if (end < 0 || end > code.code.length || (end != code.code.length && !starts[end])) {
+                    return false;
+                }
+                if (handler < 0 || handler >= code.code.length || !starts[handler]) {
+                    return false;
+                }
+                if (start >= end) {
+                    return false;
+                }
+            }
+            return true;
+        } catch (Throwable t) {
+            return false;
+        }
+    }
+
+    private static boolean checkLocalVariables(byte[] data, byte[] code) {
+        try {
+            int[] positions = Walk.positions(code);
+            boolean[] starts = new boolean[code.length];
+            for (int pos : positions) {
+                starts[pos] = true;
+            }
+            Reader r = new Reader(data);
+            int count = r.u2();
+            for (int i = 0; i < count; i++) {
+                int start = r.u2();
+                int length = r.u2();
+                r.skip(6);
+                if (start < 0 || start >= code.length || !starts[start]) {
+                    return false;
+                }
+                if (length != 0) {
+                    int end = start + length;
+                    if (end < 0 || end > code.length) {
+                        return false;
+                    }
+                    if (end != code.length && !starts[end]) {
+                        return false;
+                    }
+                }
+            }
+            return r.pos == data.length;
+        } catch (Throwable t) {
+            return false;
+        }
+    }
+
+    private static boolean checkLineNumbers(byte[] data, byte[] code) {
+        try {
+            Reader r = new Reader(data);
+            int count = r.u2();
+            for (int i = 0; i < count; i++) {
+                int start = r.u2();
+                r.skip(2);
+                if (start < 0 || start >= code.length) {
+                    return false;
+                }
             }
             return r.pos == data.length;
         } catch (Throwable t) {

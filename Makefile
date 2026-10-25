@@ -440,6 +440,7 @@ dep_mobilegl:
 		mkdir -p $(WORKINGDIR)/mobilegl; \
 		cd $(WORKINGDIR)/mobilegl && cmake \
 			-DCMAKE_CROSSCOMPILING=true \
+			-DCMAKE_BUILD_TYPE=Release \
 			-DCMAKE_SYSTEM_NAME=iOS \
 			-DCMAKE_OSX_SYSROOT="$(SDKPATH)" \
 			-DCMAKE_OSX_ARCHITECTURES=arm64 \
@@ -540,11 +541,11 @@ dep_moltenvk12:
 
 dep_moltenvk:
 	echo '[Witch v$(VERSION)] dep_moltenvk - start'
-	MOLTENVK_SRC="$(SOURCEDIR)/Natives/external/MoltenVK"
-	MOLTENVK_BUILD="$(WORKINGDIR)/moltenvk14"
-	mkdir -p "$$MOLTENVK_BUILD"
-	cp -f "$(SOURCEDIR)/patches/MoltenVK-Common-CMakeLists.txt" "$$MOLTENVK_SRC/Common/CMakeLists.txt" 2>/dev/null || true
-	cd "$$MOLTENVK_SRC/Common" && cmake \
+	MOLTENVK_SRC="$(SOURCEDIR)/Natives/external/MoltenVK"; \
+	MOLTENVK_BUILD="$(WORKINGDIR)/moltenvk14"; \
+	mkdir -p "$$MOLTENVK_BUILD"; \
+	cp -f "$(SOURCEDIR)/patches/MoltenVK-Common-CMakeLists.txt" "$$MOLTENVK_SRC/Common/CMakeLists.txt" 2>/dev/null || true; \
+	cd "$$MOLTENVK_SRC" && cmake \
 		-DCMAKE_CROSSCOMPILING=true \
 		-DCMAKE_SYSTEM_NAME=iOS \
 		-DCMAKE_OSX_SYSROOT="$(SDKPATH)" \
@@ -552,12 +553,17 @@ dep_moltenvk:
 		-DCMAKE_OSX_DEPLOYMENT_TARGET=14.0 \
 		-DCMAKE_C_FLAGS="-arch arm64" \
 		-DCMAKE_CXX_FLAGS="-arch arm64 -stdlib=libc++" \
+		-DCMAKE_BUILD_TYPE=Release \
 		-DMVK_STATIC_LIBRARY_ONLY=OFF \
+		-DMVK_EXCLUDE_SPIRV_TOOLS=ON \
+		-DCPM_cereal_SOURCE="$$MOLTENVK_SRC/External/cereal" \
+		-DCPM_SPIRV-Cross_SOURCE="$$MOLTENVK_SRC/External/SPIRV-Cross" \
+		-DCPM_Vulkan-Headers_SOURCE="$$MOLTENVK_SRC/External/Vulkan-Headers" \
 		-DCMAKE_INSTALL_PREFIX="$(SOURCEDIR)/Natives/resources/Frameworks" \
 		-B "$$MOLTENVK_BUILD" \
-		.
-	cmake --build "$$MOLTENVK_BUILD" --config Release -j$(JOBS)
-	cp "$$MOLTENVK_BUILD/MoltenVK/libMoltenVK.dylib" "$(SOURCEDIR)/Natives/resources/Frameworks/"
+		. && \
+	cmake --build "$$MOLTENVK_BUILD" --config Release -j$(JOBS) && \
+	cp -L "$$MOLTENVK_BUILD/MoltenVK/libMoltenVK.dylib" "$(SOURCEDIR)/Natives/resources/Frameworks/"
 	echo '[Witch v$(VERSION)] dep_moltenvk - end'
 
 dep_mesa_zink:
@@ -657,42 +663,24 @@ dep_kkosmic:
 
 dep_angle:
 	echo '[Witch v$(VERSION)] dep_angle - start'
-	ANGLE_SRC="$(SOURCEDIR)/source/angle-build/angle"
+	ANGLE_SRC="$(SOURCEDIR)/source/angle-build/angle"; \
 	cd "$$ANGLE_SRC" && \
 	mkdir -p out/ios-vulkan-arm64 out/ios-metal-arm64 && \
-	"$$(pwd)/buildtools/mac/gn" gen out/ios-vulkan-arm64 --args=' \
-		target_os="ios" target_cpu="arm64" target_environment="device" \
-		ios_deployment_target="16.0" \
-		is_debug=false is_official_build=true chrome_pgo_phase=0 \
-		ios_enable_code_signing=false is_component_build=false symbol_level=0 \
-		angle_standalone=true angle_build_tests=false \
-		angle_enable_vulkan=true angle_shared_libvulkan=true angle_use_custom_libvulkan=true \
-		angle_enable_metal=false angle_enable_gl=false angle_enable_null=false \
-		angle_enable_wgpu=false angle_enable_swiftshader=false \
-		angle_enable_essl=false angle_enable_glsl=true \
-		treat_warnings_as_errors=false use_custom_libcxx=true \
-		clang_base_path="//third_party/llvm-build/Release+Asserts" \
-		enable_rust=false use_system_xcode=true' && \
+	"$$(pwd)/buildtools/mac/gn" gen out/ios-vulkan-arm64 --args='target_os="ios" target_cpu="arm64" target_environment="device" ios_deployment_target="16.0" is_debug=false is_official_build=true chrome_pgo_phase=0 ios_enable_code_signing=false is_component_build=false symbol_level=0 angle_standalone=true angle_build_tests=false angle_enable_vulkan=true angle_shared_libvulkan=true angle_use_custom_libvulkan=true angle_enable_metal=false angle_enable_gl=false angle_enable_null=false angle_enable_wgpu=false angle_enable_swiftshader=false angle_enable_essl=false angle_enable_glsl=true angle_egl_dispatch_library="libGLESv2_angle_vulkan" treat_warnings_as_errors=false use_custom_libcxx=true clang_base_path="//third_party/llvm-build/Release+Asserts" enable_rust=false use_system_xcode=true enable_rust_cxx=false angle_enable_perfetto=false' && \
 	"$$(pwd)/third_party/ninja/ninja" -C out/ios-vulkan-arm64 -j4 libEGL libGLESv2 && \
-	"$$(pwd)/buildtools/mac/gn" gen out/ios-metal-arm64 --args=' \
-		target_os="ios" target_cpu="arm64" target_environment="device" \
-		ios_deployment_target="16.0" \
-		is_debug=false is_official_build=true chrome_pgo_phase=0 \
-		ios_enable_code_signing=false is_component_build=false symbol_level=0 \
-		angle_standalone=true angle_build_tests=false \
-		angle_enable_vulkan=false angle_enable_metal=true \
-		angle_enable_gl=false angle_enable_null=false \
-		angle_enable_wgpu=false angle_enable_swiftshader=false \
-		angle_enable_essl=false angle_enable_glsl=true \
-		treat_warnings_as_errors=false use_custom_libcxx=true \
-		clang_base_path="//third_party/llvm-build/Release+Asserts" \
-		enable_rust=false use_system_xcode=true metal_preferred_client="native"' && \
+	"$$(pwd)/buildtools/mac/gn" gen out/ios-metal-arm64 --args='target_os="ios" target_cpu="arm64" target_environment="device" ios_deployment_target="16.0" is_debug=false is_official_build=true chrome_pgo_phase=0 ios_enable_code_signing=false is_component_build=false symbol_level=0 angle_standalone=true angle_build_tests=false angle_enable_vulkan=false angle_enable_metal=true angle_enable_gl=false angle_enable_null=false angle_enable_wgpu=false angle_enable_swiftshader=false angle_enable_essl=false angle_enable_glsl=true treat_warnings_as_errors=false use_custom_libcxx=true clang_base_path="//third_party/llvm-build/Release+Asserts" enable_rust=false use_system_xcode=true metal_preferred_client="native" angle_egl_dispatch_library="libGLESv2_angle_metal.dylib" enable_rust_cxx=false angle_enable_perfetto=false' && \
 	"$$(pwd)/third_party/ninja/ninja" -C out/ios-metal-arm64 -j4 libEGL libGLESv2 && \
 	cp out/ios-vulkan-arm64/libEGL.framework/libEGL "$(SOURCEDIR)/Natives/resources/Frameworks/libEGL_angle_vulkan" && \
 	cp out/ios-vulkan-arm64/libGLESv2.framework/libGLESv2 "$(SOURCEDIR)/Natives/resources/Frameworks/libGLESv2_angle_vulkan" && \
 	cp out/ios-vulkan-arm64/libvulkan.dylib "$(SOURCEDIR)/Natives/resources/Frameworks/" && \
 	cp out/ios-metal-arm64/libEGL.framework/libEGL "$(SOURCEDIR)/Natives/resources/Frameworks/libEGL_angle_metal" && \
-	cp out/ios-metal-arm64/libGLESv2.framework/libGLESv2 "$(SOURCEDIR)/Natives/resources/Frameworks/libGLESv2_angle_metal"
+	cp out/ios-metal-arm64/libGLESv2.framework/libGLESv2 "$(SOURCEDIR)/Natives/resources/Frameworks/libGLESv2_angle_metal" && \
+	cp out/ios-metal-arm64/libGLESv2.framework/libGLESv2 "$(SOURCEDIR)/Natives/resources/Frameworks/libGLESv2_angle_metal.dylib" && \
+	install_name_tool -id @rpath/libEGL_angle_vulkan.dylib "$(SOURCEDIR)/Natives/resources/Frameworks/libEGL_angle_vulkan" && \
+	install_name_tool -id @rpath/libGLESv2_angle_vulkan.dylib "$(SOURCEDIR)/Natives/resources/Frameworks/libGLESv2_angle_vulkan" && \
+	install_name_tool -id @rpath/libEGL_angle_metal.dylib "$(SOURCEDIR)/Natives/resources/Frameworks/libEGL_angle_metal" && \
+	install_name_tool -id @rpath/libGLESv2_angle_metal.dylib "$(SOURCEDIR)/Natives/resources/Frameworks/libGLESv2_angle_metal" && \
+	install_name_tool -id @rpath/libGLESv2_angle_metal.dylib "$(SOURCEDIR)/Natives/resources/Frameworks/libGLESv2_angle_metal.dylib"
 	echo '[Witch v$(VERSION)] dep_angle - end'
 
 assets: logos

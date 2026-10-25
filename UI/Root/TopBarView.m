@@ -3,6 +3,7 @@
 #import "utils.h"
 #import "LauncherPreferences.h"
 #import "AmethystBlurView.h"
+#import "UIView+LiquidGlass.h"
 #import "DownloadManager.h"
 #import <objc/runtime.h>
 
@@ -117,6 +118,7 @@
 
     [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(updateColors) name:ThemeDidChangeNotification object:nil];
     [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(updateColors) name:AmethystBlurIntensityDidChangeNotification object:nil];
+    [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(updateColors) name:LiquidGlassDidChangeNotification object:nil];
     [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(rebuildProgressRows) name:DownloadTasksDidChangeNotification object:nil];
         [self updateColors];
         [self rebuildProgressRows];
@@ -255,7 +257,11 @@
     ThemeManager *theme = ThemeManager.shared;
     // When the per-bar frost is enabled, fade the base color so the realtime
     // gaussian material shows through instead of an opaque slab.
-    if ([AmethystBlurView blurEnabledForKey:@"amethyst_topbar_blur"]) {
+    if ([UIView lg_isEnabled]) {
+        // Let the navigation-layer glass sample the launcher content instead
+        // of painting a custom bar background over it.
+        self.backgroundColor = [UIColor clearColor];
+    } else if ([AmethystBlurView blurEnabledForKey:@"amethyst_topbar_blur"]) {
         self.backgroundColor = [theme.topBarBackgroundColor colorWithAlphaComponent:0.25 * theme.uiOpacity];
     } else {
         self.backgroundColor = theme.topBarBackgroundColor;

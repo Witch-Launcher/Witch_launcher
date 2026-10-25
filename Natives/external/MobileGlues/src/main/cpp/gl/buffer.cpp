@@ -1092,7 +1092,16 @@ void* glMapBufferRange(GLenum target, GLintptr offset, GLsizeiptr length, GLbitf
     if (global_settings.buffer_coherent_as_flush) access &= ~GL_MAP_FLUSH_EXPLICIT_BIT;
     //    access |= GL_MAP_UNSYNCHRONIZED_BIT;
     borrowed_target_t t(target);
-    return GLES.glMapBufferRange(t.target, offset, length, access);
+    void* result = GLES.glMapBufferRange(t.target, offset, length, access);
+    const char* backend = getenv("MOBILEGL_ANGLE_BACKEND");
+    if (backend != nullptr && strcmp(backend, "vulkan") == 0) {
+        static int logged = 0;
+        if (logged++ < 400) {
+            LOG_W_FORCE("[MGVK] MapBufferRange target=0x%X offset=%lld length=%lld access=0x%X -> %p", target,
+                        (long long)offset, (long long)length, access, result);
+        }
+    }
+    return result;
 }
 
 GLboolean glUnmapBuffer(GLenum target) {
@@ -1108,6 +1117,15 @@ GLboolean glUnmapBuffer(GLenum target) {
 
 void glBufferStorage(GLenum target, GLsizeiptr size, const void* data, GLbitfield flags) {
     LOG()
+    const char* backend = getenv("MOBILEGL_ANGLE_BACKEND");
+    const bool angle_vulkan = backend != nullptr && strcmp(backend, "vulkan") == 0;
+    if (angle_vulkan) {
+        static int logged = 0;
+        if (logged++ < 200) {
+            LOG_W_FORCE("[MGVK] BufferStorage target=0x%X size=%lld flags=0x%X ext=%p", target, (long long)size,
+                        flags, (void*)GLES.glBufferStorageEXT);
+        }
+    }
     if (GLES.glBufferStorageEXT) {
         if (global_settings.buffer_coherent_as_flush &&
             ((flags & GL_MAP_PERSISTENT_BIT) != 0 || (flags & GL_DYNAMIC_STORAGE_BIT) != 0))

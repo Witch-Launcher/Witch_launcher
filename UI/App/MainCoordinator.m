@@ -36,6 +36,8 @@
 #import "MinecraftResourceUtils.h"
 #import "ElySkinHead.h"
 
+static const NSTimeInterval kLaunchAutoHideDelay = 3.0;
+
 @interface MainCoordinator () <UIAlertViewDelegate> {
     CGFloat _lastMsTime;
     NSUInteger _lastCompletedUnitCount;
@@ -47,7 +49,9 @@
 @property (nonatomic) NSMutableDictionary<NSNumber *, UIViewController *> *tabViewControllers;
 @property (nonatomic) MainMenuViewController *mainMenuVC;
 @property (nonatomic) MinecraftResourceDownloadTask *downloadTask;
+@property (nonatomic) DownloadTask *launchProgressTask;
 @property (nonatomic, strong) DownloadProgressOverlay *progressOverlay;
+@property (nonatomic) NSTimer *autoHideLaunchTimer;
 @property (nonatomic) UIAlertController *jitAlert;
 
 @property (nonatomic) ModListViewController *modListVC;
@@ -319,6 +323,8 @@
 #pragma mark - Launch
 
 - (void)launchGame {
+    if (self.launchProgressTask) return;
+
     NSString *accountName = BaseAuthenticator.current.authData[@"username"];
     if (!accountName) {
         __weak typeof(self) weakSelf = self;
@@ -346,6 +352,8 @@
 }
 
 - (void)launchWithServer:(NSDictionary *)server {
+    if (self.launchProgressTask) return;
+
     NSString *accountName = BaseAuthenticator.current.authData[@"username"];
     if (!accountName) {
         __weak typeof(self) weakSelf = self;
@@ -403,6 +411,8 @@
     [[NSURLSession.sharedSession dataTaskWithURL:manifestURL completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
         if (error || !data) {
             dispatch_async(dispatch_get_main_queue(), ^{
+                NSError *launchError = error ?: [NSError errorWithDomain:@"WitchLaunch" code:-1 userInfo:@{NSLocalizedDescriptionKey: @"Failed to fetch version manifest"}];
+                [self completeLaunchProgressTaskWithError:launchError];
                 [self dismissProgressAlert];
                 [ErrorPresenter showNetworkError:error message:@"Failed to fetch version manifest"];
             });
@@ -411,6 +421,8 @@
         NSDictionary *json = [NSJSONSerialization JSONObjectWithData:data options:0 error:nil];
         if (!json[@"versions"]) {
             dispatch_async(dispatch_get_main_queue(), ^{
+                NSError *launchError = [NSError errorWithDomain:@"WitchLaunch" code:-2 userInfo:@{NSLocalizedDescriptionKey: @"Invalid version manifest."}];
+                [self completeLaunchProgressTaskWithError:launchError];
                 [self dismissProgressAlert];
                 [ErrorPresenter showError:@"Error" message:@"Invalid version manifest."];
             });
@@ -441,6 +453,8 @@
         }
         if (!versionObj) {
             dispatch_async(dispatch_get_main_queue(), ^{
+                NSError *launchError = [NSError errorWithDomain:@"WitchLaunch" code:-3 userInfo:@{NSLocalizedDescriptionKey: @"Cannot find version data."}];
+                [self completeLaunchProgressTaskWithError:launchError];
                 [self dismissProgressAlert];
                 [ErrorPresenter showError:@"Error" message:@"Cannot find version data."];
             });
@@ -456,6 +470,8 @@
                 dispatch_async(dispatch_get_main_queue(), ^{
                     [strongSelf safeRemoveProgressObserver];
                     strongSelf.downloadTask = nil;
+                    NSError *launchError = [NSError errorWithDomain:@"WitchLaunch" code:-4 userInfo:@{NSLocalizedDescriptionKey: @"Failed to download Minecraft resources."}];
+                    [strongSelf completeLaunchProgressTaskWithError:launchError];
                     [strongSelf dismissProgressAlert];
                     [ErrorPresenter showError:@"Download Error" message:@"Failed to download Minecraft resources."];
                 });
@@ -489,6 +505,7 @@
         if (progress.finished) {
             [self safeRemoveProgressObserver];
             dispatch_async(dispatch_get_main_queue(), ^{
+                [self completeLaunchProgressTaskWithError:nil];
                 [self.progressOverlay finishWithMessage:localize(@"progress.msg.verifying", nil)];
                 [self performJITCheckAndLaunch];
             });
@@ -539,6 +556,9 @@
         }
 
         dispatch_async(dispatch_get_main_queue(), ^{
+            if (self.launchProgressTask) {
+                [self.downloadManager updateProgress:progress.fractionCompleted forTask:self.launchProgressTask];
+            }
             [self.progressOverlay updateWithFraction:progress.fractionCompleted
                                          description:description
                               additionalDescription:additional
@@ -590,6 +610,7 @@
 }
 
 - (void)finishLaunch {
+    [self completeLaunchProgressTaskWithError:nil];
     [self dismissProgressAlert];
     if (self.downloadTask.metadata) {
         // Prepare version directory: set POJAV_GAME_DIR to instance root + symlink → version dir
@@ -617,28 +638,9 @@
 #pragma mark - Progress Alert helpers
 
 - (void)showProgressAlert:(NSString *)message {
-    self.progressOverlay = [DownloadProgressOverlay showBlurredInView:self.rootVC.view title:localize(@"launcher.launching", nil) blurred:YES];
-    self.progressOverlay.statusLabel.text = message;
-    __weak typeof(self) weakSelf = self;
-    self.progressOverlay.cancelBlock = ^{
-        MainCoordinator *strongSelf = weakSelf;
-        if (!strongSelf) return;
-        [strongSelf safeRemoveProgressObserver];
-        if (strongSelf.downloadTask) {
-            @try {
-                [strongSelf.downloadTask cancelAll];
-            } @catch (NSException *e) {
-                NSLog(@"[MainCoordinator] cancelAll exception: %@", e);
-            }
-            strongSelf.downloadTask = nil;
-        }
-        [strongSelf dismissProgressAlert];
-    };
-    self.progressOverlay.infoBlock = ^{
-        MainCoordinator *strongSelf = weakSelf;
-        if (!strongSelf) return;
-        [strongSelf showDownloadTasksForLaunch];
-    };
+    [self presentProgressOverlayWithMessage:message];
+    [self scheduleAutoHideLaunchOverlay];
+
     struct timeval tv;
     gettimeofday(&tv, NULL);
     CGFloat startTime = tv.tv_sec + tv.tv_usec / 1000000.0;
@@ -649,13 +651,113 @@
     _cachedEta = @"--";
 }
 
+- (void)presentProgressOverlayWithMessage:(NSString *)message {
+    self.progressOverlay = [DownloadProgressOverlay showBlurredInView:self.rootVC.view title:localize(@"launcher.launching", nil) blurred:YES];
+    self.progressOverlay.statusLabel.text = message;
+
+    __weak typeof(self) weakSelf = self;
+    self.progressOverlay.cancelBlock = ^{
+        MainCoordinator *strongSelf = weakSelf;
+        if (!strongSelf) return;
+        [strongSelf cancelLaunchProgress];
+    };
+    self.progressOverlay.hideBlock = ^{
+        MainCoordinator *strongSelf = weakSelf;
+        if (!strongSelf) return;
+        [strongSelf hideProgressAlert];
+    };
+    self.progressOverlay.infoBlock = ^{
+        MainCoordinator *strongSelf = weakSelf;
+        if (!strongSelf) return;
+        [strongSelf showDownloadTasksForLaunch];
+    };
+}
+
 - (void)updateProgressAlert:(NSString *)message {
     if (self.progressOverlay) {
         [self.progressOverlay updateProgress:self.downloadTask.progress.fractionCompleted message:message];
     }
+    if (self.launchProgressTask) {
+        [self.downloadManager updateProgress:self.downloadTask.progress.fractionCompleted forTask:self.launchProgressTask];
+    }
+}
+
+- (void)scheduleAutoHideLaunchOverlay {
+    [self.autoHideLaunchTimer invalidate];
+    self.autoHideLaunchTimer = nil;
+    if (!getPrefBool(@"general.auto_hide_launching")) return;
+
+    __weak typeof(self) weakSelf = self;
+    NSTimer *timer = [NSTimer timerWithTimeInterval:kLaunchAutoHideDelay repeats:NO block:^(NSTimer *timer) {
+        MainCoordinator *strongSelf = weakSelf;
+        if (!strongSelf) return;
+        strongSelf.autoHideLaunchTimer = nil;
+        if (!getPrefBool(@"general.auto_hide_launching")) return;
+        [strongSelf hideProgressAlert];
+    }];
+    self.autoHideLaunchTimer = timer;
+    [[NSRunLoop mainRunLoop] addTimer:timer forMode:NSRunLoopCommonModes];
+}
+
+- (void)hideProgressAlert {
+    [self.autoHideLaunchTimer invalidate];
+    self.autoHideLaunchTimer = nil;
+    if (!self.progressOverlay) return;
+
+    [self ensureLaunchProgressTask];
+    [self.progressOverlay dismiss];
+    self.progressOverlay = nil;
+}
+
+- (void)ensureLaunchProgressTask {
+    if (self.launchProgressTask) return;
+
+    self.launchProgressTask = [self.downloadManager beginTaskWithName:localize(@"launcher.launching", nil) type:DownloadTypeLaunch];
+    __weak typeof(self) weakSelf = self;
+    self.launchProgressTask.cancelBlock = ^{
+        MainCoordinator *strongSelf = weakSelf;
+        if (!strongSelf) return;
+        strongSelf.launchProgressTask = nil;
+        [strongSelf cancelLaunchDownload];
+    };
+    if (self.downloadTask) {
+        [self.downloadManager updateProgress:self.downloadTask.progress.fractionCompleted forTask:self.launchProgressTask];
+    }
+}
+
+- (void)cancelLaunchProgress {
+    DownloadTask *task = self.launchProgressTask;
+    self.launchProgressTask = nil;
+    if (task) {
+        [self.downloadManager cancelTask:task];
+    } else {
+        [self cancelLaunchDownload];
+    }
+}
+
+- (void)cancelLaunchDownload {
+    [self safeRemoveProgressObserver];
+    if (self.downloadTask) {
+        @try {
+            [self.downloadTask cancelAll];
+        } @catch (NSException *e) {
+            NSLog(@"[MainCoordinator] cancelAll exception: %@", e);
+        }
+        self.downloadTask = nil;
+    }
+    [self dismissProgressAlert];
+}
+
+- (void)completeLaunchProgressTaskWithError:(NSError *)error {
+    DownloadTask *task = self.launchProgressTask;
+    if (!task) return;
+    self.launchProgressTask = nil;
+    [self.downloadManager completeTask:task error:error];
 }
 
 - (void)dismissProgressAlert {
+    [self.autoHideLaunchTimer invalidate];
+    self.autoHideLaunchTimer = nil;
     if (self.progressOverlay) {
         [self.progressOverlay dismiss];
         self.progressOverlay = nil;
@@ -716,6 +818,7 @@
 }
 
 - (void)dealloc {
+    [self.autoHideLaunchTimer invalidate];
     [[NSNotificationCenter defaultCenter] removeObserver:self];
 }
 

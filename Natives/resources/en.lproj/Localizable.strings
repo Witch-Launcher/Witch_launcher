@@ -308,6 +308,8 @@
 "preference.title.renderer.debug.ltw" = "LTW (1.17+) - OpenGL 3.3 via OpenGL ES/Metal, EXPERIMENTAL";
 "preference.title.renderer.debug.mobilegl" = "MobileGL (Vulkan) - exports OpenGL 4.2 via MoltenVK";
 "preference.title.renderer.debug.tglmt" = "TGLMT (Metal) - exports OpenGL 4.6 Core via Metal, A11+";
+"preference.title.renderer.debug.metal" = "Metal - direct Metal rendering on the single iOS CAMetalLayer (requires a Metal mod)";
+"preference.title.renderer.debug.metal_macos" = "Metal (macOS port) - Metal mods ported from macOS to iOS";
 
 "Device Info" = "Device Info";
 
@@ -364,6 +366,8 @@
 
 "preference.title.resolution" = "Resolution (%)";
 "preference.detail.resolution" = "Allows you to decrease the game resolution.";
+"preference.title.vsync" = "VSync (display-synced FPS)";
+"preference.detail.vsync" = "When off, every renderer presents frames without waiting for the display refresh. Turn on to cap FPS to the screen refresh rate.";
 "preference.title.max_framerate" = "Maximum framerate";
 "preference.detail.max_framerate" = "Allows you to limit the game framerate to 60FPS on ProMotion displays.";
 
@@ -403,7 +407,7 @@
 "preference.title.gesture_hotbar" = "Hotbar gestures";
 "preference.title.gesture_hold" = "Tap to place, hold to break blocks";
 "preference.title.doubletap_offhand" = "Double-tap hotbar to swap offhand (F)";
-"preference.title.gesture_scroll" = "Gesture to control mouse wheel";
+"preference.title.keyboard_editing_toolbar" = "Apple keyboard editing toolbar";
 "preference.detail.gesture_hotbar" = "Enables gestures, such as touch the hotbar slot, swap items between hand, throw items";
 "preference.title.disable_haptics" = "Disable on-screen haptics";
 "preference.title.press_duration" = "Long-press duration (ms)";
@@ -628,6 +632,7 @@
 
 "preference.title.lwjgl_version" = "LWJGL Version";
 "preference.title.screen_orientation" = "Screen Orientation";
+"preference.title.auto_hide_launching" = "Auto-hide Launching panel";
 "preference.title.theme" = "Theme";
 "preference.title.launcher_logo" = "Launcher Logo";
 "preference.title.curseforge_api_key" = "CurseForge API Key";
@@ -667,6 +672,8 @@
 "appearance.right_panel_color" = "Right Panel Color";
 "appearance.content_card_color" = "Content Card Color";
 "appearance.background" = "Background";
+"appearance.ui_scale" = "UI Scale";
+"appearance.ui_scale_hint" = "Two-finger double-tap the launcher to reset to 100%.";
 "appearance.ui_opacity" = "UI Opacity";
 "appearance.background_blur" = "Background Blur";
 "appearance.ui_panels_blur" = "UI Panels Blur";
@@ -898,6 +905,7 @@
 "settings.group.game_opts" = "Game Options";
 "settings.group.mouse" = "Mouse";
 "settings.group.touch" = "Touch & Buttons";
+"settings.group.keyboard" = "Keyboard";
 "settings.group.gyro" = "Gyroscope";
 "settings.group.gamepad" = "Gamepad";
 "settings.group.cursor" = "Cursor & Layout";
@@ -1106,6 +1114,7 @@
 "progress.msg.dl_loader" = "Downloading loader profile...";
 "progress.msg.dl_modpack" = "Downloading modpack...";
 "progress.msg.downloading" = "Downloading...";
+"progress.hide" = "Hide";
 "progress.msg.extracting" = "Extracting overrides...";
 "progress.msg.fetching" = "Fetching available versions...";
 "progress.msg.installer_fail" = "Installer download failed";
@@ -1258,3 +1267,75 @@
 "mod.dependency_missing" = "Not installed";
 "mod.resolving_dependencies" = "Resolving dependencies";
 "mod.resolve_deps_failed" = "Could not resolve dependencies: %@";
+
+"runtime.detail.installed_version" = "Installed • %@";
+"runtime.detail.update_available" = "Update available (%@)";
+"runtime.detail.not_installed_new" = "Not installed • New: %@";
+"runtime.status.installed" = "Installed";
+"runtime.status.update_available" = "Update";
+"runtime.status.not_installed" = "Not installed";
+"runtime.action.delete" = "Delete";
+"runtime.action.update" = "Update";
+"runtime.action.download" = "Download";
+"runtime.action.delete_old" = "Delete old version";
+"runtime.title.onboarding" = "Download Runtimes";
+"runtime.title.manage" = "Runtime JDK / LWJGL";
+"runtime.skip" = "Skip";
+"runtime.manifest_load_failed" = "Couldn't load manifest.\n%@";
+"runtime.manifest_cache_fallback" = "Using local cache (couldn't load manifest).";
+"runtime.jdk_footer" = "JDK 8 for Minecraft ≤ 1.16.5 • 17/21 for 1.17 – 1.21 • 25 for newer versions.";
+"runtime.lwjgl_footer" = "3.3.3 for older versions • 3.3.6 intermediate • 3.4.1 latest.";
+"runtime.onboarding_hint" = "The Simple build doesn't include JDK/LWJGL. Red dot = important. Tap Download, then play.";
+"runtime.list_hint" = "Red dot = recommended download. Tap a row to Download / Update / Delete.";
+"runtime.delete.title" = "Confirm Delete";
+"runtime.delete.message" = "Are you sure you want to delete %@?";
+"runtime.deleted" = "Deleted.";
+"launcher_update.title" = "Launcher Update";
+"launcher_update.error.check" = "Couldn't check for updates.";
+"launcher_update.error.latest" = "Couldn't load the latest release for this channel.";
+"launcher_update.section.device" = "Device";
+"launcher_update.section.options" = "Options";
+"launcher_update.releases_count" = "Releases (%lu)";
+"launcher_update.releases" = "Releases";
+"launcher_update.running" = "Running: v%@";
+"launcher_update.channel_line" = "%@ • Channel: %@";
+"launcher_update.channel.title" = "Update Channel";
+"launcher_update.channel.auto" = "Automatic";
+"launcher_update.channel.beta" = "Beta (pre-release)";
+"launcher_update.channel.stable" = "Stable (release)";
+"launcher_update.channel.auto_detail" = "Automatic: Beta builds follow pre-release, Release builds follow release.";
+"launcher_update.channel.auto_beta" = "Automatic (Beta)";
+"launcher_update.channel.auto_stable" = "Automatic (Stable)";
+"launcher_update.variant.title" = "Distribution";
+"launcher_update.variant.full" = "Full (bundled)";
+"launcher_update.variant.slim" = "Simple (light)";
+"launcher_update.variant.full_subtitle" = "Includes JDK + LWJGL";
+"launcher_update.variant.slim_subtitle" = "No bundled runtime";
+"launcher_update.release.fallback" = "Release";
+"launcher_update.in_use" = "In use";
+"launcher_update.files" = "%lu files";
+"launcher_update.empty.title" = "Empty";
+"launcher_update.empty.message" = "This release has no installer files.";
+"launcher_update.asset.trollstore" = "Download & Install via TrollStore";
+"launcher_update.asset.sidestore" = "Install via SideStore";
+"launcher_update.asset.sidestore_subtitle" = "Open SideStore to install (data is preserved)";
+"launcher_update.asset.download_only" = "Download Only";
+"launcher_update.asset.download_only_subtitle" = "Save the file and install it yourself via Share";
+"launcher_update.downloading" = "Downloading %@…";
+"launcher_update.download_failed" = "Download failed.";
+"launcher_update.error.missing_release" = "Release '%@' isn't available yet: %@";
+"launcher_update.error.invalid_url" = "Invalid download URL";
+"launcher_update.new.title" = "Update Available";
+"launcher_update.new.message" = "Channel %@ (%@) has a new build.\nOpen the Update screen to choose and install a build.";
+"settings.launcher_update" = "Update Launcher (Beta/Stable)";
+"settings.runtime_download" = "Download Runtimes JDK/LWJGL";
+"mainmenu.runtime_onboarding.title" = "Simple build: no runtime installed";
+"mainmenu.runtime_onboarding.message" = "The Simple build ships without JDK/LWJGL to stay lightweight. Open the download table now (important items are marked) or later in Settings → Download Runtimes JDK/LWJGL?";
+"mainmenu.runtime_onboarding.confirm" = "Open Download Table";
+"keyboard.action.undo" = "Undo";
+"keyboard.action.redo" = "Redo";
+"keyboard.action.cut" = "Cut";
+"keyboard.action.copy" = "Copy";
+"keyboard.action.paste" = "Paste";
+"keyboard.action.select_all" = "Select All";
+"keyboard.action.hide" = "Hide Keyboard";

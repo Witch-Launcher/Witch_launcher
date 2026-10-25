@@ -12,6 +12,7 @@ extern bool isUseStackQueueCall;
 
 @interface TrackedTextField()
 @property(nonatomic) int lastTextPos;
+@property(nonatomic) int lastMarkedLength;
 @property(nonatomic) CGFloat lastPointX;
 @end
 
@@ -105,6 +106,10 @@ extern bool isUseStackQueueCall;
 }
 
 - (void)deleteBackward {
+    if (self.lastMarkedLength > 0) {
+        self.lastMarkedLength--;
+    }
+
     if (self.text.length > 1) {
         [super deleteBackward];
     } else {
@@ -126,16 +131,25 @@ extern bool isUseStackQueueCall;
         return [super insertFilteredText:text];
     }
 
-    int cursorPos = [super offsetFromPosition:self.beginningOfDocument toPosition:self.selectedTextRange.start];
-
-    int off = self.lastTextPos - cursorPos;
-    if (off > 0) {
-        [self sendMultiBackspaces:off];
+    int base = self.lastTextPos;
+    if (self.lastMarkedLength > 0) {
+        [self sendMultiBackspaces:self.lastMarkedLength];
+        base -= self.lastMarkedLength;
+        self.lastMarkedLength = 0;
     }
 
-    self.lastTextPos = cursorPos + text.length;
+    int cursorPos = [super offsetFromPosition:self.beginningOfDocument toPosition:self.selectedTextRange.start];
+    NSLog(@"[TrackedTextField] insert len=%lu text=%@ marked=%d last=%d cursor=%d",
+          (unsigned long)text.length, text, self.lastMarkedLength, self.lastTextPos, cursorPos);
+
+    int off = base - cursorPos;
+    if (off > 0) {
+        [self sendMultiBackspaces:off];
+        base -= off;
+    }
 
     [self sendText:text];
+    self.lastTextPos = base + (int)text.length;
 
     NSRange range = [super insertFilteredText:text];
     return range;
@@ -146,22 +160,33 @@ extern bool isUseStackQueueCall;
     int oldLength = [super offsetFromPosition:range.start toPosition:range.end];
     [self sendMultiBackspaces:oldLength];
     [self sendText:text];
-    self.lastTextPos += text.length - oldLength;
+    self.lastTextPos += (int)text.length - oldLength;
+    self.lastMarkedLength = 0;
 
     return [super replaceRangeWithTextWithoutClosingTyping:range replacementText:text];
 }
 
 - (void)setAttributedMarkedText:(NSAttributedString *)markedText selectedRange:(NSRange)selectedRange {
-    NSInteger markedLength = [self offsetFromPosition:self.markedTextRange.start toPosition:self.markedTextRange.end];
-    [self sendMultiBackspaces:markedLength];
+    int oldMarkedLength = self.lastMarkedLength;
+    NSLog(@"[TrackedTextField] marked old=%d new=%lu last=%d",
+          oldMarkedLength, (unsigned long)markedText.length, self.lastTextPos);
+    if (oldMarkedLength > 0) {
+        [self sendMultiBackspaces:oldMarkedLength];
+        self.lastTextPos = MAX(0, self.lastTextPos - oldMarkedLength);
+    }
 
     [super setAttributedMarkedText:markedText selectedRange:selectedRange];
+
+    self.lastMarkedLength = (int)markedText.length;
     [self sendText:markedText.string];
+    self.lastTextPos += self.lastMarkedLength;
 }
 
 - (void)setText:(NSString *)text {
+    NSLog(@"[TrackedTextField] setText len=%lu text=%@", (unsigned long)text.length, text);
     [super setText:text];
-    self.lastTextPos = text.length;
+    self.lastTextPos = (int)text.length;
+    self.lastMarkedLength = 0;
 }
 
 @end

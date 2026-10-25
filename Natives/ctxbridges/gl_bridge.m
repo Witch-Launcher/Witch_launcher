@@ -214,19 +214,52 @@ void dlsym_EGL() {
         // init_target_egl, which probes EGL through RTLD_DEFAULT — then
         // resolve every EGL entry point from MG's own handle so the whole
         // context/surface lifecycle runs through MG's wrappers.
-        mg_handle = dlopen("@rpath/libmobileglues.dylib", RTLD_LAZY | RTLD_GLOBAL);
-        if (!mg_handle) mg_handle = dlopen([fwPath stringByAppendingPathComponent:@"libmobileglues.dylib"].UTF8String, RTLD_LAZY | RTLD_GLOBAL);
+        const char *mgAngleBackend = getenv("MOBILEGL_ANGLE_BACKEND");
+        const char *legacyMetalEnv = getenv("MOBILEGL_LEGACY_METAL");
+        // Launcher sets this per game version; unset keeps the historical
+        // legacy-first behaviour for older callers.
+        BOOL useLegacyMetal = (legacyMetalEnv == NULL) || (strcmp(legacyMetalEnv, "0") != 0);
+        if (mgAngleBackend && strcmp(mgAngleBackend, "metal") == 0 && useLegacyMetal) {
+            NSString *legacyPath = [fwPath stringByAppendingPathComponent:@ RENDERER_NAME_MOBILEGLUES_OLD];
+            if ([[NSFileManager defaultManager] fileExistsAtPath:legacyPath]) {
+                mg_handle = dlopen(legacyPath.fileSystemRepresentation, RTLD_LAZY | RTLD_GLOBAL);
+                if (mg_handle) NSLog(@"[EGLBridge] MobileGlues legacy + ANGLE Metal: %@", legacyPath.lastPathComponent);
+            }
+        }
+        if (!mg_handle) {
+            mg_handle = dlopen("@rpath/libmobileglues.dylib", RTLD_LAZY | RTLD_GLOBAL);
+            if (!mg_handle) mg_handle = dlopen([fwPath stringByAppendingPathComponent:@"libmobileglues.dylib"].UTF8String, RTLD_LAZY | RTLD_GLOBAL);
+        }
         if (!mg_handle) {
             NSLog(@"EGLBridge: Failed to load libmobileglues.dylib: %s", dlerror());
         }
+        // MobileGlues exports the GL entry points itself (glReadPixels,
+        // glGetIntegerv, ...). resolve_gl must dlsym them from MG's handle:
+        // MG's own glXGetProcAddress uses dlsym(RTLD_NEXT) on Apple, and the
+        // ANGLE backend is loaded BEFORE MG, so that lookup returns NULL and
+        // every resolve_gl probe ("[readback] no glReadPixels") went dead.
+        if (mg_handle && !g_mgl_handle) g_mgl_handle = mg_handle;
         // Backend image for resolve_egl's fallback. It must match what
         // pojavInitOpenGL pre-loaded: TGLES for the tgles backend (MobileGlues
         // now translates GLES through TGLES instead of MetalANGLE), the
-        // libtinygl4angle/ANGLE stack when TGLES was not available.
+        // ANGLE pair for the metal/vulkan backend, the libtinygl4angle
+        // stack when TGLES was not available.
         const char *angleBackend = getenv("MOBILEGL_ANGLE_BACKEND");
         if (angleBackend && strcmp(angleBackend, "tgles") == 0) {
             dl_handle = checked_dlopen([fwPath stringByAppendingPathComponent:@"libtgles.dylib"],
                                        RTLD_LAZY | RTLD_GLOBAL, "libtgles");
+        } else if (angleBackend && strcmp(angleBackend, "vulkan") == 0) {
+            dl_handle = checked_dlopen([fwPath stringByAppendingPathComponent:@"libEGL_angle_vulkan"],
+                                       RTLD_LAZY | RTLD_GLOBAL, "libEGL_angle_vulkan");
+            if (!dl_handle) {
+                dl_handle = dlopen("@rpath/libEGL.framework/libEGL", RTLD_GLOBAL);
+            }
+        } else if (angleBackend && strcmp(angleBackend, "metal") == 0) {
+            dl_handle = checked_dlopen([fwPath stringByAppendingPathComponent:@"libEGL_angle_metal"],
+                                       RTLD_LAZY | RTLD_GLOBAL, "libEGL_angle_metal");
+            if (!dl_handle) {
+                dl_handle = dlopen("@rpath/libEGL.framework/libEGL", RTLD_GLOBAL);
+            }
         } else {
             dl_handle = dlopen("@rpath/libtinygl4angle.dylib", RTLD_GLOBAL);
             if (!dl_handle) dl_handle = dlopen([fwPath stringByAppendingPathComponent:@"libtinygl4angle.dylib"].UTF8String, RTLD_LAZY | RTLD_GLOBAL);
@@ -237,7 +270,51 @@ void dlsym_EGL() {
         if (!dl_handle) {
             NSLog(@"EGLBridge: Failed to load the GLES backend library for MobileGlues");
         }
+    } else if (useLTW) {
+        // LTW's eglCreateContext/eglMakeCurrent wrappers call the host EGL
+        // captured by proc_init() from LIBGL_EGL. Every EGL entry point the
+        // bridge resolves must come from that same image: the generic branch
+        // used to load canonical libEGL.framework/libEGL, so display/config/
+        // surface came from one EGL while LTW created the context on another,
+        // making eglCreateContext fail (0x3000).
+        PLPreloadLTWBackend();
+        const char *libgl = getenv("LIBGL_EGL");
+        if (libgl && libgl[0]) {
+            dl_handle = checked_dlopen([NSString stringWithUTF8String:libgl],
+                                       RTLD_LAZY | RTLD_GLOBAL, "LTW host EGL");
+        }
+        if (!dl_handle) {
+            const char *backend = getenv("LTW_ANGLE_BACKEND");
+            NSString *eglName = (backend && strcmp(backend, "metal") == 0)
+                ? @"libEGL_angle_metal" : @"libEGL_angle_vulkan";
+            dl_handle = checked_dlopen([fwPath stringByAppendingPathComponent:eglName],
+                                       RTLD_LAZY | RTLD_GLOBAL, "LTW host EGL fallback");
+        }
+        if (!dl_handle) {
+            NSLog(@"[EGLBridge] FATAL: LTW host EGL could not be loaded");
+            return;
+        }
+    } else if ([@ RENDERER_NAME_GL4ES isEqualToString:renderer]) {
+        // GL4ES renders through the private Metal ANGLE build. That libEGL was
+        // linked with ANGLE_CUSTOM_DISPATCH_LIBRARY=libGLESv2_angle_metal.dylib
+        // and loads the companion directly from Frameworks/, so do NOT route it
+        // through tinygl4angle (which links the shared Vulkan framework pair).
+        dl_handle = checked_dlopen([fwPath stringByAppendingPathComponent:@"libEGL_angle_metal"],
+                                   RTLD_LAZY | RTLD_GLOBAL, "libEGL_angle_metal (GL4ES Metal)");
+        if (!dl_handle) {
+            NSLog(@"[EGLBridge] GL4ES Metal EGL missing; falling back to tinygl4angle/Vulkan");
+            dl_handle = dlopen("@rpath/libtinygl4angle.dylib", RTLD_GLOBAL);
+            if (!dl_handle) dl_handle = dlopen([fwPath stringByAppendingPathComponent:@"libtinygl4angle.dylib"].UTF8String, RTLD_LAZY | RTLD_GLOBAL);
+        }
+        if (!dl_handle) {
+            dl_handle = dlopen("@rpath/libEGL.framework/libEGL", RTLD_LOCAL);
+        }
+        if (!dl_handle) {
+            NSLog(@"EGLBridge: Failed to load EGL library for GL4ES");
+            return;
+        }
     } else {
+        // MTL_ANGLE (legacy tinygl4angle) and any other non-ANGLE renderer.
         dl_handle = dlopen("@rpath/libtinygl4angle.dylib", RTLD_GLOBAL);
         if (!dl_handle) dl_handle = dlopen([fwPath stringByAppendingPathComponent:@"libtinygl4angle.dylib"].UTF8String, RTLD_LAZY | RTLD_GLOBAL);
         if (!dl_handle) {
@@ -405,6 +482,15 @@ static void log_egl_implementation(const char* tag) {
         { "eglGetDisplay",           (void*)handle.eglGetDisplay },
         { "EGL_CreateWindowSurface", dlsym(RTLD_DEFAULT, "EGL_CreateWindowSurface") },
         { "EGL_GetDisplay",          dlsym(RTLD_DEFAULT, "EGL_GetDisplay") },
+        // What a flat dlsym(RTLD_DEFAULT, ...) would hand out for the GL/EGL
+        // entry points. WebKit's libANGLE-shared.dylib is in the process
+        // default scope from app launch and is first-match by load order, so
+        // these two used to point at WebKit's ANGLE even with the selected
+        // backend pre-loaded. MobileGlues no longer uses this lookup (the
+        // launcher passes MOBILEGL_IOS_HOST_GLES/EGL), these lines only keep
+        // the shadowing visible when reading future logs.
+        { "glGetString(default)",    dlsym(RTLD_DEFAULT, "glGetString") },
+        { "eglMakeCurrent(def)",     dlsym(RTLD_DEFAULT, "eglMakeCurrent") },
         { "eglInitialize",           (void*)handle.eglInitialize },
     };
     for (size_t i = 0; i < sizeof(probes) / sizeof(probes[0]); i++) {
@@ -844,6 +930,33 @@ gl_render_window_t* gl_init_context(gl_render_window_t *share) {
         free(bundle);
         return NULL;
     }
+    if ((!bundle->config || num_configs == 0) && angleDesktopGL) {
+        // The shipped ANGLE pair advertises CLIENT_APIS=OpenGL_ES only, so the
+        // legacy tinygl4angle request for a desktop-GL config can never match.
+        // Retry with ES3: tinygl4angle drives its GL surface through ANGLE's
+        // ES 3.1 backend, and without any context LWJGL's createCapabilities
+        // aborts with "no OpenGL context current".
+        const EGLint es3_attribs[] = {
+            EGL_RED_SIZE, 8,
+            EGL_GREEN_SIZE, 8,
+            EGL_BLUE_SIZE, 8,
+            EGL_ALPHA_SIZE, 8,
+            EGL_DEPTH_SIZE, 24,
+            EGL_SURFACE_TYPE, EGL_WINDOW_BIT|EGL_PBUFFER_BIT,
+            EGL_RENDERABLE_TYPE, EGL_OPENGL_ES3_BIT,
+            EGL_NONE
+        };
+        EGLint es3_configs = 0;
+        EGLConfig es3_config = NULL;
+        NSLog(@"[EGLBridge] No desktop-GL config for %@; retrying with EGL_OPENGL_ES3_BIT", renderer);
+        if (handle.eglChooseConfig(g_EglDisplay, es3_attribs, &es3_config, 1, &es3_configs) &&
+            es3_config && es3_configs > 0) {
+            bundle->config = es3_config;
+            num_configs = es3_configs;
+            angleDesktopGL = NO;
+            NSLog(@"[EGLBridge] ES3 fallback config=%p (num_configs=%d)", (void*)es3_config, es3_configs);
+        }
+    }
     if (!bundle->config || num_configs == 0) {
         NSLog(@"[EGLBridge] No suitable EGL config found (num_configs=%d, config=%p)", num_configs, bundle->config);
         diag_dump_configs();
@@ -852,9 +965,15 @@ gl_render_window_t* gl_init_context(gl_render_window_t *share) {
     }
 
     if (!handle.eglGetConfigAttrib(g_EglDisplay, bundle->config, EGL_NATIVE_VISUAL_ID, &vid)) {
-        NSLog(@"[EGLBridge] Error eglGetConfigAttrib() failed: 0x%x", handle.eglGetError());
-        free(bundle);
-        return NULL;
+        // Not fatal: EGL_NATIVE_VISUAL_ID is informational (native visual
+        // lookup on Android/Windows). TGLES only whitelists the format/render
+        // attributes and returns EGL_BAD_ATTRIBUTE (0x3004) here; aborting on
+        // it broke MobileGlues+TGLES boot with "No supported graphics backend
+        // was found" before context creation even started. `vid` is never
+        // read after this point, so warn and let eglBindAPI/eglCreateContext
+        // surface real failures.
+        NSLog(@"[EGLBridge] WARN eglGetConfigAttrib(EGL_NATIVE_VISUAL_ID) failed: 0x%x (ignored)",
+              handle.eglGetError());
     }
 
     EGLBoolean bindResult;
@@ -1066,6 +1185,73 @@ void gl_make_current(gl_render_window_t* bundle) {
     }
 }
 
+// Post-frame GL state at swap time. The GUI-missing bug has the GUI draws
+// submitted (MGTEX lines interleaved) but invisible, so the interesting
+// question is where the LAST pass of the frame left the pipeline: a non-zero
+// draw framebuffer (GUI rendered into a texture, never composited), a clipped
+// viewport/scissor, or a stale program. Also dumps the per-unit TEXTURE_2D
+// bindings the final draw sampled.
+static void diag_dump_gl_state(int swapCount) {
+    typedef void (*glGetIntegervFn)(unsigned int, int *);
+    typedef unsigned char (*glIsEnabledFn)(unsigned int);
+    typedef unsigned int (*glGetErrorFn)(void);
+    static glGetIntegervFn getIntegerv = NULL;
+    static glIsEnabledFn isEnabled = NULL;
+    static glGetErrorFn getError = NULL;
+    if (!getIntegerv) {
+        getIntegerv = (glGetIntegervFn)resolve_gl("glGetIntegerv");
+        isEnabled = (glIsEnabledFn)resolve_gl("glIsEnabled");
+        getError = (glGetErrorFn)resolve_gl("glGetError");
+    }
+    if (!getIntegerv) {
+        NSLog(@"EGLBridge: [state #%d] no glGetIntegerv", swapCount);
+        return;
+    }
+    int vp[4] = { -1, -1, -1, -1 }, sc[4] = { -1, -1, -1, -1 };
+    int drawFB = -1, readFB = -1, prog = -1, activeTex = 0, vao = -1, readBuf = -1;
+    getIntegerv(0x0BA2 /*GL_VIEWPORT*/, vp);
+    getIntegerv(0x0C10 /*GL_SCISSOR_BOX*/, sc);
+    getIntegerv(0x8CA6 /*GL_DRAW_FRAMEBUFFER_BINDING*/, &drawFB);
+    getIntegerv(0x8CAA /*GL_READ_FRAMEBUFFER_BINDING*/, &readFB);
+    getIntegerv(0x8B8D /*GL_CURRENT_PROGRAM*/, &prog);
+    getIntegerv(0x84E0 /*GL_ACTIVE_TEXTURE*/, &activeTex);
+    getIntegerv(0x85B5 /*GL_VERTEX_ARRAY_BINDING*/, &vao);
+    getIntegerv(0x0C02 /*GL_READ_BUFFER*/, &readBuf);
+    int blend = isEnabled ? (int)isEnabled(0x0BE2 /*GL_BLEND*/) : -1;
+    int depthTest = isEnabled ? (int)isEnabled(0x0B71 /*GL_DEPTH_TEST*/) : -1;
+    int scissorTest = isEnabled ? (int)isEnabled(0x0C11 /*GL_SCISSOR_TEST*/) : -1;
+    int cullFace = isEnabled ? (int)isEnabled(0x0B44 /*GL_CULL_FACE*/) : -1;
+    int depthMask = -1;
+    getIntegerv(0x0B72 /*GL_DEPTH_WRITEMASK*/, &depthMask);
+
+    // Reading per-unit bindings needs each unit active; restore the game's
+    // active unit afterwards so the probe cannot perturb the next frame.
+    typedef void (*glActiveTextureFn)(unsigned int);
+    static glActiveTextureFn activeTexture = NULL;
+    if (!activeTexture) activeTexture = (glActiveTextureFn)resolve_gl("glActiveTexture");
+    int texUnits[4] = { -1, -1, -1, -1 };
+    if (activeTexture) {
+        for (int u = 0; u < 4; u++) {
+            activeTexture(0x84C0 /*GL_TEXTURE0*/ + (unsigned int)u);
+            getIntegerv(0x8069 /*GL_TEXTURE_BINDING_2D*/, &texUnits[u]);
+        }
+        activeTexture((unsigned int)(activeTex > 0 ? activeTex : 0x84C0));
+    }
+    NSLog(@"EGLBridge: [state #%d] viewport=%d,%d %dx%d scissor=%d,%d %dx%d scissorTest=%d blend=%d depthTest=%d depthMask=%d cull=%d drawFB=%d readFB=%d readBuf=0x%x prog=%d vao=%d activeTex=0x%x tex2D=[%d,%d,%d,%d] err=0x%x",
+          swapCount, vp[0], vp[1], vp[2], vp[3], sc[0], sc[1], sc[2], sc[3],
+          scissorTest, blend, depthTest, depthMask, cullFace, drawFB, readFB,
+          (unsigned int)readBuf, prog, vao, (unsigned int)activeTex,
+          texUnits[0], texUnits[1], texUnits[2], texUnits[3],
+          getError ? getError() : 0);
+
+    // The GUI is drawn from separate buffers in MC 26; bindings of the colour
+    // write mask tell us if a pass left colour writing disabled.
+    int colorMask[4] = { -1, -1, -1, -1 };
+    getIntegerv(0x0C23 /*GL_COLOR_WRITEMASK*/, colorMask);
+    NSLog(@"EGLBridge: [state #%d] colorMask=%d,%d,%d,%d", swapCount,
+          colorMask[0], colorMask[1], colorMask[2], colorMask[3]);
+}
+
 static void diag_read_pixels(EGLint w, EGLint h) {
     if (w <= 0 || h <= 0) {
         // Window surfaces report 0x0 before tglHostAttachMetalLayer /
@@ -1115,12 +1301,27 @@ static void diag_read_pixels(EGLint w, EGLint h) {
         // so the probe can never disturb game rendering or leave a GL error
         // behind for the game's own glGetError checks.
         int prevReadFB = 0;
-        if (getIntegerv) getIntegerv(0x8CA6 /*GL_READ_FRAMEBUFFER_BINDING*/, &prevReadFB);
-        unsigned char px2[4] = { 0xAB, 0xCD, 0xEF, 0x12 };
-        bindFB(0x8CA8 /*GL_READ_FRAMEBUFFER*/, 2);
-        readPixels(0, 0, 1, 1, 0x1908 /*GL_RGBA*/, 0x1401 /*GL_UNSIGNED_BYTE*/, px2);
-        NSLog(@"EGLBridge: [readback-fb2 @0,0] R=%u G=%u B=%u A=%u err=0x%x",
-              px2[0], px2[1], px2[2], px2[3], getError ? getError() : 0);
+        // GL_READ_FRAMEBUFFER_BINDING is 0x8CAA; 0x8CA6 is the DRAW binding.
+        if (getIntegerv) getIntegerv(0x8CAA /*GL_READ_FRAMEBUFFER_BINDING*/, &prevReadFB);
+        // Probe the game's own framebuffers: the [MGDRAW] trace showed the GUI
+        // drawn into fbo 4 (the main target read by the present), so compare
+        // the hotbar point read from fbo 4 against the window read above.
+        const int probeTargets[2] = { 2, 4 };
+        const char* probeTags[2] = { "fb2", "fb4" };
+        for (int t = 0; t < 2; t++) {
+            // GL y=0 is the bottom. (1103,0) = hotbar centre, (1103,1241) =
+            // screen centre (crosshair), (0,1241) = top-left.
+            const int probeX[3] = { 1103, 1103, 0 };
+            const int probeY[3] = { 0, 1241, 1241 };
+            for (int p = 0; p < 3; p++) {
+                unsigned char px2[4] = { 0xAB, 0xCD, 0xEF, 0x12 };
+                bindFB(0x8CA8 /*GL_READ_FRAMEBUFFER*/, (unsigned int)probeTargets[t]);
+                readPixels(probeX[p], probeY[p], 1, 1, 0x1908 /*GL_RGBA*/, 0x1401 /*GL_UNSIGNED_BYTE*/, px2);
+                NSLog(@"EGLBridge: [readback-%s @%d,%d] R=%u G=%u B=%u A=%u err=0x%x",
+                      probeTags[t], probeX[p], probeY[p], px2[0], px2[1], px2[2], px2[3],
+                      getError ? getError() : 0);
+            }
+        }
         bindFB(0x8CA8 /*GL_READ_FRAMEBUFFER*/, (unsigned int)prevReadFB);
         // Drain any error the probe itself produced.
         if (getError) while (getError() != 0) {}
@@ -1155,6 +1356,7 @@ void gl_swap_buffers() {
             }
         }
         NSLog(@"EGLBridge: [readback] egl surface %dx%d before swap #%d", w, h, swapCount);
+        diag_dump_gl_state(swapCount);
         diag_read_pixels(w, h);
         // TGLES bridge-side pixels + (at #600) gap ledger: tells black-screen
         // apart (TGLES draws nothing vs present never reaches the screen).

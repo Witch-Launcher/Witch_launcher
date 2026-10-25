@@ -216,6 +216,7 @@ void osm_swap_buffers() {
                                               provider, NULL, FALSE, kCGRenderingIntentDefault);
             if (bitmap) {
                 SurfaceViewController.surface.layer.contents = (__bridge id)bitmap;
+                pojavNoteFinalPresent();
                 CGImageRelease(bitmap);
             }
             CGDataProviderRelease(provider);

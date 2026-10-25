@@ -88,6 +88,17 @@ static CGPoint lastCenterPoint;
 }
 
 - (void)handleRightEdge:(UIPanGestureRecognizer *)sender {
+    // Widget mode owns the right-edge interaction: its menu is opened by
+    // tapping the widget, and the navigation strip is hidden. The recognizer
+    // can still be re-enabled by loadCustomControls, which used to let the
+    // game slide into the 0.7x menu state with no visible strip to drag it
+    // back. Reject the gesture and recover if that state is already active.
+    if (getPrefBool(@"general.widget_menu")) {
+        if (!self.menuView.hidden || fabs(self.rootView.transform.a - 1.0) > 0.001) {
+            [self animateMenuScale:1 duration:0.25];
+        }
+        return;
+    }
     if (lastCenterPoint.y == 0) {
         lastCenterPoint.x = self.rootView.center.x;
         lastCenterPoint.y = 1;

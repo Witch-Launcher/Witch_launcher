@@ -38,6 +38,7 @@
 #define RENDERER_NAME_GL4ES "libgl4es_114.dylib"
 #define RENDERER_NAME_MTL_ANGLE "libtinygl4angle.dylib"
 #define RENDERER_NAME_MOBILEGLUES "libmobileglues.dylib"
+#define RENDERER_NAME_MOBILEGLUES_OLD "libmobileglues_old.dylib"
 #define RENDERER_NAME_LTW "libltw.dylib"
 #define RENDERER_NAME_VK_ZINK "libOSMesa.8.dylib"
 // Vulkan → MoltenVK → Metal direct renderer. The on-disk value is kept as the
@@ -49,6 +50,15 @@
 // no ANGLE). Vanilla boot path, A11+. Selected from the renderer picker;
 // LWJGL resolves plain gl* symbols straight from this dylib.
 #define RENDERER_NAME_TGLMT "libtglmt.dylib"
+// Metal: direct Metal rendering. The launcher exposes the single host
+// CAMetalLayer through SDL_Metal_CreateView; a user-installed Metal mod
+// replaces the GPU backend and renders/presents on that layer.
+#define RENDERER_NAME_METAL "metal"
+// Metal (macOS port): same single host CAMetalLayer as RENDERER_NAME_METAL,
+// but reserved for mods ported from macOS (AppKit/NSWindow-style host code).
+// Keeping it separate means a future iOS-only API shim can be enabled here
+// without changing the plain "metal" renderer used by native iOS mods.
+#define RENDERER_NAME_METAL_MACOS "metal_macos"
 
 #define SPECIALBTN_KEYBOARD -1
 #define SPECIALBTN_TOGGLECTRL -2
@@ -101,6 +111,20 @@ BOOL DeviceHasTXM(void);
 BOOL JIT26IsLikelyDebuggerKeepAttached(void);
 
 void handle_fatal_exit(int code);
+
+// Defined in egl_bridge.m. Pre-loads the GLES backend that
+// libmobileglues.dylib resolves via dlsym(RTLD_DEFAULT) (TGLES by default;
+// ANGLE Vulkan/Metal when mobileglues.angle_backend says so).
+// Must run before MobileGlues is dlopened: JavaLauncher calls it before
+// JLI_Launch (MC 26.2 boots MobileGlues during JVM startup), and
+// pojavInitOpenGL calls it again on the GLFW path (idempotent).
+void PLPreloadMobileGluesBackend(void);
+
+// Defined in egl_bridge.m. Pre-loads the selected LTW ANGLE backend and sets
+// LIBGL_EGL before libltw's constructor runs. JavaLauncher calls it before
+// JLI_Launch (MC 26.3 loads libltw during JVM startup); pojavInitOpenGL calls
+// it again on the GLFW path (idempotent).
+void PLPreloadLTWBackend(void);
 
 // Init functions
 void init_bypassDyldLibValidation();

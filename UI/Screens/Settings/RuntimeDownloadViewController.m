@@ -145,33 +145,41 @@ typedef NS_ENUM(NSInteger, RuntimeSection) {
 
     NSMutableArray *parts = [NSMutableArray array];
     if (item.installed) {
-        [parts addObject:[NSString stringWithFormat:@"Đã cài%@", item.localVersion.length > 0 ? [@" • " stringByAppendingString:item.localVersion] : @""]];
+        if (item.localVersion.length > 0) {
+            [parts addObject:[NSString stringWithFormat:localize(@"runtime.detail.installed_version", nil), item.localVersion]];
+        } else {
+            [parts addObject:localize(@"runtime.status.installed", nil)];
+        }
         if (item.updateAvailable && item.remoteVersion.length > 0) {
-            [parts addObject:[NSString stringWithFormat:@"Có update (%@)", item.remoteVersion]];
+            [parts addObject:[NSString stringWithFormat:localize(@"runtime.detail.update_available", nil), item.remoteVersion]];
         }
     } else {
-        [parts addObject:item.remoteVersion.length > 0 ? [NSString stringWithFormat:@"Chưa cài • Mới: %@", item.remoteVersion] : @"Chưa cài"];
+        [parts addObject:item.remoteVersion.length > 0
+            ? [NSString stringWithFormat:localize(@"runtime.detail.not_installed_new", nil), item.remoteVersion]
+            : localize(@"runtime.status.not_installed", nil)];
     }
     _detailLabel.text = [parts componentsJoinedByString:@"  •  "];
     _detailLabel.textColor = (item.important && !item.installed) ? ThemeManager.shared.errorColor : ThemeManager.shared.secondaryTextColor;
 
     if (item.installed) {
         if (item.updateAvailable) {
-            _statusBadge.text = @"Cập nhật";
+            _statusBadge.text = localize(@"runtime.status.update_available", nil);
             _statusBadge.backgroundColor = ThemeManager.shared.warningColor;
         } else {
-            _statusBadge.text = @"Đã cài";
+            _statusBadge.text = localize(@"runtime.status.installed", nil);
             _statusBadge.backgroundColor = ThemeManager.shared.successColor;
         }
     } else {
-        _statusBadge.text = @"Chưa cài";
+        _statusBadge.text = localize(@"runtime.status.not_installed", nil);
         _statusBadge.backgroundColor = [UIColor grayColor];
     }
     _statusBadge.textColor = [ThemeManager.shared contrastTextColorForBackground:_statusBadge.backgroundColor];
     _sizeLabel.text = item.remoteSize > 0 ? [NSByteCountFormatter stringFromByteCount:item.remoteSize countStyle:NSByteCountFormatterCountStyleMemory] : @"";
 
-    NSString *action = (item.installed && !item.updateAvailable) ? @"Xóa" : (item.updateAvailable ? @"Cập nhật" : @"Tải");
-    UIColor *actionBg = ([action isEqualToString:@"Xóa"] ? ThemeManager.shared.errorColor : ThemeManager.shared.accentColor);
+    BOOL isDelete = item.installed && !item.updateAvailable;
+    NSString *action = isDelete ? localize(@"runtime.action.delete", nil)
+        : (item.updateAvailable ? localize(@"runtime.action.update", nil) : localize(@"runtime.action.download", nil));
+    UIColor *actionBg = isDelete ? ThemeManager.shared.errorColor : ThemeManager.shared.accentColor;
     [_actionButton setTitle:action forState:UIControlStateNormal];
     [_actionButton setTitleColor:[ThemeManager.shared contrastTextColorForBackground:actionBg] forState:UIControlStateNormal];
     _actionButton.backgroundColor = actionBg;
@@ -212,7 +220,7 @@ typedef NS_ENUM(NSInteger, RuntimeSection) {
 
 - (void)viewDidLoad {
     [super viewDidLoad];
-    self.title = self.onboardingMode ? @"Tải Runtime" : @"Runtime JDK / LWJGL";
+    self.title = self.onboardingMode ? localize(@"runtime.title.onboarding", nil) : localize(@"runtime.title.manage", nil);
     // Opaque base under the frost: without this the previous screen shows
     // through the pushed page.
     self.view.backgroundColor = ThemeManager.shared.contentBackgroundColor;
@@ -264,7 +272,7 @@ typedef NS_ENUM(NSInteger, RuntimeSection) {
     [self buildInstallPanel];
 
     if (self.onboardingMode) {
-        self.navigationItem.rightBarButtonItem = [[UIBarButtonItem alloc] initWithTitle:@"Bỏ qua" style:UIBarButtonItemStylePlain target:self action:@selector(dismissSelf)];
+        self.navigationItem.rightBarButtonItem = [[UIBarButtonItem alloc] initWithTitle:localize(@"runtime.skip", nil) style:UIBarButtonItemStylePlain target:self action:@selector(dismissSelf)];
     }
     UIBarButtonItem *refresh = [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemRefresh target:self action:@selector(reload)];
     self.navigationItem.leftBarButtonItem = refresh;
@@ -375,10 +383,10 @@ typedef NS_ENUM(NSInteger, RuntimeSection) {
             [weakSelf.tableView.refreshControl endRefreshing];
             if (error && items.count == 0) {
                 weakSelf.emptyLabel.hidden = NO;
-                weakSelf.emptyLabel.text = [NSString stringWithFormat:@"Không tải được manifest.\n%@", error.localizedDescription];
+                weakSelf.emptyLabel.text = [NSString stringWithFormat:localize(@"runtime.manifest_load_failed", nil), error.localizedDescription];
                 return;
             }
-            if (error) [ErrorPresenter showNetworkError:error message:@"Dùng cache local (không tải được manifest)."];
+            if (error) [ErrorPresenter showNetworkError:error message:localize(@"runtime.manifest_cache_fallback", nil)];
             NSMutableArray *jdk = [NSMutableArray array];
             NSMutableArray *lwjgl = [NSMutableArray array];
             for (WitchRuntimeItem *it in items) {
@@ -411,8 +419,8 @@ typedef NS_ENUM(NSInteger, RuntimeSection) {
 }
 
 - (NSString *)tableView:(UITableView *)tableView titleForFooterInSection:(NSInteger)section {
-    if (section == 1) return @"JDK 8 cho Minecraft ≤ 1.16.5 • 17/21 cho 1.17 – 1.21 • 25 cho bản mới.";
-    if (section == 2) return @"3.3.3 cho bản cũ • 3.3.6 trung gian • 3.4.1 mới nhất.";
+    if (section == 1) return localize(@"runtime.jdk_footer", nil);
+    if (section == 2) return localize(@"runtime.lwjgl_footer", nil);
     return nil;
 }
 
@@ -428,8 +436,8 @@ typedef NS_ENUM(NSInteger, RuntimeSection) {
         cell.textLabel.textColor = ThemeManager.shared.secondaryTextColor;
         cell.textLabel.textAlignment = NSTextAlignmentCenter;
         cell.textLabel.text = self.onboardingMode
-            ? @"Bản Simple không kèm sẵn JDK/LWJGL. Chấm đỏ = quan trọng. Bấm Tải rồi dùng."
-            : @"Chấm đỏ = khuyến nghị tải. Bấm vào dòng để Tải / Cập nhật / Xóa.";
+            ? localize(@"runtime.onboarding_hint", nil)
+            : localize(@"runtime.list_hint", nil);
         return cell;
     }
     RuntimeItemCell *cell = [tableView dequeueReusableCellWithIdentifier:@"RuntimeItemCell" forIndexPath:indexPath];
@@ -454,16 +462,16 @@ typedef NS_ENUM(NSInteger, RuntimeSection) {
     if (_isWorking) return;
     NSMutableArray *opts = [NSMutableArray array];
     if (item.installed && !item.updateAvailable) {
-        [opts addObject:@{@"title": @"Xóa", @"icon": @"trash", @"destructive": @YES}];
+        [opts addObject:@{@"key": @"delete", @"title": localize(@"runtime.action.delete", nil), @"icon": @"trash", @"destructive": @YES}];
     } else {
-        if (item.updateAvailable) [opts addObject:@{@"title": @"Cập nhật", @"icon": @"arrow.triangle.2.circlepath"}];
-        else [opts addObject:@{@"title": @"Tải về", @"icon": @"tray.and.arrow.down"}];
-        if (item.installed) [opts addObject:@{@"title": @"Xóa bản cũ", @"icon": @"trash", @"destructive": @YES}];
+        if (item.updateAvailable) [opts addObject:@{@"key": @"update", @"title": localize(@"runtime.action.update", nil), @"icon": @"arrow.triangle.2.circlepath"}];
+        else [opts addObject:@{@"key": @"download", @"title": localize(@"runtime.action.download", nil), @"icon": @"tray.and.arrow.down"}];
+        if (item.installed) [opts addObject:@{@"key": @"delete_old", @"title": localize(@"runtime.action.delete_old", nil), @"icon": @"trash", @"destructive": @YES}];
     }
     __weak typeof(self) weakSelf = self;
     [AppSheet showOptionsWithTitle:item.displayName message:nil options:opts selectedIndex:NSNotFound selection:^(NSInteger idx) {
-        NSString *t = opts[idx][@"title"];
-        if ([t isEqualToString:@"Xóa"] || [t isEqualToString:@"Xóa bản cũ"]) [weakSelf confirmDelete:item];
+        NSString *action = opts[idx][@"key"];
+        if ([action isEqualToString:@"delete"] || [action isEqualToString:@"delete_old"]) [weakSelf confirmDelete:item];
         else [weakSelf performDownload:item];
     }];
 }
@@ -509,11 +517,11 @@ typedef NS_ENUM(NSInteger, RuntimeSection) {
 
 - (void)confirmDelete:(WitchRuntimeItem *)item {
     __weak typeof(self) weakSelf = self;
-    [AppSheet showConfirmWithTitle:@"Xác nhận xóa" message:[NSString stringWithFormat:@"Bạn có chắc muốn xóa %@?", item.displayName] confirmTitle:@"Xóa" destructive:YES onConfirm:^{
+    [AppSheet showConfirmWithTitle:localize(@"runtime.delete.title", nil) message:[NSString stringWithFormat:localize(@"runtime.delete.message", nil), item.displayName] confirmTitle:localize(@"runtime.action.delete", nil) destructive:YES onConfirm:^{
         NSError *error = nil;
         BOOL ok = [WitchRuntimeService.shared deleteItem:item error:&error];
-        if (ok) [ErrorPresenter showToast:@"Đã xóa." success:YES];
-        else [ErrorPresenter showFileError:@"Xóa" path:item.displayName error:error];
+        if (ok) [ErrorPresenter showToast:localize(@"runtime.deleted", nil) success:YES];
+        else [ErrorPresenter showFileError:localize(@"runtime.action.delete", nil) path:item.displayName error:error];
         [weakSelf reload];
     }];
 }

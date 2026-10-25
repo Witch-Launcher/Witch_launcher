@@ -7,6 +7,7 @@
 #import "LauncherPreferences.h"
 #import "ios_uikit_bridge.h"
 #import "AmethystBlurView.h"
+#import "UIView+LiquidGlass.h"
 #import "DownloadManager.h"
 #import "HapticManager.h"
 #import "PLProfiles.h"
@@ -48,6 +49,11 @@
 - (void)viewDidLoad {
     [super viewDidLoad];
     [self setupViews];
+    // Escape hatch for an over-zoomed launcher whose gear button is off-screen.
+    UITapGestureRecognizer *resetScale = [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(resetUIScaleGesture:)];
+    resetScale.numberOfTapsRequired = 2;
+    resetScale.numberOfTouchesRequired = 2;
+    [self.view addGestureRecognizer:resetScale];
     [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(updateColors) name:ThemeDidChangeNotification object:nil];
     [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(updateShellBorderPath) name:ShellBorderDidChangeNotification object:nil];
     [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(updateColors) name:AmethystBlurIntensityDidChangeNotification object:nil];
@@ -60,7 +66,7 @@
     _topBar = [[TopBarView alloc] initWithFrame:CGRectZero];
     _topBar.delegate = self;
     [self.view addSubview:_topBar];
-    [AmethystBlurView installInView:_topBar prefKey:@"amethyst_topbar_blur"];
+    [AmethystBlurView installInView:_topBar prefKey:@"amethyst_topbar_blur" glassEligible:YES];
 
     _backgroundImageView = [[UIImageView alloc] init];
     _backgroundImageView.contentMode = UIViewContentModeScaleAspectFill;
@@ -84,7 +90,7 @@
     [self addChildViewController:_sidebarVC];
     [self.view addSubview:_sidebarVC.view];
     [_sidebarVC didMoveToParentViewController:self];
-    [AmethystBlurView installInView:_sidebarVC.view prefKey:@"amethyst_sidebar_blur"];
+    [AmethystBlurView installInView:_sidebarVC.view prefKey:@"amethyst_sidebar_blur" glassEligible:YES];
 
     _sidebarBorder = [[UIView alloc] init];
     _sidebarBorder.hidden = YES; // superseded by floating borders
@@ -99,7 +105,7 @@
     [self addChildViewController:_rightPanelVC];
     [self.view addSubview:_rightPanelVC.view];
     [_rightPanelVC didMoveToParentViewController:self];
-    [AmethystBlurView installInView:_rightPanelVC.view prefKey:@"amethyst_rightpanel_blur"];
+    [AmethystBlurView installInView:_rightPanelVC.view prefKey:@"amethyst_rightpanel_blur" glassEligible:YES];
 
     // Portrait floating launch: single circle overlay (panel hidden in portrait).
     _floatingLaunchBtn = [UIButton buttonWithType:UIButtonTypeSystem];
@@ -135,6 +141,7 @@
     _quickPanelBtn.accessibilityLabel = @"Versions and account";
     _quickPanelBtn.hidden = YES;
     [_quickPanelBtn addTarget:self action:@selector(toggleQuickPanel) forControlEvents:UIControlEventTouchUpInside];
+    [_quickPanelBtn lg_enableLiquidGlassWithTint:nil cornerRadius:24.0 maskedCorners:kCALayerMinXMinYCorner | kCALayerMaxXMinYCorner | kCALayerMinXMaxYCorner | kCALayerMaxXMaxYCorner];
     [self.view addSubview:_quickPanelBtn];
 
     // Quick panel: dim + card sliding from the right edge.
@@ -152,6 +159,7 @@
     _quickPanel.layer.borderWidth = 1;
     _quickPanel.layer.borderColor = [ThemeManager.shared.accentColor colorWithAlphaComponent:0.30].CGColor;
     _quickPanel.hidden = YES;
+    [_quickPanel lg_enableLiquidGlassWithTint:nil cornerRadius:18.0 maskedCorners:kCALayerMinXMinYCorner | kCALayerMaxXMinYCorner | kCALayerMinXMaxYCorner | kCALayerMaxXMaxYCorner];
     [self.view addSubview:_quickPanel];
 
     UILabel *quickTitle = [[UILabel alloc] init];
@@ -444,6 +452,7 @@
     v.layer.maskedCorners = corners;
     // User-adjustable border thickness (Appearance > Bar Border Thickness).
     v.clipsToBounds = YES;
+    [v setNeedsLayout];
 }
 
 - (void)viewSafeAreaInsetsDidChange {
@@ -465,8 +474,15 @@
     [self updateShellBorderPath];
     [self.view setNeedsLayout];
     [self updateFloatingLaunch];
-    _quickPanel.backgroundColor = ThemeManager.shared.cardBackgroundColor;
-    _quickPanelBtn.tintColor = ThemeManager.shared.accentColor;
+    _quickPanel.backgroundColor = theme.cardBackgroundColor;
+    _quickPanelBtn.backgroundColor = theme.cardBackgroundColor;
+    _quickPanelBtn.tintColor = theme.accentColor;
+    _quickPanel.layer.borderColor = [theme.accentColor colorWithAlphaComponent:0.30].CGColor;
+    _quickPanelBtn.layer.borderColor = [theme.accentColor colorWithAlphaComponent:0.35].CGColor;
+    [_quickPanel lg_setLiquidGlassBaseColor:theme.cardBackgroundColor];
+    [_quickPanelBtn lg_setLiquidGlassBaseColor:theme.cardBackgroundColor];
+    [_quickPanel lg_refreshLiquidGlass];
+    [_quickPanelBtn lg_refreshLiquidGlass];
     [_quickTable reloadData];
     if (theme.backgroundVideoURL) {
         [self setupBackgroundVideo:theme.backgroundVideoURL];
@@ -853,6 +869,13 @@
         _floatingLaunchBtn.accessibilityLabel = @"Play (long-press for account)";
     }
     _floatingLaunchBtn.tintColor = theme.buttonTextColor;
+}
+
+- (void)resetUIScaleGesture:(UITapGestureRecognizer *)gesture {
+    if (ThemeManager.shared.uiScale == 1.0) return;
+    ThemeManager.shared.uiScale = 1.0;
+    [ThemeManager.shared applyUIScaleToAllWindows];
+    [[HapticManager shared] play:HapticTypeMedium];
 }
 
 - (void)dealloc {

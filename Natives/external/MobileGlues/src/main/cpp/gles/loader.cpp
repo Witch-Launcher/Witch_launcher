@@ -7,6 +7,7 @@
 
 #include <cstring>
 #include <cstdio>
+#include <cstdlib>
 #include <limits.h>
 #include <string>
 #include "loader.h"
@@ -127,12 +128,28 @@ void* open_lib(const char** names, const char* override, bool* used_override) {
 
 void load_libs() {
 #if defined(__APPLE__)
-    // On iOS the launcher pre-loads the ANGLE/Metal backend with RTLD_GLOBAL
-    // before dlopen'ing this library. Using RTLD_DEFAULT lets dlsym find those
-    // pre-loaded symbols regardless of load order. RTLD_NEXT (the old value) only
-    // searches libraries loaded AFTER this one, which misses the pre-loaded ANGLE.
-    gles = RTLD_DEFAULT;
-    egl = RTLD_DEFAULT;
+    // The launcher pre-loads the backend it selected (TGLES or an ANGLE pair)
+    // and passes us its exact path in the environment. RTLD_DEFAULT is not
+    // usable here: WebKit's libANGLE-shared.dylib sits in the process default
+    // scope from app launch, so it wins every flat lookup against the backend
+    // pre-loaded later (dlsym(RTLD_DEFAULT, ...) is load-order first-match).
+    // MobileGlues would then silently drive WebKit's ANGLE instead of the
+    // selected backend -- its host glGetString returns NULL outside WebKit's
+    // own GL state, which used to crash the renderer through
+    // std::string((char*)NULL). Explicit handles keep the selected backend
+    // authoritative; RTLD_DEFAULT stays as the fallback when no path was given.
+    const char* gles_host = getenv("MOBILEGL_IOS_HOST_GLES");
+    const char* egl_host = getenv("MOBILEGL_IOS_HOST_EGL");
+    if (gles_host != nullptr && gles_host[0] != '\0') {
+        void* host = dlopen(gles_host, RTLD_LAZY | RTLD_LOCAL);
+        if (host != nullptr) gles = host;
+    }
+    if (egl_host != nullptr && egl_host[0] != '\0') {
+        void* host = dlopen(egl_host, RTLD_LAZY | RTLD_LOCAL);
+        if (host != nullptr) egl = host;
+    }
+    if (gles == nullptr) gles = RTLD_DEFAULT;
+    if (egl == nullptr) egl = RTLD_DEFAULT;
 #else
     const bool want_angle = global_settings.angle == AngleMode::Enabled;
     std::string gles_angle, egl_angle;
@@ -270,8 +287,21 @@ void InitGLESCapabilities() {
           g_gles_caps.GL_EXT_depth_clamp, g_gles_caps.GL_EXT_sRGB_write_control, g_gles_caps.GL_NV_polygon_mode,
           g_gles_caps.GL_OES_sample_shading)
 
-    if (g_gles_caps.GL_EXT_buffer_storage) {
+    // ANGLE over MoltenVK advertises EXT_buffer_storage, but Minecraft's
+    // persistent-mapping path then uploads through a buffer whose mapped range
+    // the Vulkan backend cannot keep coherent; the frame never reaches the
+    // screen. Turning the optional ARB extension off makes MG take its mutable
+    // buffer path. Metal and the native GLES backends are untouched, and
+    // MG_VULKAN_BUFFER_STORAGE=1 keeps the old behaviour available for testing.
+    const char* mg_backend = getenv("MOBILEGL_ANGLE_BACKEND");
+    const char* angle_platform = getenv("ANGLE_DEFAULT_PLATFORM");
+    const bool angle_vulkan = (mg_backend != nullptr && strcmp(mg_backend, "vulkan") == 0) ||
+                              (angle_platform != nullptr && strcmp(angle_platform, "vulkan") == 0);
+    const bool keep_buffer_storage = getenv("MG_VULKAN_BUFFER_STORAGE") != nullptr;
+    if (g_gles_caps.GL_EXT_buffer_storage && (!angle_vulkan || keep_buffer_storage)) {
         AppendExtension("GL_ARB_buffer_storage");
+    } else if (g_gles_caps.GL_EXT_buffer_storage && angle_vulkan) {
+        LOG_W_FORCE("[MobileGlues] ARB_buffer_storage disabled on the ANGLE Vulkan backend");
     }
 
     if (g_gles_caps.GL_EXT_disjoint_timer_query && global_settings.ext_timer_query) {

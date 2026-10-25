@@ -75,9 +75,9 @@
 - (NSString *)channelDisplayName:(WitchUpdateChannel)channel {
     switch (channel) {
         case WitchUpdateChannelBeta: return @"Beta (pre-release)";
-        case WitchUpdateChannelStable: return @"Ổn định (release)";
+        case WitchUpdateChannelStable: return localize(@"launcher_update.channel.stable", nil);
         default: {
-            return [self isBetaBuild] ? @"Tự động (Beta)" : @"Tự động (Ổn định)";
+            return [self isBetaBuild] ? localize(@"launcher_update.channel.auto_beta", nil) : localize(@"launcher_update.channel.auto_stable", nil);
         }
     }
 }
@@ -162,7 +162,7 @@
         }
         if (json[@"message"] && !json[@"tag_name"]) {
             // e.g. {"message":"Not Found"} when tag doesn't exist yet
-            NSError *e = [NSError errorWithDomain:@"WitchUpdate" code:404 userInfo:@{NSLocalizedDescriptionKey: [NSString stringWithFormat:@"Release '%@' chưa có: %@", tag, json[@"message"]]}];
+            NSError *e = [NSError errorWithDomain:@"WitchUpdate" code:404 userInfo:@{NSLocalizedDescriptionKey: [NSString stringWithFormat:localize(@"launcher_update.error.missing_release", nil), tag, json[@"message"]]}];
             dispatch_async(dispatch_get_main_queue(), ^{ completion(nil, NO, e); });
             return;
         }
@@ -263,7 +263,7 @@
 - (void)downloadAsset:(WitchReleaseAsset *)asset progress:(void(^)(float))progress completion:(void(^)(NSURL *, NSError *))completion {
     NSURL *url = [NSURL URLWithString:asset.downloadURL];
     if (!url) {
-        completion(nil, [NSError errorWithDomain:@"WitchUpdate" code:-2 userInfo:@{NSLocalizedDescriptionKey: @"URL tải không hợp lệ"}]);
+        completion(nil, [NSError errorWithDomain:@"WitchUpdate" code:-2 userInfo:@{NSLocalizedDescriptionKey: localize(@"launcher_update.error.invalid_url", nil)}]);
         return;
     }
     NSURLSessionDownloadTask *task = [_session downloadTaskWithURL:url completionHandler:^(NSURL *tmp, NSURLResponse *resp, NSError *error) {
@@ -361,16 +361,16 @@
         WitchReleaseAsset *any = [info assetForVariant:WitchAppVariantFull isTrollStore:[self isTrollStoreInstall]];
         if (!any) any = info.assets.firstObject;
         if (!any) return;
-        [AppSheet showConfirmWithTitle:@"Có bản mới"
-                               message:[NSString stringWithFormat:@"Kênh %@ (%@) có bản mới.\nMở màn hình Cập nhật để chọn bản và cài đặt.", [self channelDisplayName:[self selectedChannel]], [self effectiveTag]]
-                          confirmTitle:@"Cập nhật"
+        [AppSheet showConfirmWithTitle:localize(@"launcher_update.new.title", nil)
+                               message:[NSString stringWithFormat:localize(@"launcher_update.new.message", nil), [self channelDisplayName:[self selectedChannel]], [self effectiveTag]]
+                          confirmTitle:localize(@"Update", nil)
                            destructive:NO
                              onConfirm:^{
             setPrefObject(@"witch.update_last_prompt", @([[NSDate date] timeIntervalSince1970]));
             Class cls = NSClassFromString(@"LauncherUpdateViewController");
             if (cls) {
                 UIViewController *uvc = [[cls alloc] init];
-                uvc.title = @"Cập nhật";
+                uvc.title = localize(@"Update", nil);
                 [vc.navigationController pushViewController:uvc animated:YES];
                 if (!vc.navigationController) [vc presentViewController:[[UINavigationController alloc] initWithRootViewController:uvc] animated:YES completion:nil];
             }

@@ -96,6 +96,14 @@ $(OUTPUTDIR)/lwjgl-3.3.3.jar: $(CLASSES)
 	@cd $(OUTPUTDIR)/lwjgl33_lib && find ../../libs/lwjgl -name 'lwjgl*.jar' ! -name 'lwjgl.jar' -exec $(BOOTJDK)/jar -xf {} \; && rm -rf META-INF
 	@cd $(OUTPUTDIR)/lwjgl33_lib && $(BOOTJDK)/jar -xf "../../libs/lwjgl/lwjgl.jar" && rm -rf META-INF
 	@cp -R $(OUTPUTDIR)/lwjgl/* $(OUTPUTDIR)/lwjgl33_lib/
+	# Re-apply the LWJGL2 compatibility overloads from the launcher jar. The
+	# official lwjgl.jar extracted above overwrites GL11/GL20/ARBShaderObjects
+	# with builds that lack the ByteBuffer variants used by MC 1.8.9.
+	@cd $(OUTPUTDIR)/lwjgl33_lib && $(BOOTJDK)/jar -xf "../../../lwjgl.jar" \
+		org/lwjgl/opengl/GL11.class \
+		org/lwjgl/opengl/GL20.class \
+		org/lwjgl/opengl/ARBShaderObjects.class \
+		org/lwjgl/openal/AL10.class
 	@$(BOOTJDK)/jar -cf $@ -C $(OUTPUTDIR)/lwjgl33_lib .
 
 # Build LWJGL 3.3.6
@@ -107,6 +115,12 @@ $(OUTPUTDIR)/lwjgl-3.3.6.jar: $(CLASSES)
 	@cd $(OUTPUTDIR)/lwjgl36_lib && find ../../libs/lwjgl36 -name 'lwjgl*.jar' ! -name 'lwjgl.jar' -exec $(BOOTJDK)/jar -xf {} \; && rm -rf META-INF
 	@cd $(OUTPUTDIR)/lwjgl36_lib && $(BOOTJDK)/jar -xf "../../libs/lwjgl36/lwjgl.jar" && rm -rf META-INF
 	@cp -R $(OUTPUTDIR)/lwjgl/* $(OUTPUTDIR)/lwjgl36_lib/
+	# See lwjgl-3.3.3: re-apply the LWJGL2 ByteBuffer compat overloads.
+	@cd $(OUTPUTDIR)/lwjgl36_lib && $(BOOTJDK)/jar -xf "../../../lwjgl.jar" \
+		org/lwjgl/opengl/GL11.class \
+		org/lwjgl/opengl/GL20.class \
+		org/lwjgl/opengl/ARBShaderObjects.class \
+		org/lwjgl/openal/AL10.class
 	@$(BOOTJDK)/jar -cf $@ -C $(OUTPUTDIR)/lwjgl36_lib .
 
 $(OUTPUTDIR)/lwjgl-3.4.1.jar: $(CLASSES)
@@ -121,6 +135,12 @@ $(OUTPUTDIR)/lwjgl-3.4.1.jar: $(CLASSES)
 	# lwjgl-tinyfd.jar (int API) due to alphabetical extraction order.
 	@cd $(OUTPUTDIR)/lwjgl41_lib && $(BOOTJDK)/jar -xf "../../libs/lwjgl41/lwjgl-tinyfd.jar"
 	@cp -R $(OUTPUTDIR)/lwjgl/* $(OUTPUTDIR)/lwjgl41_lib/
+	# See lwjgl-3.3.3: re-apply the LWJGL2 ByteBuffer compat overloads.
+	@cd $(OUTPUTDIR)/lwjgl41_lib && $(BOOTJDK)/jar -xf "../../../lwjgl.jar" \
+		org/lwjgl/opengl/GL11.class \
+		org/lwjgl/opengl/GL20.class \
+		org/lwjgl/opengl/ARBShaderObjects.class \
+		org/lwjgl/openal/AL10.class
 	# Forge 26.2 builds a JPMS layer containing the classpath jars; the merged
 	# org/jspecify from lwjgl-core would split the package with the real
 	# org.jspecify:jspecify jar -> "Split package: org.jspecify". Strip it.
@@ -131,10 +151,14 @@ $(OUTPUTDIR)/lwjgl-3.4.1.jar: $(CLASSES)
 $(OUTPUTDIR)/lwjgl.jar: $(OUTPUTDIR)/lwjgl-3.3.3.jar
 	@cp $< $@
 
-$(OUTPUTDIR)/patchjna_agent.jar: $(CLASSES)
+METAL_COMPAT_PATCHES := $(shell find $(SOURCEDIR)/patchjna_agent/patched -type f 2>/dev/null)
+
+$(OUTPUTDIR)/patchjna_agent.jar: $(CLASSES) $(METAL_COMPAT_PATCHES)
 	@set -e
 	@mv $(basename $@)/com/sun/jna/Platform.class $(basename $@)/com/sun/jna/Platform.class.patch
 	@echo "Creating $@"
+	@rm -rf $(basename $@)/patched
+	@cp -R $(SOURCEDIR)/patchjna_agent/patched $(basename $@)/
 	@$(BOOTJDK)/jar -cfm $@ $(SOURCEDIR)/patchjna_agent.txt -C $(basename $@) .
 
 $(OUTPUTDIR)/cacio-init-agent.jar: $(CLASSES)

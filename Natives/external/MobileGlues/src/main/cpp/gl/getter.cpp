@@ -283,7 +283,10 @@ std::string getBeforeThirdSpace(const std::string& str) {
 }
 
 std::string getGpuName() {
-    std::string gpuName = std::string((char*)GLES.glGetString(GL_RENDERER));
+    // A backend queried before its context exists returns NULL (TGLES does
+    // this in RequireContext); std::string(NULL) would strlen a null pointer.
+    const char* rawGpuName = (const char*)GLES.glGetString(GL_RENDERER);
+    std::string gpuName = rawGpuName ? rawGpuName : "";
 
     if (gpuName.empty()) {
         return "<unknown>";
@@ -347,7 +350,8 @@ void set_es_version() {
 }
 
 std::string getGLESName() {
-    std::string version((const char*)GLES.glGetString(GL_VERSION));
+    const char* rawVersion = (const char*)GLES.glGetString(GL_VERSION);
+    std::string version = rawVersion ? rawVersion : "";
     // Same two formats as set_es_version: start at "OpenGL ES" (TGLES puts a
     // vendor word in front of it, ANGLE does not) and cut at the space after
     // major.minor, so GL_RENDERER reads "OpenGL ES 3.2" on both backends.

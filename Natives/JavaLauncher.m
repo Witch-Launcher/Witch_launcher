@@ -157,7 +157,7 @@ void init_loadDefaultEnv() {
     setenv("MESA_GL_VERSION_OVERRIDE", "4.1", 1);
 
     // Suppress [mvk-info] log spam (swapchain creation, etc.)
-    setenv("MVK_CONFIG_LOG_LEVEL", "2", 1);
+    setenv("MVK_CONFIG_LOG_LEVEL", getPrefBool(@"general.debug_logging") ? "2" : "0", 1);
 
     // MoltenVK 1.4.1 argument buffers break chunk lightmap texelFetch on A11
     // (world renders dark). Disable to keep lighting correct.
@@ -207,14 +207,16 @@ void init_loadMobileGluesConfig() {
     id enableExtGL43 = getPrefObject(@"mobileglues.enable_ext_gl43");
     if (enableExtGL43) config[@"enableExtGL43"] = [enableExtGL43 boolValue] ? @1 : @0;
 
-    id enableAngle = getPrefObject(@"mobileglues.enable_angle");
-    if (enableAngle) config[@"enableANGLE"] = [enableAngle boolValue] ? @1 : @0;
-
     id angleBackend = getPrefObject(@"mobileglues.angle_backend");
-    if (angleBackend) {
-        NSString *backend = [angleBackend isKindOfClass:[NSString class]] ? (NSString *)angleBackend : @"metal";
-        config[@"angleBackend"] = backend;
-    }
+    NSString *backend = (angleBackend && [angleBackend isKindOfClass:[NSString class]])
+        ? (NSString *)angleBackend : @"tgles";
+    BOOL angleEnabled = [backend isEqualToString:@"metal"] || [backend isEqualToString:@"vulkan"];
+    // ForceEnable (3), not EnableIfPossible (1): MG's hasVulkan12() probe
+    // returns false on iOS, so "if possible" always resolves to Disabled even
+    // when the launcher explicitly selected an ANGLE host. Disabled also flips
+    // MG into bufferCoherentAsFlush mode, which does not match an ANGLE host.
+    config[@"enableANGLE"] = angleEnabled ? @3 : @0;
+    config[@"angleBackend"] = angleEnabled ? backend : @"tgles";
 
     id enableNoError = getPrefObject(@"mobileglues.enable_no_error");
     if (enableNoError) config[@"enableNoError"] = @([enableNoError intValue]);
@@ -259,6 +261,15 @@ void init_loadMobileGluesConfig() {
 
     id fsr1Setting = getPrefObject(@"mobileglues.fsr1_setting");
     if (fsr1Setting) config[@"fsr1Setting"] = @([fsr1Setting intValue]);
+
+    // ANGLE hosts on iOS render the batched GUI pass incorrectly with the
+    // auto-selected indirect/multi-draw backends. Keep the default on the
+    // unrolled path (legacy MG: multidrawMode=DrawElements; current MG:
+    // multidrawOrder=unroll) unless the user explicitly picked another mode.
+    if (angleEnabled && (!multidrawMode || [multidrawMode intValue] == 0)) {
+        config[@"multidrawMode"] = @4;
+        config[@"multidrawOrder"] = @"unroll";
+    }
 
     NSError *error = nil;
     NSData *jsonData = [NSJSONSerialization dataWithJSONObject:config options:NSJSONWritingPrettyPrinted error:&error];
@@ -328,7 +339,7 @@ void init_loadLTWConfig() {
 
     // ANGLE backend selection for LTW: metal (MetalANGLE, ES 3.0) or vulkan (VulkanANGLE, ES 3.2)
     id angleBackend = getPrefObject(@"video.ltw_angle_backend");
-    NSString *backend = (angleBackend && [angleBackend isKindOfClass:[NSString class]]) ? (NSString *)angleBackend : @"metal";
+    NSString *backend = (angleBackend && [angleBackend isKindOfClass:[NSString class]]) ? (NSString *)angleBackend : @"vulkan";
     setenv("LTW_ANGLE_BACKEND", backend.UTF8String, 1);
     NSLog(@"[JavaLauncher] LTW ANGLE backend: %@", backend);
 }
@@ -647,8 +658,38 @@ int launchJVMWithArgs(NSString *username, id launchTarget, int width, int height
 
     // Setup AMETHYST_RENDERER
     NSString *renderer = [PLProfiles resolveKeyForCurrentProfile:@"renderer"];
+    if (!isExperimentalMetalRendererEnabled() &&
+        ([renderer isEqualToString:@ RENDERER_NAME_METAL] ||
+         [renderer isEqualToString:@ RENDERER_NAME_METAL_MACOS])) {
+        NSLog(@"[JavaLauncher] Experimental Metal renderer '%@' is disabled; falling back to auto (set WITCH_ENABLE_METAL_RENDERERS=1 to enable)", renderer);
+        renderer = @"auto";
+    }
     NSLog(@"[JavaLauncher] RENDERER is set to %@\n", renderer);
     setenv("AMETHYST_RENDERER", renderer.UTF8String, 1);
+    if ([renderer isEqualToString:@ RENDERER_NAME_METAL_MACOS]) {
+        // Opt-in marker for mods that were ported from macOS and need the
+        // compatibility path. The plain "metal" renderer stays untouched.
+        setenv("WITCH_METAL_MACOS", "1", 1);
+        NSLog(@"[JavaLauncher] Metal macOS-port compatibility enabled");
+    }
+
+    // MobileGlues resolves every EGL/GLES symbol with dlsym(RTLD_DEFAULT) at
+    // load time, and MC 26.2's NativeLibrariesBootstrap dlopens it during JVM
+    // startup (opengl.libname) before any GLFW/SDL window hook can run — the
+    // old pojavInitOpenGL preload comes too late and the backend probe hangs.
+    // Pre-load the backend now, while still before JLI_Launch. GLFW-path
+    // games re-run the same idempotent preload from pojavInitOpenGL.
+    // Explicit renderers only: "auto" can still resolve to GL4ES from the
+    // game's context-version hint and must not inherit a MobileGlues backend.
+    if ([renderer isEqualToString:@ RENDERER_NAME_MOBILEGLUES] ||
+        [renderer isEqualToString:@ RENDERER_NAME_MOLTENVK]) {
+        PLPreloadMobileGluesBackend();
+    } else if ([renderer isEqualToString:@ RENDERER_NAME_LTW]) {
+        // libltw's constructor dlopens LIBGL_EGL when LWJGL loads it during JVM
+        // startup. MC 26.3 reaches that point before pojavInitOpenGL, so the
+        // backend and environment must be ready here or proc_init() aborts.
+        PLPreloadLTWBackend();
+    }
 
     // The TouchController mod (0.3.1-alpha13+) only activates its iOS
     // platform when TOUCH_CONTROLLER_PROXY_SOCKET is set. It must be set
@@ -679,6 +720,7 @@ int launchJVMWithArgs(NSString *username, id launchTarget, int width, int height
         getenv("POJAV_HOME"), getPrefObject(@"general.game_directory"),
         [PLProfiles resolveKeyForCurrentProfile:@"gameDir"]]
         .stringByStandardizingPath;
+    setenv("POJAV_GAME_DIR_PROFILE", gameDir.UTF8String, 1);
     NSLog(@"[JavaLauncher] Looking for Java %d or later", minVersion);
     NSString *javaHome = getSelectedJavaHome(defaultJRETag, minVersion);
 
@@ -896,11 +938,56 @@ int launchJVMWithArgs(NSString *username, id launchTarget, int width, int height
             // (br_* table), không qua EGL.
             openglLibName = RENDERER_NAME_TGLMT;
             NSLog(@"[JavaLauncher] opengl.libname → %s (TGLMT native GL 4.6)", openglLibName);
+        } else if (strcmp(glLibName, RENDERER_NAME_METAL) == 0 ||
+                   strcmp(glLibName, RENDERER_NAME_METAL_MACOS) == 0) {
+            // MC 26.3's NativeLibrariesBootstrap calls GL.getFunctionProvider()
+            // before any backend is picked. A Metal mod replaces the GPU
+            // backend, so this library only has to export gl* symbols; no GL
+            // context, bridge table or swapchain is created for it.
+            openglLibName = RENDERER_NAME_TGLMT;
+            NSLog(@"[JavaLauncher] opengl.libname → %s (Metal/%s mod: symbol provider only)",
+                  openglLibName, glLibName);
         } else if (strcmp(glLibName, RENDERER_NAME_MOLTENVK) == 0) {
             // MoltenVK: use MobileGlues for GL entry points
             openglLibName = RENDERER_NAME_MOBILEGLUES;
             NSLog(@"[JavaLauncher] opengl.libname → %s (MoltenVK fallback)", openglLibName);
-        } else if ([ZinkConfig isZinkUsingEGL]) {
+        } else if (strcmp(glLibName, RENDERER_NAME_MOBILEGLUES) == 0) {
+            openglLibName = RENDERER_NAME_MOBILEGLUES;
+            id angleBackendPref = getPrefObject(@"mobileglues.angle_backend");
+            NSString *angleBackend = (angleBackendPref && [angleBackendPref isKindOfClass:[NSString class]])
+                ? (NSString *)angleBackendPref : @"tgles";
+            if ([angleBackend isEqualToString:@"metal"]) {
+                // MC 26.x drives the new DSA/vertex-attrib renderer. Legacy MG
+                // 1.3.5 predates those fixes and drops the whole GUI pass, so
+                // use the current MG there. Keep legacy for 1.21.x, where the
+                // current MG + ANGLE Metal combination was previously broken.
+                BOOL useLegacyMetal = YES;
+                if (versionId.length > 0) {
+                    NSInteger major = [[versionId componentsSeparatedByString:@"."].firstObject integerValue];
+                    if (major >= 26) useLegacyMetal = NO;
+                }
+                setenv("MOBILEGL_LEGACY_METAL", useLegacyMetal ? "1" : "0", 1);
+                NSString *legacyPath = [[NSBundle mainBundle].privateFrameworksPath
+                    stringByAppendingPathComponent:@ RENDERER_NAME_MOBILEGLUES_OLD];
+                if (useLegacyMetal && [fm fileExistsAtPath:legacyPath]) {
+                    openglLibName = RENDERER_NAME_MOBILEGLUES_OLD;
+                    NSLog(@"[JavaLauncher] opengl.libname → %s (MobileGlues legacy + ANGLE Metal)", openglLibName);
+                } else {
+                    NSLog(@"[JavaLauncher] opengl.libname → %s (MobileGlues current + ANGLE Metal, legacy=%d)",
+                          openglLibName, useLegacyMetal);
+                }
+            } else {
+                NSLog(@"[JavaLauncher] opengl.libname → %s (MobileGlues current, backend=%@)",
+                      openglLibName, angleBackend);
+            }
+        } else if (strcmp(glLibName, RENDERER_NAME_LTW) == 0) {
+            // LTW exports both the GL wrappers and eglGetProcAddress; loading it
+            // directly is what makes LD's gl* calls go through the LTW override
+            // chain. Do NOT let the global Zink/Mesa preference below hijack
+            // this with libEGL_Mesa26.dylib.
+            openglLibName = RENDERER_NAME_LTW;
+            NSLog(@"[JavaLauncher] opengl.libname → %s (LTW GL wrapper)", openglLibName);
+        } else if (strncmp(glLibName, "libOSMesa", 9) == 0 && [ZinkConfig isZinkUsingEGL]) {
             // Mesa 26.2.2 (EGL): LWJGL must resolve GL procs from libEGL.1.dylib
             openglLibName = "libEGL_Mesa26.dylib";
             NSLog(@"[JavaLauncher] opengl.libname → %s (Mesa 26.2.2 EGL mode)", openglLibName);

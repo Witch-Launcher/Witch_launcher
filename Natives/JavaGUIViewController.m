@@ -10,6 +10,7 @@
 #import "ios_uikit_bridge.h"
 #import "CursorManager.h"
 #import "CursorTypeManager.h"
+#import "UIKit+hook.h"
 #include "glfw_keycodes.h"
 #include "utils.h"
 
@@ -260,6 +261,7 @@ void AWTInputBridge_sendKey(int keycode) {
     self.surfaceScrollView.maximumZoomScale = 5;
     self.surfaceScrollView.scrollEnabled = NO;
     [self.view addSubview:self.surfaceScrollView];
+    AmethystSetSystemPointerHidden(self.view, virtualMouseEnabled);
 
     // Observe cursor type changes from the game (via GLFW/SDL3 JNI calls)
     [[NSNotificationCenter defaultCenter] addObserverForName:CursorTypeDidChangeNotification
@@ -327,11 +329,7 @@ void AWTInputBridge_sendKey(int keycode) {
     dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
         CADisplayLink *displayLink = [CADisplayLink displayLinkWithTarget:surfaceView selector:@selector(refreshBuffer)];
         if (@available(iOS 15.0, tvOS 15.0, *)) {
-            if(getPrefBool(@"video.max_framerate")) {
-                displayLink.preferredFrameRateRange = CAFrameRateRangeMake(30, 120, 120);
-            } else {
-                displayLink.preferredFrameRateRange = CAFrameRateRangeMake(30, 60, 60);
-            }
+            displayLink.preferredFrameRateRange = CAFrameRateRangeMake(30, 120, 120);
         }
         [displayLink addToRunLoop:NSRunLoop.currentRunLoop forMode:NSRunLoopCommonModes];
         [NSRunLoop.currentRunLoop run];
@@ -482,6 +480,7 @@ dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
                     virtualMouseEnabled = !virtualMouseEnabled;
                     self.surfaceScrollView.mousePointerView.hidden = !virtualMouseEnabled;
                     setPrefBool(@"control.virtmouse_enable", virtualMouseEnabled);
+                    AmethystSetSystemPointerHidden(self.view, virtualMouseEnabled);
                     break;
 
                 case SPECIALBTN_LOGOUTPUT:

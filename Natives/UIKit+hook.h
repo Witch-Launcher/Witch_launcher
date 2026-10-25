@@ -60,6 +60,8 @@ extern BOOL _UISolariumEnabled(void) __attribute__((weak_import));
 + (UIWindow *)externalWindow;
 @end
 
+void AmethystSetSystemPointerHidden(UIView *view, BOOL hidden);
+
 @protocol _UIPointerInteractionDriver<NSObject>
 @property (assign, nonatomic) UIView *view;
 @end

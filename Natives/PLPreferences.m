@@ -19,6 +19,7 @@
             @"cosmetica": @YES,
             @"debug_logging": @(WitchFeatureDefaultEnabled(@"logs")),
             @"liquid_glass": @NO,
+            @"auto_hide_launching": @YES,
             @"widget_menu": @NO,
             @"widget_show_fps": @NO,
             @"widget_show_cpu": @NO,
@@ -38,7 +39,6 @@
         @"video": @{ // Video & Audio
             @"renderer": @"auto",
             @"resolution": @(100),
-            @"max_framerate": @YES,
             @"performance_hud": @NO,
             @"fullscreen_airplay": @YES,
             @"silence_other_audio": @NO,
@@ -46,7 +46,7 @@
             @"allow_microphone": @NO,
             @"microphone_source": @"auto",
             @"moltenvk_version": @"1.4",
-            @"ltw_angle_backend": @"metal"
+            @"ltw_angle_backend": @"vulkan"
         }.mutableCopy,
         @"control": @{
             @"default_ctrl": @"default.json",
@@ -59,9 +59,9 @@
             @"gesture_hotbar": @YES,
             @"gesture_hold": @YES,
             @"doubletap_offhand": @YES,
-            @"gesture_scroll": @YES,
+            @"keyboard_editing_toolbar": @NO,
             @"disable_haptics": @NO,
-            @"slideable_hotbar": @NO,
+            @"slideable_hotbar": @YES,
             @"press_duration": @(400),
             @"button_scale": @(100),
             @"mouse_scale": @(100),
@@ -119,8 +119,11 @@
             @"allocated_memory": [NSNumber numberWithFloat:roundf((NSProcessInfo.processInfo.physicalMemory / 1048576) * 0.25)]
         }.mutableCopy,
         @"mobileglues": @{
+            // Backend picker is the single source of truth:
+            // tgles = TGLES (off), metal = ANGLE Metal, vulkan = ANGLE Vulkan.
+            // enable_angle is kept as a mirrored legacy key for old configs.
             @"enable_angle": @NO,
-            @"angle_backend": @"metal",
+            @"angle_backend": @"tgles",
             @"enable_no_error": @(2),
             @"enable_ext_timer_query": @YES,
             @"enable_ext_compute_shader": @NO,
@@ -324,6 +327,24 @@
             NSDebugLog(@"[PLPreferences] Set default vaule: %@: %@", key, value);
             pref[section][key] = value;
         }
+    }
+
+    // MobileGlues backend used to be a switch (enable_angle) plus a picker
+    // that defaulted to "metal". That made "backend=Vulkan + switch off" look
+    // like a Vulkan selection but still run TGLES. Normalize the legacy pair
+    // once: off+metal meant the TGLES default, while an old ON switch or any
+    // Vulkan value was an explicit ANGLE choice.
+    NSMutableDictionary *mgPref = pref[@"mobileglues"];
+    NSMutableDictionary *internalPref = pref[@"internal"];
+    if ([mgPref isKindOfClass:[NSMutableDictionary class]] &&
+        [internalPref isKindOfClass:[NSMutableDictionary class]] &&
+        ![internalPref[@"mg_backend_picker_v1"] boolValue]) {
+        NSString *backend = mgPref[@"angle_backend"];
+        if (![backend isKindOfClass:[NSString class]] || [backend isEqualToString:@"metal"]) {
+            mgPref[@"angle_backend"] = [mgPref[@"enable_angle"] boolValue] ? @"metal" : @"tgles";
+        }
+        mgPref[@"enable_angle"] = @([mgPref[@"angle_backend"] isEqualToString:@"tgles"] ? NO : YES);
+        internalPref[@"mg_backend_picker_v1"] = @YES;
     }
 
     // Branch-scoped feature defaults are applied once per branch switch:

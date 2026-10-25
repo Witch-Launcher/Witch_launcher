@@ -8,7 +8,8 @@ typedef NS_ENUM(NSUInteger, DownloadType) {
     DownloadTypeResourcePack,
     DownloadTypeMap,
     DownloadTypeServer,
-    DownloadTypeModpack
+    DownloadTypeModpack,
+    DownloadTypeLaunch
 };
 
 @interface DownloadTask : NSObject

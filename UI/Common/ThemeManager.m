@@ -29,11 +29,13 @@ NSString * const ShellBorderDidChangeNotification = @"ShellBorderDidChangeNotifi
         _colorOverrides = [NSMutableDictionary dictionary];
         _backgroundBlurIntensity = 0;
         _uiOpacity = 1.0;
+        _uiScale = 1.0;
         // Manual Dark/Light must stick on windows created later (sheets,
         // pickers, dialogs) — they default to Unspecified (follow system).
         [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(windowBecameKey:) name:UIWindowDidBecomeKeyNotification object:nil];
         [[NSUserDefaults standardUserDefaults] registerDefaults:@{
             @"amethyst_ui_opacity": @1.0,
+            @"amethyst_ui_scale": @1.0,
             @"amethyst_ui_border_enabled": @NO,
             @"amethyst_ui_border_width": @1.0,
             @"amethyst_ui_border_radius": @10.0,
@@ -66,6 +68,8 @@ NSString * const ShellBorderDidChangeNotification = @"ShellBorderDidChangeNotifi
 
     _backgroundBlurIntensity = [defaults floatForKey:@"amethyst_bg_blur"];
     _uiOpacity = [defaults floatForKey:@"amethyst_ui_opacity"];
+    _uiScale = [defaults floatForKey:@"amethyst_ui_scale"];
+    if (_uiScale < 0.5 || _uiScale > 1.5) _uiScale = 1.0;
     _uiBorderEnabled = [defaults boolForKey:@"amethyst_ui_border_enabled"];
     _uiBorderWidth = [defaults floatForKey:@"amethyst_ui_border_width"];
     _uiBorderCornerRadius = [defaults floatForKey:@"amethyst_ui_border_radius"];
@@ -185,6 +189,33 @@ NSString * const ShellBorderDidChangeNotification = @"ShellBorderDidChangeNotifi
     _uiOpacity = uiOpacity;
     [[NSUserDefaults standardUserDefaults] setFloat:uiOpacity forKey:@"amethyst_ui_opacity"];
     [self broadcastThemeChange];
+}
+
+- (void)setUiScale:(CGFloat)uiScale {
+    _uiScale = MAX(0.5, MIN(uiScale, 1.5));
+    [[NSUserDefaults standardUserDefaults] setFloat:_uiScale forKey:@"amethyst_ui_scale"];
+}
+
+- (void)applyUIScaleToAllWindows {
+    Class rootClass = NSClassFromString(@"AmethystRootViewController");
+    CGFloat scale = _uiScale;
+    if (scale <= 0) scale = 1.0;
+
+    void (^apply)(UIWindow *) = ^(UIWindow *window) {
+        if (![window isKindOfClass:[UIWindow class]]) return;
+        // Scale only the launcher shell. Presented sheets (notably Settings)
+        // and the Minecraft surface stay at 100%, so their Done/close buttons
+        // never get pushed off-screen and game coordinates stay 1:1.
+        if (rootClass && [window.rootViewController isKindOfClass:rootClass]) {
+            window.rootViewController.view.transform = CGAffineTransformMakeScale(scale, scale);
+        }
+    };
+
+    for (UIScene *scene in UIApplication.sharedApplication.connectedScenes) {
+        if (![scene isKindOfClass:[UIWindowScene class]]) continue;
+        for (UIWindow *window in ((UIWindowScene *)scene).windows) apply(window);
+    }
+    for (UIWindow *window in UIApplication.sharedApplication.windows) apply(window);
 }
 
 - (void)updateBackgroundBlur {
@@ -423,14 +454,17 @@ NSString * const ShellBorderDidChangeNotification = @"ShellBorderDidChangeNotifi
     for (UIWindow *window in UIApplication.sharedApplication.windows) {
         window.overrideUserInterfaceStyle = _interfaceStyle;
     }
+    [self applyUIScaleToAllWindows];
     [self broadcastThemeChange];
 }
 
 - (void)windowBecameKey:(NSNotification *)note {
-    if (_interfaceStyle == UIUserInterfaceStyleUnspecified) return;
     UIWindow *window = note.object;
     if ([window isKindOfClass:[UIWindow class]]) {
-        window.overrideUserInterfaceStyle = _interfaceStyle;
+        if (_interfaceStyle != UIUserInterfaceStyleUnspecified) {
+            window.overrideUserInterfaceStyle = _interfaceStyle;
+        }
+        [self applyUIScaleToAllWindows];
     }
 }
 
@@ -481,6 +515,7 @@ NSString * const ShellBorderDidChangeNotification = @"ShellBorderDidChangeNotifi
     [defaults removeObjectForKey:@"amethyst_bg_video"];
     [defaults removeObjectForKey:@"amethyst_bg_blur"];
     [defaults removeObjectForKey:@"amethyst_ui_opacity"];
+    [defaults removeObjectForKey:@"amethyst_ui_scale"];
     [defaults removeObjectForKey:@"amethyst_settings_blur"];
 
     _backgroundImage = nil;
@@ -488,12 +523,14 @@ NSString * const ShellBorderDidChangeNotification = @"ShellBorderDidChangeNotifi
     _backgroundVideoURL = nil;
     _backgroundBlurIntensity = 0;
     _uiOpacity = 1.0;
+    _uiScale = 1.0;
 
     NSString *imgPath = amethyst_hidden_path(@"amethyst_bg.png");
     [[NSFileManager defaultManager] removeItemAtPath:imgPath error:nil];
     NSString *videoPath = amethyst_hidden_path(@"amethyst_bg.mp4");
     [[NSFileManager defaultManager] removeItemAtPath:videoPath error:nil];
 
+    [self applyUIScaleToAllWindows];
     [self broadcastThemeChange];
 }
 

@@ -27,6 +27,8 @@ void glGetTexImage( 	GLenum target,
                        GLenum type,
                        void * pixels);
 
+void glGetFloatv(GLenum pname, GLfloat* data);
+
 void glGetQueryObjectiv( 	GLuint id,
                             GLenum pname,
                             GLint * params);
@@ -49,6 +51,7 @@ GLESOVERRIDE(glShaderSource)
 GLESOVERRIDE(glTexImage2D)
 GLESOVERRIDE(glDebugMessageControl)
 GLESOVERRIDE(glGetString)
+GLESOVERRIDE(glGetFloatv)
 GLESOVERRIDE(glEnable)
 GLESOVERRIDE(glMultiDrawArrays)
 GLESOVERRIDE(glMultiDrawElements)
@@ -137,3 +140,5 @@ GLESOVERRIDE(glMapBufferRange)
 GLESOVERRIDE(glFlushMappedBufferRange)
 GLESOVERRIDE(glMultiDrawElementsIndirect)
 GLESOVERRIDE(glMultiDrawArraysIndirect)
+GLESOVERRIDE(glClearTexImage)
+GLESOVERRIDE(glClearTexSubImage)

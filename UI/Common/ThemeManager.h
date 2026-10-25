@@ -44,6 +44,9 @@ extern NSString * const ShellBorderDidChangeNotification;
 @property (nonatomic, readonly) UIColor *contentBackgroundColor;
 @property (nonatomic) CGFloat backgroundBlurIntensity;
 @property (nonatomic) CGFloat uiOpacity;
+// Global visual scale for the launcher shell, browser-zoom style. 1.0 = 100%.
+// Presented sheets and the Minecraft surface are deliberately excluded.
+@property (nonatomic) CGFloat uiScale;
 @property (nonatomic) BOOL uiBorderEnabled;
 @property (nonatomic, readonly) UIColor *uiBorderColor;
 @property (nonatomic) CGFloat uiBorderWidth;
@@ -57,6 +60,7 @@ extern NSString * const ShellBorderDidChangeNotification;
 - (UIColor *)colorOverrideForKey:(NSString *)key darkMode:(BOOL)dark;
 - (void)applyInterfaceStyle:(UIUserInterfaceStyle)style;
 - (void)applyThemeToAllWindows;
+- (void)applyUIScaleToAllWindows;
 - (void)resetAppearance;
 - (void)broadcastThemeChange;
 - (void)notifyShellBorderChange;

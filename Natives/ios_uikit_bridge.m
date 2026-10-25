@@ -102,6 +102,8 @@ void UIKit_launchMinecraftSurfaceVC(UIWindow* window, NSDictionary* metadata) {
             window.alpha = 1;
             window.rootViewController = [[SurfaceViewController alloc] initWithMetadata:metadata];
             [window makeKeyAndVisible];
+            // The launcher UI may be zoomed; the game surface must stay 1:1.
+            [ThemeManager.shared applyUIScaleToAllWindows];
         }];
     });
 }
@@ -141,6 +143,7 @@ void UIKit_launchJarFileWithArgs(UIWindow* window, NSString* jarPath, NSArray<NS
             window.alpha = 1;
             window.rootViewController = [[SurfaceViewController alloc] initWithJarPath:jarPath args:args minJavaVersion:minJavaVersion];
             [window makeKeyAndVisible];
+            [ThemeManager.shared applyUIScaleToAllWindows];
         }];
     });
 }
@@ -185,6 +188,7 @@ void UIKit_returnToSplitView() {
                 window.rootViewController = rootVC;
             }
             [window makeKeyAndVisible];
+            [ThemeManager.shared applyUIScaleToAllWindows];
         }];
     });
     // A headless installer run (Forge/NeoForge) writes versions/<id> while the

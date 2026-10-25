@@ -1,6 +1,6 @@
 #import "AppSheet.h"
 #import "ThemeManager.h"
-#import "AmethystBlurView.h"
+#import "UIView+LiquidGlass.h"
 #import "HapticManager.h"
 #import "utils.h"
 #import <objc/runtime.h>
@@ -61,14 +61,14 @@ typedef NS_ENUM(NSUInteger, AppSheetMode) {
 
     _cardView = [[UIView alloc] init];
     _cardView.translatesAutoresizingMaskIntoConstraints = NO;
-    _cardView.backgroundColor = [theme.cardBackgroundColor colorWithAlphaComponent:0.96];
+    _cardView.backgroundColor = [theme.cardBackgroundColor colorWithAlphaComponent:1.0];
     _cardView.layer.cornerRadius = 22;
     _cardView.layer.maskedCorners = kCALayerMinXMinYCorner | kCALayerMaxXMinYCorner;
     _cardView.clipsToBounds = YES;
     _cardView.layer.borderWidth = 1;
     _cardView.layer.borderColor = [theme.accentColor colorWithAlphaComponent:0.30].CGColor;
+    [_cardView lg_enableLiquidGlassWithTint:nil cornerRadius:22.0 maskedCorners:kCALayerMinXMinYCorner | kCALayerMaxXMinYCorner];
     [self.view addSubview:_cardView];
-    [AmethystBlurView installInView:_cardView];
 
     UIView *grabber = [[UIView alloc] init];
     grabber.translatesAutoresizingMaskIntoConstraints = NO;
@@ -509,9 +509,11 @@ typedef NS_ENUM(NSUInteger, AppSheetMode) {
     }
     window = [[UIWindow alloc] initWithWindowScene:scene];
     window.windowLevel = UIWindowLevelAlert;
+    window.overrideUserInterfaceStyle = ThemeManager.shared.interfaceStyle;
     window.backgroundColor = [UIColor clearColor];
     window.rootViewController = host;
     window.hidden = NO;
+    [ThemeManager.shared applyUIScaleToAllWindows];
     objc_setAssociatedObject(host, "appSheetWindow", window, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     return window;
 }

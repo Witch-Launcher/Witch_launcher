@@ -37,6 +37,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.jar.JarFile;
 import java.util.zip.ZipEntry;
+import java.util.zip.ZipFile;
 import net.kdt.pojavlaunch.uikit.UIKit;
 import net.kdt.pojavlaunch.utils.JSONUtils;
 import net.kdt.pojavlaunch.value.DependentLibrary;
@@ -166,6 +167,13 @@ public final class Tools {
             neutralizeFabricLwjgl(versionInfo);
         }
         String[] launchArgs = getMinecraftArgs(profile, versionInfo);
+        String renderer = System.getenv("AMETHYST_RENDERER");
+        if (renderer != null && !renderer.isEmpty() && supportsForcedGraphicsBackend(versionInfo)) {
+            String[] withBackend = Arrays.copyOf(launchArgs, launchArgs.length + 2);
+            withBackend[launchArgs.length] = "--graphicsBackend";
+            withBackend[launchArgs.length + 1] = "libMoltenVK.dylib".equals(renderer) ? "vulkan" : "opengl";
+            launchArgs = withBackend;
+        }
         System.out.println("[DEBUG] Minecraft Args: " + Arrays.toString(launchArgs));
 
         final String launchClassPath = generateLaunchClassPath(versionInfo);
@@ -440,6 +448,17 @@ public final class Tools {
         );
         // Tools.dialogOnUiThread(this, "Result args", Arrays.asList(argsFromJson).toString());
         return argsFromJson;
+    }
+
+    public static boolean supportsForcedGraphicsBackend(JMinecraftVersionList.Version versionInfo) {
+        try {
+            File jar = new File(DIR_HOME_VERSION + "/" + versionInfo.id + "/" + versionInfo.id + ".jar");
+            try (ZipFile zip = new ZipFile(jar)) {
+                return zip.getEntry("net/minecraft/client/PreferredGraphicsApi.class") != null;
+            }
+        } catch (Throwable t) {
+            return false;
+        }
     }
 
     public static String fromStringArray(String[] strArr) {

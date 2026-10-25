@@ -5,6 +5,7 @@
 #include <assert.h>
 #include <dlfcn.h>
 
+#include <dispatch/dispatch.h>
 #include <pthread.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -32,18 +33,32 @@ void aasdl_setMainReady(NSString *nativesDir);
 int clientAPI;
 __thread basic_render_window_t* currentBundle;
 
-// Counts presented game frames at the Metal layer: whichever backend renders
-// (Zink/MoltenVK, MobileGlues, ANGLE-Metal, TGLMT), every presented frame
-// passes through -[CAMetalLayer nextDrawable], so counting there is both
-// accurate and renderer-independent. The old render-side counters
-// (pojavSwapBuffers swaps, mobileglues_swap_count dlsym) were removed: the
-// shipped libmobileglues no longer exports its symbol.
+// FPS is counted only at the final presentation layer, never at the
+// render-side swap. Metal-backed backends (MobileGlues/TGLES, ANGLE-Metal,
+// TGLMT) present through -[CAMetalLayer nextDrawable], so the swizzle below
+// sees exactly one call per displayed frame. Zink/Mesa is the exception: its
+// Vulkan commands still reach Metal via MoltenVK/KosmicKrisp, but the finished
+// frame is read back and handed to Core Animation through CALayer.contents
+// (GameSurfaceView uses a plain CALayer, there is no drawable). Its final
+// presentation is that contents assignment, counted by
+// pojavNoteFinalPresent(). The old render-side counters (pojavSwapBuffers
+// swaps, mobileglues_swap_count dlsym) remain removed.
 #include <dlfcn.h>
 #include <stdatomic.h>
 #import <objc/runtime.h>
 #import <QuartzCore/QuartzCore.h>
 
 static atomic_uint_fast64_t widgetMetalFrameCount;
+static atomic_uint_fast64_t widgetFinalPresentFrameCount;
+
+void pojavNoteFinalPresent(void) {
+    atomic_fetch_add_explicit(&widgetFinalPresentFrameCount, 1, memory_order_relaxed);
+}
+
+static BOOL widgetUsesFinalPresentCounter(void) {
+    const char *renderer = getenv("AMETHYST_RENDERER");
+    return renderer != NULL && strncmp(renderer, "libOSMesa", 9) == 0;
+}
 
 // Installed at image load, before any window exists.
 static id (*widgetOriginalNextDrawable)(id, SEL);
@@ -103,17 +118,187 @@ static void egl_preloadVulkanLoader(NSString *frameworks) {
                        "vulkan loader (ANGLE custom)");
 }
 
-static NSString* getANGLEHostEGLDylibPath(void) {
-    id ver = getPrefObject(@"video.ltw_angle_backend");
-    NSString *backend = (ver && [ver isKindOfClass:[NSString class]]) ? (NSString *)ver : @"metal";
+// ANGLE's bundled Vulkan loader (Frameworks/libvulkan.dylib) only finds a
+// driver through an ICD manifest. The MoltenVK iOS dylib is already shipped,
+// but no JSON points at it, so eglInitialize() returns EGL_NOT_INITIALIZED
+// (0x3001). Write the manifest at runtime: the app bundle is read-only and the
+// install container path changes on every install. Both loader variables are
+// set because VK_DRIVER_FILES wins on newer loaders and VK_ICD_FILENAMES is
+// the legacy name. Must run before ANGLE's first eglInitialize().
+static void ensureMoltenVKICD(void) {
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        NSString *frameworks = NSBundle.mainBundle.privateFrameworksPath;
+        NSString *mvk = [frameworks stringByAppendingPathComponent:@"libMoltenVK.dylib"];
+        if (![NSFileManager.defaultManager fileExistsAtPath:mvk]) {
+            NSLog(@"[EGLBridge] MoltenVK ICD skipped: %@ is missing", mvk);
+            return;
+        }
+        NSDictionary *manifest = @{
+            @"file_format_version": @"1.0.0",
+            @"ICD": @{
+                @"library_path": mvk,
+                @"api_version": @"1.4.0",
+                @"is_portability_driver": @YES,
+            },
+        };
+        NSError *error = nil;
+        NSData *data = [NSJSONSerialization dataWithJSONObject:manifest
+                                                       options:NSJSONWritingPrettyPrinted
+                                                         error:&error];
+        NSString *jsonPath = [NSTemporaryDirectory() stringByAppendingPathComponent:@"MoltenVK_icd.json"];
+        if (!data || ![data writeToFile:jsonPath atomically:YES]) {
+            NSLog(@"[EGLBridge] MoltenVK ICD write failed: %@ (%@)", jsonPath, error.localizedDescription);
+            return;
+        }
+        setenv("VK_ICD_FILENAMES", jsonPath.fileSystemRepresentation, 1);
+        setenv("VK_DRIVER_FILES", jsonPath.fileSystemRepresentation, 1);
+        NSLog(@"[EGLBridge] MoltenVK ICD ready: %@ (driver: %@)", jsonPath, mvk);
+    });
+}
+
+// Pre-load LTW's ANGLE backend and export LIBGL_EGL before libltw is dlopened.
+// libltw's constructor runs during JVM startup on MC 26.3 (LWJGL loads
+// opengl.libname), long before pojavInitOpenGL; its proc.c aborts when
+// LIBGL_EGL cannot be opened. Keep this idempotent: both JavaLauncher and the
+// GLFW window hook call it.
+void PLPreloadLTWBackend(void) {
     NSString *frameworks = NSBundle.mainBundle.privateFrameworksPath;
-    if ([backend isEqualToString:@"vulkan"]) {
-        return [frameworks stringByAppendingPathComponent:@"libEGL_angle_vulkan"];
+    id ltwAnglePref = getPrefObject(@"video.ltw_angle_backend");
+    NSString *backend = (ltwAnglePref && [ltwAnglePref isKindOfClass:[NSString class]])
+        ? (NSString *)ltwAnglePref : @"vulkan";
+    BOOL useMetal = [backend isEqualToString:@"metal"];
+    if (!useMetal) backend = @"vulkan";
+
+    NSString *glesPath;
+    NSString *eglPath;
+    const char *glesLabel;
+    if (useMetal) {
+        NSLog(@"[EGLBridge] LTW + ANGLE Metal (ES 3.0)");
+        // libEGL_angle_metal dispatches through ANGLE_CUSTOM_DISPATCH_LIBRARY
+        // and opens the .dylib by exact name. Preload that same image; the
+        // extensionless copy is a separate image and would split EGL/GL state.
+        glesPath = [frameworks stringByAppendingPathComponent:@"libGLESv2_angle_metal.dylib"];
+        if (![NSFileManager.defaultManager fileExistsAtPath:glesPath]) {
+            glesPath = [frameworks stringByAppendingPathComponent:@"libGLESv2_angle_metal"];
+        }
+        eglPath = [frameworks stringByAppendingPathComponent:@"libEGL_angle_metal"];
+        glesLabel = "LTW ANGLE GLES (metal)";
+    } else {
+        NSLog(@"[EGLBridge] LTW + ANGLE Vulkan (ES 3.2, via MoltenVK)");
+        // ANGLE's bundled Vulkan loader finds MoltenVK only through the
+        // runtime ICD manifest; without it eglInitialize() fails 0x3001.
+        ensureMoltenVKICD();
+        egl_checked_dlopen(getMoltenVKDylibPath(), "MoltenVK (LTW VulkanANGLE)");
+        egl_preloadVulkanLoader(frameworks);
+        glesPath = [frameworks stringByAppendingPathComponent:@"libGLESv2_angle_vulkan"];
+        eglPath = [frameworks stringByAppendingPathComponent:@"libEGL_angle_vulkan"];
+        glesLabel = "LTW ANGLE GLES (vulkan)";
     }
-    return [frameworks stringByAppendingPathComponent:@"libEGL_angle_metal"];
+
+    egl_checked_dlopen(glesPath, glesLabel);
+    egl_checked_dlopen(eglPath, "LTW host EGL");
+    setenv("LIBGL_EGL", eglPath.fileSystemRepresentation, 1);
+    setenv("LTW_ANGLE_BACKEND", backend.UTF8String, 1);
+    NSLog(@"[EGLBridge] LTW preload ready: backend=%@ LIBGL_EGL=%@", backend, eglPath);
+}
+
+// Pre-load the GLES backend that libmobileglues.dylib resolves in load_libs().
+// Must run before MobileGlues is dlopened:
+//  - MC 26.2's NativeLibrariesBootstrap loads it during JVM startup, before
+//    any GLFW/SDL window hook, so JavaLauncher.m calls this right before
+//    JLI_Launch;
+//  - the GLFW path calls it again from pojavInitOpenGL.
+// Idempotent: dlopen() returns the same handle for an already-loaded image
+// and setenv() just overwrites, so running it twice is harmless.
+//
+// Besides pre-loading, this hands MobileGlues the exact backend paths via
+// MOBILEGL_IOS_HOST_GLES / MOBILEGL_IOS_HOST_EGL. MG's loader used to resolve
+// its host through dlsym(RTLD_DEFAULT), which is load-order first-match:
+// WebKit's libANGLE-shared.dylib (in the process default scope since app
+// launch) always beat the backend pre-loaded here, so MG silently drove
+// WebKit's ANGLE and crashed in glGetString(GL_RENDERER) -> std::string(NULL).
+// With the env paths MG opens the selected backend directly.
+//
+// Backend selection is the mobileglues.angle_backend picker (single control):
+//  - tgles (default): TGLES (libtgles.dylib), a GLES 3.2 -> Metal layer that
+//    exports the public egl*/gl* names directly. It replaces MetalANGLE,
+//    which used to arrive via libtinygl4angle and its libEGL/libGLESv2
+//    framework dependencies.
+//  - vulkan: ANGLE translates GLES -> Vulkan -> MoltenVK -> Metal (ES 3.2).
+//    ensureMoltenVKICD() (GL4ES session helper) is required because ANGLE's
+//    bundled Vulkan loader only finds a driver through the manifest, else
+//    eglInitialize() fails with 0x3001.
+//  - metal: ANGLE translates GLES -> Metal. libEGL_angle_metal is built with
+//    ANGLE_CUSTOM_DISPATCH_LIBRARY=libGLESv2_angle_metal.dylib (ModuleDir
+//    lookup), so MG is pointed at that .dylib — preloading the extensionless
+//    copy instead would create a separate image and split EGL state from GL.
+void PLPreloadMobileGluesBackend(void) {
+    NSString *frameworks = NSBundle.mainBundle.privateFrameworksPath;
+
+    id backendPref = getPrefObject(@"mobileglues.angle_backend");
+    NSString *backend = (backendPref && [backendPref isKindOfClass:[NSString class]])
+        ? (NSString *)backendPref : @"tgles";
+    BOOL useANGLE = [backend isEqualToString:@"metal"] || [backend isEqualToString:@"vulkan"];
+
+    if (useANGLE) {
+        NSString *glesPath;
+        NSString *eglPath;
+        if ([backend isEqualToString:@"vulkan"]) {
+            NSLog(@"[EGLBridge] MobileGlues + ANGLE Vulkan (ES 3.2, via MoltenVK)");
+            ensureMoltenVKICD();
+            egl_checked_dlopen(getMoltenVKDylibPath(), "MoltenVK (MobileGlues VulkanANGLE)");
+            egl_preloadVulkanLoader(frameworks);
+            glesPath = [frameworks stringByAppendingPathComponent:@"libGLESv2_angle_vulkan"];
+            eglPath = [frameworks stringByAppendingPathComponent:@"libEGL_angle_vulkan"];
+        } else {
+            NSLog(@"[EGLBridge] MobileGlues + ANGLE Metal (ES 3.0-era)");
+            // libEGL_angle_metal dispatches through ANGLE_CUSTOM_DISPATCH_LIBRARY
+            // = libGLESv2_angle_metal.dylib. Point MG at the exact same file:
+            // opening the extensionless copy would be a second image, so EGL
+            // would make a context current in one image while MG calls GL in
+            // the other (glGetString returns NULL, all limits read 0).
+            glesPath = [frameworks stringByAppendingPathComponent:@"libGLESv2_angle_metal.dylib"];
+            if (![NSFileManager.defaultManager fileExistsAtPath:glesPath]) {
+                glesPath = [frameworks stringByAppendingPathComponent:@"libGLESv2_angle_metal"];
+            }
+            eglPath = [frameworks stringByAppendingPathComponent:@"libEGL_angle_metal"];
+        }
+        egl_checked_dlopen(glesPath, "MobileGlues ANGLE GLES");
+        egl_checked_dlopen(eglPath, "MobileGlues ANGLE EGL");
+        setenv("MOBILEGL_IOS_HOST_GLES", glesPath.fileSystemRepresentation, 1);
+        setenv("MOBILEGL_IOS_HOST_EGL", eglPath.fileSystemRepresentation, 1);
+        setenv("MOBILEGL_ANGLE_BACKEND", backend.UTF8String, 1);
+        setenv("MOBILEGL_ESPRYT_USE_ANGLE", "1", 1);
+        NSLog(@"[EGLBridge] MG host override: GLES=%@ EGL=%@", glesPath, eglPath);
+        return;
+    }
+
+    // TGLES default: one dylib exports both the egl* and gl* entry points.
+    NSString *tglesPath = [frameworks stringByAppendingPathComponent:@"libtgles.dylib"];
+    void *tgles = dlopen(tglesPath.fileSystemRepresentation, RTLD_LAZY | RTLD_GLOBAL);
+    if (tgles) {
+        setenv("MOBILEGL_IOS_HOST_GLES", tglesPath.fileSystemRepresentation, 1);
+        setenv("MOBILEGL_IOS_HOST_EGL", tglesPath.fileSystemRepresentation, 1);
+        setenv("MOBILEGL_ANGLE_BACKEND", "tgles", 1);
+        NSLog(@"[EGLBridge] MobileGlues + TGLES (ES 3.2, GLES->Metal direct)");
+    } else {
+        // No libtgles in this build: fall back to the MetalANGLE stack so the
+        // game still renders. The host override stays unset so MG rewinds to
+        // the plain RTLD_DEFAULT lookup; MOBILEGL_ANGLE_BACKEND stays unset
+        // too, which is what keeps the TGLES present glue (attach/resize/
+        // watchdog) off.
+        NSLog(@"[EGLBridge] TGLES unavailable (%s); falling back to MetalANGLE (libtinygl4angle)",
+              dlerror() ?: "no dlerror");
+        NSString *anglePath = [frameworks stringByAppendingPathComponent:@"libtinygl4angle.dylib"];
+        dlopen(anglePath.UTF8String, RTLD_LAZY | RTLD_GLOBAL);
+    }
 }
 
 uint64_t pojavSwapCount(void) {
+    if (widgetUsesFinalPresentCounter()) {
+        return atomic_load_explicit(&widgetFinalPresentFrameCount, memory_order_relaxed);
+    }
     return atomic_load_explicit(&widgetMetalFrameCount, memory_order_relaxed);
 }
 
@@ -147,49 +332,57 @@ int pojavInit(BOOL useStackQueue) {
 
 int pojavInitOpenGL() {
     NSString *renderer = NSProcessInfo.processInfo.environment[@"AMETHYST_RENDERER"];
+    // The Metal path exposes the host CAMetalLayer through SDL; a
+    // user-installed Metal mod owns the SDL window and renders into that
+    // single layer. There is no launcher GL context to create; loading a GL
+    // backend here would only fight the mod for the layer.
+    if ([renderer isEqualToString:@ RENDERER_NAME_METAL] ||
+        [renderer isEqualToString:@ RENDERER_NAME_METAL_MACOS]) {
+        NSLog(@"[EGLBridge] Metal renderer (%@): launcher GL context disabled "
+              @"(mod owns SDL + CAMetalLayer)", renderer);
+        return JNI_TRUE;
+    }
     BOOL isAuto = [renderer isEqualToString:@"auto"];
     if (isAuto || [renderer isEqualToString:@ RENDERER_NAME_GL4ES]) {
         // At this point, if renderer is still auto (unspecified major version), pick gl4es
         renderer = @ RENDERER_NAME_GL4ES;
         setenv("AMETHYST_RENDERER", renderer.UTF8String, 1);
+        // GL4ES uses the private Metal ANGLE pair. libEGL_angle_metal is built
+        // with ANGLE_CUSTOM_DISPATCH_LIBRARY=libGLESv2_angle_metal.dylib, so it
+        // resolves the Metal companion directly instead of the shared framework
+        // pair (which stays Vulkan for LTW/MobileGL). Preload the GLES image
+        // first so dyld keeps Metal for GL4ES's own install_name lookups.
+        NSString *frameworks = NSBundle.mainBundle.privateFrameworksPath;
+        NSLog(@"[EGLBridge] GL4ES + ANGLE Metal (private companion)");
+        NSString *metalGles = [frameworks stringByAppendingPathComponent:@"libGLESv2_angle_metal.dylib"];
+        if (![NSFileManager.defaultManager fileExistsAtPath:metalGles]) {
+            metalGles = [frameworks stringByAppendingPathComponent:@"libGLESv2_angle_metal"];
+        }
+        egl_checked_dlopen(metalGles, "GL4ES ANGLE GLES (metal)");
+        egl_checked_dlopen([frameworks stringByAppendingPathComponent:@"libEGL_angle_metal"],
+                           "GL4ES ANGLE EGL (metal)");
+        // Keep the ICD manifest as a fallback for the tinygl4angle/Vulkan path
+        // in case the custom Metal EGL is missing.
+        ensureMoltenVKICD();
         set_gl_bridge_tbl();
     } else if ([renderer isEqualToString:@ RENDERER_NAME_MOBILEGLUES]) {
         renderer = @ RENDERER_NAME_MOBILEGLUES;
         setenv("AMETHYST_RENDERER", renderer.UTF8String, 1);
         // Pre-load the GLES backend before MobileGlues so its static init
-        // (init_target_egl) can find EGL symbols via RTLD_DEFAULT.
-        //
-        // TGLES (libtgles.dylib) is that backend: a GLES 3.2 -> Metal
-        // translation layer that exports the public egl*/gl* names directly.
-        // It replaces MetalANGLE, which used to arrive via libtinygl4angle
-        // and its libEGL/libGLESv2 framework dependencies. MobileGlues has no
-        // link-time dependency on either image (it resolves everything with
-        // dlsym(RTLD_DEFAULT)), so whichever image is pre-loaded here is the
-        // one every EGL/GLES lookup lands on -- and the ANGLE frameworks are
-        // never loaded at all when TGLES is present.
-        NSString *frameworks = NSBundle.mainBundle.privateFrameworksPath;
-        void *tgles = dlopen([frameworks stringByAppendingPathComponent:@"libtgles.dylib"].UTF8String,
-                             RTLD_LAZY | RTLD_GLOBAL);
-        if (tgles) {
-            setenv("MOBILEGL_ANGLE_BACKEND", "tgles", 1);
-            NSLog(@"[EGLBridge] MobileGlues + TGLES (ES 3.2, GLES->Metal direct)");
-        } else {
-            // No libtgles in this build: fall back to the MetalANGLE stack so
-            // the game still renders. MOBILEGL_ANGLE_BACKEND stays unset, which
-            // is what keeps the TGLES present glue (attach/resize/watchdog) off.
-            NSLog(@"[EGLBridge] TGLES unavailable (%s); falling back to MetalANGLE (libtinygl4angle)",
-                  dlerror() ?: "no dlerror");
-            NSString *anglePath = [frameworks stringByAppendingPathComponent:@"libtinygl4angle.dylib"];
-            dlopen(anglePath.UTF8String, RTLD_LAZY | RTLD_GLOBAL);
-        }
+        // (init_target_egl) can find EGL symbols via RTLD_DEFAULT. The same
+        // idempotent preload also runs from JavaLauncher before JLI_Launch,
+        // because MC 26.2 dlopens MobileGlues during JVM startup, before any
+        // GLFW hook can fire.
+        PLPreloadMobileGluesBackend();
         set_gl_bridge_tbl();
     } else if ([renderer isEqualToString:@ RENDERER_NAME_MTL_ANGLE]) {
+        ensureMoltenVKICD();
         set_gl_bridge_tbl();
     } else if ([renderer isEqualToString:@ RENDERER_NAME_LTW]) {
-        // Pre-load ANGLE as host EGL before LTW, so LTW's constructor
-        // finds eglGetProcAddress via RTLD_DEFAULT.
-        NSString *anglePath = getANGLEHostEGLDylibPath();
-        dlopen(anglePath.UTF8String, RTLD_GLOBAL);
+        // libltw's constructor dlopens LIBGL_EGL during JVM startup, before
+        // this window hook. JavaLauncher performs the early preload; repeat it
+        // here for GLFW-path launches (idempotent).
+        PLPreloadLTWBackend();
         set_gl_bridge_tbl();
     } else if ([renderer hasPrefix:@"libOSMesa"]) {
         NSLog(@"[EGLBridge] Zink renderer detected, checking Mesa version...");
@@ -342,14 +535,18 @@ int pojavInitOpenGL() {
         JNI_LWJGL_changeRenderer(renderer.UTF8String);
     }
     // Preload renderer library.
-    // Skip for Mesa 26.2.2 EGL — its library (libEGL.1.dylib) was already
-    // loaded above and loading the old libOSMesa.8.dylib would clash symbols
-    // under -flat_namespace.  MobileGL is always preloaded (its dlsym_EGL
-    // handle is separate from the preload RTLD_GLOBAL handle).
+    // Skip only for the Mesa 26.2.2 EGL renderer itself — its library
+    // (libEGL_Mesa26.dylib) was already loaded above and loading the old
+    // libOSMesa.8.dylib would clash symbols under -flat_namespace. The Mesa
+    // preference is global, so do NOT let it suppress preload for LTW,
+    // GL4ES or MTL_ANGLE: that left those EGL backends half-initialized.
+    // MobileGL is always preloaded (its dlsym_EGL handle is separate from
+    // the preload RTLD_GLOBAL handle).
+    BOOL mesaEGLSelected = [renderer hasPrefix:@"libOSMesa"] && [ZinkConfig isZinkUsingEGL];
     if ([renderer isEqualToString:@ RENDERER_NAME_MOBILEGL] ||
         [renderer isEqualToString:@ RENDERER_NAME_MOBILEGLUES] ||
         [renderer isEqualToString:@ RENDERER_NAME_TGLMT] ||
-        ![ZinkConfig isZinkUsingEGL]) {
+        !mesaEGLSelected) {
         NSLog(@"[EGLBridge] Preloading renderer library: @rpath/%@", renderer);
         dlopen([NSString stringWithFormat:@"@rpath/%@", renderer].UTF8String, RTLD_GLOBAL);
     } else {

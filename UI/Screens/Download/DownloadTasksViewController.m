@@ -358,6 +358,7 @@ static NSString * const kTaskCellId = @"DownloadTaskCell";
         case DownloadTypeMap: return @"map";
         case DownloadTypeServer: return @"server.rack";
         case DownloadTypeModpack: return @"shippingbox.fill";
+        case DownloadTypeLaunch: return @"play.circle.fill";
         default: return @"puzzlepiece.extension";
     }
 }

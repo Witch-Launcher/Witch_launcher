@@ -188,6 +188,13 @@ static const char *signedMoltenVKPath(const char *requested) {
     return NULL;
 }
 
+static BOOL pathIsUnderRoot(const char *path, const char *root) {
+    if (!path || !root) return NO;
+    size_t rootLen = strlen(root);
+    while (rootLen > 1 && root[rootLen - 1] == '/') rootLen--;
+    return strncmp(path, root, rootLen) == 0 && (path[rootLen] == '/' || path[rootLen] == '\0');
+}
+
 void* hooked_dlopen(const char* path, int mode) {
     const char *mvk = signedMoltenVKPath(path);
     if (mvk) {
@@ -205,12 +212,17 @@ void* hooked_dlopen(const char* path, int mode) {
     if (DeviceHasJITFlags(JIT_FLAG_FORCE_MIRRORED)) {
         shouldUseDyldBypass26PPL = hwRedirectOrig[0] && !DeviceHasJITFlags(JIT_FLAG_HAS_TXM);
     }
-    // Only patch Mach-O and use dyld bypass dylib is in the home dir
-    // or tmp dir: LiveContainer makes a symlink to its own tmp dir so checking home dir alone would fail
+    // Only patch Mach-O and use the dyld bypass when the dylib is in the
+    // home or tmp dir. Canonicalize both roots: on iOS TMPDIR/HOME can be
+    // "/var/mobile/..." while realpath() returns "/private/var/mobile/...",
+    // so a raw substring check misses every extracted mod dylib.
     const char *home = getenv("HOME");
     const char *tmp = getenv("TMPDIR");
-    char fullpath[PATH_MAX];
-    BOOL shouldUseDyldBypass = path && realpath(path, fullpath) && (strstr(fullpath, home) || strstr(fullpath, tmp));
+    char homeReal[PATH_MAX], tmpReal[PATH_MAX], fullpath[PATH_MAX];
+    BOOL haveFullPath = path && realpath(path, fullpath);
+    BOOL underHome = haveFullPath && home && realpath(home, homeReal) && pathIsUnderRoot(fullpath, homeReal);
+    BOOL underTmp = haveFullPath && tmp && realpath(tmp, tmpReal) && pathIsUnderRoot(fullpath, tmpReal);
+    BOOL shouldUseDyldBypass = haveFullPath && (underHome || underTmp);
     shouldUseDyldBypass26PPL &= shouldUseDyldBypass;
     if (shouldUseDyldBypass) {
         PLPatchMachOPlatformForFile(path);

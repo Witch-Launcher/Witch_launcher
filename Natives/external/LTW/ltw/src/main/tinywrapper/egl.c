@@ -122,6 +122,7 @@ void build_extension_string(context_t* context) {
     // Required by Iris. Indexed variants are available since ES3.2 or with OES/EXT_draw_buffers_indexed extensions
     if(context->blending.available)
         add_extra_extension(context, &length, "GL_ARB_draw_buffers_blend");
+    add_extra_extension(context, &length, "GL_ARB_clear_texture");
     // Used by Minecraft for the GPU usage counter (see Blaze3D TimerQuery)
     add_extra_extension(context, &length, "GL_ARB_timer_query");
     if(context->multidraw_indirect) {
@@ -173,6 +174,7 @@ static void find_esversion(context_t* context) {
     if(strstr(extensions, "GL_EXT_texture_buffer")) context->buffer_texture_ext = true;
     if(strstr(extensions, "GL_EXT_multi_draw_indirect")) context->multidraw_indirect = true;
     if(strstr(extensions, "GL_EXT_base_instance")) context->base_instance = true;
+    if(strstr(extensions, "GL_EXT_clear_texture")) context->clear_texture = true;
 
     // EXT_disjoint_timer_query provides accurate int64 timer queries
     // on Core Profile it's ARB_timer_query instead
@@ -210,6 +212,12 @@ static void find_esversion(context_t* context) {
         blend->available = false;
     }
 #undef SET_FUNC
+    if(env_istrue("LTW_DEBUG")) {
+        GLfloat aniso = -1.0f;
+        es3_functions.glGetFloatv(GL_MAX_TEXTURE_MAX_ANISOTROPY_EXT, &aniso);
+        printf("LTW: host anisotropy ext=%d max=%f\n",
+               strstr(extensions, "GL_EXT_texture_filter_anisotropic") != NULL, aniso);
+    }
     build_extension_string(context);
 
     return;

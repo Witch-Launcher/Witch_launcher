@@ -289,6 +289,7 @@ static void mesa_egl_swap_buffers(void) {
             if (img) {
                 SurfaceViewController.surface.layer.contents =
                     (__bridge id)img;
+                pojavNoteFinalPresent();
                 CGImageRelease(img);
             }
             CGDataProviderRelease(dp);

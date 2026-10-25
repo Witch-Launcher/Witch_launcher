@@ -4727,7 +4727,7 @@ bool SDL_GL_LoadLibrary(const char *path)
         return SDL_UninitializedVideo();
     }
     if (_this->gl_config.driver_loaded) {
-        if (path && SDL_strcmp(path, _this->gl_config.driver_path) != 0) {
+        if (path && _this->gl_config.driver_path[0] && SDL_strcmp(path, _this->gl_config.driver_path) != 0) {
             return SDL_SetError("OpenGL library already loaded");
         }
         result = true;

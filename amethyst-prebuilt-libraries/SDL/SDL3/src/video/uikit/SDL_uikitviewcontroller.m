@@ -215,12 +215,13 @@ static void SDLCALL SDL_HideHomeIndicatorHintChanged(void *userdata, const char 
 
     SDL_SendWindowEvent(window, SDL_EVENT_WINDOW_RESIZED, w, h);
 
-    /* Local bridge: keep the host app's window size snapshot in sync. */
+    /* Local bridge: keep the host app's window size snapshot in sync.
+     * Hidden utility/test windows must not replace the live game window id. */
     static void (*noteWindow)(Uint32 windowID, int w, int h);
     if (!noteWindow) {
         noteWindow = (void (*)(Uint32, int, int))dlsym(RTLD_DEFAULT, "AASDL_NoteWindow");
     }
-    if (noteWindow) {
+    if (noteWindow && !(window->flags & SDL_WINDOW_HIDDEN)) {
         noteWindow(window->id, w, h);
     }
 }

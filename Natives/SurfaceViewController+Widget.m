@@ -164,6 +164,15 @@ static NSString *widgetShortBytes(uint64_t bytes) {
 
 @implementation TMUsageRingView
 
+- (instancetype)initWithFrame:(CGRect)frame {
+    self = [super initWithFrame:frame];
+    if (self) {
+        self.backgroundColor = UIColor.clearColor;
+        self.opaque = NO;
+    }
+    return self;
+}
+
 - (void)setUsage:(CGFloat)usage {
     if (!isfinite(usage)) usage = 0.0;
     _usage = MAX(0.0, MIN(1.0, usage));
@@ -634,6 +643,15 @@ static NSString *widgetShortBytes(uint64_t bytes) {
     }
 
     BOOL menuOpen = self.menuView != nil && !self.menuView.hidden;
+    if (widgetOn) {
+        // The navigation menu has no close strip in widget mode, so an edge
+        // swipe used to leave the game stuck at 0.7x scale. Keep the edge
+        // recognizer off and snap the game back if it was already shifted.
+        self.edgeGesture.enabled = NO;
+        if (menuOpen || fabs(self.rootView.transform.a - 1.0) > 0.001) {
+            [self animateMenuScale:1 duration:0.25];
+        }
+    }
     self.widgetView.hidden = !widgetOn || menuOpen;
     if (!widgetOn || menuOpen) return;
 

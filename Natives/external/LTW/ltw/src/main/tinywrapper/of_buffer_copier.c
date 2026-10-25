@@ -52,6 +52,7 @@ static void buffer_copier_release(GLenum target, GLint level, GLint x, GLint y, 
     es3_functions.glBindFramebuffer(GL_READ_FRAMEBUFFER, copier->tempfb);
     es3_functions.glFramebufferTexture2D(GL_DRAW_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, target, current_texbind, level);
     es3_functions.glBlitFramebuffer(0, 0, w, h, x, y, x+w, y+h, GL_DEPTH_BUFFER_BIT, GL_NEAREST);
+    es3_functions.glFramebufferTexture2D(GL_DRAW_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_TEXTURE_2D, 0, 0);
     es3_functions.glBindFramebuffer(GL_DRAW_FRAMEBUFFER, current_context->draw_framebuffer);
     es3_functions.glBindFramebuffer(GL_READ_FRAMEBUFFER, current_context->read_framebuffer);
 }
@@ -143,6 +144,7 @@ void texture_blit_framebuffer(GLenum target,
     es3_functions.glBindFramebuffer(GL_DRAW_FRAMEBUFFER, copier->destfb);
     es3_functions.glFramebufferTexture2D(GL_DRAW_FRAMEBUFFER, fb_attachment, target, texture, level);
     es3_functions.glBlitFramebuffer(x, y, width+x, height+y, xoffset, yoffset, width+xoffset, height+yoffset, fb_blit_bit, GL_NEAREST);
+    es3_functions.glFramebufferTexture2D(GL_DRAW_FRAMEBUFFER, fb_attachment, GL_TEXTURE_2D, 0, 0);
     es3_functions.glBindFramebuffer(GL_DRAW_FRAMEBUFFER, current_context->draw_framebuffer);
 }
 
@@ -170,5 +172,4 @@ void glCopyTexSubImage2D(GLenum target,
             texture_blit_framebuffer(target, level, xoffset, yoffset, x, y, width, height, true);
         }
     }
-
 }

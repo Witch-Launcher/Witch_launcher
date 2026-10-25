@@ -1258,6 +1258,19 @@ void SDL_FlushEvents(Uint32 minType, Uint32 maxType)
     SDL_EventEntry *entry, *next;
     Uint32 type;
 
+#if defined(SDL_PLATFORM_IOS) || defined(SDL_PLATFORM_TVOS)
+    /* Amethyst: Minecraft 26.3 flushes the whole input range every frame
+     * before polling. The host launcher injects keyboard, mouse button and
+     * wheel events from UIKit/GCMouse callbacks between frames, so that flush
+     * discarded them and broke hotbar switching/scrolling. Keep the queue. */
+    (void)minType;
+    (void)maxType;
+    (void)entry;
+    (void)next;
+    (void)type;
+    return;
+#endif
+
     // Make sure the events are current
 #if 0
     /* Actually, we can't do this since we might be flushing while processing
@@ -1872,7 +1885,12 @@ bool SDL_PushEvent(SDL_Event *event)
     if (event->type == SDL_EVENT_MOUSE_WHEEL) {
         if (!sdl_push_mouse_routing) {
             sdl_push_mouse_routing = true;
-            SDL_SendMouseWheel(event->wheel.timestamp, NULL, SDL_GLOBAL_MOUSE_ID,
+            /* Amethyst: route to the window carried by the injected event.
+             * SDL_SendMouseWheel(NULL) derives the window from mouse focus,
+             * which can be unset while a menu is open, leaving windowID 0;
+             * Minecraft 26.3 drops wheel events whose window handle is 0. */
+            SDL_Window *w = SDL_GetWindowFromID(event->wheel.windowID);
+            SDL_SendMouseWheel(event->wheel.timestamp, w, SDL_GLOBAL_MOUSE_ID,
                                event->wheel.x, event->wheel.y, event->wheel.direction);
             sdl_push_mouse_routing = false;
             return true;

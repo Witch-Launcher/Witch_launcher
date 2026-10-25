@@ -264,9 +264,13 @@ void* hooked_mmap(void *addr, size_t len, int prot, int flags, int fd, off_t off
         
         void *memoryLoadedFile = __mmap(NULL, len, PROT_READ, MAP_PRIVATE, fd, offset);
         if (redirectFunction == redirectFunctionDirect) {
-            mprotect(map, len, PROT_READ | PROT_WRITE);
+            if (mprotect(map, len, PROT_READ | PROT_WRITE) == -1) {
+                NSLog(@"[DyldLVBypass] fallback mprotect(RW) failed for %s: %s", mmapPath, strerror(errno));
+            }
             memcpy(map, memoryLoadedFile, len);
-            mprotect(map, len, prot);
+            if (mprotect(map, len, prot) == -1) {
+                NSLog(@"[DyldLVBypass] fallback mprotect(0x%x) failed for %s: %s", prot, mmapPath, strerror(errno));
+            }
         } else {
             // mirror `addr` (rx, JIT applied) to `mirrored` (rw)
             vm_address_t mirrored = 0;

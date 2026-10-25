@@ -231,6 +231,39 @@ void init_hookUIKitConstructor(void) {
 }
 @end
 
+@interface AmethystHiddenPointerInteractionDelegate : NSObject <UIPointerInteractionDelegate>
+@end
+
+@implementation AmethystHiddenPointerInteractionDelegate
+
+- (UIPointerStyle *)pointerInteraction:(UIPointerInteraction *)interaction styleForRegion:(UIPointerRegion *)region {
+    return [UIPointerStyle hiddenPointerStyle];
+}
+
+@end
+
+static char hiddenPointerInteractionKey;
+
+void AmethystSetSystemPointerHidden(UIView *view, BOOL hidden) {
+    if (@available(iOS 13.4, *)) {
+        UIPointerInteraction *interaction = objc_getAssociatedObject(view, &hiddenPointerInteractionKey);
+        if (!interaction) {
+            static AmethystHiddenPointerInteractionDelegate *delegate;
+            static dispatch_once_t onceToken;
+            dispatch_once(&onceToken, ^{
+                delegate = [[AmethystHiddenPointerInteractionDelegate alloc] init];
+            });
+            interaction = [[UIPointerInteraction alloc] initWithDelegate:delegate];
+            [view addInteraction:interaction];
+            objc_setAssociatedObject(view, &hiddenPointerInteractionKey, interaction, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+        }
+        if (interaction.enabled != hidden) {
+            interaction.enabled = hidden;
+            [interaction invalidate];
+        }
+    }
+}
+
 // Patch: allow UIHoverGestureRecognizer on iPhone
 // from TrollPad (https://github.com/khanhduytran0/TrollPad/commit/8eab1b20315e73ed7d5319ff0833564fe2819b30#diff-98dd369a9e94e4f3a4b45dc0288b6b5ec666b35eae93c9cde4375921cbb20e48)
 @implementation UIPointerInteraction(hook)

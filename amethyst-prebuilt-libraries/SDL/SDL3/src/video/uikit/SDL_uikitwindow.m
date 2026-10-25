@@ -74,7 +74,7 @@ static void UIKit_NoteWindow(SDL_Window *window, int w, int h)
  * should render into (the launcher's game surface). When non-nil, SDL skips
  * creating its own UIWindow so the game stays inside the launcher's view
  * hierarchy and follows its layout (controls, edge-swipe menu, rotation). */
-static UIView *UIKit_GetHostView(void)
+UIView *UIKit_GetHostView(void)
 {
     static UIView *(*GetHostView)(void);
     if (!GetHostView) {
@@ -169,10 +169,15 @@ bool UIKit_CreateWindow(SDL_VideoDevice *_this, SDL_Window *window, SDL_Properti
             SDL_UIKitDisplayData *data = (__bridge SDL_UIKitDisplayData *)display->internal;
             SDL_Window *other;
 
-            // We currently only handle a single window per display on iOS
+            // UIKit only shows one interactive window per display, but
+            // RenderPearl creates hidden utility/test windows before the real
+            // game window. Allow any number of hidden windows and at most one
+            // visible window per display.
             for (other = _this->windows; other; other = other->next) {
-                if (other != window && SDL_GetVideoDisplayForWindow(other) == display) {
-                    ret = SDL_SetError("Only one window allowed per display.");
+                if (other != window && SDL_GetVideoDisplayForWindow(other) == display &&
+                    !(window->flags & SDL_WINDOW_HIDDEN) &&
+                    !(other->flags & SDL_WINDOW_HIDDEN)) {
+                    ret = SDL_SetError("Only one visible window allowed per display.");
                     return;
                 }
             }
@@ -214,7 +219,9 @@ bool UIKit_CreateWindow(SDL_VideoDevice *_this, SDL_Window *window, SDL_Properti
             /* Local bridge: on the main screen, prefer the host app's window so
              * the game renders inside the launcher's view hierarchy. */
             UIView *hostView = UIKit_GetHostView();
-            if (data.uiscreen == [UIScreen mainScreen] && hostView != nil && hostView.window != nil) {
+            if (data.uiscreen == [UIScreen mainScreen] &&
+                !(window->flags & SDL_WINDOW_HIDDEN) &&
+                hostView != nil && hostView.window != nil) {
                 uiwindow = hostView.window;
                 hostWindow = YES;
             } else if (@available(iOS 13.0, tvOS 13.0, *)) {
@@ -291,18 +298,20 @@ void UIKit_ShowWindow(SDL_VideoDevice *_this, SDL_Window *window)
                 data.viewcontroller.view.hidden = NO;
             }
 
-            /* Local bridge: tell the host app the SDL window is live. */
-            UIKit_NoteWindow(window, window->w, window->h);
+            /* Local bridge: only the visible game window is live input. */
+            if (!(window->flags & SDL_WINDOW_HIDDEN)) {
+                UIKit_NoteWindow(window, window->w, window->h);
 
-            // Make this window the current mouse focus for touch input
-            SDL_VideoDisplay *display = SDL_GetVideoDisplayForWindow(window);
-            SDL_UIKitDisplayData *displaydata = (__bridge SDL_UIKitDisplayData *)display->internal;
+                // Make this window the current mouse focus for touch input
+                SDL_VideoDisplay *display = SDL_GetVideoDisplayForWindow(window);
+                SDL_UIKitDisplayData *displaydata = (__bridge SDL_UIKitDisplayData *)display->internal;
     #ifndef SDL_PLATFORM_VISIONOS
-            if (displaydata.uiscreen == [UIScreen mainScreen])
+                if (displaydata.uiscreen == [UIScreen mainScreen])
     #endif
-            {
-                SDL_SetMouseFocus(window);
-                SDL_SetKeyboardFocus(window);
+                {
+                    SDL_SetMouseFocus(window);
+                    SDL_SetKeyboardFocus(window);
+                }
             }
         }
     });
@@ -432,8 +441,12 @@ void UIKit_DestroyWindow(SDL_VideoDevice *_this, SDL_Window *window)
                 CFRelease(window->internal);
                 window->internal = NULL;
 
-                /* Local bridge: tell the host app the SDL window is gone. */
-                UIKit_NoteWindow(NULL, 0, 0);
+                /* Local bridge: only the visible game window drives input;
+                 * destroying a hidden utility/test window must not clear the
+                 * host's live window id. */
+                if (!(window->flags & SDL_WINDOW_HIDDEN)) {
+                    UIKit_NoteWindow(NULL, 0, 0);
+                }
             }
         }
     });

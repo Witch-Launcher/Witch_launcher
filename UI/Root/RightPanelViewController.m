@@ -6,6 +6,7 @@
 #import "PLProfiles.h"
 #import "utils.h"
 #import "AmethystBlurView.h"
+#import "UIView+LiquidGlass.h"
 #import "DownloadManager.h"
 #import "ProfileAvatarManager.h"
 #import <objc/runtime.h>
@@ -34,6 +35,7 @@
     [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(versionDidChange:) name:@"VersionDidChangeNotification" object:nil];
     [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(updateColors) name:ThemeDidChangeNotification object:nil];
     [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(updateColors) name:AmethystBlurIntensityDidChangeNotification object:nil];
+    [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(updateColors) name:LiquidGlassDidChangeNotification object:nil];
     [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(downloadTasksDidChange) name:DownloadTasksDidChangeNotification object:nil];
     [self updateColors];
     [self downloadTasksDidChange];
@@ -199,7 +201,9 @@
 
 - (void)updateColors {
     ThemeManager *theme = ThemeManager.shared;
-    if ([AmethystBlurView blurEnabledForKey:@"amethyst_rightpanel_blur"]) {
+    if ([UIView lg_isEnabled]) {
+        self.view.backgroundColor = [UIColor clearColor];
+    } else if ([AmethystBlurView blurEnabledForKey:@"amethyst_rightpanel_blur"]) {
         self.view.backgroundColor = [theme.rightPanelBackgroundColor colorWithAlphaComponent:0.25 * theme.uiOpacity];
     } else {
         self.view.backgroundColor = theme.rightPanelBackgroundColor;

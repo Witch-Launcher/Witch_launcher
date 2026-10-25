@@ -200,8 +200,11 @@ static NSArray<NSDictionary *> *_cursorTypeDefinitions;
     if ([typeId isEqualToString:@"normal"]) return YES;
     // Master toggle OFF = only normal enabled
     if (![self isMasterToggleEnabled]) return NO;
-    // Master toggle ON = check individual type preference
-    return getPrefBool([self enabledPrefKeyForType:typeId]);
+    // Master toggle ON = check individual type preference; an unset preference
+    // means enabled so the built-in cursor types work out of the box.
+    id val = getPrefObject([self enabledPrefKeyForType:typeId]);
+    if (val == nil) return YES;
+    return [val boolValue];
 }
 
 + (void)setEnabled:(BOOL)enabled forType:(NSString *)typeId {

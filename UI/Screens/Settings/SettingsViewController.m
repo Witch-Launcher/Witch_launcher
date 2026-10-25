@@ -9,6 +9,7 @@
 #import "config.h"
 #import "CustomControlsViewController.h"
 #import "AmethystBlurView.h"
+#import "UIView+LiquidGlass.h"
 #import "AppSheet.h"
 #import "FontManager.h"
 #import <PhotosUI/PhotosUI.h>
@@ -18,6 +19,7 @@
 @property (nonatomic) BOOL importingFont;
 @property (nonatomic) NSArray *sections;
 @property (nonatomic) UIScrollView *tabBarScroll;
+@property (nonatomic) UIView *tabBarGlassHost;
 @property (nonatomic) NSLayoutConstraint *tabWidthConstraint;
 @property (nonatomic) NSArray<NSLayoutConstraint *> *chromeConstraints;
 @property (nonatomic) BOOL chromeIsPortrait;
@@ -47,6 +49,12 @@
     [self updateColors];
 }
 
+- (void)viewWillDisappear:(BOOL)animated {
+    [super viewWillDisappear:animated];
+    // Fallback for keyboard/VoiceOver adjustments that never send touch-up.
+    [ThemeManager.shared applyUIScaleToAllWindows];
+}
+
 - (void)buildSections {
     NSArray *rendererOptions = [self getRendererOptions];
 
@@ -72,6 +80,7 @@
                 @{@"key": @"Dark", @"name": localize(@"theme.dark", nil)},
                 @{@"key": @"Light", @"name": localize(@"theme.light", nil)},
             ], @"default": @"System"},
+            @{@"type": @"switch", @"label": localize(@"preference.title.auto_hide_launching", nil), @"key": @"general.auto_hide_launching"},
             @{@"type": @"picker", @"label": localize(@"preference.title.screen_orientation", nil), @"key": @"general.orientation_lock", @"options": @[
                 @{@"key": @"off", @"name": localize(@"orientation.off", nil)},
                 @{@"key": @"portrait", @"name": localize(@"orientation.portrait", nil)},
@@ -79,22 +88,21 @@
             ], @"default": @"off"},
             @{@"type": @"navigate", @"label": localize(@"preference.title.game_directory", nil), @"vc": @"LauncherPrefGameDirViewController"},
             @{@"type": @"navigate", @"label": localize(@"preference.title.manage_runtime", nil) , @"vc": @"LauncherPrefManageJREViewController"},
-            @{@"type": @"navigate", @"label": @"Cập nhật Launcher (Beta/Stable)", @"vc": @"LauncherUpdateViewController"},
-            @{@"type": @"navigate", @"label": @"Tải Runtime JDK/LWJGL", @"vc": @"RuntimeDownloadViewController"},
+            @{@"type": @"navigate", @"label": localize(@"settings.launcher_update", nil), @"vc": @"LauncherUpdateViewController"},
+            @{@"type": @"navigate", @"label": localize(@"settings.runtime_download", nil), @"vc": @"RuntimeDownloadViewController"},
             @{@"type": @"navigate", @"label": localize(@"settings.storage", nil), @"vc": @"StorageManagerViewController"},
             @{@"type": @"navigate", @"label": localize(@"perf.title", nil), @"vc": @"PerfSettingsViewController"},
             @{@"type": @"navigate", @"label": localize(@"f3.title", nil), @"vc": @"F3SettingsViewController"},
-            @{@"type": @"picker", @"label": @"Kênh cập nhật", @"key": @"launcher.update_channel", @"options": @[
-                @{@"key": @"0", @"name": @"Tự động"},
+            @{@"type": @"picker", @"label": localize(@"launcher_update.channel.title", nil), @"key": @"launcher.update_channel", @"options": @[
+                @{@"key": @"0", @"name": localize(@"launcher_update.channel.auto", nil)},
                 @{@"key": @"1", @"name": @"Beta (pre-release)"},
-                @{@"key": @"2", @"name": @"Ổn định (release)"},
+                @{@"key": @"2", @"name": localize(@"launcher_update.channel.stable", nil)},
             ], @"default": @"0"},
         ]},
         @{@"title": localize(@"Game", nil), @"items": @[
             header(@"settings.group.display"),
             @{@"type": @"picker", @"label": localize(@"preference.title.renderer", nil), @"key": @"video.renderer", @"options": rendererOptions, @"default": @"auto"},
             @{@"type": @"slider", @"label": localize(@"preference.title.resolution", nil), @"key": @"video.resolution", @"min": @25, @"max": @150, @"suffix": @"%"},
-            @{@"type": @"switch", @"label": localize(@"preference.title.max_framerate", nil), @"key": @"video.max_framerate"},
             @{@"type": @"switch", @"label": localize(@"preference.title.performance_hud", nil), @"key": @"video.performance_hud"},
             @{@"type": @"switch", @"label": localize(@"preference.title.fullscreen_airplay", nil), @"key": @"video.fullscreen_airplay"},
             header(@"settings.group.java"),
@@ -119,10 +127,11 @@
             @{@"type": @"switch", @"label": localize(@"preference.title.gesture_hotbar", nil), @"key": @"control.gesture_hotbar"},
             @{@"type": @"switch", @"label": localize(@"preference.title.gesture_hold", nil), @"key": @"control.gesture_hold"},
             @{@"type": @"switch", @"label": localize(@"preference.title.doubletap_offhand", nil), @"key": @"control.doubletap_offhand"},
-            @{@"type": @"switch", @"label": localize(@"preference.title.gesture_scroll", nil), @"key": @"control.gesture_scroll"},
             @{@"type": @"slider", @"label": localize(@"preference.title.press_duration", nil), @"key": @"control.press_duration", @"min": @100, @"max": @1000, @"suffix": @"ms"},
             @{@"type": @"switch", @"label": localize(@"preference.title.recording_hide", nil), @"key": @"control.recording_hide"},
             @{@"type": @"switch", @"label": localize(@"preference.title.disable_haptics", nil), @"key": @"control.disable_haptics"},
+            header(@"settings.group.keyboard"),
+            @{@"type": @"switch", @"label": localize(@"preference.title.keyboard_editing_toolbar", nil), @"key": @"control.keyboard_editing_toolbar"},
             header(@"settings.group.gyro"),
             @{@"type": @"switch", @"label": localize(@"preference.title.gyroscope_enable", nil), @"key": @"control.gyroscope_enable"},
             @{@"type": @"switch", @"label": localize(@"preference.title.gyroscope_invert_x_axis", nil), @"key": @"control.gyroscope_invert_x_axis"},
@@ -168,8 +177,11 @@
             header(@"settings.group.moltenvk"),
             @{@"type": @"picker", @"label": localize(@"preference.title.moltenvk_version", nil), @"key": @"video.moltenvk_version", @"options": @[@"1.2", @"1.4"], @"default": @"1.4"},
             header(@"settings.group.mobileglues"),
-            @{@"type": @"switch", @"label": localize(@"preference.title.enable_angle", nil), @"key": @"mobileglues.enable_angle"},
-            @{@"type": @"picker", @"label": localize(@"preference.title.angle_backend", nil), @"key": @"mobileglues.angle_backend", @"options": @[@"metal", @"vulkan"], @"default": @"metal"},
+            @{@"type": @"picker", @"label": localize(@"preference.title.mobileglues_backend", nil), @"key": @"mobileglues.angle_backend", @"options": @[
+                @{@"key": @"tgles", @"name": @"TGLES"},
+                @{@"key": @"metal", @"name": @"ANGLE Metal"},
+                @{@"key": @"vulkan", @"name": @"ANGLE Vulkan"},
+            ], @"default": @"tgles"},
             @{@"type": @"picker", @"label": localize(@"preference.title.enable_no_error", nil), @"key": @"mobileglues.enable_no_error", @"options": @[@"0", @"1", @"2"], @"default": @"2"},
             @{@"type": @"switch", @"label": localize(@"preference.title.enable_ext_timer_query", nil), @"key": @"mobileglues.enable_ext_timer_query"},
             @{@"type": @"switch", @"label": localize(@"preference.title.enable_ext_compute_shader", nil), @"key": @"mobileglues.enable_ext_compute_shader"},
@@ -181,7 +193,7 @@
             @{@"type": @"picker", @"label": localize(@"preference.title.custom_gl_version", nil), @"key": @"mobileglues.custom_gl_version", @"options": glVersions, @"default": @"0"},
             @{@"type": @"picker", @"label": localize(@"preference.title.fsr1_setting", nil), @"key": @"mobileglues.fsr1_setting", @"options": @[@"0", @"1", @"2", @"3", @"4", @"5"], @"default": @"0"},
             header(@"settings.group.ltw"),
-            @{@"type": @"picker", @"label": localize(@"preference.title.ltw_angle_backend", nil), @"key": @"video.ltw_angle_backend", @"options": @[@"metal", @"vulkan"], @"default": @"metal"},
+            @{@"type": @"picker", @"label": localize(@"preference.title.ltw_angle_backend", nil), @"key": @"video.ltw_angle_backend", @"options": @[@"metal", @"vulkan"], @"default": @"vulkan"},
             header(@"settings.group.zink"),
             @{@"type": @"picker", @"label": localize(@"preference.title.zink_mesa_version", nil), @"key": @"zink.mesa_version", @"options": @[@"25.0.7", @"26.2.2"], @"default": @"26.2.2"},
             @{@"type": @"picker", @"label": localize(@"preference.title.optimization_level", nil), @"key": @"zink.optimization_level", @"options": zinkOptLevels, @"default": @"-1"},
@@ -264,6 +276,8 @@
             @{@"type": @"color", @"label": localize(@"appearance.content_card_color", nil), @"key": @"amethyst_card_bg_color"},
             @{@"type": @"image", @"label": localize(@"appearance.background", nil)},
             @{@"type": @"font", @"label": localize(@"appearance.launcher_font", nil)},
+            @{@"type": @"slider", @"label": localize(@"appearance.ui_scale", nil), @"key": @"amethyst_ui_scale", @"min": @50, @"max": @150, @"suffix": @"%"},
+            @{@"type": @"label", @"label": localize(@"appearance.ui_scale_hint", nil)},
             @{@"type": @"slider", @"label": localize(@"appearance.ui_opacity", nil), @"key": @"amethyst_ui_opacity", @"min": @0, @"max": @100, @"suffix": @"%"},
             @{@"type": @"slider", @"label": localize(@"appearance.background_blur", nil), @"key": @"amethyst_bg_blur", @"min": @0, @"max": @20, @"suffix": @""},
             @{@"type": @"slider", @"label": localize(@"appearance.ui_panels_blur", nil), @"key": @"amethyst_settings_blur", @"min": @0, @"max": @100, @"suffix": @"%"},
@@ -311,7 +325,7 @@
         }
     }
     NSMutableArray *appearanceItems = [_sections[appearanceIndex][@"items"] mutableCopy];
-    if (@available(iOS 16, *)) {
+    if (@available(iOS 26.0, *)) {
         [appearanceItems insertObject:@{@"type": @"switch", @"label": @"Liquid Glass", @"key": @"general.liquid_glass"} atIndex:0];
     }
     NSMutableDictionary *appearanceSection = [_sections[appearanceIndex] mutableCopy];
@@ -543,6 +557,17 @@
 }
 
 - (void)setupTabBar {
+    // The glass lives on a sibling host, not inside the scroll view: Liquid
+    // Glass is a fixed navigation layer, not scrolling content.
+    _tabBarGlassHost = [[UIView alloc] initWithFrame:CGRectZero];
+    _tabBarGlassHost.translatesAutoresizingMaskIntoConstraints = NO;
+    _tabBarGlassHost.userInteractionEnabled = NO;
+    _tabBarGlassHost.backgroundColor = ThemeManager.shared.cardBackgroundColor;
+    _tabBarGlassHost.layer.cornerRadius = 16;
+    _tabBarGlassHost.clipsToBounds = YES;
+    [_tabBarGlassHost lg_enableLiquidGlassWithTint:nil cornerRadius:16.0 maskedCorners:kCALayerMinXMinYCorner | kCALayerMaxXMinYCorner | kCALayerMinXMaxYCorner | kCALayerMaxXMaxYCorner];
+    [self.view addSubview:_tabBarGlassHost];
+
     _tabBarScroll = [[UIScrollView alloc] initWithFrame:CGRectZero];
     _tabBarScroll.translatesAutoresizingMaskIntoConstraints = NO;
     _tabBarScroll.showsHorizontalScrollIndicator = NO;
@@ -550,13 +575,19 @@
     // Horizontal drag is only meaningful for the portrait bottom rail; the
     // landscape side rail is vertical and locks its X axis below.
     _tabBarScroll.alwaysBounceHorizontal = NO;
-    // Floating rail card, same language as the profile/main bars.
-    _tabBarScroll.backgroundColor = ThemeManager.shared.cardBackgroundColor;
+    // The host supplies the material; the scroll view only carries buttons.
+    _tabBarScroll.backgroundColor = [UIColor clearColor];
     _tabBarScroll.layer.cornerRadius = 16;
     _tabBarScroll.clipsToBounds = YES;
     _tabBarScroll.layer.borderWidth = 1;
     _tabBarScroll.layer.borderColor = [ThemeManager.shared.accentColor colorWithAlphaComponent:0.25].CGColor;
     [self.view addSubview:_tabBarScroll];
+    [NSLayoutConstraint activateConstraints:@[
+        [_tabBarGlassHost.topAnchor constraintEqualToAnchor:_tabBarScroll.topAnchor],
+        [_tabBarGlassHost.bottomAnchor constraintEqualToAnchor:_tabBarScroll.bottomAnchor],
+        [_tabBarGlassHost.leadingAnchor constraintEqualToAnchor:_tabBarScroll.leadingAnchor],
+        [_tabBarGlassHost.trailingAnchor constraintEqualToAnchor:_tabBarScroll.trailingAnchor],
+    ]];
 
     _tabButtons = [NSMutableArray array];
     for (NSUInteger i = 0; i < _sections.count; i++) {
@@ -701,6 +732,8 @@
 - (void)updateColors {
     ThemeManager *theme = ThemeManager.shared;
     self.view.backgroundColor = theme.contentBackgroundColor;
+    [_tabBarGlassHost lg_setLiquidGlassBaseColor:theme.cardBackgroundColor];
+    [_tabBarGlassHost lg_refreshLiquidGlass];
     _settingsSearchBar.tintColor = theme.accentColor;
     [_panelBlur applyCurrentIntensity];
     [self refreshTableBackdrops];
@@ -791,6 +824,7 @@
     _searchBackdrop.hidden = NO;
     _searchResultsTable.hidden = YES;
     _tabBarScroll.hidden = YES;
+    _tabBarGlassHost.hidden = YES;
     _pageScroll.hidden = YES;
     _settingsSearchBar.hidden = NO;
     _settingsSearchBar.alpha = 0;
@@ -838,6 +872,7 @@
         // they only come back when search is dismissed.
         if (!self.searchActive) {
             _tabBarScroll.hidden = NO;
+            _tabBarGlassHost.hidden = NO;
             _pageScroll.hidden = NO;
         }
         return;
@@ -859,6 +894,7 @@
     self.searchResults = results;
     self.searchResultsTable.hidden = NO;
     _tabBarScroll.hidden = YES;
+    _tabBarGlassHost.hidden = YES;
     _pageScroll.hidden = YES;
     [self.searchResultsTable reloadData];
 }
@@ -1003,6 +1039,7 @@
             slider.maximumTrackTintColor = ThemeManager.shared.separatorColor;
             slider.thumbTintColor = ThemeManager.shared.accentColor;
             [slider addTarget:self action:@selector(sliderChanged:) forControlEvents:UIControlEventValueChanged];
+            [slider addTarget:self action:@selector(sliderTouchEnded:) forControlEvents:UIControlEventTouchUpInside | UIControlEventTouchUpOutside | UIControlEventTouchCancel];
             [cell.contentView addSubview:slider];
 
             [NSLayoutConstraint activateConstraints:@[
@@ -1172,6 +1209,8 @@
             val = ThemeManager.shared.backgroundBlurIntensity;
         } else if ([item[@"key"] isEqualToString:@"amethyst_ui_opacity"]) {
             val = ThemeManager.shared.uiOpacity * 100.0;
+        } else if ([item[@"key"] isEqualToString:@"amethyst_ui_scale"]) {
+            val = ThemeManager.shared.uiScale * 100.0;
         } else if ([item[@"key"] hasPrefix:@"amethyst_"] && [item[@"key"] hasSuffix:@"_blur"]) {
             // UI panel blur keys live in NSUserDefaults (AmethystBlurView reads
             // them from there), NOT in the launcher preference plist that
@@ -1402,7 +1441,7 @@
         nowOn = !getPrefBool(key);
         setPrefBool(key, nowOn);
         if ([key isEqualToString:@"general.liquid_glass"]) {
-            [[NSNotificationCenter defaultCenter] postNotificationName:@"LiquidGlassDidChangeNotification" object:nil];
+            [[NSNotificationCenter defaultCenter] postNotificationName:LiquidGlassDidChangeNotification object:nil];
         }
     }
     [HapticManager.shared play:HapticTypeLight];
@@ -1463,7 +1502,7 @@
         }
         [self reloadTables];
     } else if ([item[@"key"] isEqualToString:@"general.liquid_glass"]) {
-        [[NSNotificationCenter defaultCenter] postNotificationName:@"LiquidGlassDidChangeNotification" object:nil];
+        [[NSNotificationCenter defaultCenter] postNotificationName:LiquidGlassDidChangeNotification object:nil];
     }
 }
 
@@ -1494,6 +1533,8 @@
         ThemeManager.shared.backgroundBlurIntensity = val;
     } else if ([item[@"key"] isEqualToString:@"amethyst_ui_opacity"]) {
         ThemeManager.shared.uiOpacity = val / 100.0;
+    } else if ([item[@"key"] isEqualToString:@"amethyst_ui_scale"]) {
+        ThemeManager.shared.uiScale = val / 100.0;
     } else if ([item[@"key"] isEqualToString:@"amethyst_ui_border_radius"]) {
         // Setter persists, posts the targeted shell notification and
         // schedules one coalesced full broadcast — no extra debounce needed.
@@ -1536,6 +1577,19 @@
     }
     UILabel *valLabel = (UILabel *)[cell.contentView viewWithTag:101];
     valLabel.text = [NSString stringWithFormat:@"%.0f%@", val, item[@"suffix"] ?: @""];
+}
+
+- (void)sliderTouchEnded:(UISlider *)sender {
+    UITableViewCell *cell = (UITableViewCell *)sender.superview.superview;
+    UITableView *table = [self tableForCell:cell];
+    NSIndexPath *ip = [table indexPathForCell:cell];
+    if (!ip) return;
+    NSDictionary *item = [self itemAtIndexPath:ip inTable:table];
+    if ([item[@"key"] isEqualToString:@"amethyst_ui_scale"]) {
+        // Scaling the window while the finger is still on this slider makes
+        // the track move under the touch. Apply once the drag settles.
+        [ThemeManager.shared applyUIScaleToAllWindows];
+    }
 }
 
 // Coalesce rapid slider drags into one theme broadcast (a full shell
@@ -1836,7 +1890,7 @@
     id liquidGlass = dict[@"general.liquid_glass"];
     if ([liquidGlass isKindOfClass:[NSNumber class]]) {
         setPrefBool(@"general.liquid_glass", [liquidGlass boolValue]);
-        [[NSNotificationCenter defaultCenter] postNotificationName:@"LiquidGlassDidChangeNotification" object:nil];
+        [[NSNotificationCenter defaultCenter] postNotificationName:LiquidGlassDidChangeNotification object:nil];
     }
 
     [theme applyThemeToAllWindows];

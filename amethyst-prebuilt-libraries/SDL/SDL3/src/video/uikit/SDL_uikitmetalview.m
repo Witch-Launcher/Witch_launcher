@@ -91,6 +91,19 @@ SDL_MetalView UIKit_Metal_CreateView(SDL_VideoDevice *_this, SDL_Window *window)
             CGFloat scale = 1.0;
             SDL_uikitmetalview *metalview;
 
+            /* Local (non-upstream): when SDL is embedded in the launcher,
+             * reuse the host GameSurfaceView and its existing CAMetalLayer as
+             * the one and only drawable. Creating an SDL_uikitmetalview here
+             * would leave it unattached (and a second Metal layer), which is
+             * why Metallum/mcopt rendered nothing on iOS. The host view is
+             * already in the hierarchy and owns input, resize and display
+             * link behavior. */
+            UIView *hostView = data.hostWindow ? UIKit_GetHostView() : nil;
+            if (hostView && [hostView.layer isKindOfClass:[CAMetalLayer class]]) {
+                view = (void *)CFBridgingRetain(hostView);
+                return;
+            }
+
             if (window->flags & SDL_WINDOW_HIGH_PIXEL_DENSITY) {
                 /* Set the scale to the natural scale factor of the screen - then
                  * the backing dimensions of the Metal view will match the pixel
@@ -141,7 +154,9 @@ void UIKit_Metal_DestroyView(SDL_VideoDevice *_this, SDL_MetalView view)
 void *UIKit_Metal_GetLayer(SDL_VideoDevice *_this, SDL_MetalView view)
 {
     @autoreleasepool {
-        SDL_uikitview *uiview = (__bridge SDL_uikitview *)view;
+        /* May be the host GameSurfaceView (local host-window path) or an
+         * SDL_uikitmetalview; both are UIViews with a CAMetalLayer. */
+        UIView *uiview = (__bridge UIView *)view;
         return (__bridge void *)uiview.layer;
     }
 }

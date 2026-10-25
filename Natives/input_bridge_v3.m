@@ -543,15 +543,19 @@ int callback_SurfaceViewController_touchHotbar(CGFloat x, CGFloat y) {
         return -1;
     }
 
-    int barHeight = mcscale(20);
+    int barHeight = mcscale(22);
     int barY = physicalHeight - barHeight;
     if (y < barY) return -1;
 
-    int barWidth = mcscale(180);
+    int barWidth = mcscale(182);
     int barX = (physicalWidth / 2) - (barWidth / 2);
     if (x < barX || x >= barX + barWidth) return -1;
 
-    return hotbarKeys[(int) MathUtils_map(x, barX, barX + barWidth, 0, 9)];
+    int slot = hotbarKeys[(int) MathUtils_map(x, barX, barX + barWidth, 0, 9)];
+    NSLog(@"[Hotbar] touch=(%.1f,%.1f) phys=%dx%d gui=%d res=%.2f bar=(%d,%d %dx%d) slot=%d",
+          x, y, physicalWidth, physicalHeight, guiScale, resolutionScale,
+          barX, barY, barWidth, barHeight, slot);
+    return slot;
 }
 
 JNIEXPORT void JNICALL Java_net_kdt_pojavlaunch_uikit_UIKit_updateMCGuiScale(JNIEnv* env, jclass clazz, jint scale) {
@@ -695,6 +699,34 @@ static uint32_t aasdl_buttons;
 static uint32_t aasdl_winID;
 static int aasdl_winW;
 static int aasdl_winH;
+
+static int aasdl_guiScaleFromOptions(void) {
+    const char *gameDir = getenv("POJAV_GAME_DIR_PROFILE");
+    if (!gameDir || !*gameDir) gameDir = getenv("POJAV_GAME_DIR");
+    if (!gameDir || !*gameDir) return 0;
+    NSString *path = [@(gameDir) stringByAppendingPathComponent:@"options.txt"];
+    NSString *contents = [NSString stringWithContentsOfFile:path encoding:NSUTF8StringEncoding error:nil];
+    if (!contents) return 0;
+    for (NSString *line in [contents componentsSeparatedByCharactersInSet:NSCharacterSet.newlineCharacterSet]) {
+        if ([line hasPrefix:@"guiScale:"]) {
+            return [line substringFromIndex:9].intValue;
+        }
+    }
+    return 0;
+}
+
+static int aasdl_calculateGuiScale(void) {
+    int requested = aasdl_guiScaleFromOptions();
+    int w = windowWidth > 0 ? windowWidth : aasdl_winW;
+    int h = windowHeight > 0 ? windowHeight : aasdl_winH;
+    if (w <= 0 || h <= 0) return 1;
+    int scale = 1;
+    while (scale != requested && scale < w && scale < h &&
+           w / (scale + 1) >= 320 && h / (scale + 1) >= 240) {
+        scale++;
+    }
+    return scale;
+}
 
 // SDL3 cursor hook: track cursor shape from SDL_CreateSystemCursor
 typedef void* (*SDL_CreateSystemCursor_func)(int);
@@ -847,6 +879,10 @@ void AASDL_NoteWindow(uint32_t windowID, int w, int h) {
     } else if (isUp) {
         // size may have changed (rotation); nothing else to do
     }
+    guiScale = aasdl_calculateGuiScale();
+    NSLog(@"[SDLInject] SDL window metrics: sdl=%dx%d physical=%dx%d window=%dx%d guiScale=%d res=%.2f",
+          aasdl_winW, aasdl_winH, physicalWidth, physicalHeight, windowWidth, windowHeight,
+          guiScale, resolutionScale);
 }
 
 /*
@@ -901,20 +937,24 @@ void AASDL_NoteCursorShape(int shape) {
 void AASDL_NoteGrab(bool grabbed) {
     aasdl_lastGrabSec = CACurrentMediaTime();
     isGrabbing = grabbed ? JNI_TRUE : JNI_FALSE;
+    guiScale = aasdl_calculateGuiScale();
     dispatch_async(dispatch_get_main_queue(), ^{
         SurfaceViewController *vc = ((SurfaceViewController *)UIWindow.mainWindow.rootViewController);
         [vc updateGrabState];
     });
 }
 
-/* Map game-window pixel coords to SDL event coordinates. The game (Minecraft
- * 26.x) treats SDL mouse event coordinates as framebuffer pixels (the basis
- * of its GUI and renderer), so pass the launcher's framebuffer-space
- * coordinates through unchanged. */
+/* Map the launcher's framebuffer-space coordinates to SDL window
+ * coordinates. Minecraft 26.x scales mouse positions with
+ * Window.getScreenWidth(), which SDL reports in window points (for example
+ * 736x414), not in framebuffer pixels (2208x1242). Sending pixels made the
+ * virtual cursor move at the display's pixel density. */
 static BOOL aasdl_coords(CGFloat x, CGFloat y, float *outX, float *outY) {
-    if (windowWidth <= 0 || windowHeight <= 0) return NO;
-    *outX = (float) x;
-    *outY = (float) y;
+    if (windowWidth <= 0 || windowHeight <= 0 || aasdl_winW <= 0 || aasdl_winH <= 0) return NO;
+    const float scaleX = (float) aasdl_winW / (float) windowWidth;
+    const float scaleY = (float) aasdl_winH / (float) windowHeight;
+    *outX = (float) x * scaleX;
+    *outY = (float) y * scaleY;
     return YES;
 }
 
@@ -929,8 +969,14 @@ static void aasdl_pushMouseMotion(float x, float y, float xrel, float yrel, uint
      * SDL keeps the absolute coordinate in mouse->last_x/last_y even while
      * in relative mode, so an off-window x/y would corrupt the cursor
      * position seen by SDL_GetMouseState when the menu opens. */
-    m->x = fmaxf(0.0f, fminf(x, (float) windowWidth - 1.0f));
-    m->y = fmaxf(0.0f, fminf(y, (float) windowHeight - 1.0f));
+    const float winW = aasdl_winW > 0 ? (float) aasdl_winW : (float) windowWidth;
+    const float winH = aasdl_winH > 0 ? (float) aasdl_winH : (float) windowHeight;
+    m->x = fmaxf(0.0f, fminf(x, winW - 1.0f));
+    m->y = fmaxf(0.0f, fminf(y, winH - 1.0f));
+    if (windowWidth > 0 && aasdl_winW > 0) {
+        xrel *= (float) aasdl_winW / (float) windowWidth;
+        yrel *= (float) aasdl_winH / (float) windowHeight;
+    }
     m->xrel = xrel; m->yrel = yrel;
     aasdl_PushEvent(&ev);
 }
@@ -954,13 +1000,14 @@ static void aasdl_pushMouseButton(int button, bool down, float x, float y) {
 }
 
 static void aasdl_pushMouseWheel(float xoffset, float yoffset) {
+    if (xoffset == 0.0f && yoffset == 0.0f) return;
     AASDL_Event ev;
     memset(&ev, 0, sizeof(ev));
     AASDL_MouseWheelEvent *w = (AASDL_MouseWheelEvent *) ev.raw;
     w->type = 0x403;
     w->windowID = aasdl_windowID();
     w->x = xoffset; w->y = yoffset;
-    w->direction = 1;
+    w->direction = 0;
     w->integer_x = (int32_t) xoffset;
     w->integer_y = (int32_t) yoffset;
     float mx, my;
@@ -1008,7 +1055,11 @@ static void aasdl_pushTextInput(uint32_t codepoint) {
     }
     t->type = 0x303; /* SDL_EVENT_TEXT_INPUT (was 0x302 TEXT_EDITING: chat text never committed) */
     t->windowID = aasdl_windowID();
-    t->text = utf8;
+    /* SDL_PushEvent copies the event struct, not the pointed-to string. A
+     * stack buffer here became dangling before the game read the event, which
+     * produced random characters in chat. Keep a heap copy alive. */
+    t->text = strdup(utf8);
+    if (!t->text) return;
     aasdl_PushEvent(&ev);
 }
 
@@ -1118,6 +1169,11 @@ static uint32_t aasdl_mapMods(int mods) {
 }
 
 BOOL CallbackBridge_nativeSendChar(jchar codepoint /* jint codepoint */) {
+    static int textLogCount;
+    if (textLogCount++ < 24) {
+        NSLog(@"[Input] sendChar U+%04X glfw=%d sdl=%d", (unsigned) codepoint,
+              GLFW_invoke_Char != NULL, aasdl_available());
+    }
     if (GLFW_invoke_Char && isInputReady) {
         if (isUseStackQueueCall) {
             sendData(EVENT_TYPE_CHAR, codepoint, 0, 0, 0);
@@ -1161,19 +1217,27 @@ JNIEXPORT void JNICALL Java_org_lwjgl_glfw_CallbackBridge_nativeSendCursorEnter(
 void CallbackBridge_nativeSendCursorPos(char event, CGFloat x, CGFloat y) {
     if (!isInputReady && GLFW_invoke_CursorPos) return;
 
+    CGFloat relX = 0.0, relY = 0.0;
     switch (event) {
         case ACTION_DOWN:
         case ACTION_UP:
             if (!isGrabbing) {
                 cursorX = x;
                 cursorY = y;
+            } else {
+                cLastX = x;
+                cLastY = y;
             }
             break;
 
         case ACTION_MOVE:
             if (isGrabbing) {
-                cursorX += x - cLastX;
-                cursorY += y - cLastY;
+                relX = x - cLastX;
+                relY = y - cLastY;
+                cursorX += relX;
+                cursorY += relY;
+                cLastX = x;
+                cLastY = y;
             } else {
                 cursorX = x;
                 cursorY = y;
@@ -1183,6 +1247,8 @@ void CallbackBridge_nativeSendCursorPos(char event, CGFloat x, CGFloat y) {
         case ACTION_MOVE_MOTION:
             cursorX += x;
             cursorY += y;
+            relX = x;
+            relY = y;
             break;
     }
 
@@ -1194,10 +1260,17 @@ void CallbackBridge_nativeSendCursorPos(char event, CGFloat x, CGFloat y) {
         float mx, my;
         if (aasdl_coords(cursorX, cursorY, &mx, &my)) {
             float xrel = 0.0f, yrel = 0.0f;
-            if (event == ACTION_MOVE_MOTION) {
-                xrel = (float) x;
-                yrel = (float) y;
+            if (event == ACTION_MOVE_MOTION || (event == ACTION_MOVE && isGrabbing)) {
+                xrel = (float) relX;
+                yrel = (float) relY;
             }
+            static int cursorLogCount;
+            if (cursorLogCount < 4 || (cursorLogCount % 300) == 0) {
+                NSLog(@"[Cursor] event=%d raw=(%.1f,%.1f) sdl=(%.1f,%.1f) win=%dx%d",
+                      event, (double) cursorX, (double) cursorY,
+                      (double) mx, (double) my, aasdl_winW, aasdl_winH);
+            }
+            cursorLogCount++;
             aasdl_pushMouseMotion(mx, my, xrel, yrel, aasdl_buttons);
         }
     }
@@ -1336,6 +1409,9 @@ __attribute__((used)) void AASDL_GetFramebufferSize(int *w, int *h) {
 void CallbackBridge_nativeSendScreenSize(int width, int height) {
     windowWidth = width;
     windowHeight = height;
+    guiScale = aasdl_calculateGuiScale();
+    NSLog(@"[Input] screen size: physical=%dx%d window=%dx%d guiScale=%d res=%.2f",
+          physicalWidth, physicalHeight, windowWidth, windowHeight, guiScale, resolutionScale);
     
     if (isInputReady) {
         if (GLFW_invoke_FramebufferSize) {
@@ -1358,14 +1434,14 @@ void CallbackBridge_nativeSendScreenSize(int width, int height) {
 }
 
 void CallbackBridge_nativeSendScroll(CGFloat xoffset, CGFloat yoffset) {
-    if (GLFW_invoke_Scroll && isInputReady) {
+    if (aasdl_available() && aasdl_windowID() != 0) {
+        aasdl_pushMouseWheel((float) xoffset, (float) yoffset);
+    } else if (GLFW_invoke_Scroll && isInputReady) {
         if (isUseStackQueueCall) {
             sendDataFloat(EVENT_TYPE_SCROLL, xoffset, yoffset, 0, 0);
         } else {
             safeInvokeScroll((void*) showingWindow, (double) xoffset, (double) yoffset);
         }
-    } else if (aasdl_available()) {
-        aasdl_pushMouseWheel((float) xoffset, (float) yoffset);
     }
 }
 

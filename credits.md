@@ -30,4 +30,19 @@ DuyAnh662 (Za_d626)
 - [UnzipKit](https://github.com/abbeycode/UnzipKit): [BSD-2 License](https://github.com/abbeycode/UnzipKit/blob/master/LICENSE).
 - [DyldDeNeuralyzer](https://github.com/xpn/DyldDeNeuralyzer): bypasses Library Validation for loading external runtime
 - [LTW render](https://github.com/MojoLauncher/LTW): [LGPL-3.0 license](https://github.com/MojoLauncher/LTW/blob/master/LICENSE)
+- [MMMarkdown](https://github.com/mdiep/MMMarkdown.git): [MIT License](https://github.com/mdiep/MMMarkdown/blob/master/LICENSE.md) render file Markdown for main menu
 - Thanks to [MCHeads](https://mc-heads.net) for providing Minecraft avatars.
+
+### Upstream and community
+
+Witch Launcher and its upstream projects are built on the work of many contributors, including:
+
+- **@crystall1nedev** — Amethyst project manager and iOS port developer
+- **@khanhduytran0** — iOS port developer
+- **@artdeell**
+- **@Mathius-Boulay**
+- **@zhuowei**
+- **@jkcoxson**
+- **@Diatrus**
+- **@Catsruledogs**
+- **@T1k-T1k**

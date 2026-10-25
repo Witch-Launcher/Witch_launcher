@@ -1866,11 +1866,19 @@ SDL_Cursor *SDL_CreateSystemCursor(SDL_SystemCursor id)
     SDL_Cursor *cursor;
 
     if (!mouse->CreateSystemCursor) {
+#if defined(SDL_PLATFORM_IOS) || defined(SDL_PLATFORM_TVOS)
+        /* Amethyst: the UIKit backend has no native system cursors, but games
+         * such as Minecraft 26.3 create them at startup and fall back to the
+         * default cursor when creation fails. Return a dummy handle so
+         * SDL_SetCursor still reports the requested shape to the launcher. */
+        cursor = (SDL_Cursor *)SDL_calloc(1, sizeof(*cursor));
+#else
         SDL_SetError("CreateSystemCursor is not currently supported");
         return NULL;
+#endif
+    } else {
+        cursor = mouse->CreateSystemCursor(id);
     }
-
-    cursor = mouse->CreateSystemCursor(id);
     if (cursor) {
         cursor->next = mouse->cursors;
         mouse->cursors = cursor;

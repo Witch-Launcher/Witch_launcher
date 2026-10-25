@@ -106,7 +106,7 @@ void glShaderSource(GLuint shader, GLsizei count, const GLchar * const *string, 
     // are there #version?
     if (!strncmp(source2, "#version ", 9)) {
         if (!strncmp(&source2[13], "es", 2)) {
-            // This is for gl4es. TODO: maybe remove 'es' aswell?
+            gles_glShaderSource(shader, count, string, length);
             return;
         }
         converted = strdup(source2);
@@ -115,8 +115,13 @@ void glShaderSource(GLuint shader, GLsizei count, const GLchar * const *string, 
                 // 100, 110 -> 120
                 //converted[10] = '2';
             } else if (converted[10] - '0' < 6) {
-                // 130, 140, 150 -> 330
-                converted[9] = converted[10] = '3';
+                // 130, 140, 150 -> 310 es
+                char *lineEnd = strchr(converted, '\n');
+                char *newSource = calloc(1, strlen(converted) + 16);
+                strcpy(newSource, "#version 310 es\n");
+                if (lineEnd) strcat(newSource, lineEnd + 1);
+                free(converted);
+                converted = newSource;
             }
         }
         // remove "core", is it safe?
@@ -136,6 +141,12 @@ void glShaderSource(GLuint shader, GLsizei count, const GLchar * const *string, 
     if (FindString(converted, "\nuniform mat4 textureMatrix = mat4(1.0);")) {
         InplaceReplace(converted, &convertedLen, "\nuniform mat4 textureMatrix = mat4(1.0);", "\n#define textureMatrix mat4(1.0)");
     }
+    // MC 1.18.x light.glsl: desktop GLSL implicitly converts ivec2 to vec2 in
+    // "uv / 256.0"; GLSL ES 3.10 rejects ivec2/float, so make it explicit.
+    converted = InplaceReplace(converted, &convertedLen, "uv / 256.0", "vec2(uv) / 256.0");
+    converted = InplaceReplace(converted, &convertedLen, "uv/256.0", "vec2(uv)/256.0");
+    // 1.18.x entity/item translucent cull: implicit ivec2 -> vec2 assignment.
+    converted = InplaceReplace(converted, &convertedLen, "texCoord2 = UV2;", "texCoord2 = vec2(UV2);");
 #endif
 
     // Workaround unassigned outputs: use gl_FragData[] instead of separate color outputs
@@ -157,7 +168,8 @@ void glShaderSource(GLuint shader, GLsizei count, const GLchar * const *string, 
         "#extension GL_EXT_blend_func_extended : enable\n"
         "#extension GL_EXT_draw_buffers : enable\n"
         // For OptiFine (see patch above)
-        "#extension GL_EXT_shader_non_constant_global_initializers : enable\n";
+        "#extension GL_EXT_shader_non_constant_global_initializers : enable\n"
+        "precision highp float;\n";
     converted = InplaceInsert(GetLine(converted, 1), extensions, converted, &convertedLen);
 
     //printf("[tinygl4angle] glShaderSource: %s\n", converted);
@@ -207,8 +219,39 @@ void glGetTexLevelParameteriv(GLenum target, GLint level, GLenum pname, GLint *p
     }
 }
 
+static GLenum loggedTexFormats[24][3];
+static int loggedTexFormatCount = 0;
+
+static void logTexImage2D(GLenum internalformat, GLenum format, GLenum type) {
+    for (int i = 0; i < loggedTexFormatCount; i++) {
+        if (loggedTexFormats[i][0] == internalformat && loggedTexFormats[i][1] == format && loggedTexFormats[i][2] == type)
+            return;
+    }
+    if (loggedTexFormatCount < 24) {
+        loggedTexFormats[loggedTexFormatCount][0] = internalformat;
+        loggedTexFormats[loggedTexFormatCount][1] = format;
+        loggedTexFormats[loggedTexFormatCount][2] = type;
+        loggedTexFormatCount++;
+        fprintf(stderr, "[tinygl4angle] glTexImage2D internal=0x%x format=0x%x type=0x%x\n", internalformat, format, type);
+    }
+}
+
 void glTexImage2D(GLenum target, GLint level, GLint internalformat, GLsizei width, GLsizei height, GLint border, GLenum format, GLenum type, const GLvoid *data) {
     LOOKUP_FUNC(glTexImage2D)
+
+    logTexImage2D(internalformat, format, type);
+
+    if (internalformat == GL_DEPTH_COMPONENT) {
+        if (type == GL_FLOAT) {
+            internalformat = GL_DEPTH_COMPONENT32F;
+        } else if (type == GL_UNSIGNED_INT) {
+            internalformat = GL_DEPTH_COMPONENT24;
+        } else if (type == GL_UNSIGNED_SHORT) {
+            internalformat = GL_DEPTH_COMPONENT16;
+        }
+    } else if (internalformat == GL_DEPTH_STENCIL) {
+        internalformat = GL_DEPTH24_STENCIL8;
+    }
 
     if (type == GL_UNSIGNED_INT_8_8_8_8_REV) {
         type = GL_UNSIGNED_BYTE;

@@ -83,7 +83,8 @@ static GameSurfaceView* pojavWindow;
     shouldTriggerClick, shouldTriggerHaptic, slideableHotbar, toggleHidden;
 
 @property(nonatomic) BOOL enableMouseGestures, enableHotbarGestures;
-@property(nonatomic) BOOL enableHoldGesture, enableDoubleTapOffhand, enableScrollGesture;
+@property(nonatomic) BOOL enableHoldGesture, enableDoubleTapOffhand;
+@property(nonatomic) UIToolbar *keyboardToolbar;
 
 @property(nonatomic) UIImpactFeedbackGenerator *lightHaptic;
 @property(nonatomic) UIImpactFeedbackGenerator *mediumHaptic;
@@ -95,6 +96,8 @@ static GameSurfaceView* pojavWindow;
 @end
 
 @implementation SurfaceViewController
+
+@synthesize keyboardToolbar = _keyboardToolbar;
 
 - (instancetype)initWithMetadata:(NSDictionary *)metadata {
     self = [super init];
@@ -146,11 +149,8 @@ static GameSurfaceView* pojavWindow;
     };
     CADisplayLink *displayLink = [CADisplayLink displayLinkWithTarget:tickInput selector:@selector(invoke)];
     if (@available(iOS 15.0, tvOS 15.0, *)) {
-        if(getPrefBool(@"video.max_framerate")) {
-            displayLink.preferredFrameRateRange = CAFrameRateRangeMake(30, 120, 120);
-        } else {
-            displayLink.preferredFrameRateRange = CAFrameRateRangeMake(30, 60, 60);
-        }
+        float maxFPS = UIScreen.mainScreen.maximumFramesPerSecond;
+        displayLink.preferredFrameRateRange = CAFrameRateRangeMake(30, maxFPS, maxFPS);
     }
     [displayLink addToRunLoop:NSRunLoop.currentRunLoop forMode:NSRunLoopCommonModes];
 
@@ -245,6 +245,7 @@ static GameSurfaceView* pojavWindow;
     self.mousePointerView.image = [CursorTypeManager imageForType:initialTypeId displaySize:initialDisplayFrame.size];
     [self.touchView addSubview:self.mousePointerView];
     self.mousePointerView.frame = initialDisplayFrame;
+    AmethystSetSystemPointerHidden(self.view, virtualMouseEnabled);
 
     // Keep the tracked field inside the visible bounds: iOS attaches the
     // hardware-keyboard text input session (UIFieldEditor) only when the first
@@ -258,6 +259,14 @@ static GameSurfaceView* pojavWindow;
     self.inputTextField.font = [UIFont fontWithName:@"Menlo-Regular" size:20];
     self.inputTextField.clearsOnBeginEditing = YES;
     self.inputTextField.textAlignment = NSTextAlignmentCenter;
+    // Game chat must receive exactly what the keyboard produced. iOS smart
+    // punctuation/autocorrection can otherwise change or duplicate text.
+    self.inputTextField.autocorrectionType = UITextAutocorrectionTypeNo;
+    self.inputTextField.spellCheckingType = UITextSpellCheckingTypeNo;
+    self.inputTextField.smartQuotesType = UITextSmartQuotesTypeNo;
+    self.inputTextField.smartDashesType = UITextSmartDashesTypeNo;
+    self.inputTextField.smartInsertDeleteType = UITextSmartInsertDeleteTypeNo;
+    self.inputTextField.autocapitalizationType = UITextAutocapitalizationTypeNone;
     self.inputTextField.sendChar = ^(jchar keychar){
         CallbackBridge_nativeSendChar(keychar);
     };
@@ -276,7 +285,8 @@ static GameSurfaceView* pojavWindow;
         GCMouse* mouse = note.object;
         [self registerMouseCallbacks:mouse];
         virtualMouseEnabled = YES;
-    self.mousePointerView.hidden = isGrabbing;
+        self.mousePointerView.hidden = isGrabbing;
+        AmethystSetSystemPointerHidden(self.view, YES);
         [self setNeedsUpdateOfPrefersPointerLocked];
     }];
     self.mouseDisconnectCallback = [[NSNotificationCenter defaultCenter] addObserverForName:GCMouseDidDisconnectNotification object:nil queue:[NSOperationQueue mainQueue] usingBlock:^(NSNotification *note) {
@@ -328,6 +338,7 @@ static GameSurfaceView* pojavWindow;
         [ControllerInput registerControllerCallbacks:controller];
         self.mousePointerView.hidden = isGrabbing;
         virtualMouseEnabled = YES;
+        AmethystSetSystemPointerHidden(self.view, YES);
         if (getPrefBool(@"control.hardware_hide")) {
             self.ctrlView.hidden = YES;
         }
@@ -366,6 +377,7 @@ static GameSurfaceView* pojavWindow;
 
 - (void)viewDidAppear:(BOOL)animated {
     [super viewDidAppear:animated];
+    AmethystSetSystemPointerHidden(self.view, isGrabbing || virtualMouseEnabled);
     [self setNeedsUpdateOfPrefersPointerLocked];
 }
 
@@ -469,6 +481,8 @@ static GameSurfaceView* pojavWindow;
         self.inputTextField.autocorrectionType = UITextAutocorrectionTypeNo;
     }
 
+    [self applyKeyboardToolbarPreference];
+
     BOOL gyroEnabled = getPrefBool(@"control.gyroscope_enable");
     BOOL gyroInvertX = getPrefBool(@"control.gyroscope_invert_x_axis");
     int gyroSensitivity = getPrefInt(@"control.gyroscope_sensitivity");
@@ -478,6 +492,7 @@ static GameSurfaceView* pojavWindow;
 
     virtualMouseEnabled = getPrefBool(@"control.virtmouse_enable");
     self.mousePointerView.hidden = isGrabbing || !virtualMouseEnabled;
+    AmethystSetSystemPointerHidden(self.view, isGrabbing || virtualMouseEnabled);
 
     // Update virtual mouse scale
     CGFloat mouseScale = getPrefFloat(@"control.mouse_scale") / 100.0;
@@ -497,10 +512,9 @@ static GameSurfaceView* pojavWindow;
     self.enableHotbarGestures = getPrefBool(@"control.gesture_hotbar");
     self.enableHoldGesture = getPrefBool(@"control.gesture_hold");
     self.enableDoubleTapOffhand = getPrefBool(@"control.doubletap_offhand");
-    self.enableScrollGesture = getPrefBool(@"control.gesture_scroll");
     self.shouldTriggerHaptic = !getPrefBool(@"control.disable_haptics");
 
-    self.scrollPanGesture.enabled = self.enableScrollGesture;
+    self.scrollPanGesture.enabled = self.enableMouseGestures;
     self.doubleTapGesture.enabled = self.enableHotbarGestures;
     self.longPressGesture.minimumPressDuration = getPrefFloat(@"control.press_duration") / 1000.0;
 
@@ -517,6 +531,82 @@ static GameSurfaceView* pojavWindow;
     }
     // Update pointer lock state
     [self setNeedsUpdateOfPrefersPointerLocked];
+}
+
+- (void)applyKeyboardToolbarPreference {
+    UIToolbar *editingToolbar = getPrefBool(@"control.keyboard_editing_toolbar") ? self.keyboardToolbar : nil;
+    if (self.inputTextField.inputAccessoryView != editingToolbar) {
+        self.inputTextField.inputAccessoryView = editingToolbar;
+        if (self.inputTextField.isFirstResponder) {
+            [self.inputTextField reloadInputViews];
+        }
+    }
+}
+
+- (UIBarButtonItem *)keyboardBarButtonWithImage:(NSString *)imageName
+                                           title:(NSString *)title
+                                          action:(SEL)action {
+    UIImage *image = [UIImage systemImageNamed:imageName];
+    UIBarButtonItem *item = image
+        ? [[UIBarButtonItem alloc] initWithImage:image style:UIBarButtonItemStylePlain target:self action:action]
+        : [[UIBarButtonItem alloc] initWithTitle:title style:UIBarButtonItemStylePlain target:self action:action];
+    item.accessibilityLabel = title;
+    return item;
+}
+
+- (UIToolbar *)keyboardToolbar {
+    if (_keyboardToolbar) {
+        return _keyboardToolbar;
+    }
+
+    UIToolbar *toolbar = [[UIToolbar alloc] initWithFrame:CGRectMake(0, 0, self.view.bounds.size.width, 44)];
+    toolbar.autoresizingMask = UIViewAutoresizingFlexibleWidth;
+    toolbar.translucent = YES;
+
+    UIBarButtonItem *flexibleA = [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemFlexibleSpace target:nil action:nil];
+    UIBarButtonItem *flexibleB = [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemFlexibleSpace target:nil action:nil];
+    toolbar.items = @[
+        [self keyboardBarButtonWithImage:@"arrow.uturn.backward" title:localize(@"keyboard.action.undo", nil) action:@selector(keyboardUndo:)],
+        [self keyboardBarButtonWithImage:@"arrow.uturn.forward" title:localize(@"keyboard.action.redo", nil) action:@selector(keyboardRedo:)],
+        flexibleA,
+        [self keyboardBarButtonWithImage:@"scissors" title:localize(@"keyboard.action.cut", nil) action:@selector(keyboardCut:)],
+        [self keyboardBarButtonWithImage:@"doc.on.doc" title:localize(@"keyboard.action.copy", nil) action:@selector(keyboardCopy:)],
+        [self keyboardBarButtonWithImage:@"doc.on.clipboard" title:localize(@"keyboard.action.paste", nil) action:@selector(keyboardPaste:)],
+        flexibleB,
+        [self keyboardBarButtonWithImage:@"selection.pin.in.out" title:localize(@"keyboard.action.select_all", nil) action:@selector(keyboardSelectAll:)],
+        [self keyboardBarButtonWithImage:@"keyboard.chevron.compact.down" title:localize(@"keyboard.action.hide", nil) action:@selector(keyboardHide:)],
+    ];
+    [toolbar sizeToFit];
+    _keyboardToolbar = toolbar;
+    return _keyboardToolbar;
+}
+
+- (void)keyboardUndo:(id)sender {
+    [self.inputTextField.undoManager undo];
+}
+
+- (void)keyboardRedo:(id)sender {
+    [self.inputTextField.undoManager redo];
+}
+
+- (void)keyboardCut:(id)sender {
+    [self.inputTextField cut:sender];
+}
+
+- (void)keyboardCopy:(id)sender {
+    [self.inputTextField copy:sender];
+}
+
+- (void)keyboardPaste:(id)sender {
+    [self.inputTextField paste:sender];
+}
+
+- (void)keyboardSelectAll:(id)sender {
+    [self.inputTextField selectAll:sender];
+}
+
+- (void)keyboardHide:(id)sender {
+    [self.inputTextField resignFirstResponder];
 }
 
 - (void)handleControlScaleChange {
@@ -541,6 +631,7 @@ static GameSurfaceView* pojavWindow;
     self.mousePointerView.image = [CursorTypeManager imageForType:activeTypeId displaySize:displayFrame.size];
     self.mousePointerView.frame = displayFrame;
     self.mousePointerView.hidden = isGrabbing || !getPrefBool(@"control.virtmouse_enable");
+    AmethystSetSystemPointerHidden(self.view, isGrabbing || getPrefBool(@"control.virtmouse_enable"));
     self.mouseSpeed = getPrefFloat(@"control.mouse_speed") / 100.0;
     // Button scale live update: refresh control layout (ControlButton reads control.button_scale)
     for (UIView *v in self.ctrlView.subviews) {
@@ -632,8 +723,9 @@ static GameSurfaceView* pojavWindow;
     // Update cursor type based on grab state
     [CursorTypeManager setCursorHidden:(isGrabbing == JNI_TRUE)];
 
-    self.scrollPanGesture.enabled = self.enableScrollGesture && !isGrabbing;
+    self.scrollPanGesture.enabled = self.enableMouseGestures && !isGrabbing;
     self.mousePointerView.hidden = isGrabbing || !virtualMouseEnabled;
+    AmethystSetSystemPointerHidden(self.view, isGrabbing || virtualMouseEnabled);
     [self setNeedsUpdateOfPrefersPointerLocked];
 
     // Update buttons visibility
@@ -721,6 +813,15 @@ static GameSurfaceView* pojavWindow;
         menuButton.showsMenuAsPrimaryAction = YES;
         self.edgeGesture.enabled = NO;
     }
+
+    // loadCustomControls is also called after editing controls in-game, and
+    // it re-enables the edge recognizer above. Widget mode must keep that
+    // recognizer off, otherwise the game can be swiped into the navigation
+    // menu whose swipe strip is hidden in widget mode.
+    if (getPrefBool(@"general.widget_menu")) {
+        self.edgeGesture.enabled = NO;
+        self.menuSwipeView.hidden = YES;
+    }
 }
 
 - (void)viewWillTransitionToSize:(CGSize)size withTransitionCoordinator:(id<UIViewControllerTransitionCoordinator>)coordinator
@@ -800,6 +901,7 @@ static GameSurfaceView* pojavWindow;
         if (self.inputTextField.isFirstResponder) {
             [self.inputTextField resignFirstResponder];
         } else {
+            [self applyKeyboardToolbarPreference];
             [self.inputTextField becomeFirstResponder];
             // Insert an undeletable space
             self.inputTextField.text = @" ";
@@ -865,9 +967,10 @@ static GameSurfaceView* pojavWindow;
         }
 
         if (touchEvent == self.hotbarTouch && self.slideableHotbar && ![self isTouchInactive:self.hotbarTouch]) {
-            CGFloat screenScale = [[UIScreen mainScreen] scale];
+            CGPoint hotbarPoint = [touchEvent locationInView:self.surfaceView];
+            CGFloat screenScale = self.screenScale;
             int slot = self.enableHotbarGestures ?
-            callback_SurfaceViewController_touchHotbar(locationInView.x * screenScale, locationInView.y * screenScale) : -1;
+            callback_SurfaceViewController_touchHotbar(hotbarPoint.x * screenScale, hotbarPoint.y * screenScale) : -1;
             if (slot != -1 && currentHotbarSlot != slot && (event == ACTION_DOWN || currentHotbarSlot != -1)) {
                 currentHotbarSlot = slot;
                 CallbackBridge_nativeSendKey(slot, 0, 1, 0);
@@ -995,12 +1098,10 @@ static GameSurfaceView* pojavWindow;
     }
 
     mouse.mouseInput.scroll.xAxis.valueChangedHandler = ^(GCControllerAxisInput * _Nonnull axis, float value) {
-        // Workaround MC-121772 (macOS/iOS feature)
-        CallbackBridge_nativeSendScroll(value, value);
+        CallbackBridge_nativeSendScroll(value, 0);
     };
     mouse.mouseInput.scroll.yAxis.valueChangedHandler = ^(GCControllerAxisInput * _Nonnull axis, float value) {
-        // Workaround MC-121772 (macOS/iOS feature)
-        CallbackBridge_nativeSendScroll(-value, -value);
+        CallbackBridge_nativeSendScroll(0, -value);
     };
 
     if (getPrefBool(@"control.hardware_hide")) {
@@ -1041,8 +1142,8 @@ static GameSurfaceView* pojavWindow;
     }
     
     if (sender.state == UIGestureRecognizerStateRecognized && isGrabbing) {
-        CGFloat screenScale = [[UIScreen mainScreen] scale];
-        CGPoint point = [sender locationInView:self.rootView];
+        CGFloat screenScale = self.screenScale;
+        CGPoint point = [sender locationInView:self.surfaceView];
         int hotbarSlot = self.enableHotbarGestures ?
             callback_SurfaceViewController_touchHotbar(point.x * screenScale, point.y * screenScale) : -1;
         if (self.enableDoubleTapOffhand && hotbarSlot != -1 && currentHotbarSlot == hotbarSlot) {
@@ -1106,8 +1207,8 @@ static GameSurfaceView* pojavWindow;
     }
     
     if (!self.slideableHotbar) {
-        CGPoint location = [sender locationInView:self.rootView];
-        CGFloat screenScale = UIScreen.mainScreen.scale;
+        CGPoint location = [sender locationInView:self.surfaceView];
+        CGFloat screenScale = self.screenScale;
         currentHotbarSlot = self.enableHotbarGestures ?
             callback_SurfaceViewController_touchHotbar(location.x * screenScale, location.y * screenScale) : -1;
     }
@@ -1182,6 +1283,7 @@ static GameSurfaceView* pojavWindow;
                         if (self.inputTextField.isFirstResponder) {
                             [self.inputTextField resignFirstResponder];
                         } else {
+                            [self applyKeyboardToolbarPreference];
                             [self.inputTextField becomeFirstResponder];
                             // Insert an undeletable space
                             self.inputTextField.text = @" ";
@@ -1222,6 +1324,7 @@ static GameSurfaceView* pojavWindow;
                         virtualMouseEnabled = !virtualMouseEnabled;
                         self.mousePointerView.hidden = !virtualMouseEnabled;
                         setPrefBool(@"control.virtmouse_enable", virtualMouseEnabled);
+                        AmethystSetSystemPointerHidden(self.view, virtualMouseEnabled);
                         [self setNeedsUpdateOfPrefersPointerLocked];
                     }
                     break;
@@ -1369,10 +1472,12 @@ static NSTimer* staleTouchSweepTimer = nil;
         if (touch.type == UITouchTypeIndirectPointer) {
             continue; // handle this in a different place
         }
-        CGPoint locationInView = [touch locationInView:self.rootView];
-        CGFloat screenScale = [[UIScreen mainScreen] scale];
+        CGPoint locationInView = [touch locationInView:self.surfaceView];
+        CGFloat screenScale = self.screenScale;
         currentHotbarSlot = self.enableHotbarGestures ?
             callback_SurfaceViewController_touchHotbar(locationInView.x * screenScale, locationInView.y * screenScale) : -1;
+        NSLog(@"[Hotbar] down surface=(%.1f,%.1f) scale=%.2f slot=%d",
+              locationInView.x, locationInView.y, screenScale, currentHotbarSlot);
         if ([self isTouchInactive:self.hotbarTouch] && currentHotbarSlot != -1) {
             self.hotbarTouch = touch;
         }

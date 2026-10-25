@@ -3,6 +3,7 @@
 #import "HapticManager.h"
 #import "LauncherPreferences.h"
 #import "AmethystBlurView.h"
+#import "UIView+LiquidGlass.h"
 
 @interface SidebarTabItem : UIView
 @property (nonatomic) UIImageView *iconView;
@@ -149,6 +150,7 @@
 
     [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(updateColors) name:ThemeDidChangeNotification object:nil];
     [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(updateColors) name:AmethystBlurIntensityDidChangeNotification object:nil];
+    [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(updateColors) name:LiquidGlassDidChangeNotification object:nil];
         [self updateColors];
     }
 
@@ -200,7 +202,9 @@
 
 - (void)updateColors {
     ThemeManager *theme = ThemeManager.shared;
-    if ([AmethystBlurView blurEnabledForKey:@"amethyst_sidebar_blur"]) {
+    if ([UIView lg_isEnabled]) {
+        self.view.backgroundColor = [UIColor clearColor];
+    } else if ([AmethystBlurView blurEnabledForKey:@"amethyst_sidebar_blur"]) {
         self.view.backgroundColor = [theme.sidebarBackgroundColor colorWithAlphaComponent:0.25 * theme.uiOpacity];
     } else {
         self.view.backgroundColor = theme.sidebarBackgroundColor;
