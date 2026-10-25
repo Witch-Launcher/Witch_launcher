@@ -226,12 +226,20 @@ bool UIKit_CreateWindow(SDL_VideoDevice *_this, SDL_Window *window, SDL_Properti
             BOOL hostWindow = NO;
 
             /* Local bridge: on the main screen, prefer the host app's window so
-             * the game renders inside the launcher's view hierarchy. */
+             * the game renders inside the launcher's view hierarchy. The game
+             * can start before the presenting controller's view is attached;
+             * use the app's key window in that case and let the host surface
+             * attach the view when it appears. */
             UIView *hostView = UIKit_GetHostView();
+            UIWindow *hostUIWindow = hostView.window;
+            if (!hostUIWindow) {
+                hostUIWindow = [UIApplication sharedApplication].keyWindow;
+            }
             if (data.uiscreen == [UIScreen mainScreen] &&
                 !(window->flags & (SDL_WINDOW_UTILITY | SDL_WINDOW_NOT_FOCUSABLE)) &&
-                hostView != nil && hostView.window != nil) {
-                uiwindow = hostView.window;
+                hostView != nil && hostUIWindow != nil &&
+                hostUIWindow.screen == data.uiscreen) {
+                uiwindow = hostUIWindow;
                 hostWindow = YES;
             } else if (@available(iOS 13.0, tvOS 13.0, *)) {
                 UIWindowScene *scene = (__bridge UIWindowScene *)SDL_GetPointerProperty(create_props, SDL_PROP_WINDOW_CREATE_WINDOWSCENE_POINTER, NULL);
@@ -258,8 +266,9 @@ bool UIKit_CreateWindow(SDL_VideoDevice *_this, SDL_Window *window, SDL_Properti
             }
     #endif
 
-            NSLog(@"[SDL] window '%s' id=%u host=%d flags=0x%x", window->title ?: "",
-                  (unsigned)window->id, hostWindow, (unsigned)window->flags);
+            NSLog(@"[SDL] window '%s' id=%u host=%d hostViewInWindow=%d flags=0x%x",
+                  window->title ?: "", (unsigned)window->id, hostWindow,
+                  hostView.window != nil, (unsigned)window->flags);
 
             if (!SetupWindowData(_this, window, uiwindow, true, hostWindow)) {
                 return;
