@@ -276,7 +276,8 @@ NSMutableArray<NSDictionary *> *localVersionList, *remoteVersionList;
 
     NSFileManager *fileManager = NSFileManager.defaultManager;
     NSString *versionPath = [NSString stringWithFormat:@"%s/versions/", getenv("POJAV_GAME_DIR")];
-    NSArray *list = [fileManager contentsOfDirectoryAtPath:versionPath error:nil];
+    NSArray *list = [[fileManager contentsOfDirectoryAtPath:versionPath error:nil]
+                     sortedArrayUsingSelector:@selector(localizedStandardCompare:)];
     for (NSString *versionId in list) {
         NSString *localPath = [versionPath stringByAppendingPathComponent:versionId];
         BOOL isDirectory;
