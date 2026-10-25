@@ -61,6 +61,10 @@ static GameSurfaceView* pojavWindow;
     // Hover gesture tracking for click detection
     CGPoint hoverStartPoint;
     BOOL hoverMoved;
+
+    // Last surface size used to refresh the game framebuffer metrics after
+    // the initial layout/rotation, not just on explicit preference changes.
+    CGSize lastSurfaceSize;
 }
 
 @property(nonatomic) NSDictionary* metadata;
@@ -375,6 +379,16 @@ static GameSurfaceView* pojavWindow;
     [self launchMinecraft];
 }
 
+- (void)viewDidLayoutSubviews {
+    [super viewDidLayoutSubviews];
+    if (self.surfaceView.superview == nil) return;
+    CGSize size = self.surfaceView.superview.bounds.size;
+    if (!CGSizeEqualToSize(size, lastSurfaceSize)) {
+        lastSurfaceSize = size;
+        [self updateSavedResolution];
+    }
+}
+
 - (void)viewDidAppear:(BOOL)animated {
     [super viewDidAppear:animated];
     AmethystSetSystemPointerHidden(self.view, isGrabbing || virtualMouseEnabled);
@@ -654,17 +668,25 @@ static GameSurfaceView* pojavWindow;
         }
     }
 
+    resolutionScale = getPrefFloat(@"video.resolution") / 100.0;
+
+    // viewDidLoad calls this before creating surfaceView; don't publish a
+    // zero-sized framebuffer to the game and don't overwrite valid metrics.
+    if (self.surfaceView == nil) {
+        return;
+    }
+
     if (self.surfaceView.superview != nil) {
         self.surfaceView.frame = self.surfaceView.superview.frame;
     }
 
-    resolutionScale = getPrefFloat(@"video.resolution") / 100.0;
     self.surfaceView.layer.contentsScale = self.screenScale * resolutionScale;
 
     physicalWidth = roundf(self.surfaceView.frame.size.width * self.screenScale);
     physicalHeight = roundf(self.surfaceView.frame.size.height * self.screenScale);
     windowWidth = roundf(physicalWidth * resolutionScale);
     windowHeight = roundf(physicalHeight * resolutionScale);
+    lastSurfaceSize = self.surfaceView.superview.bounds.size;
     // Resolution should not be odd
     if ((windowWidth % 2) != 0) {
         --windowWidth;
@@ -971,7 +993,11 @@ static GameSurfaceView* pojavWindow;
             CGFloat screenScale = self.screenScale;
             int slot = self.enableHotbarGestures ?
             callback_SurfaceViewController_touchHotbar(hotbarPoint.x * screenScale, hotbarPoint.y * screenScale) : -1;
-            if (slot != -1 && currentHotbarSlot != slot && (event == ACTION_DOWN || currentHotbarSlot != -1)) {
+            /* Select on the initial press too. Previously currentHotbarSlot
+             * was set in touchesBegan, so this condition was false for the
+             * first slot and a drag that never crossed a slot boundary (most
+             * visibly slot 1) produced no key at all. */
+            if (slot != -1 && (event == ACTION_DOWN || currentHotbarSlot != slot)) {
                 currentHotbarSlot = slot;
                 CallbackBridge_nativeSendKey(slot, 0, 1, 0);
                 CallbackBridge_nativeSendKey(slot, 0, 0, 0);
@@ -1127,7 +1153,9 @@ static GameSurfaceView* pojavWindow;
                 CallbackBridge_nativeSendMouseButton(isGrabbing == JNI_TRUE ?
                     GLFW_MOUSE_BUTTON_RIGHT : GLFW_MOUSE_BUTTON_LEFT, 0, 0);
             });
-        } else {
+        } else if (!self.slideableHotbar) {
+            /* Slideable hotbars already select on the initial ACTION_DOWN;
+             * only the non-slideable path needs the tap recognizer. */
             CallbackBridge_nativeSendKey(currentHotbarSlot, 0, 1, 0);
             CallbackBridge_nativeSendKey(currentHotbarSlot, 0, 0, 0);
         }

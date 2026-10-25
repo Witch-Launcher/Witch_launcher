@@ -17,6 +17,7 @@
 #include <dlfcn.h>
 #include <libgen.h>
 #include <mach/mach.h>
+#include <math.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <stdatomic.h>
@@ -543,15 +544,30 @@ int callback_SurfaceViewController_touchHotbar(CGFloat x, CGFloat y) {
         return -1;
     }
 
+    if (guiScale <= 0 || resolutionScale <= 0.0f) return -1;
     int barHeight = mcscale(22);
-    int barY = physicalHeight - barHeight;
-    if (y < barY) return -1;
-
     int barWidth = mcscale(182);
-    int barX = (physicalWidth / 2) - (barWidth / 2);
+
+    /* Match vanilla's integer GUI coordinates: guiWidth = framebufferWidth /
+     * guiScale, and the hotbar starts at guiWidth / 2 - 91. Using
+     * physicalWidth / 2 - barWidth / 2 leaves a few pixels of drift on the
+     * left edge, enough to miss slot 1 on a Retina display. */
+    int framebufferWidth = windowWidth > 0 ? windowWidth : (int)lroundf(physicalWidth * resolutionScale);
+    int framebufferHeight = windowHeight > 0 ? windowHeight : (int)lroundf(physicalHeight * resolutionScale);
+    int guiWidth = framebufferWidth / guiScale;
+    int guiHeight = framebufferHeight / guiScale;
+    int barX = (int)lroundf((guiWidth / 2 - 91) * (CGFloat)guiScale / resolutionScale);
+    int barY = (int)lroundf((guiHeight - 22) * (CGFloat)guiScale / resolutionScale);
+    if (y < barY) return -1;
     if (x < barX || x >= barX + barWidth) return -1;
 
-    int slot = hotbarKeys[(int) MathUtils_map(x, barX, barX + barWidth, 0, 9)];
+    /* The vanilla hotbar is 182x22 logical pixels with nine 20px slots and a
+     * 1px border. Mapping 182/9 shifts the right-hand slots; use the real
+     * 20px pitch and clamp the border pixels. */
+    int index = (int) ((x - barX - mcscale(1)) / (CGFloat) mcscale(20));
+    if (index < 0) index = 0;
+    if (index > 8) index = 8;
+    int slot = hotbarKeys[index];
     NSLog(@"[Hotbar] touch=(%.1f,%.1f) phys=%dx%d gui=%d res=%.2f bar=(%d,%d %dx%d) slot=%d",
           x, y, physicalWidth, physicalHeight, guiScale, resolutionScale,
           barX, barY, barWidth, barHeight, slot);
@@ -717,9 +733,13 @@ static int aasdl_guiScaleFromOptions(void) {
 
 static int aasdl_calculateGuiScale(void) {
     int requested = aasdl_guiScaleFromOptions();
-    int w = windowWidth > 0 ? windowWidth : aasdl_winW;
-    int h = windowHeight > 0 ? windowHeight : aasdl_winH;
-    if (w <= 0 || h <= 0) return 1;
+    /* windowWidth/Height are the game framebuffer dimensions. aasdl_winW/H
+     * are SDL window points (736x414 on an iPhone 8 Plus) and produce a bogus
+     * scale of 1; use the physical surface size while the game is still
+     * starting, and never overwrite a valid scale with 1. */
+    int w = windowWidth > 0 ? windowWidth : (int)lroundf(physicalWidth * resolutionScale);
+    int h = windowHeight > 0 ? windowHeight : (int)lroundf(physicalHeight * resolutionScale);
+    if (w <= 0 || h <= 0) return guiScale > 0 ? guiScale : 1;
     int scale = 1;
     while (scale != requested && scale < w && scale < h &&
            w / (scale + 1) >= 320 && h / (scale + 1) >= 240) {
@@ -937,7 +957,6 @@ void AASDL_NoteCursorShape(int shape) {
 void AASDL_NoteGrab(bool grabbed) {
     aasdl_lastGrabSec = CACurrentMediaTime();
     isGrabbing = grabbed ? JNI_TRUE : JNI_FALSE;
-    guiScale = aasdl_calculateGuiScale();
     dispatch_async(dispatch_get_main_queue(), ^{
         SurfaceViewController *vc = ((SurfaceViewController *)UIWindow.mainWindow.rootViewController);
         [vc updateGrabState];
@@ -973,10 +992,11 @@ static void aasdl_pushMouseMotion(float x, float y, float xrel, float yrel, uint
     const float winH = aasdl_winH > 0 ? (float) aasdl_winH : (float) windowHeight;
     m->x = fmaxf(0.0f, fminf(x, winW - 1.0f));
     m->y = fmaxf(0.0f, fminf(y, winH - 1.0f));
-    if (windowWidth > 0 && aasdl_winW > 0) {
-        xrel *= (float) aasdl_winW / (float) windowWidth;
-        yrel *= (float) aasdl_winH / (float) windowHeight;
-    }
+    /* Keep relative motion in physical pixels. Minecraft's MouseHandler adds
+     * xrel/yrel directly to accumulatedDX/DY for camera rotation; converting
+     * them to window points made Retina devices ~3x less sensitive (a full
+     * screen drag only turned the camera a little). Absolute x/y remain in
+     * SDL window points for GUI hit-testing. */
     m->xrel = xrel; m->yrel = yrel;
     aasdl_PushEvent(&ev);
 }
