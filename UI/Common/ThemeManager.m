@@ -279,7 +279,16 @@ static void WalkPresentedForScale(UIViewController *from, CGFloat scale, ThemeMa
     if (!presented) return;
     // Alerts keep their system look and physical size.
     if (![presented isKindOfClass:UIAlertController.class]) {
-        [tm applyUIScaleToPresentedView:presented.view scale:scale];
+        // The virtual controls editor maps raw screen coordinates into the
+        // game, so it must stay 1:1 like the Minecraft surface.
+        Class controlsEditorClass = NSClassFromString(@"CustomControlsViewController");
+        BOOL isControlsEditor = controlsEditorClass && [presented isKindOfClass:controlsEditorClass];
+        if (!isControlsEditor) {
+            [tm applyUIScaleToPresentedView:presented.view scale:scale];
+        }
+        // Sheets can present further pages on top of themselves.
+        if (!isControlsEditor) WalkPresentedForScale(presented, scale, tm);
+        return;
     }
     // Sheets can present further pages on top of themselves.
     WalkPresentedForScale(presented, scale, tm);
@@ -288,6 +297,7 @@ static void WalkPresentedForScale(UIViewController *from, CGFloat scale, ThemeMa
 - (void)applyUIScaleToAllWindows {
     Class rootClass = NSClassFromString(@"AmethystRootViewController");
     Class appSheetHostClass = NSClassFromString(@"AppSheetHostVC");
+    Class gameClass = NSClassFromString(@"SurfaceViewController");
     CGFloat scale = _uiScale;
     if (scale <= 0) scale = 1.0;
 
@@ -302,6 +312,14 @@ static void WalkPresentedForScale(UIViewController *from, CGFloat scale, ThemeMa
             (appSheetHostClass && root && [root isKindOfClass:appSheetHostClass]);
         if (zoomable) {
             [self applyUIScaleToRootView:root.view inWindow:window];
+            WalkPresentedForScale(root, scale, self);
+            return;
+        }
+        // In-game: the same window swaps its root to the game controller. The
+        // surface itself stays 1:1, but the settings/perf sheets presented on
+        // top of it still follow the launcher's UI scale.
+        BOOL gameRoot = gameClass && root && [root isKindOfClass:gameClass];
+        if (gameRoot) {
             WalkPresentedForScale(root, scale, self);
         }
     };
