@@ -40,6 +40,7 @@ static UICornerConfiguration *LGConfigurationForRadius(CGFloat radius, CACornerM
 
 @interface AmethystLiquidGlassCenter : NSObject
 + (instancetype)shared;
+@property (nonatomic, assign) BOOL refreshPending;
 @end
 
 @implementation AmethystLiquidGlassCenter
@@ -56,7 +57,26 @@ static UICornerConfiguration *LGConfigurationForRadius(CGFloat radius, CACornerM
 }
 
 - (void)surfaceConfigurationChanged:(NSNotification *)notification {
-    [UIView lg_refreshAllInWindows];
+    if (![NSThread isMainThread]) {
+        dispatch_async(dispatch_get_main_queue(), ^{
+            [self surfaceConfigurationChanged:notification];
+        });
+        return;
+    }
+    /* Theme broadcasts arrive in bursts (launch, settings pages, trait
+     * changes, style imports). One full view-tree walk per burst is enough:
+     * coalesce the posts and refresh once, 0.3s after the last one. */
+    if (self.refreshPending) {
+        return;
+    }
+    self.refreshPending = YES;
+    __weak typeof(self) weakSelf = self;
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.3 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        weakSelf.refreshPending = NO;
+        if ([UIView lg_isEnabled]) {
+            [UIView lg_refreshAllInWindows];
+        }
+    });
 }
 
 @end
@@ -218,24 +238,59 @@ static void LGEnsureCenter(void) {
         });
         return;
     }
+    if (![UIView lg_isEnabled]) {
+        return;
+    }
 
-    void (^walk)(UIView *) = ^(UIView *view) {
-        if (objc_getAssociatedObject(view, kLiquidGlassConfigKey)) {
-            [view lg_refreshLiquidGlass];
+    /* sharedApplication is nil before UIKit has started (a broadcast can fire
+     * during app bootstrap), and connectedScenes / windows can evaluate to
+     * nil mid-launch — e.g. before a scene has connected. The iOS 26/27 SDK
+     * resolves countByEnumeratingWithState: into a class-resolved direct
+     * dispatch that dereferences the receiver instead of silently skipping
+     * it, so fast-enumerating any nil expression crashed right at startup
+     * with SIGSEGV 0x10 the first time a theme broadcast ran. Guard every
+     * enumerated expression against nil here; an object-return method called
+     * on nil stays safe through objc_msgSend (it returns nil), which the
+     * `?: @[]` paths below rely on. */
+    UIApplication *app = [UIApplication sharedApplication];
+    if (!app) {
+        return;
+    }
+    NSSet<UIScene *> *connectedScenes = app.connectedScenes ?: NSSet.set;
+    NSArray<UIWindow *> *appWindows = app.windows ?: NSArray.array;
+
+    /* Collect configured views first, then refresh the snapshot. Each refresh
+     * inserts/removes an effect subview, so walking the live tree while
+     * mutating it is exactly the kind of re-entrancy this walk must avoid;
+     * the strong references held by the snapshot also keep every target alive
+     * for the whole pass. */
+    NSMutableArray<UIView *> *targets = [NSMutableArray array];
+    __block void (^collect)(UIView *) = ^(UIView *view) {
+        if (!view) {
+            return;
         }
-        for (UIView *subview in [view.subviews copy]) {
-            walk(subview);
+        if (objc_getAssociatedObject(view, kLiquidGlassConfigKey)) {
+            [targets addObject:view];
+        }
+        NSArray<UIView *> *children = [view.subviews copy] ?: @[];
+        for (UIView *subview in children) {
+            collect(subview);
         }
     };
-
-    for (UIScene *scene in UIApplication.sharedApplication.connectedScenes) {
+    for (UIScene *scene in connectedScenes) {
         if (![scene isKindOfClass:[UIWindowScene class]]) continue;
-        for (UIWindow *window in ((UIWindowScene *)scene).windows) {
-            walk(window);
+        NSArray<UIWindow *> *sceneWindows = ((UIWindowScene *)scene).windows ?: NSArray.array;
+        for (UIWindow *window in sceneWindows) {
+            collect(window);
         }
     }
-    for (UIWindow *window in UIApplication.sharedApplication.windows) {
-        walk(window);
+    for (UIWindow *window in appWindows) {
+        collect(window);
+    }
+    collect = nil;
+
+    for (UIView *target in targets) {
+        [target lg_refreshLiquidGlass];
     }
 }
 

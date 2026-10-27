@@ -25,6 +25,35 @@ static NSString *const kImageGifName = @"image.gif";
 
 @implementation CursorManager
 
+/* Hot-path caches. The virtual pointer's position is recomputed on EVERY
+ * pointer-motion event (surface drag, pencil hover, GCMouse moves — up to
+ * 120/s), so any disk touch inside the geometry path costs real frame time:
+ * cursorsDirectoryForType does an exists+mkdir probe, hitboxForCursor reads
+ * and JSON-parses a file, and compositeImageForType re-resolves images all
+ * per call. Memoize directory paths, hitbox points and the final display
+ * geometry; every writer below invalidates whichever pieces it changes. */
+static NSMutableDictionary<NSString *, NSString *> *_typeDirCache;    // typeId -> dir path
+static NSMutableDictionary<NSString *, NSValue *> *_hitboxCache;     // hitbox file path -> CGPoint
+static NSMutableDictionary<NSString *, NSValue *> *_geometryCache;   // "type|scale|name" -> CGRect (origin = hotspot offset, size = displaySize)
+static NSMutableDictionary<NSString *, UIImage *> *_imageCache;      // "type|w|h|name" -> composited/resampled cursor image
+
+static void CMRuntimeCachesInit(void) {
+    if (!_typeDirCache) {
+        _typeDirCache = [NSMutableDictionary dictionary];
+        _hitboxCache = [NSMutableDictionary dictionary];
+        _geometryCache = [NSMutableDictionary dictionary];
+        _imageCache = [NSMutableDictionary dictionary];
+    }
+}
+
++ (void)invalidateCursorRuntimeCaches {
+    CMRuntimeCachesInit();
+    [_typeDirCache removeAllObjects];
+    [_hitboxCache removeAllObjects];
+    [_geometryCache removeAllObjects];
+    [_imageCache removeAllObjects];
+}
+
 + (NSString *)cursorsDirectory {
     NSString *path = amethyst_hidden_dir(kCursorsDirName);
     NSFileManager *fm = NSFileManager.defaultManager;
@@ -124,6 +153,7 @@ static NSString *const kImageGifName = @"image.gif";
     }
     NSString *fileName = isGIF ? kImageGifName : kImagePngName;
     [data writeToFile:[dir stringByAppendingPathComponent:fileName] atomically:YES];
+    [self invalidateCursorRuntimeCaches];
 }
 
 #pragma mark - Hitbox
@@ -157,6 +187,7 @@ static NSString *const kImageGifName = @"image.gif";
     NSDictionary *json = @{@"x": @(roundf(hitbox.x)), @"y": @(roundf(hitbox.y))};
     NSData *data = [NSJSONSerialization dataWithJSONObject:json options:0 error:nil];
     [data writeToFile:path atomically:YES];
+    [self invalidateCursorRuntimeCaches];
 }
 
 #pragma mark - Delete
@@ -166,7 +197,11 @@ static NSString *const kImageGifName = @"image.gif";
     NSFileManager *fm = NSFileManager.defaultManager;
     NSString *dir = [self cursorPathForName:name];
     if (![fm fileExistsAtPath:dir]) return NO;
-    return [fm removeItemAtPath:dir error:nil];
+    BOOL removed = [fm removeItemAtPath:dir error:nil];
+    if (removed) {
+        [self invalidateCursorRuntimeCaches];
+    }
+    return removed;
 }
 
 #pragma mark - Import
@@ -373,25 +408,50 @@ static CGSize CursorPixelAlignedSize(CGSize size) {
     return frame;
 }
 
-+ (CGRect)displayFrameForMouseFrame:(CGRect)mouseFrame typeId:(NSString *)typeId {
+/* Memoized display geometry for one (typeId, mouse scale, cursor) triple:
+ * origin = hotspot offset in display units to subtract from the mouse frame,
+ * size = pixel-aligned display size. Built on first use per key; invalidated
+ * in bulk by invalidateCursorRuntimeCaches (hitbox/cursor writers) or
+ * naturally by the key when the scale preference or cursor choice changes. */
++ (CGRect)displayGeometryForType:(NSString *)typeId {
+    if (!_geometryCache) {
+        CMRuntimeCachesInit();
+    }
+    CGFloat mouseScale = getPrefFloat(@"control.mouse_scale") / 100.0;
     NSString *cursorName = [self currentCursorForType:typeId];
+    NSString *key = [NSString stringWithFormat:@"%@|%.4f|%@", typeId, mouseScale, cursorName];
+    NSValue *cached = _geometryCache[key];
+    if (cached) {
+        return [cached CGRectValue];
+    }
     UIImage *image = [self compositeImageForType:typeId];
     CGPoint hitbox = [self hitboxForCursor:cursorName inType:typeId];
-
-    CGFloat mouseScale = getPrefFloat(@"control.mouse_scale") / 100.0;
     BOOL isCustom = ![self isDefaultCursor:cursorName];
     CGFloat scale = [self displayScaleForImage:image mouseScale:mouseScale isCustomCursor:isCustom];
     CGSize displaySize = CursorPixelAlignedSize(CGSizeMake(image.size.width * scale, image.size.height * scale));
-
     CGFloat imgW = MAX(image.size.width, 1);
     CGFloat imgH = MAX(image.size.height, 1);
     CGFloat dispX = (hitbox.x / imgW) * displaySize.width;
     CGFloat dispY = (hitbox.y / imgH) * displaySize.height;
+    CGRect geometry = CGRectMake(dispX, dispY, displaySize.width, displaySize.height);
+    _geometryCache[key] = [NSValue valueWithCGRect:geometry];
+    return geometry;
+}
 
++ (CGRect)displayFrameForMouseFrame:(CGRect)mouseFrame typeId:(NSString *)typeId {
+    CGRect geometry = [self displayGeometryForType:typeId];
     CGRect frame = mouseFrame;
-    frame.origin.x -= dispX;
-    frame.origin.y -= dispY;
-    frame.size = displaySize;
+    frame.origin.x -= geometry.origin.x;
+    frame.origin.y -= geometry.origin.y;
+    frame.size = geometry.size;
+    return frame;
+}
+
++ (CGRect)mouseFrameForDisplayFrame:(CGRect)displayFrame typeId:(NSString *)typeId {
+    CGRect geometry = [self displayGeometryForType:typeId];
+    CGRect frame = displayFrame;
+    frame.origin.x += geometry.origin.x;
+    frame.origin.y += geometry.origin.y;
     return frame;
 }
 
@@ -399,22 +459,6 @@ static CGSize CursorPixelAlignedSize(CGSize size) {
     NSString *name = self.currentCursorName;
     UIImage *image = [self imageForCursor:name];
     CGPoint hitbox = [self hitboxForCursor:name];
-
-    CGFloat imgW = MAX(image.size.width, 1);
-    CGFloat imgH = MAX(image.size.height, 1);
-    CGFloat dispX = (hitbox.x / imgW) * displayFrame.size.width;
-    CGFloat dispY = (hitbox.y / imgH) * displayFrame.size.height;
-
-    CGRect frame = displayFrame;
-    frame.origin.x += dispX;
-    frame.origin.y += dispY;
-    return frame;
-}
-
-+ (CGRect)mouseFrameForDisplayFrame:(CGRect)displayFrame typeId:(NSString *)typeId {
-    NSString *cursorName = [self currentCursorForType:typeId];
-    UIImage *image = [self compositeImageForType:typeId];
-    CGPoint hitbox = [self hitboxForCursor:cursorName inType:typeId];
 
     CGFloat imgW = MAX(image.size.width, 1);
     CGFloat imgH = MAX(image.size.height, 1);
@@ -441,11 +485,19 @@ static NSString *const kCursorTypesDirName = @"cursor_types";
 }
 
 + (NSString *)cursorsDirectoryForType:(NSString *)typeId {
+    if (!_typeDirCache) {
+        CMRuntimeCachesInit();
+    }
+    NSString *cached = _typeDirCache[typeId];
+    if (cached) {
+        return cached;
+    }
     NSString *path = [[self cursorTypesRootDirectory] stringByAppendingPathComponent:typeId];
     NSFileManager *fm = NSFileManager.defaultManager;
     if (![fm fileExistsAtPath:path]) {
         [fm createDirectoryAtPath:path withIntermediateDirectories:YES attributes:nil error:nil];
     }
+    _typeDirCache[typeId] = path;
     return path;
 }
 
@@ -512,31 +564,26 @@ static NSString *const kCursorTypesDirName = @"cursor_types";
 }
 
 + (CGPoint)hitboxForCursor:(NSString *)name inType:(NSString *)typeId {
+    if (!_hitboxCache) {
+        CMRuntimeCachesInit();
+    }
     NSString *path = [[self cursorPathForName:name inType:typeId] stringByAppendingPathComponent:kHitboxFileName];
+    NSValue *cached = _hitboxCache[path];
+    if (cached) {
+        return [cached CGPointValue];
+    }
+    CGPoint result = [self readHitboxFromDisk:name inType:typeId path:path];
+    _hitboxCache[path] = [NSValue valueWithCGPoint:result];
+    return result;
+}
+
+/* The file read + JSON decode that hitboxForCursor used to run on every
+ * pointer-motion event; cached results live in _hitboxCache. */
++ (CGPoint)readHitboxFromDisk:(NSString *)name inType:(NSString *)typeId path:(NSString *)path {
     NSData *data = [NSData dataWithContentsOfFile:path];
     if (!data) {
         if ([name isEqualToString:@"default"]) {
-            // Hotspots are in the viewBox coordinates of CursorShapeRenderer.
-            // Arrow-shaped cursors point at (1.5, 1.5); the link hand at its
-            // fingertip; text at the caret; everything else is centered.
-            if ([typeId isEqualToString:@"normal"] ||
-                [typeId isEqualToString:@"working"] ||
-                [typeId isEqualToString:@"help"]) {
-                return CGPointMake(1.5, 1.5);
-            }
-            if ([typeId isEqualToString:@"link"]) {
-                return CGPointMake(8.0, 2.2);
-            }
-            if ([typeId isEqualToString:@"text"]) {
-                return CGPointMake(10, 14);
-            }
-            if ([typeId isEqualToString:@"precision"] || [typeId isEqualToString:@"crosshair"] ||
-                [typeId isEqualToString:@"busy"] || [typeId isEqualToString:@"unavailable"] ||
-                [typeId isEqualToString:@"vresize"] || [typeId isEqualToString:@"hresize"] ||
-                [typeId isEqualToString:@"diagonal"] || [typeId isEqualToString:@"move"]) {
-                return CGPointMake(12, 12);
-            }
-            return CGPointMake(1.5, 1.5);
+            return [self defaultHitboxForType:typeId];
         }
         // Custom cursor without a hitbox: default to top-left corner
         return CGPointZero;
@@ -544,6 +591,27 @@ static NSString *const kCursorTypesDirName = @"cursor_types";
     NSDictionary *json = [NSJSONSerialization JSONObjectWithData:data options:0 error:nil];
     if (![json isKindOfClass:NSDictionary.class]) return CGPointZero;
     return CGPointMake([json[@"x"] floatValue], [json[@"y"] floatValue]);
+}
+
++ (CGPoint)defaultHitboxForType:(NSString *)typeId {
+    if ([typeId isEqualToString:@"normal"] ||
+        [typeId isEqualToString:@"working"] ||
+        [typeId isEqualToString:@"help"]) {
+        return CGPointMake(1.5, 1.5);
+    }
+    if ([typeId isEqualToString:@"link"]) {
+        return CGPointMake(8.0, 2.2);
+    }
+    if ([typeId isEqualToString:@"text"]) {
+        return CGPointMake(10, 14);
+    }
+    if ([typeId isEqualToString:@"precision"] || [typeId isEqualToString:@"crosshair"] ||
+        [typeId isEqualToString:@"busy"] || [typeId isEqualToString:@"unavailable"] ||
+        [typeId isEqualToString:@"vresize"] || [typeId isEqualToString:@"hresize"] ||
+        [typeId isEqualToString:@"diagonal"] || [typeId isEqualToString:@"move"]) {
+        return CGPointMake(12, 12);
+    }
+    return CGPointMake(1.5, 1.5);
 }
 
 + (void)setHitboxForCursor:(NSString *)name hitbox:(CGPoint)hitbox inType:(NSString *)typeId {
@@ -556,6 +624,7 @@ static NSString *const kCursorTypesDirName = @"cursor_types";
     NSDictionary *json = @{@"x": @(roundf(hitbox.x)), @"y": @(roundf(hitbox.y))};
     NSData *data = [NSJSONSerialization dataWithJSONObject:json options:0 error:nil];
     [data writeToFile:path atomically:YES];
+    [self invalidateCursorRuntimeCaches];
 }
 
 + (BOOL)deleteCursor:(NSString *)name inType:(NSString *)typeId {
@@ -563,7 +632,11 @@ static NSString *const kCursorTypesDirName = @"cursor_types";
     NSFileManager *fm = NSFileManager.defaultManager;
     NSString *dir = [self cursorPathForName:name inType:typeId];
     if (![fm fileExistsAtPath:dir]) return NO;
-    return [fm removeItemAtPath:dir error:nil];
+    BOOL removed = [fm removeItemAtPath:dir error:nil];
+    if (removed) {
+        [self invalidateCursorRuntimeCaches];
+    }
+    return removed;
 }
 
 + (NSString *)uniqueCursorName:(NSString *)name forType:(NSString *)typeId {
@@ -585,6 +658,7 @@ static NSString *const kCursorTypesDirName = @"cursor_types";
     }
     NSString *fileName = isGIF ? kImageGifName : kImagePngName;
     [data writeToFile:[dir stringByAppendingPathComponent:fileName] atomically:YES];
+    [self invalidateCursorRuntimeCaches];
 }
 
 + (NSString *)importCursorFromData:(NSData *)data withName:(NSString *)name forType:(NSString *)typeId error:(NSError **)error {
@@ -1094,41 +1168,53 @@ static BOOL gDiagonalUsesNESW = NO;
 + (UIImage *)compositeImageForType:(NSString *)typeId displaySize:(CGSize)displaySize {
     if (displaySize.width <= 0 || displaySize.height <= 0) return nil;
 
-    if ([typeId isEqualToString:@"hidden"]) {
-        return [self generateDefaultShapeForType:@"hidden"];
+    if (!_imageCache) {
+        CMRuntimeCachesInit();
+    }
+    NSString *cursorName = [self currentCursorForType:typeId];
+    NSString *key = [NSString stringWithFormat:@"%@|%.0fx%.0f|%@", typeId, displaySize.width, displaySize.height, cursorName];
+    UIImage *cached = _imageCache[key];
+    if (cached) {
+        return cached;
     }
 
-    NSString *cursorName = [self currentCursorForType:typeId];
-    if (![self isDefaultCursor:cursorName]) {
+    UIImage *result;
+    if ([typeId isEqualToString:@"hidden"]) {
+        result = [self generateDefaultShapeForType:@"hidden"];
+    } else if (![self isDefaultCursor:cursorName]) {
         UIImage *customImage = [self imageForCursor:cursorName inType:typeId];
         if (customImage) {
             // Animated cursors keep their frames; the image view scales them
             // with linear filtering. Static cursors are resampled once at the
             // exact display size so they stay crisp.
-            if (customImage.images.count > 1) return customImage;
-
-            CGFloat scale = [UIScreen mainScreen].scale;
-            UIGraphicsBeginImageContextWithOptions(displaySize, NO, scale);
-            CGContextRef ctx = UIGraphicsGetCurrentContext();
-            if (!ctx) {
+            if (customImage.images.count > 1) {
+                result = customImage;
+            } else {
+                CGFloat scale = [UIScreen mainScreen].scale;
+                UIGraphicsBeginImageContextWithOptions(displaySize, NO, scale);
+                CGContextRef ctx = UIGraphicsGetCurrentContext();
+                if (!ctx) {
+                    UIGraphicsEndImageContext();
+                    return customImage;
+                }
+                CGContextSetInterpolationQuality(ctx, kCGInterpolationHigh);
+                [customImage drawInRect:CGRectMake(0, 0, displaySize.width, displaySize.height)];
+                result = UIGraphicsGetImageFromCurrentImageContext() ?: customImage;
                 UIGraphicsEndImageContext();
-                return customImage;
             }
-            CGContextSetInterpolationQuality(ctx, kCGInterpolationHigh);
-            [customImage drawInRect:CGRectMake(0, 0, displaySize.width, displaySize.height)];
-            UIImage *resized = UIGraphicsGetImageFromCurrentImageContext();
-            UIGraphicsEndImageContext();
-            return resized ?: customImage;
         }
     }
 
-    if ([CursorShapeRenderer hasShapeForType:typeId]) {
+    if (!result && [CursorShapeRenderer hasShapeForType:typeId]) {
         CGFloat scale = [UIScreen mainScreen].scale;
-        UIImage *image = [CursorShapeRenderer imageForType:typeId size:displaySize scale:scale];
-        if (image) return image;
+        result = [CursorShapeRenderer imageForType:typeId size:displaySize scale:scale];
+    }
+    if (!result) {
+        result = [self defaultShapeImageForType:@"normal"];
     }
 
-    return [self defaultShapeImageForType:@"normal"];
+    _imageCache[key] = result;
+    return result;
 }
 
 @end
