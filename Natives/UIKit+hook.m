@@ -4,6 +4,7 @@
 #import "UIKit+hook.h"
 #import "utils.h"
 #import "SurfaceViewController.h"
+#import "ThemeManager.h"
 
 __weak UIWindow *mainWindow, *externalWindow;
 
@@ -66,6 +67,11 @@ void init_hookUIKitConstructor(void) {
     // Add this line to swizzle the _imageWithSize: method
     swizzleUIImageMethod(NSSelectorFromString(@"_imageWithSize:"), @selector(hook_imageWithSize:));
 
+    // Re-apply the user's UI scale whenever anything is presented, so new
+    // sheets/pages (including ones opened from inside an open sheet) zoom
+    // immediately instead of waiting for the next theme broadcast.
+    swizzle(UIViewController.class, @selector(presentViewController:animated:completion:), @selector(hook_presentViewController:animated:completion:));
+
     if (realUIIdiom == UIUserInterfaceIdiomTV) {
         if (UIDevice.currentDevice.userInterfaceIdiom == UIUserInterfaceIdiomPad) {
 #pragma clang diagnostic push
@@ -84,6 +90,33 @@ void init_hookUIKitConstructor(void) {
 - (UIView *)buttonGlassView {
     return self.view.superview.superview.superview.superview;
 }
+@end
+
+// Keep the user's UI scale on every presentation. The scale pass is
+// idempotent and only touches allowlisted windows (launcher shell + AppSheet
+// hosts), so system presentations are unaffected.
+@implementation UIViewController(hook)
+
+- (void)hook_presentViewController:(UIViewController *)viewControllerToPresent
+                          animated:(BOOL)flag
+                        completion:(void (^)(void))completion {
+    void (^wrapped)(void) = completion;
+    if (completion) {
+        wrapped = ^{
+            if (completion) completion();
+            dispatch_async(dispatch_get_main_queue(), ^{
+                [ThemeManager.shared applyUIScaleToAllWindows];
+            });
+        };
+    }
+    [self hook_presentViewController:viewControllerToPresent animated:flag completion:wrapped];
+    // The presented view exists with its final frame right after the call;
+    // an async pass covers it when no completion was supplied.
+    dispatch_async(dispatch_get_main_queue(), ^{
+        [ThemeManager.shared applyUIScaleToAllWindows];
+    });
+}
+
 @end
 
 @implementation UIDevice(hook)

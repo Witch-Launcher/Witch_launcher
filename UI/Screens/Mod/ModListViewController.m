@@ -508,6 +508,7 @@
     _searchBar.delegate = self;
     _searchBar.placeholder = @"Search mods...";
     _searchBar.searchBarStyle = UISearchBarStyleMinimal;
+    [ThemeManager.shared styleSearchBar:_searchBar];
     [self.view addSubview:_searchBar];
 
     _spinner = [[UIActivityIndicatorView alloc] initWithActivityIndicatorStyle:UIActivityIndicatorViewStyleLarge];
@@ -542,6 +543,7 @@
     [_sourceControl setTitleTextAttributes:@{NSForegroundColorAttributeName: ThemeManager.shared.primaryTextColor, NSFontAttributeName: [UIFont systemFontOfSize:11 weight:UIFontWeightMedium]} forState:UIControlStateNormal];
     [_sourceControl setTitleTextAttributes:@{NSForegroundColorAttributeName: ThemeManager.shared.buttonTextColor, NSFontAttributeName: [UIFont systemFontOfSize:11 weight:UIFontWeightSemibold]} forState:UIControlStateSelected];
     [_sourceControl addTarget:self action:@selector(sourceChanged) forControlEvents:UIControlEventValueChanged];
+    [ThemeManager.shared styleSegmentedControl:_sourceControl];
     [self.view addSubview:_sourceControl];
 
     _tableView = [[UITableView alloc] init];
@@ -604,14 +606,11 @@
         self.view.backgroundColor = theme.contentBackgroundColor;
     }
     if (@available(iOS 13.0, *)) {
-        _searchBar.searchTextField.textColor = theme.primaryTextColor;
+        [theme styleSearchBar:_searchBar];
     }
-    _searchBar.tintColor = theme.accentColor;
     _emptyLabel.textColor = theme.secondaryTextColor;
     _errorLabel.textColor = theme.errorColor;
-    _sourceControl.selectedSegmentTintColor = theme.accentColor;
-    [_sourceControl setTitleTextAttributes:@{NSForegroundColorAttributeName: theme.primaryTextColor, NSFontAttributeName: [UIFont systemFontOfSize:11 weight:UIFontWeightMedium]} forState:UIControlStateNormal];
-    [_sourceControl setTitleTextAttributes:@{NSForegroundColorAttributeName: theme.buttonTextColor, NSFontAttributeName: [UIFont systemFontOfSize:11 weight:UIFontWeightSemibold]} forState:UIControlStateSelected];
+    [theme styleSegmentedControl:_sourceControl];
 }
 
 - (NSString *)selectedVersion {

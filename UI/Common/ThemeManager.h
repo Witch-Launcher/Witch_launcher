@@ -36,6 +36,9 @@ extern NSString * const ShellBorderDidChangeNotification;
 // hardcoded white selected title turns invisible). Preserves each state's
 // font, only fixes colors.
 - (void)styleSegmentedControl:(UISegmentedControl *)seg;
+// Theme a UISearchBar: transparent bar + translucent themed field, so the
+// iOS 26 glass chrome never paints an opaque white row over the theme.
+- (void)styleSearchBar:(UISearchBar *)bar;
 
 @property (nonatomic) UIImage *backgroundImage;
 @property (nonatomic) UIImage *blurredBackgroundImage;
@@ -45,7 +48,8 @@ extern NSString * const ShellBorderDidChangeNotification;
 @property (nonatomic) CGFloat backgroundBlurIntensity;
 @property (nonatomic) CGFloat uiOpacity;
 // Global visual scale for the launcher shell, browser-zoom style. 1.0 = 100%.
-// Presented sheets and the Minecraft surface are deliberately excluded.
+// Also applies to sheets, pickers and pages presented by the shell and to
+// AppSheet windows; the Minecraft surface and keyboards stay at 100%.
 @property (nonatomic) CGFloat uiScale;
 @property (nonatomic) BOOL uiBorderEnabled;
 @property (nonatomic, readonly) UIColor *uiBorderColor;
@@ -61,6 +65,13 @@ extern NSString * const ShellBorderDidChangeNotification;
 - (void)applyInterfaceStyle:(UIUserInterfaceStyle)style;
 - (void)applyThemeToAllWindows;
 - (void)applyUIScaleToAllWindows;
+// Idempotent browser-zoom application for one root view; returns YES when
+// the view changed (used by the shell's layout pass to survive rotation).
+- (BOOL)applyUIScaleToRootView:(UIView *)rootView inWindow:(UIWindow *)window;
+// Build the themed UINavigationBarAppearance and apply it to the appearance
+// proxy plus every live bar in every window, so Done/Save bars follow the
+// user's colors instead of the default system look.
+- (void)applyNavigationBarTheme;
 - (void)resetAppearance;
 - (void)broadcastThemeChange;
 - (void)notifyShellBorderChange;

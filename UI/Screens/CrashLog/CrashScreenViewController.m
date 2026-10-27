@@ -1171,8 +1171,10 @@ static const NSUInteger kMaxSearchHits = 2000;
     [self updateFileSegments];
     WitchAIChatViewController *vc = [[WitchAIChatViewController alloc] initWithAnalysis:self.analysis exitCode:self.exitCode];
     UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:vc];
+    // OverFullScreen on iPhone: the chat's backdrop is the themed translucent
+    // color, so the crash screen must stay underneath it.
     nav.modalPresentationStyle = UIDevice.currentDevice.userInterfaceIdiom == UIUserInterfaceIdiomPad
-        ? UIModalPresentationFormSheet : UIModalPresentationFullScreen;
+        ? UIModalPresentationFormSheet : UIModalPresentationOverFullScreen;
     [self presentViewController:nav animated:YES completion:nil];
 }
 

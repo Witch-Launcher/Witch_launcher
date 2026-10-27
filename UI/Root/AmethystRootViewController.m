@@ -311,6 +311,10 @@
     // Portrait: collapse the 180pt right panel (it squeezes content down to
     // ~150pt on phones) and show the floating circular launch button instead.
     // Landscape keeps the exact current layout.
+    // Re-assert the UI-scale zoom first: the window rewrites the root view's
+    // frame on rotation/resize, which can drop the enlarged bounds; the
+    // helper is idempotent, so this only fires when something drifted.
+    [ThemeManager.shared applyUIScaleToRootView:self.view inWindow:self.view.window];
     CGRect bounds = self.view.bounds;
     if (bounds.size.width == 0 || bounds.size.height == 0) return;
     BOOL isPortrait = bounds.size.width < bounds.size.height;
@@ -538,7 +542,12 @@
     [coordinator animateAlongsideTransition:^(id<UIViewControllerTransitionCoordinatorContext> context) {
         [self.view setNeedsLayout];
         [self.view layoutIfNeeded];
-    } completion:nil];
+    } completion:^(id<UIViewControllerTransitionCoordinatorContext> context) {
+        // Open sheets rotate with the window and their system-managed frames
+        // drift away from the zoomed layout; re-assert the scale once the
+        // rotation settles.
+        [ThemeManager.shared applyUIScaleToAllWindows];
+    }];
 }
 
 - (void)switchContentTo:(UIViewController *)vc animated:(BOOL)animated {
@@ -609,7 +618,13 @@
 
 - (void)pushContent:(UIViewController *)vc animated:(BOOL)animated {
     UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:vc];
-    nav.modalPresentationStyle = UIModalPresentationFullScreen;
+    // OverFullScreen, not FullScreen: UIKit removes the presenting view for
+    // plain FullScreen presentations, so pages whose backdrop is transparent
+    // (custom background image / UI Opacity / panel blur) had nothing behind
+    // them and rendered over the raw window — pitch black in dark mode with
+    // every appearance slider feeling dead. OverFullScreen keeps the launcher
+    // underneath, so the backdrop and all its theme sliders come back.
+    nav.modalPresentationStyle = UIModalPresentationOverFullScreen;
     nav.transitioningDelegate = self.coordinator;
     [self presentViewController:nav animated:animated completion:nil];
 }

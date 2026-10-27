@@ -475,6 +475,7 @@
     _settingsSearchBar.delegate = self;
     _settingsSearchBar.showsCancelButton = NO;
     _settingsSearchBar.hidden = YES;
+    [ThemeManager.shared styleSearchBar:_settingsSearchBar];
 
     _searchResultsTable = [[UITableView alloc] initWithFrame:CGRectZero style:UITableViewStyleGrouped];
     _searchResultsTable.translatesAutoresizingMaskIntoConstraints = NO;
@@ -735,7 +736,7 @@
     self.view.backgroundColor = theme.contentBackgroundColor;
     [_tabBarGlassHost lg_setLiquidGlassBaseColor:theme.cardBackgroundColor];
     [_tabBarGlassHost lg_refreshLiquidGlass];
-    _settingsSearchBar.tintColor = theme.accentColor;
+    [ThemeManager.shared styleSearchBar:_settingsSearchBar];
     [_panelBlur applyCurrentIntensity];
     [self refreshTableBackdrops];
     for (UIButton *btn in _tabButtons) {
