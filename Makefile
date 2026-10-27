@@ -429,6 +429,45 @@ verify-jres:
 	cp $(WORKINGDIR)/mobileglues/libspirv-cross*.dylib $(WORKINGDIR)/ 2>/dev/null || true
 	echo '[Witch v$(VERSION)] dep_mg - end'
 
+# SPIRV-Cross C API shared library used by Minecraft's OpenGL backend
+# (com.mojang.renderpearl -> org.lwjgl.util.spvc). The MobileGlues prebuilt
+# copy is built for Apple Silicon macOS CPUs, so clang emits ARMv8.3 LDAPR*
+# (RCpc) instructions in thread-safe static guards; A11/A10 (iPhone 8 and
+# older) are ARMv8.2 and crash with SIGILL on the first spvc compile.
+# Build it here for the real iOS target with a generic ARMv8.0 CPU instead of
+# shipping the prebuilt.
+spvc:
+	echo '[Witch v$(VERSION)] spvc - start'
+	mkdir -p $(WORKINGDIR)/spvc
+	cd $(WORKINGDIR)/spvc && cmake \
+		-DCMAKE_BUILD_TYPE=Release \
+		-DCMAKE_SYSTEM_NAME=iOS \
+		-DCMAKE_OSX_SYSROOT="$(SDKPATH)" \
+		-DCMAKE_OSX_ARCHITECTURES=arm64 \
+		-DCMAKE_OSX_DEPLOYMENT_TARGET=14.0 \
+		-DCMAKE_C_FLAGS="-mcpu=generic" \
+		-DCMAKE_CXX_FLAGS="-mcpu=generic" \
+		-DCMAKE_MAKE_PROGRAM=/usr/bin/make \
+		-DSPIRV_CROSS_SHARED=ON \
+		-DSPIRV_CROSS_STATIC=OFF \
+		-DSPIRV_CROSS_CLI=OFF \
+		-DSPIRV_CROSS_ENABLE_TESTS=OFF \
+		-DSPIRV_CROSS_ENABLE_C_API=ON \
+		-DSPIRV_CROSS_ENABLE_GLSL=ON \
+		-DSPIRV_CROSS_ENABLE_HLSL=OFF \
+		-DSPIRV_CROSS_ENABLE_MSL=OFF \
+		-DSPIRV_CROSS_ENABLE_CPP=OFF \
+		-DSPIRV_CROSS_ENABLE_REFLECT=OFF \
+		-DSPIRV_CROSS_ENABLE_UTIL=OFF \
+		$(SOURCEDIR)/Natives/external/MobileGlues/src/main/cpp/3rdparty/SPIRV-Cross/
+	cmake --build $(WORKINGDIR)/spvc --config Release -j$(JOBS) --target spirv-cross-c-shared
+	cp $(WORKINGDIR)/spvc/libspirv-cross-c-shared.0.dylib $(WORKINGDIR)/libspirv-cross-c-shared.0.dylib
+	cp $(WORKINGDIR)/spvc/libspirv-cross-c-shared.0.dylib $(SOURCEDIR)/Natives/resources/Frameworks/libspirv-cross-c-shared.0.dylib
+	@if otool -tvV $(WORKINGDIR)/libspirv-cross-c-shared.0.dylib | grep -qE '\b(ldapr|stllr)'; then \
+		echo 'ERROR: libspirv-cross still uses ARMv8.3 atomics (unsupported on A11/A10)'; exit 1; \
+	fi
+	echo '[Witch v$(VERSION)] spvc - end'
+
 dep_mobilegl:
 	echo '[Witch v$(VERSION)] dep_mobilegl - start'
 	@if [ ! -f "$(SOURCEDIR)/Natives/external/MobileGL/CMakeLists.txt" ]; then \
@@ -752,7 +791,7 @@ lwgjl:
 	find "$$LWJGL41_DIR/bin/RELEASE" -name '*.jar' ! -name '*-natives-*' ! -name '*-sources.jar' -exec cp {} "$(SOURCEDIR)/JavaApp/libs/lwjgl41/" \; 2>/dev/null || true; \
 	echo '[Witch v$(VERSION)] lwgjl - end'
 
-payload: native dep_mg dep_mobilegl dep_tgles dep_tglmt lwgjl java jre assets
+payload: native dep_mg spvc dep_mobilegl dep_tgles dep_tglmt lwgjl java jre assets
 	echo '[Witch v$(VERSION)] payload - start'
 	rm -f $(WORKINGDIR)/Witch.app/*.png
 	$(call METHOD_DIRCHECK,$(WORKINGDIR)/Witch.app/libs)
@@ -771,6 +810,15 @@ payload: native dep_mg dep_mobilegl dep_tgles dep_tglmt lwgjl java jre assets
 	cp $(SOURCEDIR)/lwgjl/lwjgl3-wip-rebase_3.3.3/bin/out/*.dylib $(WORKINGDIR)/Witch.app/libs/lwjgl33_natives/ || exit 1
 	cp $(SOURCEDIR)/lwgjl/lwjgl3-wip-rebase_3.3.6/bin/out/*.dylib $(WORKINGDIR)/Witch.app/libs/lwjgl36_natives/ || exit 1
 	cp $(SOURCEDIR)/lwgjl/lwjgl3-wip-rebase_3.4.1/bin/out/*.dylib $(WORKINGDIR)/Witch.app/libs/lwjgl41_natives/ || exit 1
+	# LWJGL's own libspirv-cross.dylib was compiled with the macOS arm64
+	# (Apple Silicon) CPU baseline, which emits ARMv8.3 RCpc atomics in
+	# thread-safe static guards -> SIGILL on A11/A10. Replace it everywhere
+	# with the ARMv8.0 iOS build produced by `make spvc` so no code path can
+	# pick the incompatible copy.
+	for dir in lwjgl33_natives lwjgl36_natives lwjgl41_natives; do \
+		cp $(SOURCEDIR)/Natives/resources/Frameworks/libspirv-cross-c-shared.0.dylib \
+			$(WORKINGDIR)/Witch.app/libs/$$dir/libspirv-cross.dylib; \
+	done
 	# The LWJGL macOS build emits a macOS-platform libMoltenVK.dylib (links
 	# AppKit, platform macOS) that can never dlopen on iOS. If it stays in the
 	# natives dirs, LWJGL resolves a bare "libMoltenVK.dylib" opengl.libname via

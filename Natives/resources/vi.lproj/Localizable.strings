@@ -287,6 +287,8 @@
 "preference.detail.mouse_scale" = "Đổi kích thước chuột ảo";
 "preference.title.mouse_speed" = "Tốc độ chuột (%)";
 "preference.detail.mouse_speed" = "Chỉnh tốc độ của chuột ảo";
+"preference.title.camera_sensitivity" = "Độ nhạy camera (%)";
+"preference.detail.camera_sensitivity" = "Chỉnh mức xoay camera khi kéo trong game";
 "preference.title.virtmouse_enable" = "Chuột ảo";
 "preference.detail.virtmouse_enable" = "Bật tùy chọn này để khởi động trò chơi với chuột ảo được bật sẵn";
 "preference.title.slideable_hotbar" = "Thanh vật phẩm có thể trượt";

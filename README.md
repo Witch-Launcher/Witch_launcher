@@ -116,13 +116,17 @@ Screenshots from a development build of Witch Launcher 0.0.4. The interface can 
 
 | | |
 |---|---|
-| <img src="media/IMG_2690.png" width="400" alt="Witch Launcher screenshot 1"> | <img src="media/IMG_2691.png" width="400" alt="Witch Launcher screenshot 2"> |
-| <img src="media/IMG_2692.png" width="400" alt="Witch Launcher screenshot 3"> | <img src="media/IMG_2693.png" width="400" alt="Witch Launcher screenshot 4"> |
-| <img src="media/IMG_2694.png" width="400" alt="Witch Launcher screenshot 5"> | <img src="media/IMG_2695.png" width="400" alt="Witch Launcher screenshot 6"> |
-| <img src="media/IMG_2696.png" width="400" alt="Witch Launcher screenshot 7"> | <img src="media/IMG_2697.png" width="400" alt="Witch Launcher screenshot 8"> |
-| <img src="media/IMG_2698.png" width="400" alt="Witch Launcher screenshot 9"> | <img src="media/IMG_2699.png" width="400" alt="Witch Launcher screenshot 10"> |
-| <img src="media/IMG_2700.png" width="400" alt="Witch Launcher screenshot 11"> | <img src="media/IMG_2701.png" width="400" alt="Witch Launcher screenshot 12"> |
-| <img src="media/IMG_2702.png" width="400" alt="Witch Launcher screenshot 13"> | <img src="media/IMG_2703.png" width="400" alt="Witch Launcher screenshot 14"> |
+| <img src="media/IMG_3100.png" width="400" alt="Witch Launcher screenshot 1"> | <img src="media/IMG_3101.png" width="400" alt="Witch Launcher screenshot 2"> |
+| <img src="media/IMG_3102.png" width="400" alt="Witch Launcher screenshot 3"> | <img src="media/IMG_3103.png" width="400" alt="Witch Launcher screenshot 4"> |
+| <img src="media/IMG_3104.png" width="400" alt="Witch Launcher screenshot 5"> | <img src="media/IMG_3105.png" width="400" alt="Witch Launcher screenshot 6"> |
+| <img src="media/IMG_3106.png" width="400" alt="Witch Launcher screenshot 7"> | <img src="media/IMG_3107.png" width="400" alt="Witch Launcher screenshot 8"> |
+| <img src="media/IMG_3108.png" width="400" alt="Witch Launcher screenshot 9"> | <img src="media/IMG_3109.png" width="400" alt="Witch Launcher screenshot 10"> |
+| <img src="media/IMG_3110.png" width="400" alt="Witch Launcher screenshot 11"> | <img src="media/IMG_3112.png" width="400" alt="Witch Launcher screenshot 12"> |
+| <img src="media/IMG_3113.png" width="400" alt="Witch Launcher screenshot 13"> | <img src="media/IMG_3116.png" width="400" alt="Witch Launcher screenshot 14"> |
+| <img src="media/IMG_3117.png" width="400" alt="Witch Launcher screenshot 15"> | <img src="media/IMG_3120.png" width="400" alt="Witch Launcher screenshot 16"> |
+| <img src="media/IMG_3121.png" width="400" alt="Witch Launcher screenshot 17"> | <img src="media/IMG_3122.png" width="400" alt="Witch Launcher screenshot 18"> |
+| <img src="media/IMG_3123.png" width="400" alt="Witch Launcher screenshot 19"> | <img src="media/witch_perf_1792592888.png" width="400" alt="Witch Launcher screenshot 20"> |
+| <img src="media/witch_perf_1792592906.png" width="400" alt="Witch Launcher screenshot 21"> |
 
 ---
 

@@ -80,9 +80,40 @@ build_lwjgl() {
       ;;
 
     ios)
-      echo "Building iOS ABI: $abi"
-      echo "Not yet implemented"
-      exit 0
+      echo "Building iOS natives: libshaderc.dylib (arm64)"
+      # Root-cause fix (2026-10-26): Witch's glslang C++ symbols were being
+      # interposed/fused with libmobileglues' different-version glslang, causing
+      # SIGSEGV in TParseContext::lValueErrorCheck. New build pins glslang 16.6.0
+      # and exports ONLY the C API (_shaderc_* + _spv*), nothing C++.
+      local osx_workdir="${LWJGL_IOS_WORKDIR:-/Volumes/project/shaderc-crash-debug}"
+      if [ ! -d "$osx_workdir/dl/shaderc" ]; then
+        echo "Missing shaderc source at $osx_workdir/dl/shaderc — see NOTES.md there" >&2
+        _print_usage_on_exit=false
+        return 1
+      fi
+      cat > "$SCRIPT_DIR/libshaderc-ios.exports" <<'EXPS'
+_shaderc_*
+_spv*
+EXPS
+      cmake -S "$osx_workdir/dl/shaderc" -B "$osx_workdir/build/shaderc-ios" -G Ninja \
+        -DCMAKE_SYSTEM_NAME=iOS -DCMAKE_OSX_SYSROOT=iphoneos -DCMAKE_OSX_ARCHITECTURES=arm64 \
+        -DCMAKE_OSX_DEPLOYMENT_TARGET=14.0 -DCMAKE_BUILD_TYPE=Release \
+        -DBUILD_SHARED_LIBS=OFF -DSHADERC_SKIP_TESTS=ON -DSHADERC_SKIP_EXAMPLES=ON \
+        -DSHADERC_SKIP_INSTALL=ON -DSHADERC_SKIP_COPYRIGHT_CHECK=ON -DSHADERC_SKIP_EXECUTABLES=ON \
+        -DENABLE_PCH=OFF -DENABLE_EXCEPTIONS=ON -DENABLE_HLSL=ON \
+        -DCMAKE_SHARED_LINKER_FLAGS="-Wl,-exported_symbols_list,$SCRIPT_DIR/libshaderc-ios.exports" \
+        -DCMAKE_INSTALL_PREFIX="$osx_workdir/build/shaderc-ios-inst" \
+        || { _print_usage_on_exit=false; return 1; }
+      cmake --build "$osx_workdir/build/shaderc-ios" --target shaderc_shared -j"${LWJGL_BUILD_JOBS:-8}" \
+        || { _print_usage_on_exit=false; return 1; }
+      cp "$osx_workdir/build/shaderc-ios/libshaderc/libshaderc_shared.1.dylib" \
+         "$osx_workdir/build/libshaderc.dylib"
+      install_name_tool -id @rpath/libshaderc_shared.1.dylib "$osx_workdir/build/libshaderc.dylib"
+      codesign -f -s - --timestamp=none "$osx_workdir/build/libshaderc.dylib"
+      local dest="build/generated/ios/jniLibs"
+      mkdir -p "$dest"
+      mv "$osx_workdir/build/libshaderc.dylib" "$dest/libshaderc.dylib"
+      echo "iOS libshaderc built: $dest/libshaderc.dylib"
       ;;
 
     *)

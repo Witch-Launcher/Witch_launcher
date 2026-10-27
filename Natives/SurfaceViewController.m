@@ -82,6 +82,7 @@ static GameSurfaceView* pojavWindow;
 
 @property(nonatomic) CGFloat screenScale;
 @property(nonatomic) CGFloat mouseSpeed;
+@property(nonatomic) CGFloat cameraSensitivity;
 @property(nonatomic) CGRect clickRange;
 @property(nonatomic) BOOL isMacCatalystApp, shouldHideControlsFromRecording,
     shouldTriggerClick, shouldTriggerHaptic, slideableHotbar, toggleHidden;
@@ -503,6 +504,8 @@ static GameSurfaceView* pojavWindow;
     [GyroInput updateSensitivity:gyroEnabled?gyroSensitivity:0 invertXAxis:gyroInvertX];
 
     self.mouseSpeed = getPrefFloat(@"control.mouse_speed") / 100.0;
+    CGFloat cameraSensitivity = getPrefFloat(@"control.camera_sensitivity");
+    self.cameraSensitivity = cameraSensitivity > 0 ? cameraSensitivity / 100.0 : 1.0;
 
     virtualMouseEnabled = getPrefBool(@"control.virtmouse_enable");
     self.mousePointerView.hidden = isGrabbing || !virtualMouseEnabled;
@@ -647,6 +650,8 @@ static GameSurfaceView* pojavWindow;
     self.mousePointerView.hidden = isGrabbing || !getPrefBool(@"control.virtmouse_enable");
     AmethystSetSystemPointerHidden(self.view, isGrabbing || getPrefBool(@"control.virtmouse_enable"));
     self.mouseSpeed = getPrefFloat(@"control.mouse_speed") / 100.0;
+    CGFloat cameraSensitivity = getPrefFloat(@"control.camera_sensitivity");
+    self.cameraSensitivity = cameraSensitivity > 0 ? cameraSensitivity / 100.0 : 1.0;
     // Button scale live update: refresh control layout (ControlButton reads control.button_scale)
     for (UIView *v in self.ctrlView.subviews) {
         if ([v respondsToSelector:@selector(update)]) {
@@ -905,6 +910,11 @@ static GameSurfaceView* pojavWindow;
         }
         lastVirtualMousePoint = location;
     }
+    if (isGrabbing && event == ACTION_MOVE_MOTION) {
+        CGFloat cameraSensitivity = self.cameraSensitivity > 0 ? self.cameraSensitivity : 1.0;
+        location.x *= cameraSensitivity;
+        location.y *= cameraSensitivity;
+    }
     CallbackBridge_nativeSendCursorPos(event, location.x * screenScale, location.y * screenScale);
 }
 
@@ -1141,7 +1151,7 @@ static GameSurfaceView* pojavWindow;
             [self.lightHaptic impactOccurred];
         }
     }
-    
+
     if (!self.shouldTriggerClick) return;
 
     if (sender.state == UIGestureRecognizerStateRecognized) {
@@ -1504,8 +1514,6 @@ static NSTimer* staleTouchSweepTimer = nil;
         CGFloat screenScale = self.screenScale;
         currentHotbarSlot = self.enableHotbarGestures ?
             callback_SurfaceViewController_touchHotbar(locationInView.x * screenScale, locationInView.y * screenScale) : -1;
-        NSLog(@"[Hotbar] down surface=(%.1f,%.1f) scale=%.2f slot=%d",
-              locationInView.x, locationInView.y, screenScale, currentHotbarSlot);
         if ([self isTouchInactive:self.hotbarTouch] && currentHotbarSlot != -1) {
             self.hotbarTouch = touch;
         }

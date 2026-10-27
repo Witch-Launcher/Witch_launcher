@@ -418,6 +418,8 @@
 "preference.detail.mouse_scale" = "Change the size of the virtual mouse";
 "preference.title.mouse_speed" = "Mouse speed (%)";
 "preference.detail.mouse_speed" = "Change the speed of the virtual mouse";
+"preference.title.camera_sensitivity" = "Camera sensitivity (%)";
+"preference.detail.camera_sensitivity" = "Adjust how far the camera turns while dragging in game";
 "preference.title.virtmouse_enable" = "Virtual mouse";
 "preference.detail.virtmouse_enable" = "Enable this option to start with virtual mouse on";
 "preference.title.slideable_hotbar" = "Slideable hotbar";

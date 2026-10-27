@@ -66,6 +66,7 @@
             @"button_scale": @(100),
             @"mouse_scale": @(100),
             @"mouse_speed": @(100),
+            @"camera_sensitivity": @(100),
             @"virtmouse_enable": @NO,
             @"virtmouse_cursor": @"default",
             @"gyroscope_enable": @NO,

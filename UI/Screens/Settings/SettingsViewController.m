@@ -121,6 +121,7 @@
             @{@"type": @"slider", @"label": localize(@"preference.title.mouse_scale", nil), @"key": @"control.mouse_scale", @"min": @30, @"max": @500, @"suffix": @"%"},
             @{@"type": @"slider", @"label": localize(@"preference.title.mouse_speed", nil), @"key": @"control.mouse_speed", @"min": @10, @"max": @300, @"suffix": @"%"},
             header(@"settings.group.touch"),
+            @{@"type": @"slider", @"label": localize(@"preference.title.camera_sensitivity", nil), @"key": @"control.camera_sensitivity", @"min": @10, @"max": @300, @"suffix": @"%"},
             @{@"type": @"slider", @"label": localize(@"preference.title.button_scale", nil), @"key": @"control.button_scale", @"min": @30, @"max": @200, @"suffix": @"%"},
             @{@"type": @"switch", @"label": localize(@"preference.title.slideable_hotbar", nil), @"key": @"control.slideable_hotbar"},
             @{@"type": @"switch", @"label": localize(@"preference.title.gesture_mouse", nil), @"key": @"control.gesture_mouse"},
@@ -1230,6 +1231,7 @@
                 setPrefFloat(@"java.allocated_memory", val);
             }
         }
+        if (val == 0 && [item[@"key"] isEqualToString:@"control.camera_sensitivity"]) val = 100;
         if (val == 0 && ![item[@"key"] isEqualToString:@"amethyst_bg_blur"] && ![item[@"key"] isEqualToString:@"amethyst_ui_opacity"] && !([item[@"key"] hasPrefix:@"amethyst_"] && [item[@"key"] hasSuffix:@"_blur"]) && ![item[@"key"] isEqualToString:@"general.widget_bg_opacity"] && ![item[@"key"] isEqualToString:@"amethyst_ui_border_radius"] && ![item[@"key"] isEqualToString:@"amethyst_shell_gap"] && ![item[@"key"] isEqualToString:@"amethyst_shell_inner_gap"] && ![item[@"key"] isEqualToString:@"amethyst_ui_border_width"] && ![item[@"key"] isEqualToString:@"amethyst_ui_border_enabled"] && !disabled) val = [item[@"min"] floatValue] + ([item[@"max"] floatValue] - [item[@"min"] floatValue]) / 2;
         sl.minimumValue = [item[@"min"] floatValue];
         sl.maximumValue = [item[@"max"] floatValue];
@@ -1561,7 +1563,7 @@
         setPrefFloat(item[@"key"], val);
         if ([item[@"key"] isEqualToString:@"video.resolution"]) {
             [[NSNotificationCenter defaultCenter] postNotificationName:@"ResolutionDidChangeNotification" object:nil];
-        } else if ([item[@"key"] isEqualToString:@"control.mouse_scale"] || [item[@"key"] isEqualToString:@"control.button_scale"] || [item[@"key"] isEqualToString:@"control.mouse_speed"]) {
+        } else if ([item[@"key"] isEqualToString:@"control.mouse_scale"] || [item[@"key"] isEqualToString:@"control.button_scale"] || [item[@"key"] isEqualToString:@"control.mouse_speed"] || [item[@"key"] isEqualToString:@"control.camera_sensitivity"]) {
             // Live update virtual mouse / button scale without relaunch
             [[NSNotificationCenter defaultCenter] postNotificationName:@"ControlScaleDidChangeNotification" object:nil];
             [[NSNotificationCenter defaultCenter] postNotificationName:@"MouseScaleDidChangeNotification" object:nil];
