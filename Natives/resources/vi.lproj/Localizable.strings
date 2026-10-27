@@ -19,6 +19,14 @@
 "hang.decline" = "Từ chối";
 "perf.toast.started" = "Đã bắt đầu đo hiệu năng";
 
+"notice.zink_mesa_2622.title" = "Zink Mesa 26.2.2 chưa hoạt động";
+"notice.zink_mesa_2622.message" = "Mesa 26.2.2 hiện đang lỗi trên launcher và không thể chạy game. Chuyển về 25.0.7 và thoát khỏi game?";
+"notice.zink_mesa_2622.revert" = "Chuyển về 25.0.7 & thoát";
+"notice.mobileglues_backend.title" = "Backend MobileGlues chưa hoạt động";
+"notice.mobileglues_backend.message" = "Hiện chỉ ANGLE Vulkan hoạt động — backend đang chọn vẫn đang lỗi. Chuyển về ANGLE Vulkan và thoát khỏi game?";
+"notice.mobileglues_backend.revert" = "Chuyển về ANGLE Vulkan & thoát";
+"notice.action.continue" = "Vẫn chạy";
+
 "In-Game Widget" = "Tiện ích trong game";
 "preference.title.widget_menu" = "Menu tiện ích";
 "preference.title.widget_show_fps" = "Hiển thị FPS";

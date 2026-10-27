@@ -311,6 +311,7 @@ add_executable(Witch
   SceneExternalDelegate.m
   SurfaceViewController.m
   SurfaceViewController+HangDetect.m
+  GameLaunchChecks.m
   SurfaceViewController+ExternalDisplay.m
   SurfaceViewController+LogView.m
   SurfaceViewController+Navigation.m
@@ -354,6 +355,7 @@ egl_bridge.m
    ../UI/Common/AppErrorDialog.m
    ../UI/Common/ErrorPresenter.m
    ../UI/Common/AppSheet.m
+   ../UI/Common/AmethystNoticePanel.m
     ../UI/Root/AmethystRootViewController.m
    ../UI/Root/TopBarView.m
    ../UI/Root/SidebarViewController.m

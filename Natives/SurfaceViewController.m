@@ -20,6 +20,7 @@
 #import "PLProfiles.h"
 #import "SurfaceViewController.h"
 #import "SurfaceViewController+HangDetect.h"
+#import "GameLaunchChecks.h"
 #import "TrackedTextField.h"
 #import "UIKit+hook.h"
 #import "ios_uikit_bridge.h"
@@ -760,6 +761,18 @@ static GameSurfaceView* pojavWindow;
 }
 
 - (void)launchMinecraft {
+    // Pre-launch setting checks (e.g. known-broken renderer configurations).
+    // A visible notice defers the JVM launch; "continue anyway" resumes here
+    // through beginMinecraftLaunch, "revert & exit" goes back to the launcher.
+    if ([GameLaunchChecks presentFirstIssueIn:self.view onContinue:^{
+        [self beginMinecraftLaunch];
+    }]) {
+        return;
+    }
+    [self beginMinecraftLaunch];
+}
+
+- (void)beginMinecraftLaunch {
     [self startBlackScreenWatchdog];
     [[PerfRecorder shared] startWithMetadata:@{
         @"version": self.metadata[@"id"] ?: @"",

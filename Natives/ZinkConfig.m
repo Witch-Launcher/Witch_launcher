@@ -281,8 +281,8 @@ static AppleGPUGeneration _cachedGPUGeneration = AppleGPUGenerationUnknown;
             return v;
         }
     }
-    NSLog(@"[ZinkConfig] selectedMesaVersion: default = 26.2.2");
-    return @"26.2.2";
+    NSLog(@"[ZinkConfig] selectedMesaVersion: default = 25.0.7");
+    return @"25.0.7";
 }
 
 + (NSString *)zinkLibraryName {

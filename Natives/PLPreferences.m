@@ -123,8 +123,9 @@
             // Backend picker is the single source of truth:
             // tgles = TGLES (off), metal = ANGLE Metal, vulkan = ANGLE Vulkan.
             // enable_angle is kept as a mirrored legacy key for old configs.
-            @"enable_angle": @NO,
-            @"angle_backend": @"tgles",
+            // Default = ANGLE Vulkan (the only working backend right now).
+            @"enable_angle": @YES,
+            @"angle_backend": @"vulkan",
             @"enable_no_error": @(2),
             @"enable_ext_timer_query": @YES,
             @"enable_ext_compute_shader": @NO,
@@ -142,7 +143,7 @@
             @"enable_gl_thread": @YES,
             @"glsl_cache_size": @(32),
             @"api_features": @(0xFFFFFFFF),
-            @"mesa_version": @"26.2.2"
+            @"mesa_version": @"25.0.7"
         }.mutableCopy,
         @"mobilegl": @{
             @"backend_type": @"DirectVulkan",
@@ -210,7 +211,9 @@
             @"debug_server_localhost_only": @NO
         }.mutableCopy;
         defaults[@"perf"] = @{
-            @"record": @YES,
+            // Auto-recording defaults OFF; manual recording from the in-game
+            // menu is always available.
+            @"record": @NO,
             @"metric_fps": @YES,
             @"metric_cpu": @YES,
             @"metric_gpu": @YES,

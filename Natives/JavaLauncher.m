@@ -209,7 +209,7 @@ void init_loadMobileGluesConfig() {
 
     id angleBackend = getPrefObject(@"mobileglues.angle_backend");
     NSString *backend = (angleBackend && [angleBackend isKindOfClass:[NSString class]])
-        ? (NSString *)angleBackend : @"tgles";
+        ? (NSString *)angleBackend : @"vulkan";
     BOOL angleEnabled = [backend isEqualToString:@"metal"] || [backend isEqualToString:@"vulkan"];
     // ForceEnable (3), not EnableIfPossible (1): MG's hasVulkan12() probe
     // returns false on iOS, so "if possible" always resolves to Disabled even

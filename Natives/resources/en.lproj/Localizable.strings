@@ -19,6 +19,14 @@
 "hang.decline" = "Decline";
 "perf.toast.started" = "Performance recording started";
 
+"notice.zink_mesa_2622.title" = "Zink Mesa 26.2.2 not working";
+"notice.zink_mesa_2622.message" = "Mesa 26.2.2 is currently broken in this launcher and will not start the game. Revert the setting to 25.0.7 and exit?";
+"notice.zink_mesa_2622.revert" = "Revert to 25.0.7 & exit";
+"notice.mobileglues_backend.title" = "MobileGlues backend not working";
+"notice.mobileglues_backend.message" = "Only ANGLE Vulkan works right now — the selected backend is still broken. Revert to ANGLE Vulkan and exit?";
+"notice.mobileglues_backend.revert" = "Revert to ANGLE Vulkan & exit";
+"notice.action.continue" = "Run anyway";
+
 "In-Game Widget" = "In-Game Widget";
 "preference.title.widget_menu" = "Widget Menu";
 "preference.title.widget_show_fps" = "Show FPS";
