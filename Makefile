@@ -439,6 +439,13 @@ verify-jres:
 spvc:
 	echo '[Witch v$(VERSION)] spvc - start'
 	mkdir -p $(WORKINGDIR)/spvc
+	# Root-cause fix (2026-10-27, session 5): the slim build (MSL/HLSL/CPP/
+	# REFLECT/UTIL OFF) shipped in 0.0.4 regressed frame rate on-device —
+	# MC 26.3 RenderPearl parses/reflects SPIR-V through LWJGL spvc and the
+	# missing backend pieces forced slower fallback paths on every new
+	# pipeline. The verified-good device build (Witch-0.0.4-ios.ipa @2026-10-27)
+	# keeps pin be71ee8 and turns ALL backends ON, still -mcpu=generic and
+	# guarded below against ARMv8.3 atomics for A11/A10.
 	cd $(WORKINGDIR)/spvc && cmake \
 		-DCMAKE_BUILD_TYPE=Release \
 		-DCMAKE_SYSTEM_NAME=iOS \
@@ -454,11 +461,11 @@ spvc:
 		-DSPIRV_CROSS_ENABLE_TESTS=OFF \
 		-DSPIRV_CROSS_ENABLE_C_API=ON \
 		-DSPIRV_CROSS_ENABLE_GLSL=ON \
-		-DSPIRV_CROSS_ENABLE_HLSL=OFF \
-		-DSPIRV_CROSS_ENABLE_MSL=OFF \
-		-DSPIRV_CROSS_ENABLE_CPP=OFF \
-		-DSPIRV_CROSS_ENABLE_REFLECT=OFF \
-		-DSPIRV_CROSS_ENABLE_UTIL=OFF \
+		-DSPIRV_CROSS_ENABLE_HLSL=ON \
+		-DSPIRV_CROSS_ENABLE_MSL=ON \
+		-DSPIRV_CROSS_ENABLE_CPP=ON \
+		-DSPIRV_CROSS_ENABLE_REFLECT=ON \
+		-DSPIRV_CROSS_ENABLE_UTIL=ON \
 		$(SOURCEDIR)/Natives/external/MobileGlues/src/main/cpp/3rdparty/SPIRV-Cross/
 	cmake --build $(WORKINGDIR)/spvc --config Release -j$(JOBS) --target spirv-cross-c-shared
 	cp $(WORKINGDIR)/spvc/libspirv-cross-c-shared.0.dylib $(WORKINGDIR)/libspirv-cross-c-shared.0.dylib
