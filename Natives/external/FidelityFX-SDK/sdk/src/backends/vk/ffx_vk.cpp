@@ -33,6 +33,7 @@
 #ifdef _WIN32
 #include <windows.h>
 #else
+#include <dlfcn.h>  // dlsym for the vkGetDeviceProcAddr fallback below
 #include <codecvt>  // this is deprecated so it's just a fallback solution
 #endif  // _WIN32
 
@@ -1538,9 +1539,18 @@ FfxErrorCode CreateBackendContextVK(FfxInterface* backendInterface, FfxEffect ef
         // Map extension array
         backendContext->extensionProperties = (VkExtensionProperties*)pMem;
 
-        // if vkGetDeviceProcAddr is NULL, use the one from the vulkan header
+        // if vkGetDeviceProcAddr is NULL, use the one from the vulkan header.
+        // On iOS there is no system Vulkan loader: the launcher dlopens
+        // libMoltenVK.dylib long after launch, so taking the address of the
+        // symbol here would emit an eager __got bind of _vkGetDeviceProcAddr
+        // that dyld cannot resolve before main() and aborts the process
+        // (crash log Witch-2026-10-28-230359.ips). Every other vk* reference
+        // in this backend goes through lazy-bound call stubs; this is the
+        // only address-taken one. Resolve it through dlsym instead — by the
+        // time ffxGetDeviceVK runs, the Vulkan ICD is already loaded.
         if (vkDeviceContext->vkDeviceProcAddr == NULL)
-            vkDeviceContext->vkDeviceProcAddr = vkGetDeviceProcAddr;
+            vkDeviceContext->vkDeviceProcAddr =
+                reinterpret_cast<PFN_vkGetDeviceProcAddr>(dlsym(RTLD_DEFAULT, "vkGetDeviceProcAddr"));
 
         if (vkDeviceContext->vkDevice != VK_NULL_HANDLE) {
             backendContext->device = vkDeviceContext->vkDevice;
