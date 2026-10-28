@@ -666,6 +666,22 @@ int launchJVMWithArgs(NSString *username, id launchTarget, int width, int height
     }
     NSLog(@"[JavaLauncher] RENDERER is set to %@\n", renderer);
     setenv("AMETHYST_RENDERER", renderer.UTF8String, 1);
+    // MC 26.x graphics-API forcing policy (video.graphics_backend_forcing pref).
+    // Values match `--graphicsBackend` semantics: vulkan|opengl force that API,
+    // "none" appends nothing so MC honors its own in-game "Graphics Backend"
+    // option, auto keeps the legacy renderer-derived choice (Tools.java).
+    {
+        id gbfPref = getPrefObject(@"video.graphics_backend_forcing");
+        NSString *forcing = [gbfPref isKindOfClass:NSString.class] ? (NSString *)gbfPref : @"auto";
+        NSString *envValue = @"auto";
+        if ([forcing isEqualToString:@"vulkan"] || [forcing isEqualToString:@"opengl"]) {
+            envValue = forcing;
+        } else if ([forcing isEqualToString:@"none"]) {
+            envValue = @"none";
+        }
+        setenv("WITCH_FORCE_BACKEND", envValue.UTF8String, 1);
+        NSLog(@"[JavaLauncher] WITCH_FORCE_BACKEND → %@ (pref %@)", envValue, forcing);
+    }
     if ([renderer isEqualToString:@ RENDERER_NAME_METAL_MACOS]) {
         // Opt-in marker for mods that were ported from macOS and need the
         // compatibility path. The plain "metal" renderer stays untouched.

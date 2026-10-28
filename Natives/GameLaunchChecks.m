@@ -65,6 +65,38 @@
     };
     [checks addObject:mgBackend];
 
+    // The profile's own `renderer` is resolved by PLProfiles BEFORE the global
+    // Settings value, so a profile that carries an old renderer (e.g.
+    // libMoltenVK.dylib) silently overrides whatever the user picks in
+    // Settings — and the launch then always runs MoltenVK. Offer to copy the
+    // global renderer into the profile so the Settings picker wins.
+    GameLaunchCheck *rendererShadow = [GameLaunchCheck new];
+    rendererShadow.checkID = @"profile.renderer_shadow";
+    rendererShadow.title = localize(@"notice.profile_renderer_shadow.title", nil);
+    rendererShadow.message = localize(@"notice.profile_renderer_shadow.message", nil);
+    rendererShadow.revertButtonTitle = localize(@"notice.profile_renderer_shadow.revert", nil);
+    rendererShadow.continueButtonTitle = localize(@"notice.action.continue", nil);
+    rendererShadow.isAffected = ^BOOL {
+        NSString *global = getPrefObject(@"video.renderer");
+        if (![global isKindOfClass:NSString.class] || global.length == 0) return NO;
+        PLProfiles *profiles = PLProfiles.current;
+        NSMutableDictionary<NSString *, NSString *> *profile = profiles.selectedProfile;
+        if (!profile) return NO;
+        NSString *profileRenderer = profile[@"renderer"];
+        return profileRenderer.length > 0 && ![profileRenderer isEqualToString:global];
+    };
+    rendererShadow.revert = ^{
+        PLProfiles *profiles = PLProfiles.current;
+        NSMutableDictionary<NSString *, NSString *> *profile = profiles.selectedProfile;
+        if (!profile) return;
+        NSString *global = getPrefObject(@"video.renderer");
+        if (![global isKindOfClass:NSString.class] || global.length == 0) return;
+        profile[@"renderer"] = global;
+        [profiles save];
+        UIKit_returnToSplitView();
+    };
+    [checks addObject:rendererShadow];
+
     return checks;
 }
 

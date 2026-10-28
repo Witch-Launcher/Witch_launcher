@@ -102,6 +102,12 @@
         @{@"title": localize(@"Game", nil), @"items": @[
             header(@"settings.group.display"),
             @{@"type": @"picker", @"label": localize(@"preference.title.renderer", nil), @"key": @"video.renderer", @"options": rendererOptions, @"default": @"auto"},
+            @{@"type": @"picker", @"label": localize(@"preference.title.graphics_backend_forcing", nil), @"key": @"video.graphics_backend_forcing", @"options": @[
+                @{@"key": @"auto", @"name": localize(@"preference.gbf.auto", nil)},
+                @{@"key": @"vulkan", @"name": localize(@"preference.gbf.vulkan", nil)},
+                @{@"key": @"opengl", @"name": localize(@"preference.gbf.opengl", nil)},
+                @{@"key": @"none", @"name": localize(@"preference.gbf.none", nil)},
+            ], @"default": @"auto"},
             @{@"type": @"slider", @"label": localize(@"preference.title.resolution", nil), @"key": @"video.resolution", @"min": @25, @"max": @150, @"suffix": @"%"},
             @{@"type": @"switch", @"label": localize(@"preference.title.performance_hud", nil), @"key": @"video.performance_hud"},
             @{@"type": @"switch", @"label": localize(@"preference.title.fullscreen_airplay", nil), @"key": @"video.fullscreen_airplay"},

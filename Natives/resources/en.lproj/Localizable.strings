@@ -27,6 +27,16 @@
 "notice.mobileglues_backend.revert" = "Revert to ANGLE Vulkan & exit";
 "notice.action.continue" = "Run anyway";
 
+"notice.profile_renderer_shadow.title" = "Profile overrides the global renderer";
+"notice.profile_renderer_shadow.message" = "This profile has its own Renderer, which is resolved before the Settings renderer — changing Settings has no effect. Apply the global renderer to this profile?";
+"notice.profile_renderer_shadow.revert" = "Apply global renderer";
+
+"preference.title.graphics_backend_forcing" = "Forced graphics backend (MC 26.x)";
+"preference.gbf.auto" = "Auto (from renderer)";
+"preference.gbf.vulkan" = "Force Vulkan (MoltenVK)";
+"preference.gbf.opengl" = "Force OpenGL";
+"preference.gbf.none" = "Follow Minecraft setting";
+
 "In-Game Widget" = "In-Game Widget";
 "preference.title.widget_menu" = "Widget Menu";
 "preference.title.widget_show_fps" = "Show FPS";

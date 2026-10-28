@@ -27,6 +27,16 @@
 "notice.mobileglues_backend.revert" = "Chuyển về ANGLE Vulkan & thoát";
 "notice.action.continue" = "Vẫn chạy";
 
+"notice.profile_renderer_shadow.title" = "Renderer của profile đang đè lên renderer global";
+"notice.profile_renderer_shadow.message" = "Profile này có Renderer riêng và được ưu tiên trước Renderer trong Cài đặt — đổi trong Cài đặt sẽ không có tác dụng. Áp renderer global cho profile này?";
+"notice.profile_renderer_shadow.revert" = "Áp renderer global";
+
+"preference.title.graphics_backend_forcing" = "Ép graphics backend (MC 26.x)";
+"preference.gbf.auto" = "Tự động (theo renderer)";
+"preference.gbf.vulkan" = "Ép Vulkan (MoltenVK)";
+"preference.gbf.opengl" = "Ép OpenGL";
+"preference.gbf.none" = "Theo setting của Minecraft";
+
 "In-Game Widget" = "Tiện ích trong game";
 "preference.title.widget_menu" = "Menu tiện ích";
 "preference.title.widget_show_fps" = "Hiển thị FPS";

@@ -168,10 +168,27 @@ public final class Tools {
         }
         String[] launchArgs = getMinecraftArgs(profile, versionInfo);
         String renderer = System.getenv("AMETHYST_RENDERER");
-        if (renderer != null && !renderer.isEmpty() && supportsForcedGraphicsBackend(versionInfo)) {
+        // Graphics-API forcing is now user-configurable (video.graphics_backend_forcing
+        // pref → WITCH_FORCE_BACKEND env, set in JavaLauncher before the JVM boots):
+        //   vulkan/opengl → append --graphicsBackend with that value
+        //   none          → append nothing; MC 26.x then honors its own in-game
+        //                   "Graphics Backend" option (options.txt) again
+        //   auto/unset    → legacy behavior, derived from the profile renderer
+        String forceBackend = System.getenv("WITCH_FORCE_BACKEND");
+        String forcedGraphicsBackend = null;
+        if (supportsForcedGraphicsBackend(versionInfo)) {
+            if ("vulkan".equals(forceBackend) || "opengl".equals(forceBackend)) {
+                forcedGraphicsBackend = forceBackend;
+            } else if (forceBackend != null && (forceBackend.isEmpty() || "none".equals(forceBackend))) {
+                // follow-minecraft: append nothing; MC reads its own options
+            } else if (renderer != null && !renderer.isEmpty()) {
+                forcedGraphicsBackend = "libMoltenVK.dylib".equals(renderer) ? "vulkan" : "opengl";
+            }
+        }
+        if (forcedGraphicsBackend != null) {
             String[] withBackend = Arrays.copyOf(launchArgs, launchArgs.length + 2);
             withBackend[launchArgs.length] = "--graphicsBackend";
-            withBackend[launchArgs.length + 1] = "libMoltenVK.dylib".equals(renderer) ? "vulkan" : "opengl";
+            withBackend[launchArgs.length + 1] = forcedGraphicsBackend;
             launchArgs = withBackend;
         }
         System.out.println("[DEBUG] Minecraft Args: " + Arrays.toString(launchArgs));
