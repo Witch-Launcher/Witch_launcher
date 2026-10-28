@@ -24,6 +24,14 @@
 #include "TGLMTConfig.h"
 #include "MemSampler.h"
 
+// MetalBridgeKit.framework (vendored in Frameworks/, dlopened for the
+// metal_macos renderer). Runtime link only, so declare the ObjC facade
+// instead of importing the Swift module.
+@interface MBProbe : NSObject
++ (NSString *)frameworkVersion;
++ (NSString *)runAllServices;
+@end
+
 #import "ios_uikit_bridge.h"
 #import "JavaLauncher.h"
 #import "LauncherPreferences.h"
@@ -687,6 +695,39 @@ int launchJVMWithArgs(NSString *username, id launchTarget, int width, int height
         // compatibility path. The plain "metal" renderer stays untouched.
         setenv("WITCH_METAL_MACOS", "1", 1);
         NSLog(@"[JavaLauncher] Metal macOS-port compatibility enabled");
+        // MetalBridgeKit re-implements the macOS-only Metal API surface the
+        // ported mod calls (managed storage, BC formats, tessellation patch,
+        // sparse pages, argument replay) on top of iOS public APIs. Load it
+        // RTLD_GLOBAL so its ObjC classes (MBProbe, ...) register in-process
+        // before the mod's own dlopen/dlsym pass, and publish absolute paths
+        // so the mod can reach the framework from any working directory.
+        NSString *bridgeFrameworks = NSBundle.mainBundle.privateFrameworksPath;
+        NSString *bridgeBundle = [bridgeFrameworks stringByAppendingPathComponent:@"MetalBridgeKit.framework"];
+        NSString *bridgeBinary = [bridgeBundle stringByAppendingPathComponent:@"MetalBridgeKit"];
+        if ([[NSFileManager defaultManager] fileExistsAtPath:bridgeBinary]) {
+            void *bridge = dlopen(bridgeBinary.UTF8String, RTLD_LAZY | RTLD_GLOBAL);
+            if (bridge != NULL) {
+                setenv("WITCH_METAL_BRIDGE_PATH", bridgeBinary.UTF8String, 1);
+                setenv("WITCH_METAL_BRIDGE_BUNDLE", bridgeBundle.UTF8String, 1);
+                NSLog(@"[MetalBridgeKit] Loaded %@ (v%@)", bridgeBinary, MBProbe.frameworkVersion);
+                // On-device verification of every service: set
+                // WITCH_METAL_PROBE=0 to skip it on slow devices.
+                const char *probeFlag = getenv("WITCH_METAL_PROBE");
+                if (!probeFlag || strcmp(probeFlag, "0") != 0) {
+                    Class probe = NSClassFromString(@"MBProbe");
+                    if (probe && [probe respondsToSelector:@selector(runAllServices)]) {
+                        NSString *report = [probe performSelector:@selector(runAllServices)];
+                        NSLog(@"[MetalBridgeKit] Service probes:\n%@", report);
+                    } else {
+                        NSLog(@"[MetalBridgeKit] MBProbe class unavailable");
+                    }
+                }
+            } else {
+                NSLog(@"[MetalBridgeKit] dlopen %@ failed: %s", bridgeBinary, dlerror());
+            }
+        } else {
+            NSLog(@"[MetalBridgeKit] Framework missing at %@ — the macOS Metal mod will not find its compatibility path", bridgeBundle);
+        }
     }
 
     // MobileGlues resolves every EGL/GLES symbol with dlsym(RTLD_DEFAULT) at
@@ -1073,6 +1114,20 @@ int launchJVMWithArgs(NSString *username, id launchTarget, int width, int height
     NSString *librariesPath = [NSString stringWithFormat:@"%@/libs", NSBundle.mainBundle.bundlePath];
     margv[++margc] = [NSString stringWithFormat:@"-javaagent:%@/cacio-init-agent.jar=", librariesPath].UTF8String;
     margv[++margc] = [NSString stringWithFormat:@"-javaagent:%@/patchjna_agent.jar=", librariesPath].UTF8String;
+
+    // FidelityFX (FSR 1 / FSR 2 / FSR 3 upscaler / frame generation). The agent
+    // jar is only attached when an effect is enabled; fsr3.effect values match
+    // Fsr3Native modes: 1=framegen 2=fsr1 3=fsr2 4=fsr3-upscale.
+    NSInteger fsr3Effect = getPrefInt(@"fsr3.effect");
+    if (fsr3Effect >= 1 && fsr3Effect <= 4) {
+        float fsr3Scale = getPrefFloat(@"fsr3.resolution_scale");
+        if (fsr3Scale <= 0.0f || fsr3Scale > 1.0f) {
+            fsr3Scale = 1.0f;
+        }
+        margv[++margc] = [NSString stringWithFormat:
+            @"-javaagent:%@/fsr3-agent.jar=mode=%ld&scale=%.3f",
+            librariesPath, (long)fsr3Effect, fsr3Scale].UTF8String;
+    }
 
     // F3 debug overlay metadata. The agent patches the game's debug screen at
     // class-load time (obfuscation-proof "Java: %s" marker); the values are

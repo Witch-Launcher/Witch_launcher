@@ -60,3 +60,7 @@ __pycache__/
 
 *.class
 /Natives/build_test
+
+# temp build/clone scratch dirs (do not commit)
+.tmp-*/
+Natives/external/FidelityFX-SDK/.build-sc/

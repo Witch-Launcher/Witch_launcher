@@ -430,8 +430,21 @@ if("${CMAKE_HOST_SYSTEM_NAME}" MATCHES "Linux|^GNU$|Android")
 target_sources(Witch PUBLIC non_darwin_utils.m)
 endif()
 
+# FidelityFX SDK (FSR1 / FSR2 / FSR3Upscaler / FrameInterpolation), Vulkan backend.
+# Bridge code lives in Natives/upscaler/ and talks to the SDK through the public host API.
+set(FFX_VULKAN_HEADERS_INCLUDE ${CMAKE_CURRENT_LIST_DIR}/external/MoltenVK/External/Vulkan-Headers/include)
+add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/external/FidelityFX-SDK/ios ffx_fsr3)
+target_sources(Witch PRIVATE upscaler/ffx_bridge.cpp)
+target_include_directories(Witch PRIVATE
+  ${CMAKE_CURRENT_LIST_DIR}/upscaler
+  ${CMAKE_CURRENT_LIST_DIR}/external/FidelityFX-SDK/sdk/include
+  ${CMAKE_CURRENT_LIST_DIR}/external/FidelityFX-SDK/sdk/src/components/fsr3upscaler
+  ${CMAKE_CURRENT_LIST_DIR}/external/MoltenVK/External/Vulkan-Headers/include
+)
+
 target_link_libraries(Witch
   PUBLIC AFNetworking
+  ffx_fsr3_vk
   TouchControllerBridge
   lzma
   z

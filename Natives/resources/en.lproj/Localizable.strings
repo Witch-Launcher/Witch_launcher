@@ -934,6 +934,15 @@
 "settings.group.zink" = "Zink";
 "settings.group.moltenvk" = "MoltenVK";
 "settings.group.ltw" = "LTW";
+"settings.group.fsr3" = "FidelityFX (AMD FSR 3)";
+"preference.title.fsr3_effect" = "FidelityFX Effect";
+"preference.title.fsr3_effect.off" = "Off";
+"preference.title.fsr3_effect.framegen" = "Frame Generation (FSR 3 FG)";
+"preference.title.fsr3_effect.fsr1" = "FSR 1 (EASU + RCAS)";
+"preference.title.fsr3_effect.fsr2" = "FSR 2";
+"preference.title.fsr3_effect.fsr3" = "FSR 3 Upscaler";
+"preference.title.fsr3_resolution_scale" = "Render Resolution Scale";
+"settings.group.fsr3_hint" = "Requires the MoltenVK (Vulkan) renderer. Frame Generation interpolates extra frames between rendered ones; the upscalers sharpen and upscale - lower the render resolution scale to gain FPS. Experimental: motion is estimated from the camera only, so fast scene changes may smear.";
 "settings.group.witch" = "Witch Server";
 "settings.group.curseforge" = "CurseForge";
 "settings.group.ai" = "AI";

@@ -777,6 +777,15 @@
 "settings.group.zink" = "Zink";
 "settings.group.moltenvk" = "MoltenVK";
 "settings.group.ltw" = "LTW";
+"settings.group.fsr3" = "FidelityFX (AMD FSR 3)";
+"preference.title.fsr3_effect" = "Hiệu ứng FidelityFX";
+"preference.title.fsr3_effect.off" = "Tắt";
+"preference.title.fsr3_effect.framegen" = "Frame Generation (FSR 3 FG)";
+"preference.title.fsr3_effect.fsr1" = "FSR 1 (EASU + RCAS)";
+"preference.title.fsr3_effect.fsr2" = "FSR 2";
+"preference.title.fsr3_effect.fsr3" = "FSR 3 Upscaler";
+"preference.title.fsr3_resolution_scale" = "Tỉ lệ độ phân giải render";
+"settings.group.fsr3_hint" = "Yêu cầu renderer MoltenVK (Vulkan). Frame Generation nội suy thêm khung giữa các khung đã render; các upscaler làm nét và phóng đại - hãy giảm tỉ lệ độ phân giải render để đạt FPS cao hơn. Thử nghiệm: chuyển động được ước lượng chỉ từ camera, khung cảnh thay đổi nhanh có thể bị mờ.";
 "settings.group.witch" = "Máy chủ Witch";
 "settings.group.curseforge" = "CurseForge";
 "settings.group.ai" = "AI";

@@ -539,6 +539,30 @@ dep_tglmt:
 		{ echo 'ERROR: libtglmt.dylib missing (set TGLMT_SRC or vendor the dylib)'; exit 1; }
 	echo '[Witch v$(VERSION)] dep_tglmt - end'
 
+# MetalBridgeKit: macOS Metal API facade + A9 emulation services (BC decode,
+# tessellation, fences, sparse, argument replay) for Metal mods ported from
+# macOS. Renderer "metal_macos" dlopens the framework at launch (JavaLauncher).
+# Vendored copy ships with the repo; METALBRIDGE_SRC rebuilds it fresh.
+METALBRIDGE_SRC ?= /Volumes/D/MetalBridgeA9
+dep_metalbridge:
+	echo '[Witch v$(VERSION)] dep_metalbridge - start'
+	if [ -d "$(METALBRIDGE_SRC)/MetalBridge.xcodeproj" ] && command -v xcodebuild >/dev/null 2>&1; then \
+		(cd "$(METALBRIDGE_SRC)" && xcodegen generate >/dev/null 2>&1 || true) && \
+		(cd "$(METALBRIDGE_SRC)" && xcodebuild -project MetalBridge.xcodeproj \
+			-target MetalBridgeKit -configuration Release -sdk iphoneos \
+			-arch arm64 CODE_SIGNING_ALLOWED=NO build) >/dev/null 2>&1 && \
+		rm -rf "$(SOURCEDIR)/Natives/resources/Frameworks/MetalBridgeKit.framework" && \
+		cp -pR "$(METALBRIDGE_SRC)/build/Release-iphoneos/MetalBridgeKit.framework" \
+			"$(SOURCEDIR)/Natives/resources/Frameworks/MetalBridgeKit.framework"; \
+	else \
+		echo '[Witch] METALBRIDGE_SRC not found, keeping vendored MetalBridgeKit.framework'; \
+	fi
+	test -d "$(SOURCEDIR)/Natives/resources/Frameworks/MetalBridgeKit.framework" && \
+		test -f "$(SOURCEDIR)/Natives/resources/Frameworks/MetalBridgeKit.framework/MetalBridgeKit" && \
+		test -f "$(SOURCEDIR)/Natives/resources/Frameworks/MetalBridgeKit.framework/default.metallib" || \
+		{ echo 'ERROR: MetalBridgeKit.framework missing or incomplete (set METALBRIDGE_SRC or vendor it)'; exit 1; }
+	echo '[Witch v$(VERSION)] dep_metalbridge - end'
+
 dep_tgles:
 	echo '[Witch v$(VERSION)] dep_tgles - start'
 	mkdir -p "$(WORKINGDIR)"
@@ -798,7 +822,7 @@ lwgjl:
 	find "$$LWJGL41_DIR/bin/RELEASE" -name '*.jar' ! -name '*-natives-*' ! -name '*-sources.jar' -exec cp {} "$(SOURCEDIR)/JavaApp/libs/lwjgl41/" \; 2>/dev/null || true; \
 	echo '[Witch v$(VERSION)] lwgjl - end'
 
-payload: native dep_mg spvc dep_mobilegl dep_tgles dep_tglmt lwgjl java jre assets
+payload: native dep_mg spvc dep_mobilegl dep_tgles dep_tglmt dep_metalbridge lwgjl java jre assets
 	echo '[Witch v$(VERSION)] payload - start'
 	rm -f $(WORKINGDIR)/Witch.app/*.png
 	$(call METHOD_DIRCHECK,$(WORKINGDIR)/Witch.app/libs)
@@ -808,7 +832,7 @@ payload: native dep_mg spvc dep_mobilegl dep_tgles dep_tglmt lwgjl java jre asse
 	cp -R $(SOURCEDIR)/Natives/resources/* $(WORKINGDIR)/Witch.app/ || exit 1
 	cp $(WORKINGDIR)/*.dylib $(WORKINGDIR)/Witch.app/Frameworks/ || exit 1
 	cp -R $(SOURCEDIR)/JavaApp/libs/others/* $(WORKINGDIR)/Witch.app/libs/ || exit 1
-	cp $(SOURCEDIR)/JavaApp/build/launcher.jar $(SOURCEDIR)/JavaApp/build/patchjna_agent.jar $(SOURCEDIR)/JavaApp/build/cacio-init-agent.jar $(SOURCEDIR)/JavaApp/build/f3agent.jar $(WORKINGDIR)/Witch.app/libs/ || exit 1
+	cp $(SOURCEDIR)/JavaApp/build/launcher.jar $(SOURCEDIR)/JavaApp/build/patchjna_agent.jar $(SOURCEDIR)/JavaApp/build/cacio-init-agent.jar $(SOURCEDIR)/JavaApp/build/f3agent.jar $(SOURCEDIR)/JavaApp/build/fsr3-agent.jar $(WORKINGDIR)/Witch.app/libs/ || exit 1
 	mkdir -p $(WORKINGDIR)/Witch.app/libs/lwjgl33 $(WORKINGDIR)/Witch.app/libs/lwjgl36 $(WORKINGDIR)/Witch.app/libs/lwjgl41
 	cp $(SOURCEDIR)/JavaApp/build/lwjgl-3.3.3.jar $(WORKINGDIR)/Witch.app/libs/lwjgl33/lwjgl.jar || exit 1
 	cp $(SOURCEDIR)/JavaApp/build/lwjgl-3.3.6.jar $(WORKINGDIR)/Witch.app/libs/lwjgl36/lwjgl.jar || exit 1
@@ -982,4 +1006,4 @@ clean:
 
 		
 
-.PHONY: all clean check native java jre lwgjl dep_mg dep_mobilegl dep_tgles dep_tglmt dep_moltenvk dep_moltenvk12 dep_mesa_zink dep_kkosmic dep_angle assets payload package dsym deploy help codesign
+.PHONY: all clean check native java jre lwgjl dep_mg dep_mobilegl dep_tgles dep_tglmt dep_metalbridge dep_moltenvk dep_moltenvk12 dep_mesa_zink dep_kkosmic dep_angle assets payload package dsym deploy help codesign
