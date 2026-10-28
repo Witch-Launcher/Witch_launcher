@@ -25,12 +25,11 @@
 #include "MemSampler.h"
 
 // MetalBridgeKit.framework (vendored in Frameworks/, dlopened for the
-// metal_macos renderer). Runtime link only, so declare the ObjC facade
-// instead of importing the Swift module.
-@interface MBProbe : NSObject
-+ (NSString *)frameworkVersion;
-+ (NSString *)runAllServices;
-@end
+// metal_macos renderer). Runtime link only: its ObjC classes do not exist
+// until the dlopen below registers them, so the facade is reached strictly
+// through NSClassFromString — a static class reference (e.g.
+// MBProbe.frameworkVersion) would emit a strong _OBJC_CLASS_$_MBProbe that
+// dyld cannot bind before main() and abort the launch.
 
 #import "ios_uikit_bridge.h"
 #import "JavaLauncher.h"
@@ -709,7 +708,13 @@ int launchJVMWithArgs(NSString *username, id launchTarget, int width, int height
             if (bridge != NULL) {
                 setenv("WITCH_METAL_BRIDGE_PATH", bridgeBinary.UTF8String, 1);
                 setenv("WITCH_METAL_BRIDGE_BUNDLE", bridgeBundle.UTF8String, 1);
-                NSLog(@"[MetalBridgeKit] Loaded %@ (v%@)", bridgeBinary, MBProbe.frameworkVersion);
+                Class probeClass = NSClassFromString(@"MBProbe");
+                if (probeClass && [probeClass respondsToSelector:@selector(frameworkVersion)]) {
+                    NSString *version = [probeClass performSelector:@selector(frameworkVersion)];
+                    NSLog(@"[MetalBridgeKit] Loaded %@ (v%@)", bridgeBinary, version);
+                } else {
+                    NSLog(@"[MetalBridgeKit] Loaded %@ (MBProbe class unavailable)", bridgeBinary);
+                }
                 // On-device verification of every service: set
                 // WITCH_METAL_PROBE=0 to skip it on slow devices.
                 const char *probeFlag = getenv("WITCH_METAL_PROBE");
