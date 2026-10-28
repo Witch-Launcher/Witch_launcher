@@ -177,13 +177,15 @@ NSString* getSelectedJavaHome(NSString* defaultJRETag, int minVersion) {
 
 #pragma mark Renderer
 BOOL isExperimentalMetalRendererEnabled(void) {
+    // Enabled by default now; set WITCH_ENABLE_METAL_RENDERERS=0/false/no to
+    // opt out.
     const char *value = getenv("WITCH_ENABLE_METAL_RENDERERS");
-    if (!value) return NO;
+    if (!value) return YES;
     NSString *flag = [[NSString stringWithUTF8String:value] lowercaseString];
-    return flag.length > 0 &&
-        ![flag isEqualToString:@"0"] &&
-        ![flag isEqualToString:@"false"] &&
-        ![flag isEqualToString:@"no"];
+    return !(flag.length > 0 &&
+        ([flag isEqualToString:@"0"] ||
+         [flag isEqualToString:@"false"] ||
+         [flag isEqualToString:@"no"]));
 }
 
 NSArray* getRendererKeys(BOOL containsDefault) {
@@ -199,8 +201,8 @@ NSArray* getRendererKeys(BOOL containsDefault) {
         @ RENDERER_NAME_TGLMT
     ].mutableCopy;
 
-    // Both Metal paths are unfinished; keep them out of every picker unless
-    // a developer explicitly opts in through the environment.
+    // Both Metal paths are shown by default now (see
+    // isExperimentalMetalRendererEnabled); the env flag only hides them.
     if (isExperimentalMetalRendererEnabled()) {
         [array addObject:@ RENDERER_NAME_METAL];
         [array addObject:@ RENDERER_NAME_METAL_MACOS];
