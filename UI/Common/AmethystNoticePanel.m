@@ -88,14 +88,13 @@ static __weak UIView *noticeCardView;
     message.text = notice.message;
     [card addSubview:message];
 
-    // Buttons: first action = left, second = right, single = full width.
+    // Buttons stack vertically at full width so long localized labels never
+    // truncate.
     NSMutableArray<UIButton *> *buttons = [NSMutableArray array];
     NSMutableArray<AmethystNoticeAction *> *actions = [notice.actions mutableCopy];
     if (actions.count > 2) {
         actions = [actions subarrayWithRange:NSMakeRange(0, 2)].mutableCopy;
     }
-    NSMutableArray<NSLayoutConstraint *> *layout = [NSMutableArray array];
-    UIButton *previous = nil;
     for (AmethystNoticeAction *action in actions) {
         UIButton *button = [UIButton buttonWithType:UIButtonTypeSystem];
         button.translatesAutoresizingMaskIntoConstraints = NO;
@@ -118,31 +117,23 @@ static __weak UIView *noticeCardView;
         objc_setAssociatedObject(button, "amethystNoticeAction", action, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
         [card addSubview:button];
         [buttons addObject:button];
-
-        [layout addObject:[button.topAnchor constraintEqualToAnchor:message.bottomAnchor constant:14]];
-        [layout addObject:[button.heightAnchor constraintEqualToConstant:44]];
-        [layout addObject:[button.bottomAnchor constraintEqualToAnchor:card.bottomAnchor constant:-16]];
-        if (!previous) {
-            [layout addObject:[button.leadingAnchor constraintEqualToAnchor:card.leadingAnchor constant:16]];
-            if (buttons.count == 1) {
-                [layout addObject:[button.trailingAnchor constraintEqualToAnchor:card.trailingAnchor constant:-16]];
-            }
-        } else {
-            [layout addObject:[button.leadingAnchor constraintEqualToAnchor:previous.trailingAnchor constant:10]];
-            [layout addObject:[button.trailingAnchor constraintEqualToAnchor:card.trailingAnchor constant:-16]];
-            [layout addObject:[button.widthAnchor constraintEqualToAnchor:previous.widthAnchor]];
-        }
-        previous = button;
     }
 
     UILayoutGuide *safe = host.safeAreaLayoutGuide;
-    NSLayoutConstraint *width = [card.widthAnchor constraintEqualToAnchor:host.widthAnchor constant:-32];
-    width.priority = 999;
+    // Preferred width 380, never wider than the screen edges, floor 260 so
+    // the card stays readable even if the host has not been laid out yet.
+    NSLayoutConstraint *wantWidth = [card.widthAnchor constraintEqualToConstant:380];
+    wantWidth.priority = 999;
+    NSLayoutConstraint *floorWidth = [card.widthAnchor constraintGreaterThanOrEqualToConstant:260];
+    floorWidth.priority = 998;
     [NSLayoutConstraint activateConstraints:@[
         [card.centerXAnchor constraintEqualToAnchor:host.centerXAnchor],
         [card.topAnchor constraintEqualToAnchor:safe.topAnchor constant:12],
-        width,
+        [card.leadingAnchor constraintGreaterThanOrEqualToAnchor:host.leadingAnchor constant:16],
+        [card.trailingAnchor constraintLessThanOrEqualToAnchor:host.trailingAnchor constant:-16],
         [card.widthAnchor constraintLessThanOrEqualToConstant:380],
+        wantWidth,
+        floorWidth,
 
         [icon.leadingAnchor constraintEqualToAnchor:card.leadingAnchor constant:16],
         [icon.topAnchor constraintEqualToAnchor:card.topAnchor constant:18],
@@ -162,6 +153,17 @@ static __weak UIView *noticeCardView;
             [message.bottomAnchor constraintEqualToAnchor:card.bottomAnchor constant:-16],
         ]];
     } else {
+        NSMutableArray<NSLayoutConstraint *> *layout = [NSMutableArray array];
+        UIButton *previous = nil;
+        for (UIButton *button in buttons) {
+            [layout addObject:[button.leadingAnchor constraintEqualToAnchor:card.leadingAnchor constant:16]];
+            [layout addObject:[button.trailingAnchor constraintEqualToAnchor:card.trailingAnchor constant:-16]];
+            [layout addObject:[button.heightAnchor constraintEqualToConstant:44]];
+            [layout addObject:[button.topAnchor constraintEqualToAnchor:(previous ?: message).bottomAnchor
+                                                               constant:(previous ? 10 : 14)]];
+            previous = button;
+        }
+        [layout addObject:[previous.bottomAnchor constraintEqualToAnchor:card.bottomAnchor constant:-16]];
         [NSLayoutConstraint activateConstraints:layout];
     }
 
