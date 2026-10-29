@@ -135,6 +135,13 @@ static NSString *const kVerCell = @"VerCell";
     [AmethystBlurView installInView:self.view];
 }
 
+- (void)viewWillAppear:(BOOL)animated {
+    [super viewWillAppear:animated];
+    // The mod list root hides the nav bar because it has no title; show it
+    // again so the detail page keeps its "Quay lại" button.
+    [self.navigationController setNavigationBarHidden:NO animated:animated];
+}
+
 - (void)setupViews {
     _scrollView = [[UIScrollView alloc] init];
     _scrollView.translatesAutoresizingMaskIntoConstraints = NO;

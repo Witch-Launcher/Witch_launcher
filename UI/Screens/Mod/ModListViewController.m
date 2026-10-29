@@ -495,6 +495,10 @@
 
 - (void)viewWillAppear:(BOOL)animated {
     [super viewWillAppear:animated];
+    // The Mod tab's root page has no title and no back button, so the stock
+    // nav bar only renders as an empty slab covering the search area. Hide it
+    // here; the pushed detail page shows it again for "Quay lại".
+    [self.navigationController setNavigationBarHidden:YES animated:animated];
     _selectedMod = nil;
     _downloadBtn.hidden = YES;
     _installBtn.hidden = YES;

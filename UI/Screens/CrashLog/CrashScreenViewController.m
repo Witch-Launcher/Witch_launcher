@@ -543,6 +543,10 @@ static const NSUInteger kMaxSearchHits = 2000;
     _summaryWidthConstraint.constant = MIN(300, MAX(260, size.width * 0.3));
     _summaryWidthConstraint.active = horizontal;
     _summaryHeightConstraint.active = !horizontal;
+    // The spacer soaks up slack in the landscape sidebar. Keep it out of the
+    // vertical layout, otherwise its low hugging leaves the summary height
+    // ambiguous and the panel keeps the tall height from the rotated state.
+    _summarySpacer.hidden = !horizontal;
 
     [self.view setNeedsLayout];
 }
