@@ -1584,7 +1584,12 @@ FfxErrorCode CreateBackendContextVK(FfxInterface* backendInterface, FfxEffect ef
         backendContext->vkFunctionTable.vkDestroySampler = (PFN_vkDestroySampler)vkDeviceContext->vkDeviceProcAddr(backendContext->device, "vkDestroySampler");
         backendContext->vkFunctionTable.vkDestroyShaderModule = (PFN_vkDestroyShaderModule)vkDeviceContext->vkDeviceProcAddr(backendContext->device, "vkDestroyShaderModule");
         backendContext->vkFunctionTable.vkGetBufferMemoryRequirements = (PFN_vkGetBufferMemoryRequirements)vkDeviceContext->vkDeviceProcAddr(backendContext->device, "vkGetBufferMemoryRequirements");
+        // Core 1.1 promoted function: drivers (e.g. MoltenVK) may only export
+        // the core name and not the KHR-suffixed alias, so fall back.
         backendContext->vkFunctionTable.vkGetBufferMemoryRequirements2KHR = (PFN_vkGetBufferMemoryRequirements2KHR)vkDeviceContext->vkDeviceProcAddr(backendContext->device, "vkGetBufferMemoryRequirements2KHR");
+        if (!backendContext->vkFunctionTable.vkGetBufferMemoryRequirements2KHR) {
+            backendContext->vkFunctionTable.vkGetBufferMemoryRequirements2KHR = (PFN_vkGetBufferMemoryRequirements2KHR)vkDeviceContext->vkDeviceProcAddr(backendContext->device, "vkGetBufferMemoryRequirements2");
+        }
         backendContext->vkFunctionTable.vkGetImageMemoryRequirements = (PFN_vkGetImageMemoryRequirements)vkDeviceContext->vkDeviceProcAddr(backendContext->device, "vkGetImageMemoryRequirements");
         backendContext->vkFunctionTable.vkAllocateDescriptorSets = (PFN_vkAllocateDescriptorSets)vkDeviceContext->vkDeviceProcAddr(backendContext->device, "vkAllocateDescriptorSets");
         backendContext->vkFunctionTable.vkFreeDescriptorSets = (PFN_vkFreeDescriptorSets)vkDeviceContext->vkDeviceProcAddr(backendContext->device, "vkFreeDescriptorSets");
@@ -1743,7 +1748,8 @@ FfxErrorCode CreateBackendContextVK(FfxInterface* backendInterface, FfxEffect ef
 
             uint32_t memoryTypeBits = 0;
             /// Enable usage of dedicated memory for Breadcrumbs buffers only when is required by the implementation
-            if (devCaps.dedicatedAllocationSupported)
+            /// (skip when the promoted 2KHR function could not be resolved at all)
+            if (devCaps.dedicatedAllocationSupported && backendContext->vkFunctionTable.vkGetBufferMemoryRequirements2KHR)
             {
                 // Decide whether use dedicated memory or not
                 VkBufferMemoryRequirementsInfo2 bufferReq = {};
