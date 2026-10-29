@@ -49,7 +49,10 @@ enum {
 // pure-FG). fgEnabled turns on frame generation independently - it can be
 // combined with any upscaler (combo) or run alone. sharpness (0..1) drives
 // RCAS sharpening inside the FSR dispatches.
-// colorFormat is a VkFormat (BGRA8_UNORM family). Returns 0 on success.
+// colorFormat is the swapchain's VkFormat (bridge outputs are created with
+// it); srcColorFormat is the game render texture's VkFormat (used to register
+// the externally-owned color image, and as the FI back buffer format in pure
+// FG mode). Returns 0 on success.
 int ffxfg_init(long long vkDevice,
                long long vkPhysicalDevice,
                long long vkGetDeviceProcAddr,
@@ -61,6 +64,7 @@ int ffxfg_init(long long vkDevice,
                int renderWidth, int renderHeight,
                int displayWidth, int displayHeight,
                int colorFormat,
+               int srcColorFormat,
                int depthInverted);
 
 void ffxfg_destroy(void);
@@ -101,6 +105,7 @@ int ffxfg_record_frame(long long vkCommandBuffer,
 long long ffxfg_record_upscale(long long srcColorImage,
                                int srcWidth, int srcHeight,
                                long long swapchainImage,
+                               int srcColorFormat,
                                const float* camData, int camDataCount,
                                int reset);
 
@@ -139,7 +144,7 @@ JNIEXPORT jint JNICALL Java_net_vda_witchlaunch_fsr3_Fsr3Native_init(
     jint fgEnabled, jfloat sharpness,
     jint renderWidth, jint renderHeight,
     jint displayWidth, jint displayHeight,
-    jint colorFormat, jint depthInverted);
+    jint colorFormat, jint srcColorFormat, jint depthInverted);
 
 JNIEXPORT void JNICALL Java_net_vda_witchlaunch_fsr3_Fsr3Native_destroy(
     JNIEnv* env, jclass clazz);
@@ -156,7 +161,7 @@ JNIEXPORT jint JNICALL Java_net_vda_witchlaunch_fsr3_Fsr3Native_recordFrame(
 JNIEXPORT jlong JNICALL Java_net_vda_witchlaunch_fsr3_Fsr3Native_recordUpscale(
     JNIEnv* env, jclass clazz,
     jlong srcColorImage, jint srcWidth, jint srcHeight,
-    jlong swapchainImage, jfloatArray camData, jint reset);
+    jlong swapchainImage, jint srcColorFormat, jfloatArray camData, jint reset);
 
 JNIEXPORT jint JNICALL Java_net_vda_witchlaunch_fsr3_Fsr3Native_lastUpscaleSlot(
     JNIEnv* env, jclass clazz);

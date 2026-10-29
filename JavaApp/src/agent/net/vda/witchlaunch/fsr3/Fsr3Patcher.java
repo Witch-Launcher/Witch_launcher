@@ -58,26 +58,30 @@ public class Fsr3Patcher implements ClassFileTransformer {
         if (classfileBuffer == null || className == null) {
             return null;
         }
+        // The JVM hands the class name to transformers in the internal slash
+        // form on this runtime (verified: PatchJNAAgent matches slash names);
+        // normalize so dot-form constants work on both shapes.
+        String normalizedName = className.replace('/', '.');
         try {
-            if (CLASS_MINECRAFT.equals(className) && !minecraftPatched) {
+            if (CLASS_MINECRAFT.equals(normalizedName) && !minecraftPatched) {
                 byte[] out = patchMinecraft(classfileBuffer);
                 if (out != null) {
                     minecraftPatched = true;
                     return out;
                 }
-            } else if (CLASS_WINDOW.equals(className) && !windowPatched) {
+            } else if (CLASS_WINDOW.equals(normalizedName) && !windowPatched) {
                 byte[] out = patchWindow(classfileBuffer);
                 if (out != null) {
                     windowPatched = true;
                     return out;
                 }
-            } else if (CLASS_SURFACE.equals(className) && !surfacePatched) {
+            } else if (CLASS_SURFACE.equals(normalizedName) && !surfacePatched) {
                 byte[] out = patchSurface(classfileBuffer);
                 if (out != null) {
                     surfacePatched = true;
                     return out;
                 }
-            } else if (CLASS_ENCODER.equals(className) && !encoderPatched) {
+            } else if (CLASS_ENCODER.equals(normalizedName) && !encoderPatched) {
                 byte[] out = patchEncoder(classfileBuffer);
                 if (out != null) {
                     encoderPatched = true;

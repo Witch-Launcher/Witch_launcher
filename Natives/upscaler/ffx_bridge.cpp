@@ -53,7 +53,11 @@ struct BridgeState {
     uint32_t renderHeight = 0;
     uint32_t displayWidth = 0;
     uint32_t displayHeight = 0;
+    // Swapchain format (bridge outputs / FI back buffer in combo mode) and
+    // the game render texture format (external color resource, FI back
+    // buffer in pure-FG mode).
     VkFormat colorFormat = VK_FORMAT_B8G8R8A8_UNORM;
+    VkFormat srcColorFormat = VK_FORMAT_R8G8B8A8_UNORM;
 
     // Handles retained for teardown.
     VkDevice device = VK_NULL_HANDLE;
@@ -505,6 +509,7 @@ int ffxfg_init(long long vkDeviceHandle,
                int renderWidth, int renderHeight,
                int displayWidth, int displayHeight,
                int colorFormatInt,
+               int srcColorFormatInt,
                int depthInverted)
 {
     (void)depthInverted;  // TODO: pass through to the context flags
@@ -520,6 +525,10 @@ int ffxfg_init(long long vkDeviceHandle,
         static_cast<uintptr_t>(vkGetDeviceProcAddrHandle));
     VkQueue queue = reinterpret_cast<VkQueue>(static_cast<uintptr_t>(vkQueueHandle));
     VkFormat colorFormat = static_cast<VkFormat>(colorFormatInt);
+    VkFormat srcColorFormat = static_cast<VkFormat>(srcColorFormatInt);
+    if (srcColorFormat == VK_FORMAT_UNDEFINED) {
+        srcColorFormat = colorFormat;
+    }
 
     if (!getDeviceProcAddr) {
         // Fallback: the Vulkan loader (MoltenVK) is already loaded in-process.
@@ -559,6 +568,7 @@ int ffxfg_init(long long vkDeviceHandle,
     g_bridge.displayWidth = static_cast<uint32_t>(displayWidth);
     g_bridge.displayHeight = static_cast<uint32_t>(displayHeight);
     g_bridge.colorFormat = colorFormat;
+    g_bridge.srcColorFormat = srcColorFormat;
 
     g_bridge.scratch.resize(32u * 1024u * 1024u);
 
@@ -586,7 +596,8 @@ int ffxfg_init(long long vkDeviceHandle,
     // Frame interpolation context (frame generation). In combo mode the FI
     // consumes the upscaler's display-res output, so the max render size must
     // cover the display size; the per-frame dispatch renderSize stays at the
-    // (scaled) render resolution.
+    // (scaled) render resolution. In pure-FG mode the back buffer is the
+    // game's render texture, so its format is used there.
     if (g_bridge.fg) {
         FfxFrameInterpolationContextDescription fiDesc = {};
         fiDesc.flags = 0;
@@ -594,8 +605,9 @@ int ffxfg_init(long long vkDeviceHandle,
         fiDesc.maxRenderSize.height = g_bridge.displayHeight;
         fiDesc.displaySize.width = g_bridge.displayWidth;
         fiDesc.displaySize.height = g_bridge.displayHeight;
-        fiDesc.backBufferFormat = ffxGetSurfaceFormatVK(colorFormat);
-        fiDesc.previousInterpolationSourceFormat = ffxGetSurfaceFormatVK(colorFormat);
+        fiDesc.backBufferFormat = ffxGetSurfaceFormatVK(
+            g_bridge.mode != 0 ? colorFormat : srcColorFormat);
+        fiDesc.previousInterpolationSourceFormat = fiDesc.backBufferFormat;
         fiDesc.backendInterface = g_bridge.ffxInterface;
 
         error = ffxFrameInterpolationContextCreate(&g_bridge.fiContext, &fiDesc);
@@ -967,7 +979,7 @@ int ffxfg_record_frame(long long vkCommandBufferHandle,
     // Register the current frame's resources.
     FfxResource presentColor = resourceFromImage(
         srcColor, static_cast<uint32_t>(srcWidth), static_cast<uint32_t>(srcHeight),
-        b.colorFormat, L"PresentColor", FFX_RESOURCE_STATE_COMPUTE_READ);
+        b.srcColorFormat, L"PresentColor", FFX_RESOURCE_STATE_COMPUTE_READ);
     FfxResource mvsResource = resourceFromImage(
         b.mvsDevice, b.renderWidth, b.renderHeight,
         VK_FORMAT_R16G16_SFLOAT, L"MotionVectors", FFX_RESOURCE_STATE_COMPUTE_READ);
@@ -1051,6 +1063,7 @@ int ffxfg_record_frame(long long vkCommandBufferHandle,
 long long ffxfg_record_upscale(long long srcColorImageHandle,
                                int srcWidth, int srcHeight,
                                long long swapchainImageHandle,
+                               int srcColorFormatInt,
                                const float* camData, int camDataCount,
                                int reset)
 {
@@ -1067,6 +1080,9 @@ long long ffxfg_record_upscale(long long srcColorImageHandle,
         return 0;
     }
 
+    const VkFormat srcColorFormat =
+        srcColorFormatInt > 0 ? static_cast<VkFormat>(srcColorFormatInt)
+                              : b.srcColorFormat;
     const bool needsMotionData = (b.mode != FFXFX_MODE_FSR1) || b.fg;
     const bool needsBlit = (b.mode != 0 && swapchainImageHandle != 0);
 
@@ -1115,7 +1131,7 @@ long long ffxfg_record_upscale(long long srcColorImageHandle,
             dispatch.commandList = ffxGetCommandListVK(cmd);
             dispatch.color = resourceFromImage(
                 srcColor, static_cast<uint32_t>(srcWidth), static_cast<uint32_t>(srcHeight),
-                b.colorFormat, L"Color", FFX_RESOURCE_STATE_COMPUTE_READ);
+                srcColorFormat, L"Color", FFX_RESOURCE_STATE_COMPUTE_READ);
             dispatch.output = output;
             dispatch.renderSize.width = static_cast<uint32_t>(srcWidth);
             dispatch.renderSize.height = static_cast<uint32_t>(srcHeight);
@@ -1127,7 +1143,7 @@ long long ffxfg_record_upscale(long long srcColorImageHandle,
             dispatch.commandList = ffxGetCommandListVK(cmd);
             dispatch.color = resourceFromImage(
                 srcColor, static_cast<uint32_t>(srcWidth), static_cast<uint32_t>(srcHeight),
-                b.colorFormat, L"Color", FFX_RESOURCE_STATE_COMPUTE_READ);
+                srcColorFormat, L"Color", FFX_RESOURCE_STATE_COMPUTE_READ);
             dispatch.depth = resourceFromImage(
                 b.depthDevice, b.renderWidth, b.renderHeight,
                 VK_FORMAT_R32_SFLOAT, L"Depth", FFX_RESOURCE_STATE_COMPUTE_READ);
@@ -1156,7 +1172,7 @@ long long ffxfg_record_upscale(long long srcColorImageHandle,
             dispatch.commandList = ffxGetCommandListVK(cmd);
             dispatch.color = resourceFromImage(
                 srcColor, static_cast<uint32_t>(srcWidth), static_cast<uint32_t>(srcHeight),
-                b.colorFormat, L"Color", FFX_RESOURCE_STATE_COMPUTE_READ);
+                srcColorFormat, L"Color", FFX_RESOURCE_STATE_COMPUTE_READ);
             dispatch.depth = resourceFromImage(
                 b.depthDevice, b.renderWidth, b.renderHeight,
                 VK_FORMAT_R32_SFLOAT, L"Depth", FFX_RESOURCE_STATE_COMPUTE_READ);
@@ -1240,7 +1256,7 @@ long long ffxfg_record_upscale(long long srcColorImageHandle,
         } else {
             presentColor = resourceFromImage(
                 srcColor, static_cast<uint32_t>(srcWidth), static_cast<uint32_t>(srcHeight),
-                b.colorFormat, L"PresentColor", FFX_RESOURCE_STATE_COMPUTE_READ);
+                srcColorFormat, L"PresentColor", FFX_RESOURCE_STATE_COMPUTE_READ);
         }
         FfxResource mvsResource = resourceFromImage(
             b.mvsDevice, b.renderWidth, b.renderHeight,
@@ -1488,7 +1504,7 @@ JNIEXPORT jint JNICALL Java_net_vda_witchlaunch_fsr3_Fsr3Native_init(
     jint fgEnabled, jfloat sharpness,
     jint renderWidth, jint renderHeight,
     jint displayWidth, jint displayHeight,
-    jint colorFormat, jint depthInverted)
+    jint colorFormat, jint srcColorFormat, jint depthInverted)
 {
     (void)env;
     (void)clazz;
@@ -1496,7 +1512,7 @@ JNIEXPORT jint JNICALL Java_net_vda_witchlaunch_fsr3_Fsr3Native_init(
                       vkQueue, queueFamilyIndex, mode,
                       fgEnabled, sharpness,
                       renderWidth, renderHeight, displayWidth, displayHeight,
-                      colorFormat, depthInverted);
+                      colorFormat, srcColorFormat, depthInverted);
 }
 
 JNIEXPORT void JNICALL Java_net_vda_witchlaunch_fsr3_Fsr3Native_destroy(
@@ -1543,7 +1559,7 @@ JNIEXPORT jint JNICALL Java_net_vda_witchlaunch_fsr3_Fsr3Native_recordFrame(
 JNIEXPORT jlong JNICALL Java_net_vda_witchlaunch_fsr3_Fsr3Native_recordUpscale(
     JNIEnv* env, jclass clazz,
     jlong srcColorImage, jint srcWidth, jint srcHeight,
-    jlong swapchainImage, jfloatArray camData, jint reset)
+    jlong swapchainImage, jint srcColorFormat, jfloatArray camData, jint reset)
 {
     (void)clazz;
     if (!env || !camData) {
@@ -1558,7 +1574,8 @@ JNIEXPORT jlong JNICALL Java_net_vda_witchlaunch_fsr3_Fsr3Native_recordUpscale(
         return 0;
     }
     const long long result = ffxfg_record_upscale(
-        srcColorImage, srcWidth, srcHeight, swapchainImage, elements, length, reset);
+        srcColorImage, srcWidth, srcHeight, swapchainImage, srcColorFormat,
+        elements, length, reset);
     env->ReleaseFloatArrayElements(camData, elements, JNI_ABORT);
     return result;
 }

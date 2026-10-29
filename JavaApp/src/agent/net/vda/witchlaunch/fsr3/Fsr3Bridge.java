@@ -49,11 +49,11 @@ public class Fsr3Bridge {
 
     private static Field surfaceSwapchain, surfaceSwapchainImages,
             surfaceCurrentImageIndex, surfaceSwapchainWidth,
-            surfaceSwapchainHeight, surfaceImageFormat, surfaceDevice;
+            surfaceSwapchainHeight, surfaceSwapchainImageFormat, surfaceDevice;
     private static Method deviceVkDevice, deviceGraphicsQueue;
     private static Method queueVkQueue, queueFamilyIdx;
     private static Method viewVkImage, viewGetWidth, viewGetHeight,
-            viewTexture, textureGetFormat;
+            viewTexture, textureGetFormat, textureVkImage;
     private static Method encoderExecute;
     private static Method longListGetLong;
 
@@ -92,10 +92,14 @@ public class Fsr3Bridge {
             ensureReflection();
             if (!ensureNativeInit()) return;
 
-            long srcImage = (Long) viewVkImage.invoke(view);
+            long srcImage = (Long) textureVkImage.invoke(viewTexture.invoke(view));
             int srcW = (Integer) viewGetWidth.invoke(view, 0);
             int srcH = (Integer) viewGetHeight.invoke(view, 0);
             if (srcImage == 0 || srcW <= 0 || srcH <= 0) return;
+
+            // The render texture's true format (GpuFormat enum name).
+            int srcFormat = mapFormat(textureGetFormat.invoke(
+                    viewTexture.invoke(view)).toString());
 
             long swapchainImage = 0;
             if (upscalerMode != Fsr3Native.MODE_NONE) {
@@ -110,7 +114,7 @@ public class Fsr3Bridge {
             if (cam == null) return;
 
             long cb = Fsr3Native.recordUpscale(srcImage, srcW, srcH,
-                    swapchainImage, cam, resetFlag);
+                    swapchainImage, srcFormat, cam, resetFlag);
             if (cb != 0 && encoderClass().isInstance(encoder)) {
                 org.lwjgl.vulkan.VkCommandBuffer lwjglCb =
                         new org.lwjgl.vulkan.VkCommandBuffer(cb, lwjglDevice);
@@ -226,10 +230,14 @@ public class Fsr3Bridge {
             logOnce("LWJGL function provider unavailable, native dlsym fallback");
         }
 
-        // Format: map the GpuFormat enum name to a VkFormat value.
-        Object textureObj = viewTexture.invoke(view);
-        String formatName = textureGetFormat.invoke(textureObj).toString();
-        int vkFormat = mapFormat(formatName);
+        // Formats: the swapchain's raw VkFormat (bridge-owned outputs must
+        // match it for correct blits) and the render texture's GpuFormat.
+        int vkFormat = surfaceSwapchainImageFormat.getInt(surface);
+        if (vkFormat <= 0) {
+            vkFormat = 44; // VK_FORMAT_B8G8R8A8_UNORM
+        }
+        int srcFormat = mapFormat(textureGetFormat.invoke(
+                viewTexture.invoke(view)).toString());
 
         int renderW = (Integer) viewGetWidth.invoke(view, 0);
         int renderH = (Integer) viewGetHeight.invoke(view, 0);
@@ -238,7 +246,7 @@ public class Fsr3Bridge {
 
         int rc = Fsr3Native.init(deviceAddr, physAddr, gdpa, vkQueue.address(), family,
                 upscalerMode, fgEnabled, sharpness,
-                renderW, renderH, displayW, displayH, vkFormat, 0);
+                renderW, renderH, displayW, displayH, vkFormat, srcFormat, 0);
         if (rc != 0) {
             logOnce("Fsr3Native.init failed rc=" + rc);
             nativeFailed = true;
@@ -248,17 +256,34 @@ public class Fsr3Bridge {
         System.out.println("[Fsr3Bridge] native init ok (upscaler=" + upscalerMode
                 + " fg=" + fgEnabled + " scale=" + scale + " sharp=" + sharpness
                 + " render=" + renderW + "x" + renderH
-                + " display=" + displayW + "x" + displayH + " fmt=" + vkFormat + ")");
+                + " display=" + displayW + "x" + displayH
+                + " fmt=" + vkFormat + " srcFmt=" + srcFormat + ")");
         return true;
     }
 
+    /**
+     * Map a com.mojang.renderpearl.api.GpuFormat enum name to a VkFormat
+     * value. The enum uses RGBA-style names (no BGRA - MoltenVK swapchains
+     * are BGRA8 and are read from the surface's swapchainImageFormat int
+     * instead, not from this mapping).
+     */
     private static int mapFormat(String name) {
-        if (name == null) return 44; // VK_FORMAT_B8G8R8A8_UNORM
-        if (name.contains("B8G8R8A8")) return 44;
-        if (name.contains("R8G8B8A8")) return 37;
-        if (name.contains("R16G16B16A16")) return name.contains("SFLOAT") || name.contains("FLOAT") ? 97 : 93;
-        if (name.contains("R16G16_SFLOAT") || name.contains("R16G16_FLOAT")) return 48;
-        return 44;
+        if (name == null) return 37; // VK_FORMAT_R8G8B8A8_UNORM
+        if (name.equals("RGBA8_UNORM")) return 37;
+        if (name.equals("RGBA8_SNORM")) return 35;
+        if (name.equals("RGBA16_UNORM")) return 93;
+        if (name.equals("RGBA16_SNORM")) return 95;
+        if (name.equals("RGBA16_FLOAT")) return 97;
+        if (name.equals("RGBA32_FLOAT")) return 126;
+        if (name.equals("RGB10A2_UNORM")) return 56;
+        if (name.equals("RG11B10_FLOAT")) return 122;
+        if (name.equals("R8_UNORM")) return 9;
+        if (name.equals("RG8_UNORM")) return 16;
+        if (name.equals("R16_FLOAT")) return 83;
+        if (name.equals("RG16_FLOAT")) return 87;
+        if (name.equals("R32_FLOAT")) return 100;
+        if (name.equals("RG32_FLOAT")) return 107;
+        return 37;
     }
 
     // ---- camera capture ----------------------------------------------------------
@@ -371,6 +396,8 @@ public class Fsr3Bridge {
         surfaceSwapchainWidth.setAccessible(true);
         surfaceSwapchainHeight = surfaceC.getDeclaredField("swapchainHeight");
         surfaceSwapchainHeight.setAccessible(true);
+        surfaceSwapchainImageFormat = surfaceC.getDeclaredField("swapchainImageFormat");
+        surfaceSwapchainImageFormat.setAccessible(true);
         surfaceDevice = surfaceC.getDeclaredField("device");
         surfaceDevice.setAccessible(true);
 
@@ -383,12 +410,14 @@ public class Fsr3Bridge {
         queueFamilyIdx = queueC.getMethod("queueFamilyIndex");
 
         Class<?> viewC = cl.loadClass("com.mojang.renderpearl.backend.vulkan.VulkanGpuTextureView");
-        viewVkImage = viewC.getMethod("vkImage");
         viewGetWidth = viewC.getMethod("getWidth", int.class);
         viewGetHeight = viewC.getMethod("getHeight", int.class);
         viewTexture = viewC.getMethod("texture");
 
+        // The VkImage lives on VulkanGpuTexture, not on the view; the view
+        // only exposes texture() (BaseGpuTextureView getWidth/getHeight).
         Class<?> textureC = cl.loadClass("com.mojang.renderpearl.backend.vulkan.VulkanGpuTexture");
+        textureVkImage = textureC.getMethod("vkImage");
         textureGetFormat = textureC.getMethod("getFormat");
 
         Class<?> encoderC = cl.loadClass("com.mojang.renderpearl.backend.vulkan.VulkanCommandEncoder");

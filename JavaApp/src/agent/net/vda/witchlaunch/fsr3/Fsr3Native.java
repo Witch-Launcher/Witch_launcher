@@ -20,7 +20,9 @@ public final class Fsr3Native {
      * Initialize the FidelityFX contexts. mode selects the upscaler (0/FSR1/
      * FSR2/FSR3U), fgEnabled turns on frame generation independently - both
      * may be active at once (upscale first, then interpolate the upscaled
-     * frame). sharpness (0..1) drives RCAS sharpening. Returns 0 on success.
+     * frame). sharpness (0..1) drives RCAS sharpening. colorFormat is the
+     * swapchain's VkFormat (bridge outputs), srcColorFormat the render
+     * texture's VkFormat. Returns 0 on success.
      */
     public static native int init(long vkDevice, long vkPhysicalDevice,
                                   long vkGetDeviceProcAddr, long vkQueue,
@@ -28,7 +30,8 @@ public final class Fsr3Native {
                                   int fgEnabled, float sharpness,
                                   int renderWidth, int renderHeight,
                                   int displayWidth, int displayHeight,
-                                  int colorFormat, int depthInverted);
+                                  int colorFormat, int srcColorFormat,
+                                  int depthInverted);
 
     public static native void destroy();
 
@@ -44,6 +47,7 @@ public final class Fsr3Native {
      */
     public static native long recordUpscale(long srcColorImage, int srcWidth,
                                             int srcHeight, long swapchainImage,
+                                            int srcColorFormat,
                                             float[] camData, int reset);
 
     /** Output slot written by the last recordUpscale (0/1, or -1). */
