@@ -491,6 +491,10 @@ FfxResource resourceFromImage(VkImage image,
     desc.depth = 1;
     desc.mipCount = 1;
     desc.flags = FFX_RESOURCE_FLAGS_UNDEFINED;
+    // The interpolation dispatch binds these images as UAVs; without the UAV
+    // usage flag RegisterResourceVK never creates UAV views and the compute
+    // job dereferences pResourceViews[0xFFFFFFFF] (uavViewIndex stays -1).
+    desc.usage = FFX_RESOURCE_USAGE_UAV;
     return ffxGetResourceVK(reinterpret_cast<void*>(image), desc, name, state);
 }
 
