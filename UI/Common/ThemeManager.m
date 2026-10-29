@@ -1,5 +1,6 @@
 #import "ThemeManager.h"
 #import <CoreImage/CoreImage.h>
+#import <PhotosUI/PhotosUI.h>
 #import "utils.h"
 #import "AmethystBlurView.h"
 
@@ -274,24 +275,30 @@ NSString * const ShellBorderDidChangeNotification = @"ShellBorderDidChangeNotifi
     presentedView.transform = wantTransform;
 }
 
+// System-provided presentations keep their own look and physical size —
+// alerts, the document/photo pickers and the share sheet render (and hit-test)
+// through system machinery, so a zoom transform desynchronizes touches from
+// what is on screen (e.g. the Files picker's Open button stops responding).
+static BOOL KeepsSystemSizeWhenScaled(UIViewController *vc) {
+    if ([vc isKindOfClass:UIAlertController.class]) return YES;
+    if ([vc isKindOfClass:[UIDocumentPickerViewController class]]) return YES;
+    if ([vc isKindOfClass:[PHPickerViewController class]]) return YES;
+    if ([vc isKindOfClass:[UIImagePickerController class]]) return YES;
+    if ([vc isKindOfClass:[UIActivityViewController class]]) return YES;
+    // The virtual controls editor maps raw screen coordinates into the game,
+    // so it must stay 1:1 like the Minecraft surface.
+    Class controlsEditorClass = NSClassFromString(@"CustomControlsViewController");
+    return controlsEditorClass && [vc isKindOfClass:controlsEditorClass];
+}
+
 static void WalkPresentedForScale(UIViewController *from, CGFloat scale, ThemeManager *tm) {
     UIViewController *presented = from.presentedViewController;
     if (!presented) return;
-    // Alerts keep their system look and physical size.
-    if (![presented isKindOfClass:UIAlertController.class]) {
-        // The virtual controls editor maps raw screen coordinates into the
-        // game, so it must stay 1:1 like the Minecraft surface.
-        Class controlsEditorClass = NSClassFromString(@"CustomControlsViewController");
-        BOOL isControlsEditor = controlsEditorClass && [presented isKindOfClass:controlsEditorClass];
-        if (!isControlsEditor) {
-            [tm applyUIScaleToPresentedView:presented.view scale:scale];
-        }
+    if (!KeepsSystemSizeWhenScaled(presented)) {
+        [tm applyUIScaleToPresentedView:presented.view scale:scale];
         // Sheets can present further pages on top of themselves.
-        if (!isControlsEditor) WalkPresentedForScale(presented, scale, tm);
-        return;
+        WalkPresentedForScale(presented, scale, tm);
     }
-    // Sheets can present further pages on top of themselves.
-    WalkPresentedForScale(presented, scale, tm);
 }
 
 - (void)applyUIScaleToAllWindows {
