@@ -95,6 +95,10 @@ struct BridgeState {
     // extra present (own acquire/submit/present).
     VkCommandPool commandPool = VK_NULL_HANDLE;
     VkCommandBuffer upscaleCommandBuffer = VK_NULL_HANDLE;
+    // Separate buffer for the interpolated-frame present blit: resetting the
+    // upscale buffer (which the game's encoder submits) while it may still be
+    // pending is invalid.
+    VkCommandBuffer presentCommandBuffer = VK_NULL_HANDLE;
     VkSemaphore acquireSemaphore = VK_NULL_HANDLE;
     VkSemaphore presentSemaphore = VK_NULL_HANDLE;
 
@@ -740,8 +744,12 @@ int ffxfg_init(long long vkDeviceHandle,
             cbInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
             cbInfo.commandPool = g_bridge.commandPool;
             cbInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-            cbInfo.commandBufferCount = 1;
-            vkAllocateCommandBuffers(device, &cbInfo, &g_bridge.upscaleCommandBuffer);
+            cbInfo.commandBufferCount = 2;
+            VkCommandBuffer commandBuffers[2] = {};
+            if (vkAllocateCommandBuffers(device, &cbInfo, commandBuffers) == VK_SUCCESS) {
+                g_bridge.upscaleCommandBuffer = commandBuffers[0];
+                g_bridge.presentCommandBuffer = commandBuffers[1];
+            }
 
             VkSemaphoreCreateInfo semInfo = {};
             semInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
@@ -984,6 +992,7 @@ void ffxfg_destroy(void)
             vkDestroyCommandPool(device, b.commandPool, nullptr);
             b.commandPool = VK_NULL_HANDLE;
             b.upscaleCommandBuffer = VK_NULL_HANDLE;
+            b.presentCommandBuffer = VK_NULL_HANDLE;
         }
         vkDestroyImage(device, b.mvsStaging, nullptr);
         vkFreeMemory(device, b.mvsStagingMemory, nullptr);
@@ -1212,13 +1221,13 @@ long long ffxfg_record_upscale(long long srcColorImageHandle,
     b.lastFrameOk = false;
 
     if (!b.initialized || !b.enabled || !b.commandPool || !b.upscaleCommandBuffer) {
-        return 0;
+        return -1;
     }
     if (!srcColorImageHandle || !camData || camDataCount < 16) {
-        return 0;
+        return -1;
     }
     if (b.mode != 0 && !swapchainImageHandle) {
-        return 0;
+        return -1;
     }
 
     const VkFormat srcColorFormat =
@@ -1240,7 +1249,7 @@ long long ffxfg_record_upscale(long long srcColorImageHandle,
     beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
     vkResetCommandBuffer(cmd, 0);
     if (vkBeginCommandBuffer(cmd, &beginInfo) != VK_SUCCESS) {
-        return 0;
+        return -1;
     }
 
     if (needsBlit) {
@@ -1348,7 +1357,7 @@ long long ffxfg_record_upscale(long long srcColorImageHandle,
 
     if (error != FFX_OK) {
         vkEndCommandBuffer(cmd);
-        return 0;
+        return -1;
     }
 
     // Blit the upscaled output over the whole swapchain image.
@@ -1483,12 +1492,12 @@ long long ffxfg_record_upscale(long long srcColorImageHandle,
         }
         if (error != FFX_OK) {
             vkEndCommandBuffer(cmd);
-            return 0;
+            return -1;
         }
     }
 
     if (vkEndCommandBuffer(cmd) != VK_SUCCESS) {
-        return 0;
+        return -1;
     }
 
     b.lastFrameOk = true;
@@ -1534,7 +1543,8 @@ int ffxfg_present_interpolated(long long vkSwapchainHandle, int slot)
 {
     BridgeState& b = g_bridge;
     if (!b.initialized || !b.enabled || !b.queue || !b.commandPool ||
-        !b.acquireSemaphore || !b.presentSemaphore || slot < 0 || slot >= kMaxOutputs) {
+        !b.acquireSemaphore || !b.presentSemaphore || !b.presentCommandBuffer ||
+        slot < 0 || slot >= kMaxOutputs) {
         return -1;
     }
 
@@ -1570,7 +1580,7 @@ int ffxfg_present_interpolated(long long vkSwapchainHandle, int slot)
     }
     VkImage swapchainImage = cachedImages[imageIndex];
 
-    VkCommandBuffer cmd = b.upscaleCommandBuffer;
+    VkCommandBuffer cmd = b.presentCommandBuffer;
     VkCommandBufferBeginInfo beginInfo = {};
     beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
     beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
@@ -1713,28 +1723,31 @@ JNIEXPORT jint JNICALL Java_net_vda_witchlaunch_fsr3_Fsr3Native_recordFrame(
     return result;
 }
 
-JNIEXPORT jlong JNICALL Java_net_vda_witchlaunch_fsr3_Fsr3Native_recordUpscale(
+JNIEXPORT jint JNICALL Java_net_vda_witchlaunch_fsr3_Fsr3Native_recordUpscale(
     JNIEnv* env, jclass clazz,
     jlong srcColorImage, jint srcWidth, jint srcHeight,
     jlong swapchainImage, jint srcColorFormat, jfloatArray camData, jint reset)
 {
     (void)clazz;
     if (!env || !camData) {
-        return 0;
+        return -1;
     }
     jsize length = env->GetArrayLength(camData);
     if (length < 16) {
-        return 0;
+        return -1;
     }
     jfloat* elements = env->GetFloatArrayElements(camData, nullptr);
     if (!elements) {
-        return 0;
+        return -1;
     }
+    // >= 0: the fg output slot written this frame (the VkCommandBuffer with
+    // the recorded work is fetched via lastRecordedCommandBuffer); < 0:
+    // nothing was recorded, do not submit the bridge command buffer.
     const long long result = ffxfg_record_upscale(
         srcColorImage, srcWidth, srcHeight, swapchainImage, srcColorFormat,
         elements, length, reset);
     env->ReleaseFloatArrayElements(camData, elements, JNI_ABORT);
-    return result;
+    return static_cast<jint>(result);
 }
 
 JNIEXPORT jint JNICALL Java_net_vda_witchlaunch_fsr3_Fsr3Native_lastUpscaleSlot(

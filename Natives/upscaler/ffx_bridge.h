@@ -158,7 +158,7 @@ JNIEXPORT jint JNICALL Java_net_vda_witchlaunch_fsr3_Fsr3Native_recordFrame(
     jint srcWidth, jint srcHeight,
     jfloatArray camData, jint reset);
 
-JNIEXPORT jlong JNICALL Java_net_vda_witchlaunch_fsr3_Fsr3Native_recordUpscale(
+JNIEXPORT jint JNICALL Java_net_vda_witchlaunch_fsr3_Fsr3Native_recordUpscale(
     JNIEnv* env, jclass clazz,
     jlong srcColorImage, jint srcWidth, jint srcHeight,
     jlong swapchainImage, jint srcColorFormat, jfloatArray camData, jint reset);

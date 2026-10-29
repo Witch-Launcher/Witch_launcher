@@ -147,12 +147,15 @@ public class Fsr3Bridge {
             float[] cam = captureCamera();
             if (cam == null) return;
 
-            long cb = Fsr3Native.recordUpscale(srcImage, srcW, srcH,
+            int writtenSlot = Fsr3Native.recordUpscale(srcImage, srcW, srcH,
                     swapchainImage, srcFormat, cam, resetFlag);
-            if (cb != 0 && encoderClass().isInstance(encoder)) {
-                org.lwjgl.vulkan.VkCommandBuffer lwjglCb =
-                        new org.lwjgl.vulkan.VkCommandBuffer(cb, lwjglDevice);
-                encoderExecute.invoke(encoder, lwjglCb);
+            if (writtenSlot >= 0 && encoderClass().isInstance(encoder)) {
+                long cb = Fsr3Native.lastRecordedCommandBuffer();
+                if (cb != 0) {
+                    org.lwjgl.vulkan.VkCommandBuffer lwjglCb =
+                            new org.lwjgl.vulkan.VkCommandBuffer(cb, lwjglDevice);
+                    encoderExecute.invoke(encoder, lwjglCb);
+                }
             }
         } catch (Throwable t) {
             logOnce("onBeforeSubmit failed: " + t);

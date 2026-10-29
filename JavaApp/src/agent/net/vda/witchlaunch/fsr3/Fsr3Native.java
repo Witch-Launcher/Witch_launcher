@@ -42,13 +42,14 @@ public final class Fsr3Native {
      * buffer. camData is 16 floats: pos(3) right(3) up(3) fwd(3) near far
      * fovY(dtMs at [15]).
      *
-     * Returns the bridge-owned VkCommandBuffer handle (0 on failure); add it
-     * to the frame submission via VulkanCommandEncoder.execute().
+     * Returns the fg output slot written this frame (>= 0, see
+     * lastFgSlot()); negative when nothing was recorded. The recorded
+     * VkCommandBuffer is fetched via lastRecordedCommandBuffer().
      */
-    public static native long recordUpscale(long srcColorImage, int srcWidth,
-                                            int srcHeight, long swapchainImage,
-                                            int srcColorFormat,
-                                            float[] camData, int reset);
+    public static native int recordUpscale(long srcColorImage, int srcWidth,
+                                           int srcHeight, long swapchainImage,
+                                           int srcColorFormat,
+                                           float[] camData, int reset);
 
     /** Output slot written by the last recordUpscale (0/1, or -1). */
     public static native int lastUpscaleSlot();
