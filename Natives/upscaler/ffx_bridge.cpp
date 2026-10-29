@@ -117,6 +117,16 @@ struct BridgeState {
     VkImage depthDevice = VK_NULL_HANDLE;
     VkDeviceMemory depthDeviceMemory = VK_NULL_HANDLE;
 
+    // FI dilate/reconstruct outputs (UAVs written by the FI pipelines).
+    // dilatedDepth: R32F, dilatedMotionVectors: R16G16F, reconstructed
+    // previous nearest depth: R32UINT (packed), all render-res.
+    VkImage dilatedDepthDevice = VK_NULL_HANDLE;
+    VkDeviceMemory dilatedDepthDeviceMemory = VK_NULL_HANDLE;
+    VkImage dilatedMvsDevice = VK_NULL_HANDLE;
+    VkDeviceMemory dilatedMvsDeviceMemory = VK_NULL_HANDLE;
+    VkImage recDepthDevice = VK_NULL_HANDLE;
+    VkDeviceMemory recDepthDeviceMemory = VK_NULL_HANDLE;
+
     // Upscaler outputs (double buffered; written by the FSR dispatches).
     VkImage outputs[kMaxOutputs] = {};
     VkDeviceMemory outputMemories[kMaxOutputs] = {};
@@ -785,6 +795,84 @@ int ffxfg_init(long long vkDeviceHandle,
         return -1;
     }
 
+    // FI dilate/reconstruct UAVs. The interpolation pipelines write these as
+    // storage images, so they need STORAGE usage; TRANSFER_DST lets the
+    // layout warm-up copy below run if needed.
+    if (!createImage2D(device, physicalDevice, g_bridge.renderWidth, g_bridge.renderHeight,
+                       VK_FORMAT_R32_SFLOAT, VK_IMAGE_TILING_OPTIMAL,
+                       VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT,
+                       VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+                       &g_bridge.dilatedDepthDevice, &g_bridge.dilatedDepthDeviceMemory,
+                       nullptr, nullptr)) {
+        logBridge("init: dilated depth image failed");
+        ffxfg_destroy();
+        return -1;
+    }
+    if (!createImage2D(device, physicalDevice, g_bridge.renderWidth, g_bridge.renderHeight,
+                       VK_FORMAT_R16G16_SFLOAT, VK_IMAGE_TILING_OPTIMAL,
+                       VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT,
+                       VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+                       &g_bridge.dilatedMvsDevice, &g_bridge.dilatedMvsDeviceMemory,
+                       nullptr, nullptr)) {
+        logBridge("init: dilated mvs image failed");
+        ffxfg_destroy();
+        return -1;
+    }
+    if (!createImage2D(device, physicalDevice, g_bridge.renderWidth, g_bridge.renderHeight,
+                       VK_FORMAT_R32_UINT, VK_IMAGE_TILING_OPTIMAL,
+                       VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT,
+                       VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+                       &g_bridge.recDepthDevice, &g_bridge.recDepthDeviceMemory,
+                       nullptr, nullptr)) {
+        logBridge("init: rec depth image failed");
+        ffxfg_destroy();
+        return -1;
+    }
+
+    // Transition the FI UAVs to GENERAL once: the interpolation pipelines
+    // write them as storage images, and FFX's barrier tracking starts from
+    // the state claimed at registration (UNORDERED_ACCESS), which never
+    // emits the initial UNDEFINED -> GENERAL transition itself.
+    if (g_bridge.commandPool) {
+        VkCommandBuffer warmup = VK_NULL_HANDLE;
+        VkCommandBufferAllocateInfo wi = {};
+        wi.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+        wi.commandPool = g_bridge.commandPool;
+        wi.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+        wi.commandBufferCount = 1;
+        if (vkAllocateCommandBuffers(device, &wi, &warmup) == VK_SUCCESS) {
+            VkCommandBufferBeginInfo bi = {};
+            bi.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+            bi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+            if (vkBeginCommandBuffer(warmup, &bi) == VK_SUCCESS) {
+                recordImageBarrier(warmup, g_bridge.dilatedDepthDevice, VK_IMAGE_ASPECT_COLOR_BIT,
+                                   VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL,
+                                   VK_PIPELINE_STAGE_2_NONE, VK_ACCESS_2_NONE,
+                                   VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
+                                   VK_ACCESS_2_MEMORY_READ_BIT | VK_ACCESS_2_MEMORY_WRITE_BIT);
+                recordImageBarrier(warmup, g_bridge.dilatedMvsDevice, VK_IMAGE_ASPECT_COLOR_BIT,
+                                   VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL,
+                                   VK_PIPELINE_STAGE_2_NONE, VK_ACCESS_2_NONE,
+                                   VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
+                                   VK_ACCESS_2_MEMORY_READ_BIT | VK_ACCESS_2_MEMORY_WRITE_BIT);
+                recordImageBarrier(warmup, g_bridge.recDepthDevice, VK_IMAGE_ASPECT_COLOR_BIT,
+                                   VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL,
+                                   VK_PIPELINE_STAGE_2_NONE, VK_ACCESS_2_NONE,
+                                   VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
+                                   VK_ACCESS_2_MEMORY_READ_BIT | VK_ACCESS_2_MEMORY_WRITE_BIT);
+                vkEndCommandBuffer(warmup);
+                VkSubmitInfo si = {};
+                si.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+                si.commandBufferCount = 1;
+                si.pCommandBuffers = &warmup;
+                if (vkQueueSubmit(g_bridge.queue, 1, &si, VK_NULL_HANDLE) == VK_SUCCESS) {
+                    vkQueueWaitIdle(g_bridge.queue);
+                }
+            }
+            vkFreeCommandBuffers(device, g_bridge.commandPool, 1, &warmup);
+        }
+    }
+
     // Fill the constant depth with the far plane value.
     {
         const size_t floatsPerRow = static_cast<size_t>(g_bridge.depthStagingRowPitch / sizeof(float));
@@ -905,6 +993,12 @@ void ffxfg_destroy(void)
         vkFreeMemory(device, b.depthStagingMemory, nullptr);
         vkDestroyImage(device, b.depthDevice, nullptr);
         vkFreeMemory(device, b.depthDeviceMemory, nullptr);
+        vkDestroyImage(device, b.dilatedDepthDevice, nullptr);
+        vkFreeMemory(device, b.dilatedDepthDeviceMemory, nullptr);
+        vkDestroyImage(device, b.dilatedMvsDevice, nullptr);
+        vkFreeMemory(device, b.dilatedMvsDeviceMemory, nullptr);
+        vkDestroyImage(device, b.recDepthDevice, nullptr);
+        vkFreeMemory(device, b.recDepthDeviceMemory, nullptr);
         for (int i = 0; i < kMaxOutputs; ++i) {
             vkDestroyImage(device, b.outputs[i], nullptr);
             vkFreeMemory(device, b.outputMemories[i], nullptr);
@@ -925,6 +1019,12 @@ void ffxfg_destroy(void)
         b.depthStagingMemory = VK_NULL_HANDLE;
         b.depthDevice = VK_NULL_HANDLE;
         b.depthDeviceMemory = VK_NULL_HANDLE;
+        b.dilatedDepthDevice = VK_NULL_HANDLE;
+        b.dilatedDepthDeviceMemory = VK_NULL_HANDLE;
+        b.dilatedMvsDevice = VK_NULL_HANDLE;
+        b.dilatedMvsDeviceMemory = VK_NULL_HANDLE;
+        b.recDepthDevice = VK_NULL_HANDLE;
+        b.recDepthDeviceMemory = VK_NULL_HANDLE;
     }
     b.device = VK_NULL_HANDLE;
     b.physicalDevice = VK_NULL_HANDLE;
@@ -1025,6 +1125,20 @@ int ffxfg_record_frame(long long vkCommandBufferHandle,
     prepare.cameraFovAngleVertical = camData[14];
     prepare.depth = depthResource;
     prepare.motionVectors = mvsResource;
+    // The interpolation pipelines write the dilated data into these
+    // app-provided UAVs every frame (same contract as the SDK's FSR3
+    // composite driver). Leaving them empty registers NULL identifiers and
+    // the "Clear Reconstructed Previous Nearest Depth" job then executes
+    // against an empty resource slot (vkCmdFillBuffer with a null buffer).
+    prepare.dilatedDepth = resourceFromImage(
+        b.dilatedDepthDevice, b.renderWidth, b.renderHeight,
+        VK_FORMAT_R32_SFLOAT, L"DilatedDepth", FFX_RESOURCE_STATE_UNORDERED_ACCESS);
+    prepare.dilatedMotionVectors = resourceFromImage(
+        b.dilatedMvsDevice, b.renderWidth, b.renderHeight,
+        VK_FORMAT_R16G16_SFLOAT, L"DilatedMotionVectors", FFX_RESOURCE_STATE_UNORDERED_ACCESS);
+    prepare.reconstructedPrevDepth = resourceFromImage(
+        b.recDepthDevice, b.renderWidth, b.renderHeight,
+        VK_FORMAT_R32_UINT, L"ReconstructedPrevNearestDepth", FFX_RESOURCE_STATE_UNORDERED_ACCESS);
     prepare.frameID = b.frameID;
     prepare.cameraPosition[0] = camData[0];
     prepare.cameraPosition[1] = camData[1];
@@ -1065,6 +1179,11 @@ int ffxfg_record_frame(long long vkCommandBufferHandle,
     dispatch.frameTimeDelta = camData[15];
     dispatch.reset = (reset != 0);
     dispatch.frameID = b.frameID;
+    // Same resources the prepare registered: the interpolation passes read
+    // the dilated depth/MVs and the previous reconstructed depth from them.
+    dispatch.dilatedDepth = prepare.dilatedDepth;
+    dispatch.dilatedMotionVectors = prepare.dilatedMotionVectors;
+    dispatch.reconstructedPrevDepth = prepare.reconstructedPrevDepth;
     dispatch.interpolationRect.left = 0;
     dispatch.interpolationRect.top = 0;
     dispatch.interpolationRect.width = static_cast<int32_t>(b.displayWidth);
@@ -1306,6 +1425,19 @@ long long ffxfg_record_upscale(long long srcColorImageHandle,
         prepare.cameraFovAngleVertical = camData[14];
         prepare.depth = depthResource;
         prepare.motionVectors = mvsResource;
+        // App-provided UAVs the interpolation pipelines write every frame
+        // (same contract as the SDK's FSR3 composite driver). Empty values
+        // register NULL identifiers and the reconstruct-depth clear job then
+        // executes against an empty resource slot.
+        prepare.dilatedDepth = resourceFromImage(
+            b.dilatedDepthDevice, b.renderWidth, b.renderHeight,
+            VK_FORMAT_R32_SFLOAT, L"DilatedDepth", FFX_RESOURCE_STATE_UNORDERED_ACCESS);
+        prepare.dilatedMotionVectors = resourceFromImage(
+            b.dilatedMvsDevice, b.renderWidth, b.renderHeight,
+            VK_FORMAT_R16G16_SFLOAT, L"DilatedMotionVectors", FFX_RESOURCE_STATE_UNORDERED_ACCESS);
+        prepare.reconstructedPrevDepth = resourceFromImage(
+            b.recDepthDevice, b.renderWidth, b.renderHeight,
+            VK_FORMAT_R32_UINT, L"ReconstructedPrevNearestDepth", FFX_RESOURCE_STATE_UNORDERED_ACCESS);
         prepare.frameID = b.frameID;
         prepare.cameraPosition[0] = camData[0];
         prepare.cameraPosition[1] = camData[1];
@@ -1339,6 +1471,9 @@ long long ffxfg_record_upscale(long long srcColorImageHandle,
             dispatch.frameTimeDelta = camData[15];
             dispatch.reset = (reset != 0);
             dispatch.frameID = b.frameID;
+            dispatch.dilatedDepth = prepare.dilatedDepth;
+            dispatch.dilatedMotionVectors = prepare.dilatedMotionVectors;
+            dispatch.reconstructedPrevDepth = prepare.reconstructedPrevDepth;
             dispatch.interpolationRect.left = 0;
             dispatch.interpolationRect.top = 0;
             dispatch.interpolationRect.width = static_cast<int32_t>(b.displayWidth);

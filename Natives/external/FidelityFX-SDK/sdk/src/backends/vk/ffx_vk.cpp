@@ -4218,10 +4218,20 @@ static FfxErrorCode executeGpuJobTimestamp(BackendContext_VK* backendContext, Ff
 static FfxErrorCode executeGpuJobClearFloat(BackendContext_VK* backendContext, FfxGpuJobDescription* job, VkCommandBuffer vkCommandBuffer)
 {
     uint32_t idx = job->clearJobDescriptor.target.internalIndex;
+    // Clear jobs are scheduled against shared resources that are optional in
+    // some host integrations; a NULL identifier (or a slot never created)
+    // has a zeroed Resource whose type reads as BUFFER with a null VkBuffer,
+    // which would end up as vkCmdFillBuffer(nullptr).
+    if (idx == 0) {
+        return FFX_OK;
+    }
     BackendContext_VK::Resource ffxResource = backendContext->pResources[idx];
 
     if (ffxResource.resourceDescription.type == FFX_RESOURCE_TYPE_BUFFER)
     {
+        if (!ffxResource.bufferResource) {
+            return FFX_OK;
+        }
         addBarrier(backendContext, &job->clearJobDescriptor.target, FFX_RESOURCE_STATE_COPY_DEST);
         flushBarriers(backendContext, vkCommandBuffer);
 
@@ -4231,6 +4241,9 @@ static FfxErrorCode executeGpuJobClearFloat(BackendContext_VK* backendContext, F
     }
     else
     {
+        if (!ffxResource.imageResource) {
+            return FFX_OK;
+        }
         addBarrier(backendContext, &job->clearJobDescriptor.target, FFX_RESOURCE_STATE_COPY_DEST);
         flushBarriers(backendContext, vkCommandBuffer);
 
