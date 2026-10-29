@@ -33,10 +33,6 @@ public class Fsr3Patcher implements ClassFileTransformer {
     private static final String CLASS_ENCODER = "com.mojang.renderpearl.backend.vulkan.VulkanCommandEncoder";
 
     private final Instrumentation instrumentation;
-    private boolean minecraftPatched;
-    private boolean windowPatched;
-    private boolean surfacePatched;
-    private boolean encoderPatched;
 
     public static void install(Instrumentation inst) {
         if (inst == null) {
@@ -60,31 +56,29 @@ public class Fsr3Patcher implements ClassFileTransformer {
         }
         // The JVM hands the class name to transformers in the internal slash
         // form on this runtime (verified: PatchJNAAgent matches slash names);
-        // normalize so dot-form constants work on both shapes.
+        // normalize so dot-form constants work on both shapes. Every defining
+        // classloader gets its own patched copy (a second copy of the game
+        // classes silently used unpatched code before).
         String normalizedName = className.replace('/', '.');
         try {
-            if (CLASS_MINECRAFT.equals(normalizedName) && !minecraftPatched) {
+            if (CLASS_MINECRAFT.equals(normalizedName)) {
                 byte[] out = patchMinecraft(classfileBuffer);
                 if (out != null) {
-                    minecraftPatched = true;
                     return out;
                 }
-            } else if (CLASS_WINDOW.equals(normalizedName) && !windowPatched) {
+            } else if (CLASS_WINDOW.equals(normalizedName)) {
                 byte[] out = patchWindow(classfileBuffer);
                 if (out != null) {
-                    windowPatched = true;
                     return out;
                 }
-            } else if (CLASS_SURFACE.equals(normalizedName) && !surfacePatched) {
+            } else if (CLASS_SURFACE.equals(normalizedName)) {
                 byte[] out = patchSurface(classfileBuffer);
                 if (out != null) {
-                    surfacePatched = true;
                     return out;
                 }
-            } else if (CLASS_ENCODER.equals(normalizedName) && !encoderPatched) {
+            } else if (CLASS_ENCODER.equals(normalizedName)) {
                 byte[] out = patchEncoder(classfileBuffer);
                 if (out != null) {
-                    encoderPatched = true;
                     return out;
                 }
             }

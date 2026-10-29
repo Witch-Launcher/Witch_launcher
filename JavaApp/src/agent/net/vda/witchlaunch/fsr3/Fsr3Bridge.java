@@ -19,10 +19,17 @@ public class Fsr3Bridge {
     // Upscaler mode (0 = off) and frame generation flag are independent:
     // the upscaler renders at a scaled resolution, frame generation inserts
     // interpolated frames (from the upscaler output when both are active).
-    private static volatile int upscalerMode = 0;
-    private static volatile int fgEnabled = 0;
-    private static volatile float scale = 1.0f;
-    private static volatile float sharpness = 0.6f;
+    // Defaults come from system properties because the patched game classes
+    // resolve this class through the GAME classloader (which may define its
+    // own copy - configure() runs on the agent's copy); properties reach both.
+    private static volatile int upscalerMode =
+            Integer.getInteger("witch.fsr3.upscaler", 0);
+    private static volatile int fgEnabled =
+            Integer.getInteger("witch.fsr3.fg", 0) != 0 ? 1 : 0;
+    private static volatile float scale =
+            Float.parseFloat(System.getProperty("witch.fsr3.scale", "1.0f"));
+    private static volatile float sharpness =
+            Float.parseFloat(System.getProperty("witch.fsr3.sharpness", "0.6f"));
 
     // Per-frame state (render thread only).
     private static volatile Object minecraft;
@@ -64,6 +71,13 @@ public class Fsr3Bridge {
 
     public static void configure(int newUpscalerMode, int newFgEnabled,
                                  float newScale, float newSharpness) {
+        // Publish through system properties FIRST: if the game's classloader
+        // defines its own copy of this class, its static init runs on first
+        // hook touch and must already see the real values.
+        System.setProperty("witch.fsr3.upscaler", Integer.toString(newUpscalerMode));
+        System.setProperty("witch.fsr3.fg", newFgEnabled != 0 ? "1" : "0");
+        System.setProperty("witch.fsr3.scale", Float.toString(newScale));
+        System.setProperty("witch.fsr3.sharpness", Float.toString(newSharpness));
         upscalerMode = newUpscalerMode;
         fgEnabled = newFgEnabled != 0 ? 1 : 0;
         scale = newScale;
@@ -72,17 +86,37 @@ public class Fsr3Bridge {
 
     // ---- hook callbacks ---------------------------------------------------------
 
+    // One-shot diagnostics: prove each hook actually fires (silent early
+    // returns made a mis-wired pipeline indistinguishable from no hooks).
+    private static boolean dbgRenderFrame, dbgBlit, dbgSubmit, dbgPresent;
+
     public static void onRenderFrame(Object mc) {
+        if (!dbgRenderFrame) {
+            dbgRenderFrame = true;
+            System.out.println("[Fsr3Bridge] onRenderFrame (mc=" + (mc != null)
+                    + " upscaler=" + upscalerMode + " fg=" + fgEnabled + ")");
+        }
         minecraft = mc;
     }
 
     public static void onBlit(Object surface, Object encoder, Object textureView) {
+        if (!dbgBlit) {
+            dbgBlit = true;
+            System.out.println("[Fsr3Bridge] onBlit (surface=" + (surface != null)
+                    + " view=" + (textureView != null) + ")");
+        }
         lastSurface = surface;
         lastEncoder = encoder;
         lastTextureView = textureView;
     }
 
     public static void onBeforeSubmit(Object encoder) {
+        if (!dbgSubmit) {
+            dbgSubmit = true;
+            System.out.println("[Fsr3Bridge] onBeforeSubmit (surface=" + (lastSurface != null)
+                    + " view=" + (lastTextureView != null) + " upscaler=" + upscalerMode
+                    + " fg=" + fgEnabled + ")");
+        }
         if ((upscalerMode == 0 && fgEnabled == 0) || nativeFailed) return;
         Object surface = lastSurface;
         Object view = lastTextureView;
@@ -127,6 +161,11 @@ public class Fsr3Bridge {
     }
 
     public static void onPresent(Object surface) {
+        if (!dbgPresent) {
+            dbgPresent = true;
+            System.out.println("[Fsr3Bridge] onPresent (surface=" + (surface != null)
+                    + " fg=" + fgEnabled + ")");
+        }
         if (fgEnabled == 0 || nativeFailed) return;
         try {
             ensureReflection();
