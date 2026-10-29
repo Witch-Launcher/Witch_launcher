@@ -43,7 +43,11 @@ constexpr int kMaxOutputs = 2;
 struct BridgeState {
     bool initialized = false;
     bool enabled = true;
+    // Upscaler mode (0 = none). Frame generation is tracked separately so the
+    // two features can run together (combo).
     int mode = 0;
+    bool fg = false;
+    float sharpness = 0.0f;
 
     uint32_t renderWidth = 0;
     uint32_t renderHeight = 0;
@@ -109,12 +113,20 @@ struct BridgeState {
     VkImage depthDevice = VK_NULL_HANDLE;
     VkDeviceMemory depthDeviceMemory = VK_NULL_HANDLE;
 
-    // Interpolated outputs (double buffered).
+    // Upscaler outputs (double buffered; written by the FSR dispatches).
     VkImage outputs[kMaxOutputs] = {};
     VkDeviceMemory outputMemories[kMaxOutputs] = {};
 
+    // Interpolated outputs (double buffered; written by the FI dispatch).
+    // Kept separate from the upscaler outputs so both features can run in
+    // combo: the upscaler writes outputs[], the interpolator consumes that
+    // result and writes fgOutputs[].
+    VkImage fgOutputs[kMaxOutputs] = {};
+    VkDeviceMemory fgOutputMemories[kMaxOutputs] = {};
+
     uint64_t frameID = 0;
     uint32_t outputSlot = 0;
+    uint32_t fgOutputSlot = 0;
     bool lastFrameOk = false;
 
     // Previous camera pose for synthetic motion vectors.
@@ -488,6 +500,8 @@ int ffxfg_init(long long vkDeviceHandle,
                long long vkQueueHandle,
                int queueFamilyIndex,
                int mode,
+               int fgEnabled,
+               float sharpness,
                int renderWidth, int renderHeight,
                int displayWidth, int displayHeight,
                int colorFormatInt,
@@ -517,9 +531,19 @@ int ffxfg_init(long long vkDeviceHandle,
         logBridge("init: null device handles");
         return -1;
     }
-    if (mode != FFXFX_MODE_FRAMEGEN && mode != FFXFX_MODE_FSR1 &&
+
+    // Legacy pure-FG mode: FFXFX_MODE_FRAMEGEN means "no upscaler, FG on".
+    if (mode == FFXFX_MODE_FRAMEGEN) {
+        mode = 0;
+        fgEnabled = 1;
+    }
+    if (mode != 0 && mode != FFXFX_MODE_FSR1 &&
         mode != FFXFX_MODE_FSR2 && mode != FFXFX_MODE_FSR3UPSCALE) {
         logBridge("init: unknown mode");
+        return -1;
+    }
+    if (mode == 0 && fgEnabled == 0) {
+        logBridge("init: nothing enabled");
         return -1;
     }
 
@@ -528,6 +552,8 @@ int ffxfg_init(long long vkDeviceHandle,
     g_bridge.queue = queue;
     g_bridge.queueFamilyIndex = static_cast<uint32_t>(queueFamilyIndex);
     g_bridge.mode = mode;
+    g_bridge.fg = (fgEnabled != 0);
+    g_bridge.sharpness = sharpness < 0.0f ? 0.0f : (sharpness > 1.0f ? 1.0f : sharpness);
     g_bridge.renderWidth = static_cast<uint32_t>(renderWidth);
     g_bridge.renderHeight = static_cast<uint32_t>(renderHeight);
     g_bridge.displayWidth = static_cast<uint32_t>(displayWidth);
@@ -557,8 +583,11 @@ int ffxfg_init(long long vkDeviceHandle,
         return -1;
     }
 
-    // Per-mode FidelityFX context.
-    if (mode == FFXFX_MODE_FRAMEGEN) {
+    // Frame interpolation context (frame generation). In combo mode the FI
+    // consumes the upscaler's display-res output, so the max render size must
+    // cover the display size; the per-frame dispatch renderSize stays at the
+    // (scaled) render resolution.
+    if (g_bridge.fg) {
         FfxFrameInterpolationContextDescription fiDesc = {};
         fiDesc.flags = 0;
         fiDesc.maxRenderSize.width = g_bridge.displayWidth;
@@ -575,7 +604,10 @@ int ffxfg_init(long long vkDeviceHandle,
             return -1;
         }
         g_bridge.fiContextValid = true;
-    } else if (mode == FFXFX_MODE_FSR1) {
+    }
+
+    // Per-mode upscaler context.
+    if (mode == FFXFX_MODE_FSR1) {
         FfxFsr1ContextDescription fsr1Desc = {};
         fsr1Desc.flags = 0;
         fsr1Desc.outputFormat = ffxGetSurfaceFormatVK(colorFormat);
@@ -607,7 +639,7 @@ int ffxfg_init(long long vkDeviceHandle,
             return -1;
         }
         g_bridge.fsr2Valid = true;
-    } else {  // FFXFX_MODE_FSR3UPSCALE
+    } else if (mode == FFXFX_MODE_FSR3UPSCALE) {
         FfxFsr3UpscalerContextDescription fsr3uDesc = {};
         fsr3uDesc.flags = 0;
         fsr3uDesc.maxRenderSize.width = g_bridge.renderWidth;
@@ -731,17 +763,33 @@ int ffxfg_init(long long vkDeviceHandle,
         }
     }
 
-    // Outputs.
-    for (int i = 0; i < kMaxOutputs; ++i) {
-        if (!createImage2D(device, physicalDevice, g_bridge.displayWidth, g_bridge.displayHeight,
-                           colorFormat, VK_IMAGE_TILING_OPTIMAL,
-                           VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
-                           VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
-                           &g_bridge.outputs[i], &g_bridge.outputMemories[i],
-                           nullptr, nullptr)) {
-            logBridge("init: output image failed");
-            ffxfg_destroy();
-            return -1;
+    // Outputs: upscaler results (mode != 0) and interpolated results (fg).
+    if (g_bridge.mode != 0) {
+        for (int i = 0; i < kMaxOutputs; ++i) {
+            if (!createImage2D(device, physicalDevice, g_bridge.displayWidth, g_bridge.displayHeight,
+                               colorFormat, VK_IMAGE_TILING_OPTIMAL,
+                               VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
+                               VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+                               &g_bridge.outputs[i], &g_bridge.outputMemories[i],
+                               nullptr, nullptr)) {
+                logBridge("init: output image failed");
+                ffxfg_destroy();
+                return -1;
+            }
+        }
+    }
+    if (g_bridge.fg) {
+        for (int i = 0; i < kMaxOutputs; ++i) {
+            if (!createImage2D(device, physicalDevice, g_bridge.displayWidth, g_bridge.displayHeight,
+                               colorFormat, VK_IMAGE_TILING_OPTIMAL,
+                               VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
+                               VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+                               &g_bridge.fgOutputs[i], &g_bridge.fgOutputMemories[i],
+                               nullptr, nullptr)) {
+                logBridge("init: fg output image failed");
+                ffxfg_destroy();
+                return -1;
+            }
         }
     }
 
@@ -749,10 +797,13 @@ int ffxfg_init(long long vkDeviceHandle,
     g_bridge.enabled = true;
     g_bridge.frameID = 0;
     g_bridge.outputSlot = 0;
+    g_bridge.fgOutputSlot = 0;
     g_bridge.havePrevPose = false;
     g_bridge.lastFrameOk = false;
 
-    logBridge("init: ok");
+    logBridge(g_bridge.fg && g_bridge.mode != 0 ? "init: ok (upscaler + framegen combo)"
+              : g_bridge.fg ? "init: ok (framegen only)"
+              : "init: ok (upscaler only)");
     return 0;
 }
 
@@ -826,6 +877,12 @@ void ffxfg_destroy(void)
             b.outputs[i] = VK_NULL_HANDLE;
             b.outputMemories[i] = VK_NULL_HANDLE;
         }
+        for (int i = 0; i < kMaxOutputs; ++i) {
+            vkDestroyImage(device, b.fgOutputs[i], nullptr);
+            vkFreeMemory(device, b.fgOutputMemories[i], nullptr);
+            b.fgOutputs[i] = VK_NULL_HANDLE;
+            b.fgOutputMemories[i] = VK_NULL_HANDLE;
+        }
         b.mvsStaging = VK_NULL_HANDLE;
         b.mvsStagingMemory = VK_NULL_HANDLE;
         b.mvsDevice = VK_NULL_HANDLE;
@@ -839,6 +896,8 @@ void ffxfg_destroy(void)
     b.physicalDevice = VK_NULL_HANDLE;
     b.queue = VK_NULL_HANDLE;
     b.mode = 0;
+    b.fg = false;
+    b.sharpness = 0.0f;
     b.initialized = false;
     b.lastFrameOk = false;
 }
@@ -854,6 +913,14 @@ long long ffxfg_get_output_image(int slot)
         return 0;
     }
     return static_cast<long long>(reinterpret_cast<uintptr_t>(g_bridge.outputs[slot]));
+}
+
+long long ffxfg_get_fg_output_image(int slot)
+{
+    if (slot < 0 || slot >= kMaxOutputs) {
+        return 0;
+    }
+    return static_cast<long long>(reinterpret_cast<uintptr_t>(g_bridge.fgOutputs[slot]));
 }
 
 int ffxfg_output_slot_count(void)
@@ -875,7 +942,9 @@ int ffxfg_record_frame(long long vkCommandBufferHandle,
     BridgeState& b = g_bridge;
     b.lastFrameOk = false;
 
-    if (!b.initialized || !b.enabled || !b.fiContextValid) {
+    // Legacy pure-FG path only: in combo mode the record_upscale path owns
+    // both dispatches.
+    if (!b.initialized || !b.enabled || !b.fiContextValid || !b.fg || b.mode != 0) {
         return -1;
     }
     if (!vkCommandBufferHandle || !srcColorImageHandle || !camData || camDataCount < 16) {
@@ -950,7 +1019,7 @@ int ffxfg_record_frame(long long vkCommandBufferHandle,
     dispatch.renderSize.height = b.renderHeight;
     dispatch.currentBackBuffer = presentColor;
     dispatch.output = resourceFromImage(
-        b.outputs[b.outputSlot], b.displayWidth, b.displayHeight,
+        b.fgOutputs[b.fgOutputSlot], b.displayWidth, b.displayHeight,
         b.colorFormat, L"InterpolatedOutput", FFX_RESOURCE_STATE_UNORDERED_ACCESS);
     // No optical flow: synthetic camera motion vectors only.
     dispatch.opticalFlowScale.x = 0.0f;
@@ -973,8 +1042,8 @@ int ffxfg_record_frame(long long vkCommandBufferHandle,
     }
 
     b.lastFrameOk = true;
-    const int writtenSlot = static_cast<int>(b.outputSlot);
-    b.outputSlot = (b.outputSlot + 1) % kMaxOutputs;
+    const int writtenSlot = static_cast<int>(b.fgOutputSlot);
+    b.fgOutputSlot = (b.fgOutputSlot + 1) % kMaxOutputs;
     b.frameID++;
     return writtenSlot;
 }
@@ -994,12 +1063,12 @@ long long ffxfg_record_upscale(long long srcColorImageHandle,
     if (!srcColorImageHandle || !camData || camDataCount < 16) {
         return 0;
     }
-    if (b.mode != FFXFX_MODE_FRAMEGEN && !swapchainImageHandle) {
+    if (b.mode != 0 && !swapchainImageHandle) {
         return 0;
     }
 
-    const bool needsMotionData = (b.mode != FFXFX_MODE_FSR1);
-    const bool needsBlit = (swapchainImageHandle != 0);
+    const bool needsMotionData = (b.mode != FFXFX_MODE_FSR1) || b.fg;
+    const bool needsBlit = (b.mode != 0 && swapchainImageHandle != 0);
 
     VkCommandBuffer cmd = b.upscaleCommandBuffer;
     VkImage srcColor = reinterpret_cast<VkImage>(static_cast<uintptr_t>(srcColorImageHandle));
@@ -1033,27 +1102,161 @@ long long ffxfg_record_upscale(long long srcColorImageHandle,
                             b.renderWidth, b.renderHeight, VK_FORMAT_R32_SFLOAT);
     }
 
-    FfxResource output = resourceFromImage(
-        b.outputs[b.outputSlot], b.displayWidth, b.displayHeight,
-        b.colorFormat, L"UpscaleOutput", FFX_RESOURCE_STATE_UNORDERED_ACCESS);
-
     FfxErrorCode error = FFX_ERROR_INVALID_ARGUMENT;
-    if (b.mode == FFXFX_MODE_FRAMEGEN) {
-        FfxResource presentColor = resourceFromImage(
-            srcColor, static_cast<uint32_t>(srcWidth), static_cast<uint32_t>(srcHeight),
-            b.colorFormat, L"PresentColor", FFX_RESOURCE_STATE_COMPUTE_READ);
+
+    // ---- upscaler dispatch (mode != 0) ----
+    if (b.mode != 0) {
+        FfxResource output = resourceFromImage(
+            b.outputs[b.outputSlot], b.displayWidth, b.displayHeight,
+            b.colorFormat, L"UpscaleOutput", FFX_RESOURCE_STATE_UNORDERED_ACCESS);
+
+        if (b.mode == FFXFX_MODE_FSR1) {
+            FfxFsr1DispatchDescription dispatch = {};
+            dispatch.commandList = ffxGetCommandListVK(cmd);
+            dispatch.color = resourceFromImage(
+                srcColor, static_cast<uint32_t>(srcWidth), static_cast<uint32_t>(srcHeight),
+                b.colorFormat, L"Color", FFX_RESOURCE_STATE_COMPUTE_READ);
+            dispatch.output = output;
+            dispatch.renderSize.width = static_cast<uint32_t>(srcWidth);
+            dispatch.renderSize.height = static_cast<uint32_t>(srcHeight);
+            dispatch.enableSharpening = (b.sharpness > 0.001f);
+            dispatch.sharpness = b.sharpness;
+            error = ffxFsr1ContextDispatch(&b.fsr1Context, &dispatch);
+        } else if (b.mode == FFXFX_MODE_FSR2) {
+            FfxFsr2DispatchDescription dispatch = {};
+            dispatch.commandList = ffxGetCommandListVK(cmd);
+            dispatch.color = resourceFromImage(
+                srcColor, static_cast<uint32_t>(srcWidth), static_cast<uint32_t>(srcHeight),
+                b.colorFormat, L"Color", FFX_RESOURCE_STATE_COMPUTE_READ);
+            dispatch.depth = resourceFromImage(
+                b.depthDevice, b.renderWidth, b.renderHeight,
+                VK_FORMAT_R32_SFLOAT, L"Depth", FFX_RESOURCE_STATE_COMPUTE_READ);
+            dispatch.motionVectors = resourceFromImage(
+                b.mvsDevice, b.renderWidth, b.renderHeight,
+                VK_FORMAT_R16G16_SFLOAT, L"MotionVectors", FFX_RESOURCE_STATE_COMPUTE_READ);
+            dispatch.output = output;
+            dispatch.jitterOffset.x = 0.0f;
+            dispatch.jitterOffset.y = 0.0f;
+            dispatch.motionVectorScale.x = 1.0f;
+            dispatch.motionVectorScale.y = -1.0f;
+            dispatch.renderSize.width = static_cast<uint32_t>(srcWidth);
+            dispatch.renderSize.height = static_cast<uint32_t>(srcHeight);
+            dispatch.enableSharpening = (b.sharpness > 0.001f);
+            dispatch.sharpness = b.sharpness;
+            dispatch.frameTimeDelta = camData[15];
+            dispatch.preExposure = 1.0f;
+            dispatch.reset = (reset != 0);
+            dispatch.cameraNear = camData[12];
+            dispatch.cameraFar = camData[13];
+            dispatch.cameraFovAngleVertical = camData[14];
+            dispatch.viewSpaceToMetersFactor = 1.0f;
+            error = ffxFsr2ContextDispatch(&b.fsr2Context, &dispatch);
+        } else if (b.mode == FFXFX_MODE_FSR3UPSCALE) {
+            FfxFsr3UpscalerDispatchDescription dispatch = {};
+            dispatch.commandList = ffxGetCommandListVK(cmd);
+            dispatch.color = resourceFromImage(
+                srcColor, static_cast<uint32_t>(srcWidth), static_cast<uint32_t>(srcHeight),
+                b.colorFormat, L"Color", FFX_RESOURCE_STATE_COMPUTE_READ);
+            dispatch.depth = resourceFromImage(
+                b.depthDevice, b.renderWidth, b.renderHeight,
+                VK_FORMAT_R32_SFLOAT, L"Depth", FFX_RESOURCE_STATE_COMPUTE_READ);
+            dispatch.motionVectors = resourceFromImage(
+                b.mvsDevice, b.renderWidth, b.renderHeight,
+                VK_FORMAT_R16G16_SFLOAT, L"MotionVectors", FFX_RESOURCE_STATE_COMPUTE_READ);
+            dispatch.dilatedDepth = b.fsr3uDilatedDepth;
+            dispatch.dilatedMotionVectors = b.fsr3uDilatedMVs;
+            dispatch.reconstructedPrevNearestDepth = b.fsr3uRecPrevNearestDepth;
+            dispatch.output = output;
+            dispatch.jitterOffset.x = 0.0f;
+            dispatch.jitterOffset.y = 0.0f;
+            dispatch.motionVectorScale.x = 1.0f;
+            dispatch.motionVectorScale.y = -1.0f;
+            dispatch.renderSize.width = static_cast<uint32_t>(srcWidth);
+            dispatch.renderSize.height = static_cast<uint32_t>(srcHeight);
+            dispatch.upscaleSize.width = b.displayWidth;
+            dispatch.upscaleSize.height = b.displayHeight;
+            dispatch.enableSharpening = (b.sharpness > 0.001f);
+            dispatch.sharpness = b.sharpness;
+            dispatch.frameTimeDelta = camData[15];
+            dispatch.preExposure = 1.0f;
+            dispatch.reset = (reset != 0);
+            dispatch.cameraNear = camData[12];
+            dispatch.cameraFar = camData[13];
+            dispatch.cameraFovAngleVertical = camData[14];
+            dispatch.viewSpaceToMetersFactor = 1.0f;
+            dispatch.flags = 0;
+            error = ffxFsr3UpscalerContextDispatch(&b.fsr3uContext, &dispatch);
+        }
+    }
+
+    if (error != FFX_OK) {
+        vkEndCommandBuffer(cmd);
+        return 0;
+    }
+
+    // Blit the upscaled output over the whole swapchain image.
+    if (needsBlit) {
+        recordImageBarrier(cmd, b.outputs[b.outputSlot], VK_IMAGE_ASPECT_COLOR_BIT,
+                           VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                           VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, VK_ACCESS_2_MEMORY_WRITE_BIT,
+                           VK_PIPELINE_STAGE_2_COPY_BIT, VK_ACCESS_2_TRANSFER_READ_BIT);
+
+        VkImageBlit blit = {};
+        blit.srcSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+        blit.srcSubresource.layerCount = 1;
+        blit.srcOffsets[0] = {0, 0, 0};
+        blit.srcOffsets[1] = {static_cast<int32_t>(b.displayWidth), static_cast<int32_t>(b.displayHeight), 1};
+        blit.dstSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+        blit.dstSubresource.layerCount = 1;
+        blit.dstOffsets[0] = {0, 0, 0};
+        blit.dstOffsets[1] = {static_cast<int32_t>(b.displayWidth), static_cast<int32_t>(b.displayHeight), 1};
+        vkCmdBlitImage(cmd, b.outputs[b.outputSlot], VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                       swapchainImage, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                       1, &blit, VK_FILTER_LINEAR);
+
+        recordImageBarrier(cmd, swapchainImage, VK_IMAGE_ASPECT_COLOR_BIT,
+                           VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
+                           VK_PIPELINE_STAGE_2_COPY_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT,
+                           VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, VK_ACCESS_2_NONE);
+    }
+
+    // ---- frame interpolation (fg) ----
+    // Combo: FI consumes the upscaler's display-res output (kept as the real
+    // frame in the swapchain); pure FG: FI consumes the game's full-res back
+    // buffer. The interpolated result lands in fgOutputs[] and is presented
+    // by ffxfg_present_interpolated() before the real frame (FIFO).
+    if (b.fg) {
+        FfxResource presentColor;
+        if (b.mode != 0) {
+            // The blit left the upscaler output in TRANSFER_SRC; make it
+            // compute-readable again for the FI dispatch.
+            recordImageBarrier(cmd, b.outputs[b.outputSlot], VK_IMAGE_ASPECT_COLOR_BIT,
+                               VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_IMAGE_LAYOUT_GENERAL,
+                               VK_PIPELINE_STAGE_2_COPY_BIT, VK_ACCESS_2_TRANSFER_READ_BIT,
+                               VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, VK_ACCESS_2_MEMORY_READ_BIT);
+            presentColor = resourceFromImage(
+                b.outputs[b.outputSlot], b.displayWidth, b.displayHeight,
+                b.colorFormat, L"PresentColor", FFX_RESOURCE_STATE_COMPUTE_READ);
+        } else {
+            presentColor = resourceFromImage(
+                srcColor, static_cast<uint32_t>(srcWidth), static_cast<uint32_t>(srcHeight),
+                b.colorFormat, L"PresentColor", FFX_RESOURCE_STATE_COMPUTE_READ);
+        }
         FfxResource mvsResource = resourceFromImage(
             b.mvsDevice, b.renderWidth, b.renderHeight,
             VK_FORMAT_R16G16_SFLOAT, L"MotionVectors", FFX_RESOURCE_STATE_COMPUTE_READ);
         FfxResource depthResource = resourceFromImage(
             b.depthDevice, b.renderWidth, b.renderHeight,
             VK_FORMAT_R32_SFLOAT, L"Depth", FFX_RESOURCE_STATE_COMPUTE_READ);
+        FfxResource fgOutput = resourceFromImage(
+            b.fgOutputs[b.fgOutputSlot], b.displayWidth, b.displayHeight,
+            b.colorFormat, L"InterpolatedOutput", FFX_RESOURCE_STATE_UNORDERED_ACCESS);
 
         FfxFrameInterpolationPrepareDescription prepare = {};
         prepare.flags = 0;
         prepare.commandList = ffxGetCommandListVK(cmd);
-        prepare.renderSize.width = b.displayWidth;
-        prepare.renderSize.height = b.displayHeight;
+        prepare.renderSize.width = b.renderWidth;
+        prepare.renderSize.height = b.renderHeight;
         prepare.jitterOffset.x = 0.0f;
         prepare.jitterOffset.y = 0.0f;
         prepare.motionVectorScale.x = 1.0f;
@@ -1088,7 +1291,7 @@ long long ffxfg_record_upscale(long long srcColorImageHandle,
             dispatch.renderSize.width = b.renderWidth;
             dispatch.renderSize.height = b.renderHeight;
             dispatch.currentBackBuffer = presentColor;
-            dispatch.output = output;
+            dispatch.output = fgOutput;
             dispatch.opticalFlowScale.x = 0.0f;
             dispatch.opticalFlowScale.y = 0.0f;
             dispatch.cameraNear = camData[12];
@@ -1105,113 +1308,10 @@ long long ffxfg_record_upscale(long long srcColorImageHandle,
             error = ffxFrameInterpolationDispatch(&b.fiContext, &dispatch);
             b.frameID++;
         }
-    } else if (b.mode == FFXFX_MODE_FSR1) {
-        FfxFsr1DispatchDescription dispatch = {};
-        dispatch.commandList = ffxGetCommandListVK(cmd);
-        dispatch.color = resourceFromImage(
-            srcColor, static_cast<uint32_t>(srcWidth), static_cast<uint32_t>(srcHeight),
-            b.colorFormat, L"Color", FFX_RESOURCE_STATE_COMPUTE_READ);
-        dispatch.output = output;
-        dispatch.renderSize.width = static_cast<uint32_t>(srcWidth);
-        dispatch.renderSize.height = static_cast<uint32_t>(srcHeight);
-        dispatch.enableSharpening = true;
-        dispatch.sharpness = 0.6f;
-        error = ffxFsr1ContextDispatch(&b.fsr1Context, &dispatch);
-    } else if (b.mode == FFXFX_MODE_FSR2) {
-        FfxFsr2DispatchDescription dispatch = {};
-        dispatch.commandList = ffxGetCommandListVK(cmd);
-        dispatch.color = resourceFromImage(
-            srcColor, static_cast<uint32_t>(srcWidth), static_cast<uint32_t>(srcHeight),
-            b.colorFormat, L"Color", FFX_RESOURCE_STATE_COMPUTE_READ);
-        dispatch.depth = resourceFromImage(
-            b.depthDevice, b.renderWidth, b.renderHeight,
-            VK_FORMAT_R32_SFLOAT, L"Depth", FFX_RESOURCE_STATE_COMPUTE_READ);
-        dispatch.motionVectors = resourceFromImage(
-            b.mvsDevice, b.renderWidth, b.renderHeight,
-            VK_FORMAT_R16G16_SFLOAT, L"MotionVectors", FFX_RESOURCE_STATE_COMPUTE_READ);
-        dispatch.output = output;
-        dispatch.jitterOffset.x = 0.0f;
-        dispatch.jitterOffset.y = 0.0f;
-        dispatch.motionVectorScale.x = 1.0f;
-        dispatch.motionVectorScale.y = -1.0f;
-        dispatch.renderSize.width = static_cast<uint32_t>(srcWidth);
-        dispatch.renderSize.height = static_cast<uint32_t>(srcHeight);
-        dispatch.enableSharpening = false;
-        dispatch.sharpness = 0.0f;
-        dispatch.frameTimeDelta = camData[15];
-        dispatch.preExposure = 1.0f;
-        dispatch.reset = (reset != 0);
-        dispatch.cameraNear = camData[12];
-        dispatch.cameraFar = camData[13];
-        dispatch.cameraFovAngleVertical = camData[14];
-        dispatch.viewSpaceToMetersFactor = 1.0f;
-        error = ffxFsr2ContextDispatch(&b.fsr2Context, &dispatch);
-    } else if (b.mode == FFXFX_MODE_FSR3UPSCALE) {
-        FfxFsr3UpscalerDispatchDescription dispatch = {};
-        dispatch.commandList = ffxGetCommandListVK(cmd);
-        dispatch.color = resourceFromImage(
-            srcColor, static_cast<uint32_t>(srcWidth), static_cast<uint32_t>(srcHeight),
-            b.colorFormat, L"Color", FFX_RESOURCE_STATE_COMPUTE_READ);
-        dispatch.depth = resourceFromImage(
-            b.depthDevice, b.renderWidth, b.renderHeight,
-            VK_FORMAT_R32_SFLOAT, L"Depth", FFX_RESOURCE_STATE_COMPUTE_READ);
-        dispatch.motionVectors = resourceFromImage(
-            b.mvsDevice, b.renderWidth, b.renderHeight,
-            VK_FORMAT_R16G16_SFLOAT, L"MotionVectors", FFX_RESOURCE_STATE_COMPUTE_READ);
-        dispatch.dilatedDepth = b.fsr3uDilatedDepth;
-        dispatch.dilatedMotionVectors = b.fsr3uDilatedMVs;
-        dispatch.reconstructedPrevNearestDepth = b.fsr3uRecPrevNearestDepth;
-        dispatch.output = output;
-        dispatch.jitterOffset.x = 0.0f;
-        dispatch.jitterOffset.y = 0.0f;
-        dispatch.motionVectorScale.x = 1.0f;
-        dispatch.motionVectorScale.y = -1.0f;
-        dispatch.renderSize.width = static_cast<uint32_t>(srcWidth);
-        dispatch.renderSize.height = static_cast<uint32_t>(srcHeight);
-        dispatch.upscaleSize.width = b.displayWidth;
-        dispatch.upscaleSize.height = b.displayHeight;
-        dispatch.enableSharpening = false;
-        dispatch.sharpness = 0.0f;
-        dispatch.frameTimeDelta = camData[15];
-        dispatch.preExposure = 1.0f;
-        dispatch.reset = (reset != 0);
-        dispatch.cameraNear = camData[12];
-        dispatch.cameraFar = camData[13];
-        dispatch.cameraFovAngleVertical = camData[14];
-        dispatch.viewSpaceToMetersFactor = 1.0f;
-        dispatch.flags = 0;
-        error = ffxFsr3UpscalerContextDispatch(&b.fsr3uContext, &dispatch);
-    }
-
-    if (error != FFX_OK) {
-        vkEndCommandBuffer(cmd);
-        return 0;
-    }
-
-    // Blit the upscaled output over the whole swapchain image.
-    if (needsBlit) {
-        recordImageBarrier(cmd, b.outputs[b.outputSlot], VK_IMAGE_ASPECT_COLOR_BIT,
-                           VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-                           VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, VK_ACCESS_2_MEMORY_WRITE_BIT,
-                           VK_PIPELINE_STAGE_2_COPY_BIT, VK_ACCESS_2_TRANSFER_READ_BIT);
-
-        VkImageBlit blit = {};
-        blit.srcSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-        blit.srcSubresource.layerCount = 1;
-        blit.srcOffsets[0] = {0, 0, 0};
-        blit.srcOffsets[1] = {static_cast<int32_t>(b.displayWidth), static_cast<int32_t>(b.displayHeight), 1};
-        blit.dstSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-        blit.dstSubresource.layerCount = 1;
-        blit.dstOffsets[0] = {0, 0, 0};
-        blit.dstOffsets[1] = {static_cast<int32_t>(b.displayWidth), static_cast<int32_t>(b.displayHeight), 1};
-        vkCmdBlitImage(cmd, b.outputs[b.outputSlot], VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-                       swapchainImage, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-                       1, &blit, VK_FILTER_LINEAR);
-
-        recordImageBarrier(cmd, swapchainImage, VK_IMAGE_ASPECT_COLOR_BIT,
-                           VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
-                           VK_PIPELINE_STAGE_2_COPY_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT,
-                           VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, VK_ACCESS_2_NONE);
+        if (error != FFX_OK) {
+            vkEndCommandBuffer(cmd);
+            return 0;
+        }
     }
 
     if (vkEndCommandBuffer(cmd) != VK_SUCCESS) {
@@ -1219,8 +1319,15 @@ long long ffxfg_record_upscale(long long srcColorImageHandle,
     }
 
     b.lastFrameOk = true;
-    const int writtenSlot = static_cast<int>(b.outputSlot);
-    b.outputSlot = (b.outputSlot + 1) % kMaxOutputs;
+    int writtenSlot = 0;
+    if (b.mode != 0) {
+        writtenSlot = static_cast<int>(b.outputSlot);
+        b.outputSlot = (b.outputSlot + 1) % kMaxOutputs;
+    }
+    if (b.fg) {
+        writtenSlot = static_cast<int>(b.fgOutputSlot);
+        b.fgOutputSlot = (b.fgOutputSlot + 1) % kMaxOutputs;
+    }
     return writtenSlot;
 }
 
@@ -1235,10 +1342,19 @@ long long ffxfg_last_recorded_command_buffer(void)
 int ffxfg_last_upscale_slot(void)
 {
     BridgeState& b = g_bridge;
-    if (!b.lastFrameOk) {
+    if (!b.lastFrameOk || b.mode == 0) {
         return -1;
     }
     return static_cast<int>((b.outputSlot + kMaxOutputs - 1) % kMaxOutputs);
+}
+
+int ffxfg_last_fg_slot(void)
+{
+    BridgeState& b = g_bridge;
+    if (!b.lastFrameOk || !b.fg) {
+        return -1;
+    }
+    return static_cast<int>((b.fgOutputSlot + kMaxOutputs - 1) % kMaxOutputs);
 }
 
 int ffxfg_present_interpolated(long long vkSwapchainHandle, int slot)
@@ -1295,7 +1411,7 @@ int ffxfg_present_interpolated(long long vkSwapchainHandle, int slot)
                        VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, VK_ACCESS_2_NONE,
                        VK_PIPELINE_STAGE_2_COPY_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT);
 
-    recordImageBarrier(cmd, b.outputs[slot], VK_IMAGE_ASPECT_COLOR_BIT,
+    recordImageBarrier(cmd, b.fgOutputs[slot], VK_IMAGE_ASPECT_COLOR_BIT,
                        VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
                        VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, VK_ACCESS_2_MEMORY_WRITE_BIT,
                        VK_PIPELINE_STAGE_2_COPY_BIT, VK_ACCESS_2_TRANSFER_READ_BIT);
@@ -1309,7 +1425,7 @@ int ffxfg_present_interpolated(long long vkSwapchainHandle, int slot)
     blit.dstSubresource.layerCount = 1;
     blit.dstOffsets[0] = {0, 0, 0};
     blit.dstOffsets[1] = {static_cast<int32_t>(b.displayWidth), static_cast<int32_t>(b.displayHeight), 1};
-    vkCmdBlitImage(cmd, b.outputs[slot], VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+    vkCmdBlitImage(cmd, b.fgOutputs[slot], VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
                    swapchainImage, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
                    1, &blit, VK_FILTER_LINEAR);
 
@@ -1369,6 +1485,7 @@ JNIEXPORT jint JNICALL Java_net_vda_witchlaunch_fsr3_Fsr3Native_init(
     JNIEnv* env, jclass clazz,
     jlong vkDevice, jlong vkPhysicalDevice, jlong vkGetDeviceProcAddr,
     jlong vkQueue, jint queueFamilyIndex, jint mode,
+    jint fgEnabled, jfloat sharpness,
     jint renderWidth, jint renderHeight,
     jint displayWidth, jint displayHeight,
     jint colorFormat, jint depthInverted)
@@ -1377,6 +1494,7 @@ JNIEXPORT jint JNICALL Java_net_vda_witchlaunch_fsr3_Fsr3Native_init(
     (void)clazz;
     return ffxfg_init(vkDevice, vkPhysicalDevice, vkGetDeviceProcAddr,
                       vkQueue, queueFamilyIndex, mode,
+                      fgEnabled, sharpness,
                       renderWidth, renderHeight, displayWidth, displayHeight,
                       colorFormat, depthInverted);
 }
@@ -1453,6 +1571,14 @@ JNIEXPORT jint JNICALL Java_net_vda_witchlaunch_fsr3_Fsr3Native_lastUpscaleSlot(
     return ffxfg_last_upscale_slot();
 }
 
+JNIEXPORT jint JNICALL Java_net_vda_witchlaunch_fsr3_Fsr3Native_lastFgSlot(
+    JNIEnv* env, jclass clazz)
+{
+    (void)env;
+    (void)clazz;
+    return ffxfg_last_fg_slot();
+}
+
 JNIEXPORT jlong JNICALL Java_net_vda_witchlaunch_fsr3_Fsr3Native_lastRecordedCommandBuffer(
     JNIEnv* env, jclass clazz)
 {
@@ -1475,6 +1601,14 @@ JNIEXPORT jlong JNICALL Java_net_vda_witchlaunch_fsr3_Fsr3Native_getOutputImage(
     (void)env;
     (void)clazz;
     return ffxfg_get_output_image(slot);
+}
+
+JNIEXPORT jlong JNICALL Java_net_vda_witchlaunch_fsr3_Fsr3Native_getFgOutputImage(
+    JNIEnv* env, jclass clazz, jint slot)
+{
+    (void)env;
+    (void)clazz;
+    return ffxfg_get_fg_output_image(slot);
 }
 
 JNIEXPORT jint JNICALL Java_net_vda_witchlaunch_fsr3_Fsr3Native_outputSlotCount(

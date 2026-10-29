@@ -8,16 +8,24 @@ package net.vda.witchlaunch.fsr3;
 public final class Fsr3Native {
     private Fsr3Native() {}
 
-    // Modes - must match the values in Natives/upscaler/ffx_bridge.h.
+    // Upscaler modes - must match the values in Natives/upscaler/ffx_bridge.h.
+    // MODE_FRAMEGEN is the legacy pure-FG value (no upscaler + FG on).
+    public static final int MODE_NONE = 0;
     public static final int MODE_FRAMEGEN = 1;
     public static final int MODE_FSR1 = 2;
     public static final int MODE_FSR2 = 3;
     public static final int MODE_FSR3UPSCALE = 4;
 
-    /** Initialize the FidelityFX context. Returns 0 on success. */
+    /**
+     * Initialize the FidelityFX contexts. mode selects the upscaler (0/FSR1/
+     * FSR2/FSR3U), fgEnabled turns on frame generation independently - both
+     * may be active at once (upscale first, then interpolate the upscaled
+     * frame). sharpness (0..1) drives RCAS sharpening. Returns 0 on success.
+     */
     public static native int init(long vkDevice, long vkPhysicalDevice,
                                   long vkGetDeviceProcAddr, long vkQueue,
                                   int queueFamilyIndex, int mode,
+                                  int fgEnabled, float sharpness,
                                   int renderWidth, int renderHeight,
                                   int displayWidth, int displayHeight,
                                   int colorFormat, int depthInverted);
@@ -41,6 +49,9 @@ public final class Fsr3Native {
     /** Output slot written by the last recordUpscale (0/1, or -1). */
     public static native int lastUpscaleSlot();
 
+    /** Output slot holding the latest interpolated frame (0/1, or -1). */
+    public static native int lastFgSlot();
+
     /** The VkCommandBuffer recorded by the last recordUpscale. */
     public static native long lastRecordedCommandBuffer();
 
@@ -52,6 +63,9 @@ public final class Fsr3Native {
     public static native int presentInterpolated(long vkSwapchain, int slot);
 
     public static native long getOutputImage(int slot);
+
+    /** The VkImage of an interpolated-output slot (double buffered). */
+    public static native long getFgOutputImage(int slot);
 
     public static native int outputSlotCount();
 }

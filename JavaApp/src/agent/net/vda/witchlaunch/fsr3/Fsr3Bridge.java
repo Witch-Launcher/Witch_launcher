@@ -16,8 +16,13 @@ import java.lang.reflect.Method;
  */
 public class Fsr3Bridge {
 
-    private static volatile int mode = 0;
+    // Upscaler mode (0 = off) and frame generation flag are independent:
+    // the upscaler renders at a scaled resolution, frame generation inserts
+    // interpolated frames (from the upscaler output when both are active).
+    private static volatile int upscalerMode = 0;
+    private static volatile int fgEnabled = 0;
     private static volatile float scale = 1.0f;
+    private static volatile float sharpness = 0.6f;
 
     // Per-frame state (render thread only).
     private static volatile Object minecraft;
@@ -57,9 +62,12 @@ public class Fsr3Bridge {
     private static float prevCamX, prevCamY, prevCamZ, prevXRot, prevYRot;
     private static boolean havePrevCam = false;
 
-    public static void configure(int newMode, float newScale) {
-        mode = newMode;
+    public static void configure(int newUpscalerMode, int newFgEnabled,
+                                 float newScale, float newSharpness) {
+        upscalerMode = newUpscalerMode;
+        fgEnabled = newFgEnabled != 0 ? 1 : 0;
         scale = newScale;
+        sharpness = newSharpness;
     }
 
     // ---- hook callbacks ---------------------------------------------------------
@@ -75,7 +83,7 @@ public class Fsr3Bridge {
     }
 
     public static void onBeforeSubmit(Object encoder) {
-        if (mode == 0 || nativeFailed) return;
+        if ((upscalerMode == 0 && fgEnabled == 0) || nativeFailed) return;
         Object surface = lastSurface;
         Object view = lastTextureView;
         if (surface == null || view == null) return;
@@ -90,7 +98,7 @@ public class Fsr3Bridge {
             if (srcImage == 0 || srcW <= 0 || srcH <= 0) return;
 
             long swapchainImage = 0;
-            if (mode != Fsr3Native.MODE_FRAMEGEN) {
+            if (upscalerMode != Fsr3Native.MODE_NONE) {
                 int imageIndex = surfaceCurrentImageIndex.getInt(surface);
                 if (imageIndex < 0) return;
                 swapchainImage = (Long) longListGetLong.invoke(
@@ -115,13 +123,13 @@ public class Fsr3Bridge {
     }
 
     public static void onPresent(Object surface) {
-        if (mode != Fsr3Native.MODE_FRAMEGEN || nativeFailed) return;
+        if (fgEnabled == 0 || nativeFailed) return;
         try {
             ensureReflection();
             if (!nativeReady) return;
             long swapchain = surfaceSwapchain.getLong(surface);
             if (swapchain == 0) return;
-            int slot = Fsr3Native.lastUpscaleSlot();
+            int slot = Fsr3Native.lastFgSlot();
             if (slot < 0) return;
             Fsr3Native.presentInterpolated(swapchain, slot);
         } catch (Throwable t) {
@@ -155,9 +163,9 @@ public class Fsr3Bridge {
     private static int scaleValue(Object window, String fieldName) {
         int raw = readIntField(window, fieldName, 0);
         if (raw <= 0) return raw;
-        boolean upscalerActive = (mode == Fsr3Native.MODE_FSR1
-                || mode == Fsr3Native.MODE_FSR2
-                || mode == Fsr3Native.MODE_FSR3UPSCALE);
+        boolean upscalerActive = (upscalerMode == Fsr3Native.MODE_FSR1
+                || upscalerMode == Fsr3Native.MODE_FSR2
+                || upscalerMode == Fsr3Native.MODE_FSR3UPSCALE);
         if (!upscalerActive || scale >= 0.999f) return raw;
         return Math.max(1, (int) (raw * scale));
     }
@@ -229,14 +237,16 @@ public class Fsr3Bridge {
         int displayH = surfaceSwapchainHeight.getInt(surface);
 
         int rc = Fsr3Native.init(deviceAddr, physAddr, gdpa, vkQueue.address(), family,
-                mode, renderW, renderH, displayW, displayH, vkFormat, 0);
+                upscalerMode, fgEnabled, sharpness,
+                renderW, renderH, displayW, displayH, vkFormat, 0);
         if (rc != 0) {
             logOnce("Fsr3Native.init failed rc=" + rc);
             nativeFailed = true;
             return false;
         }
         nativeReady = true;
-        System.out.println("[Fsr3Bridge] native init ok (mode=" + mode
+        System.out.println("[Fsr3Bridge] native init ok (upscaler=" + upscalerMode
+                + " fg=" + fgEnabled + " scale=" + scale + " sharp=" + sharpness
                 + " render=" + renderW + "x" + renderH
                 + " display=" + displayW + "x" + displayH + " fmt=" + vkFormat + ")");
         return true;

@@ -137,6 +137,20 @@
             @"custom_gl_version": @(0),
             @"fsr1_setting": @(0)
         }.mutableCopy,
+        // FidelityFX bridge (Natives/upscaler/ + fsr3-agent). Section and every
+        // key MUST exist here or setObject silently drops writes (see the tglmt
+        // note above) — the picker then always reverts to Off.
+        @"fsr3": @{
+            // 0 = off, 1 = FSR1, 2 = FSR2, 3 = FSR3 Upscaler.
+            @"upscaler": @(0),
+            // Frame generation is independent and can run together with the
+            // upscaler (upscale first, then interpolate the upscaled frame).
+            @"framegen": @NO,
+            // Render resolution scale 0.25..1.0 (only used by the upscaler).
+            @"resolution_scale": @(1.0),
+            // RCAS sharpening 0..1 for the FSR1/FSR2/FSR3 dispatches.
+            @"sharpness": @(0.6)
+        }.mutableCopy,
         @"zink": @{
             @"optimization_level": @(-1),
             @"gl_override": @(0),

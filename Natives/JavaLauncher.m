@@ -1121,17 +1121,30 @@ int launchJVMWithArgs(NSString *username, id launchTarget, int width, int height
     margv[++margc] = [NSString stringWithFormat:@"-javaagent:%@/patchjna_agent.jar=", librariesPath].UTF8String;
 
     // FidelityFX (FSR 1 / FSR 2 / FSR 3 upscaler / frame generation). The agent
-    // jar is only attached when an effect is enabled; fsr3.effect values match
-    // Fsr3Native modes: 1=framegen 2=fsr1 3=fsr2 4=fsr3-upscale.
-    NSInteger fsr3Effect = getPrefInt(@"fsr3.effect");
-    if (fsr3Effect >= 1 && fsr3Effect <= 4) {
+    // jar is only attached when one of the features is enabled. The two are
+    // independent and can be combined: fsr3.upscaler (0=off 1=FSR1 2=FSR2
+    // 3=FSR3U) is mapped to the native upscaler modes (FSR1=2 FSR2=3 FSR3U=4),
+    // fsr3.framegen enables frame interpolation.
+    NSInteger fsr3Upscaler = getPrefInt(@"fsr3.upscaler");
+    BOOL fsr3Framegen = getPrefBool(@"fsr3.framegen");
+    if (fsr3Upscaler >= 1 && fsr3Upscaler <= 3) {
+        fsr3Upscaler += 1;  // UI value -> native Fsr3Native mode (FSR1=2 ...).
+    } else {
+        fsr3Upscaler = 0;
+    }
+    if (fsr3Upscaler > 0 || fsr3Framegen) {
         float fsr3Scale = getPrefFloat(@"fsr3.resolution_scale");
         if (fsr3Scale <= 0.0f || fsr3Scale > 1.0f) {
             fsr3Scale = 1.0f;
         }
+        float fsr3Sharpness = getPrefFloat(@"fsr3.sharpness");
+        if (fsr3Sharpness < 0.0f || fsr3Sharpness > 1.0f) {
+            fsr3Sharpness = 0.6f;
+        }
         margv[++margc] = [NSString stringWithFormat:
-            @"-javaagent:%@/fsr3-agent.jar=mode=%ld&scale=%.3f",
-            librariesPath, (long)fsr3Effect, fsr3Scale].UTF8String;
+            @"-javaagent:%@/fsr3-agent.jar=mode=%ld&fg=%d&scale=%.3f&sharp=%.3f",
+            librariesPath, (long)fsr3Upscaler, fsr3Framegen ? 1 : 0,
+            fsr3Scale, fsr3Sharpness].UTF8String;
     }
 
     // F3 debug overlay metadata. The agent patches the game's debug screen at

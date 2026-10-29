@@ -3,9 +3,14 @@
 
 // AMD FidelityFX bridge (Vulkan backend) for the Witch launcher.
 //
-// Supports one FidelityFX context at a time:
-//   - FSR3 Frame Generation (FrameInterpolation)
-//   - FSR1 / FSR2 / FSR3 Upscaler
+// Two independent features that can be enabled together (combo):
+//   - Upscaler: FSR1 / FSR2 / FSR3 Upscaler (mode != 0). Renders at a scaled
+//     resolution, upscales into a bridge-owned output and blits it over the
+//     swapchain image.
+//   - Frame Generation: FSR3 FrameInterpolation (fgEnabled). In pure FG mode it
+//     interpolates from the game's full-res back buffer; in combo mode it
+//     interpolates from the upscaler's display-res output instead, so the
+//     interpolated frames keep the upscaled quality.
 //
 // The Java agent (net.vda.witchlaunch.fsr3) drives this through plain JNI
 // naming; the JVM resolves Java_net_vda_witchlaunch_fsr3_Fsr3Native_* from the
@@ -13,18 +18,16 @@
 // core).
 //
 // Integration contract with the patched RenderPearl surface:
-//  - Frame Generation: ffxfg_record_frame() is invoked from inside the patched
-//    VulkanGpuSurface.blitFromTexture, BEFORE the surface's own blit/submit,
-//    with the transient VkCommandBuffer and the source texture's VkImage. The
-//    bridge records FI prepare+dispatch into that command buffer and tells the
-//    caller which VkImage to present as the interpolated frame (a bridge-owned
-//    output). ffxfg_present_interpolated() then acquires a swapchain image,
-//    blits that output into it and presents it (bridge-owned sync objects).
 //  - Upscalers: ffxfg_record_upscale() allocates a bridge-owned command
 //    buffer, records the upscale dispatch + a blit of the bridge output over
 //    the whole swapchain image (which must be in PRESENT_SRC layout at that
 //    point - the game's own blit ran first). The Java bridge adds the recorded
 //    buffer to the frame submission via VulkanCommandEncoder.execute().
+//  - Frame Generation: the same ffxfg_record_upscale() call records the FI
+//    prepare+dispatch after the upscale work (combo) or on its own (pure FG,
+//    swapchainImage == 0). ffxfg_present_interpolated() then acquires a
+//    swapchain image, blits the interpolation output (ffxfg_last_fg_slot())
+//    into it and presents it (bridge-owned sync objects).
 
 #include <jni.h>
 
@@ -32,15 +35,20 @@
 extern "C" {
 #endif
 
-// One FidelityFX effect context active at a time.
+// Upscaler mode (0 = none). 1 is reserved for the legacy pure-FG mode and is
+// accepted by ffxfg_init as (no upscaler + frame generation).
 enum {
-    FFXFX_MODE_FRAMEGEN    = 1,
+    FFXFX_MODE_FRAMEGEN    = 1,  // legacy: pure FG, no upscaler
     FFXFX_MODE_FSR1        = 2,
     FFXFX_MODE_FSR2        = 3,
     FFXFX_MODE_FSR3UPSCALE = 4,
 };
 
 // Initialize the bridge on the game's Vulkan device.
+// mode selects the upscaler (0/FSR1/FSR2/FSR3U; FFXFX_MODE_FRAMEGEN is legacy
+// pure-FG). fgEnabled turns on frame generation independently - it can be
+// combined with any upscaler (combo) or run alone. sharpness (0..1) drives
+// RCAS sharpening inside the FSR dispatches.
 // colorFormat is a VkFormat (BGRA8_UNORM family). Returns 0 on success.
 int ffxfg_init(long long vkDevice,
                long long vkPhysicalDevice,
@@ -48,6 +56,8 @@ int ffxfg_init(long long vkDevice,
                long long vkQueue,
                int queueFamilyIndex,
                int mode,
+               int fgEnabled,
+               float sharpness,
                int renderWidth, int renderHeight,
                int displayWidth, int displayHeight,
                int colorFormat,
@@ -74,15 +84,20 @@ int ffxfg_record_frame(long long vkCommandBuffer,
                        const float* camData, int camDataCount,
                        int reset);
 
-// Upscaler path (FSR1/FSR2/FSR3 Upscaler). Records into a bridge-owned command
+// Upscaler path (FSR1/FSR2/FSR3 Upscaler) and/or the frame generation path.
+// When a swapchainImage is given the upscaler blit is recorded; when the
+// bridge was initialized with fgEnabled the frame interpolation prepare +
+// dispatch is recorded as well (reading the upscaler output in combo mode, or
+// srcColor when no upscaler is active). Records into a bridge-owned command
 // buffer: synthetic motion vector / depth uploads (when applicable), the
-// upscale dispatch into a bridge output, then a blit of the output over the
-// whole swapchain image. swapchainImage must currently be in PRESENT_SRC
-// layout; it is left in PRESENT_SRC. camData has the same layout as above.
+// upscale dispatch into a bridge output, the blit of the output over the
+// whole swapchain image, then the interpolation dispatch into a separate
+// bridge output. swapchainImage must currently be in PRESENT_SRC layout; it is
+// left in PRESENT_SRC. camData has the same layout as above.
 // Returns the bridge-owned VkCommandBuffer handle (submitted by the Java
-// bridge through VulkanCommandEncoder.execute), or 0 on failure. Use
-// ffxfg_get_output_image(slot) with the slot returned by
-// ffxfg_last_upscale_slot().
+// bridge through VulkanCommandEncoder.execute), or 0 on failure. The upscale
+// result lives in ffxfg_get_output_image(ffxfg_last_upscale_slot()); the
+// interpolated result in ffxfg_get_fg_output_image(ffxfg_last_fg_slot()).
 long long ffxfg_record_upscale(long long srcColorImage,
                                int srcWidth, int srcHeight,
                                long long swapchainImage,
@@ -91,6 +106,9 @@ long long ffxfg_record_upscale(long long srcColorImage,
 
 // Output slot written by the last ffxfg_record_upscale call (0 or 1, -1 none).
 int ffxfg_last_upscale_slot(void);
+
+// Output slot holding the latest interpolated frame (0 or 1, -1 none).
+int ffxfg_last_fg_slot(void);
 
 // The VkCommandBuffer recorded by the last ffxfg_record_upscale call.
 long long ffxfg_last_recorded_command_buffer(void);
@@ -102,6 +120,9 @@ int ffxfg_present_interpolated(long long vkSwapchain, int slot);
 
 // The VkImage of an output slot (double buffered).
 long long ffxfg_get_output_image(int slot);
+
+// The VkImage of an interpolated-output slot (double buffered).
+long long ffxfg_get_fg_output_image(int slot);
 
 // Output slot count (double buffered).
 int ffxfg_output_slot_count(void);
@@ -115,6 +136,7 @@ JNIEXPORT jint JNICALL Java_net_vda_witchlaunch_fsr3_Fsr3Native_init(
     JNIEnv* env, jclass clazz,
     jlong vkDevice, jlong vkPhysicalDevice, jlong vkGetDeviceProcAddr,
     jlong vkQueue, jint queueFamilyIndex, jint mode,
+    jint fgEnabled, jfloat sharpness,
     jint renderWidth, jint renderHeight,
     jint displayWidth, jint displayHeight,
     jint colorFormat, jint depthInverted);
@@ -139,6 +161,9 @@ JNIEXPORT jlong JNICALL Java_net_vda_witchlaunch_fsr3_Fsr3Native_recordUpscale(
 JNIEXPORT jint JNICALL Java_net_vda_witchlaunch_fsr3_Fsr3Native_lastUpscaleSlot(
     JNIEnv* env, jclass clazz);
 
+JNIEXPORT jint JNICALL Java_net_vda_witchlaunch_fsr3_Fsr3Native_lastFgSlot(
+    JNIEnv* env, jclass clazz);
+
 JNIEXPORT jlong JNICALL Java_net_vda_witchlaunch_fsr3_Fsr3Native_lastRecordedCommandBuffer(
     JNIEnv* env, jclass clazz);
 
@@ -146,6 +171,9 @@ JNIEXPORT jint JNICALL Java_net_vda_witchlaunch_fsr3_Fsr3Native_presentInterpola
     JNIEnv* env, jclass clazz, jlong vkSwapchain, jint slot);
 
 JNIEXPORT jlong JNICALL Java_net_vda_witchlaunch_fsr3_Fsr3Native_getOutputImage(
+    JNIEnv* env, jclass clazz, jint slot);
+
+JNIEXPORT jlong JNICALL Java_net_vda_witchlaunch_fsr3_Fsr3Native_getFgOutputImage(
     JNIEnv* env, jclass clazz, jint slot);
 
 JNIEXPORT jint JNICALL Java_net_vda_witchlaunch_fsr3_Fsr3Native_outputSlotCount(
