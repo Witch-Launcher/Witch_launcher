@@ -327,6 +327,10 @@ public class Fsr3Bridge {
 
     // ---- camera capture ----------------------------------------------------------
 
+    private static float num(Object o) {
+        return ((Number) o).floatValue();
+    }
+
     private static float[] captureCamera() {
         try {
             Object mc = minecraft;
@@ -336,12 +340,12 @@ public class Fsr3Bridge {
             Object camera = gameRendererMainCamera().invoke(gameRenderer);
 
             Object pos = cameraPosition.invoke(camera);
-            float px = (Float) vec3X.invoke(pos);
-            float py = (Float) vec3Y.invoke(pos);
-            float pz = (Float) vec3Z.invoke(pos);
-            float xRot = (Float) cameraXRot.invoke(camera);
-            float yRot = (Float) cameraYRot.invoke(camera);
-            float fovDeg = (Float) cameraFov.invoke(camera);
+            float px = num(vec3X.invoke(pos));
+            float py = num(vec3Y.invoke(pos));
+            float pz = num(vec3Z.invoke(pos));
+            float xRot = num(cameraXRot.invoke(camera));
+            float yRot = num(cameraYRot.invoke(camera));
+            float fovDeg = num(cameraFov.invoke(camera));
             Object fwd = cameraForward.invoke(camera);
             Object up = cameraUp.invoke(camera);
 
@@ -349,15 +353,15 @@ public class Fsr3Bridge {
             cam[0] = px;
             cam[1] = py;
             cam[2] = pz;
-            cam[3] = (Float) v3fX.invoke(fwd) * -1f; // left -> right
-            cam[4] = (Float) v3fY.invoke(fwd) * -1f;
-            cam[5] = (Float) v3fZ.invoke(fwd) * -1f;
-            cam[6] = (Float) v3fX.invoke(up);
-            cam[7] = (Float) v3fY.invoke(up);
-            cam[8] = (Float) v3fZ.invoke(up);
-            cam[9] = (Float) v3fX.invoke(fwd);
-            cam[10] = (Float) v3fY.invoke(fwd);
-            cam[11] = (Float) v3fZ.invoke(fwd);
+            cam[3] = num(v3fX.invoke(fwd)) * -1f; // left -> right
+            cam[4] = num(v3fY.invoke(fwd)) * -1f;
+            cam[5] = num(v3fZ.invoke(fwd)) * -1f;
+            cam[6] = num(v3fX.invoke(up));
+            cam[7] = num(v3fY.invoke(up));
+            cam[8] = num(v3fZ.invoke(up));
+            cam[9] = num(v3fX.invoke(fwd));
+            cam[10] = num(v3fY.invoke(fwd));
+            cam[11] = num(v3fZ.invoke(fwd));
             cam[12] = 0.05f; // near
             cam[13] = 64.0f; // far (synthetic depth constant anyway)
             cam[14] = (float) Math.toRadians(fovDeg);
