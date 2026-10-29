@@ -570,7 +570,22 @@ int ffxfg_init(long long vkDeviceHandle,
     g_bridge.colorFormat = colorFormat;
     g_bridge.srcColorFormat = srcColorFormat;
 
-    g_bridge.scratch.resize(32u * 1024u * 1024u);
+    // Size the scratch from the SDK's own contract instead of a hardcoded
+    // guess, and log the computed requirement so a mismatch is visible in
+    // the device log (ffxGetInterfaceVK rejects undersized buffers with a
+    // generic error code).
+    const size_t requiredScratch = ffxGetScratchMemorySizeVK(physicalDevice, 4);
+    g_bridge.scratch.resize(requiredScratch + (8u << 20));
+
+    {
+        char buf[256];
+        snprintf(buf, sizeof(buf),
+                 "init: dev=%p phys=%p gdpa=%p color=%d src=%d mode=%d fg=%d scratch=%zu",
+                 device, physicalDevice, reinterpret_cast<void*>(getDeviceProcAddr),
+                 static_cast<int>(colorFormat), static_cast<int>(srcColorFormat),
+                 mode, fgEnabled, requiredScratch);
+        logBridge(buf);
+    }
 
     VkDeviceContext deviceContext = {};
     deviceContext.vkDevice = device;
@@ -589,7 +604,10 @@ int ffxfg_init(long long vkDeviceHandle,
                                            g_bridge.scratch.size(),
                                            4);
     if (error != FFX_OK) {
-        logBridge("init: ffxGetInterfaceVK failed");
+        char buf[128];
+        snprintf(buf, sizeof(buf), "init: ffxGetInterfaceVK failed (0x%x)",
+                 static_cast<unsigned>(error));
+        logBridge(buf);
         return -1;
     }
 
