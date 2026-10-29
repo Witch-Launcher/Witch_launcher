@@ -40,6 +40,7 @@ public class Fsr3Bridge {
     // Native init state.
     private static volatile boolean nativeReady = false;
     private static volatile boolean nativeFailed = false;
+    private static volatile boolean frameRecordPending = false;
     private static org.lwjgl.vulkan.VkDevice lwjglDevice;
 
     // Reflection caches.
@@ -108,6 +109,12 @@ public class Fsr3Bridge {
         lastSurface = surface;
         lastEncoder = encoder;
         lastTextureView = textureView;
+        // blitFromTexture runs once per frame; gate the FidelityFX record to
+        // the first submit() that follows it. The game's encoder can call
+        // submit() multiple times per frame and each invocation opens a new
+        // queue submission - recording into every one of them would advance
+        // the output slots more than once per frame.
+        frameRecordPending = true;
     }
 
     public static void onBeforeSubmit(Object encoder) {
@@ -118,6 +125,8 @@ public class Fsr3Bridge {
                     + " fg=" + fgEnabled + ")");
         }
         if ((upscalerMode == 0 && fgEnabled == 0) || nativeFailed) return;
+        if (!frameRecordPending) return;
+        frameRecordPending = false;
         Object surface = lastSurface;
         Object view = lastTextureView;
         if (surface == null || view == null) return;

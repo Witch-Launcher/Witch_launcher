@@ -94,11 +94,18 @@ struct BridgeState {
     // buffer joins the game's frame submission) and the frame generation
     // extra present (own acquire/submit/present).
     VkCommandPool commandPool = VK_NULL_HANDLE;
-    VkCommandBuffer upscaleCommandBuffer = VK_NULL_HANDLE;
-    // Separate buffer for the interpolated-frame present blit: resetting the
-    // upscale buffer (which the game's encoder submits) while it may still be
-    // pending is invalid.
-    VkCommandBuffer presentCommandBuffer = VK_NULL_HANDLE;
+    // Ring of primary command buffers for the per-frame FidelityFX work.
+    // Rotating avoids resetting a buffer that a previous submission may
+    // still hold pending (the game can call submit() more than once/frame).
+    static constexpr int kCbRing = 3;
+    VkCommandBuffer upscaleCommandBuffers[kCbRing] = {};
+    int upscaleCbIndex = 0;
+    long long lastRecordedCb = 0;
+    // Separate ring for the interpolated-frame present blit: resetting the
+    // upscale buffers (which the game's encoder submits) while they may
+    // still be pending is invalid.
+    VkCommandBuffer presentCommandBuffers[kCbRing] = {};
+    int presentCbIndex = 0;
     VkSemaphore acquireSemaphore = VK_NULL_HANDLE;
     VkSemaphore presentSemaphore = VK_NULL_HANDLE;
 
@@ -744,11 +751,13 @@ int ffxfg_init(long long vkDeviceHandle,
             cbInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
             cbInfo.commandPool = g_bridge.commandPool;
             cbInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-            cbInfo.commandBufferCount = 2;
-            VkCommandBuffer commandBuffers[2] = {};
+            cbInfo.commandBufferCount = 2 * BridgeState::kCbRing;
+            VkCommandBuffer commandBuffers[2 * BridgeState::kCbRing] = {};
             if (vkAllocateCommandBuffers(device, &cbInfo, commandBuffers) == VK_SUCCESS) {
-                g_bridge.upscaleCommandBuffer = commandBuffers[0];
-                g_bridge.presentCommandBuffer = commandBuffers[1];
+                for (int i = 0; i < BridgeState::kCbRing; ++i) {
+                    g_bridge.upscaleCommandBuffers[i] = commandBuffers[i];
+                    g_bridge.presentCommandBuffers[i] = commandBuffers[BridgeState::kCbRing + i];
+                }
             }
 
             VkSemaphoreCreateInfo semInfo = {};
@@ -991,8 +1000,13 @@ void ffxfg_destroy(void)
         if (b.commandPool) {
             vkDestroyCommandPool(device, b.commandPool, nullptr);
             b.commandPool = VK_NULL_HANDLE;
-            b.upscaleCommandBuffer = VK_NULL_HANDLE;
-            b.presentCommandBuffer = VK_NULL_HANDLE;
+            for (int i = 0; i < BridgeState::kCbRing; ++i) {
+                b.upscaleCommandBuffers[i] = VK_NULL_HANDLE;
+                b.presentCommandBuffers[i] = VK_NULL_HANDLE;
+            }
+            b.upscaleCbIndex = 0;
+            b.presentCbIndex = 0;
+            b.lastRecordedCb = 0;
         }
         vkDestroyImage(device, b.mvsStaging, nullptr);
         vkFreeMemory(device, b.mvsStagingMemory, nullptr);
@@ -1220,7 +1234,7 @@ long long ffxfg_record_upscale(long long srcColorImageHandle,
     BridgeState& b = g_bridge;
     b.lastFrameOk = false;
 
-    if (!b.initialized || !b.enabled || !b.commandPool || !b.upscaleCommandBuffer) {
+    if (!b.initialized || !b.enabled || !b.commandPool || !b.upscaleCommandBuffers[0]) {
         return -1;
     }
     if (!srcColorImageHandle || !camData || camDataCount < 16) {
@@ -1236,7 +1250,8 @@ long long ffxfg_record_upscale(long long srcColorImageHandle,
     const bool needsMotionData = (b.mode != FFXFX_MODE_FSR1) || b.fg;
     const bool needsBlit = (b.mode != 0 && swapchainImageHandle != 0);
 
-    VkCommandBuffer cmd = b.upscaleCommandBuffer;
+    VkCommandBuffer cmd = b.upscaleCommandBuffers[b.upscaleCbIndex];
+    b.lastRecordedCb = 0;
     VkImage srcColor = reinterpret_cast<VkImage>(static_cast<uintptr_t>(srcColorImageHandle));
     VkImage swapchainImage = reinterpret_cast<VkImage>(static_cast<uintptr_t>(swapchainImageHandle));
 
@@ -1384,6 +1399,13 @@ long long ffxfg_record_upscale(long long srcColorImageHandle,
                            VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
                            VK_PIPELINE_STAGE_2_COPY_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT,
                            VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, VK_ACCESS_2_NONE);
+
+        // Restore the upscaled output to GENERAL so the next frame's dispatch
+        // (which declares this image as a UAV) sees the layout it expects.
+        recordImageBarrier(cmd, b.outputs[b.outputSlot], VK_IMAGE_ASPECT_COLOR_BIT,
+                           VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_IMAGE_LAYOUT_GENERAL,
+                           VK_PIPELINE_STAGE_2_COPY_BIT, VK_ACCESS_2_TRANSFER_READ_BIT,
+                           VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, VK_ACCESS_2_MEMORY_READ_BIT | VK_ACCESS_2_MEMORY_WRITE_BIT);
     }
 
     // ---- frame interpolation (fg) ----
@@ -1394,12 +1416,8 @@ long long ffxfg_record_upscale(long long srcColorImageHandle,
     if (b.fg) {
         FfxResource presentColor;
         if (b.mode != 0) {
-            // The blit left the upscaler output in TRANSFER_SRC; make it
-            // compute-readable again for the FI dispatch.
-            recordImageBarrier(cmd, b.outputs[b.outputSlot], VK_IMAGE_ASPECT_COLOR_BIT,
-                               VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_IMAGE_LAYOUT_GENERAL,
-                               VK_PIPELINE_STAGE_2_COPY_BIT, VK_ACCESS_2_TRANSFER_READ_BIT,
-                               VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, VK_ACCESS_2_MEMORY_READ_BIT);
+            // The needsBlit section restored the upscaled output to GENERAL,
+            // which is the layout the FI dispatch reads it in.
             presentColor = resourceFromImage(
                 b.outputs[b.outputSlot], b.displayWidth, b.displayHeight,
                 b.colorFormat, L"PresentColor", FFX_RESOURCE_STATE_COMPUTE_READ);
@@ -1500,6 +1518,8 @@ long long ffxfg_record_upscale(long long srcColorImageHandle,
         return -1;
     }
 
+    b.lastRecordedCb = static_cast<long long>(reinterpret_cast<uintptr_t>(cmd));
+    b.upscaleCbIndex = (b.upscaleCbIndex + 1) % BridgeState::kCbRing;
     b.lastFrameOk = true;
     int writtenSlot = 0;
     if (b.mode != 0) {
@@ -1516,9 +1536,7 @@ long long ffxfg_record_upscale(long long srcColorImageHandle,
 long long ffxfg_last_recorded_command_buffer(void)
 {
     BridgeState& b = g_bridge;
-    return b.upscaleCommandBuffer
-        ? static_cast<long long>(reinterpret_cast<uintptr_t>(b.upscaleCommandBuffer))
-        : 0;
+    return b.lastRecordedCb;
 }
 
 int ffxfg_last_upscale_slot(void)
@@ -1543,7 +1561,7 @@ int ffxfg_present_interpolated(long long vkSwapchainHandle, int slot)
 {
     BridgeState& b = g_bridge;
     if (!b.initialized || !b.enabled || !b.queue || !b.commandPool ||
-        !b.acquireSemaphore || !b.presentSemaphore || !b.presentCommandBuffer ||
+        !b.acquireSemaphore || !b.presentSemaphore || !b.presentCommandBuffers[0] ||
         slot < 0 || slot >= kMaxOutputs) {
         return -1;
     }
@@ -1580,7 +1598,7 @@ int ffxfg_present_interpolated(long long vkSwapchainHandle, int slot)
     }
     VkImage swapchainImage = cachedImages[imageIndex];
 
-    VkCommandBuffer cmd = b.presentCommandBuffer;
+    VkCommandBuffer cmd = b.presentCommandBuffers[b.presentCbIndex];
     VkCommandBufferBeginInfo beginInfo = {};
     beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
     beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
@@ -1611,6 +1629,14 @@ int ffxfg_present_interpolated(long long vkSwapchainHandle, int slot)
     vkCmdBlitImage(cmd, b.fgOutputs[slot], VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
                    swapchainImage, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
                    1, &blit, VK_FILTER_LINEAR);
+
+    // Restore the interpolated output to GENERAL so the next frame's
+    // interpolation dispatch (which declares it as a UAV) sees the layout it
+    // expects; leaving it in TRANSFER_SRC would corrupt the barrier chain.
+    recordImageBarrier(cmd, b.fgOutputs[slot], VK_IMAGE_ASPECT_COLOR_BIT,
+                       VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_IMAGE_LAYOUT_GENERAL,
+                       VK_PIPELINE_STAGE_2_COPY_BIT, VK_ACCESS_2_TRANSFER_READ_BIT,
+                       VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, VK_ACCESS_2_MEMORY_READ_BIT | VK_ACCESS_2_MEMORY_WRITE_BIT);
 
     recordImageBarrier(cmd, swapchainImage, VK_IMAGE_ASPECT_COLOR_BIT,
                        VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
@@ -1659,6 +1685,7 @@ int ffxfg_present_interpolated(long long vkSwapchainHandle, int slot)
         return -1;
     }
 
+    b.presentCbIndex = (b.presentCbIndex + 1) % BridgeState::kCbRing;
     return static_cast<int>(imageIndex);
 }
 
