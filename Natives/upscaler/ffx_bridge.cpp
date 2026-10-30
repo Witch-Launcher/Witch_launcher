@@ -1480,7 +1480,10 @@ long long ffxfg_record_upscale(long long srcColorImageHandle,
                             b.renderWidth, b.renderHeight, VK_FORMAT_R32_SFLOAT);
     }
 
-    FfxErrorCode error = FFX_ERROR_INVALID_ARGUMENT;
+    // No upscaler to dispatch in pure-FG mode; the placeholder previously
+    // left INVALID_ARGUMENT here, which the check below then turned into a
+    // spurious failure before the frame generation section could ever run.
+    FfxErrorCode error = FFX_OK;
 
     // ---- upscaler dispatch (mode != 0) ----
     if (b.mode != 0) {
