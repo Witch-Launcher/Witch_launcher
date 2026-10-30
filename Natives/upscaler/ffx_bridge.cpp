@@ -21,10 +21,14 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <condition_variable>
 #include <cstdio>
 #include <cstdint>
 #include <cstring>
+#include <mutex>
+#include <thread>
 #include <vector>
+#include <atomic>
 
 #include <dlfcn.h>
 
@@ -129,6 +133,35 @@ struct BridgeState {
     int presentCbIndex = 0;
     VkSemaphore acquireSemaphore = VK_NULL_HANDLE;
     VkSemaphore presentSemaphore = VK_NULL_HANDLE;
+
+    // Witch patch: official-FSR3-style frame pacing. The generated frames
+    // are presented by a dedicated thread at evenly spaced deadlines across
+    // the real frame's interval (the SDK contract: pacing belongs to the
+    // presentation side, not the game loop), and the game thread only
+    // enqueues - it never blocks on vsync for sub-frames.
+    struct PresentJob {
+        long long swapchainHandle;
+        int slot;
+        double deadlineSeconds;  // steady_clock epoch
+        bool batchEnd;           // last slot of its batch
+        long long batchSerial;   // batch id for the done-notification
+    };
+    std::mutex presentMutex;
+    std::condition_variable presentCv;
+    std::vector<PresentJob> presentQueue;
+    std::thread presentThread;
+    bool presentThreadStarted = false;
+    bool presentThreadStop = false;
+    // Per-batch pacing context (batch starts when the first slot of the
+    // batch is enqueued; deadline spacing = frameDelta / (batchCount + 1)).
+    double fgBatchStartSeconds = 0.0;
+    int fgBatchEnqueuedIndex = 0;
+    double fgBatchDelta = 0.0;  // last record's frameTimeDelta (camData[15])
+    int fgBatchPlanned = 0;     // fgBatchCount snapshot at batch start
+    // Slot reuse protection: gen slots are recycled by the next record, so a
+    // record must not overwrite slots the present thread has not shown yet.
+    std::atomic<long long> presentSerial{0};
+    std::atomic<long long> presentDoneSerial{0};
 
     // Scratch buffer handed to ffxGetInterfaceVK.
     std::vector<uint8_t> scratch;
@@ -816,6 +849,13 @@ FfxResource resourceFromImage(VkImage image,
 
 // ---- public implementation -------------------------------------------------
 
+// Witch patch: paced-present worker + shared helpers (global scope so the
+// init/record paths and the definitions below agree; forward decls here,
+// definitions near the present section).
+static double ffxfg_steady_seconds(void);
+static void ffxfg_present_thread_run(void);
+static int ffxfg_start_present_thread(void);
+
 // (Re)allocate the interpolated-output ring: one slot per generated frame
 // plus the next write, i.e. the multiplier size. Full allocations only run
 // before the first record (no in-flight submissions reference the old
@@ -1157,6 +1197,10 @@ int ffxfg_init(long long vkDeviceHandle,
             semInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
             vkCreateSemaphore(device, &semInfo, nullptr, &g_bridge.acquireSemaphore);
             vkCreateSemaphore(device, &semInfo, nullptr, &g_bridge.presentSemaphore);
+
+            // Witch patch: paced present worker (official-FSR3-style). It
+            // waits idle until the first batch is enqueued.
+            ffxfg_start_present_thread();
 
             // GPU timestamp query pools for the record stages. Created
             // feature-detected: if the pool cannot be created the profiling
@@ -1559,6 +1603,21 @@ void ffxfg_destroy(void)
         if (b.depthStagingMapped) {
             vkUnmapMemory(device, b.depthStagingMemory);
             b.depthStagingMapped = nullptr;
+        }
+        // Witch patch: stop the paced-present worker first (it uses the
+        // queue and the fg outputs).
+        if (b.presentThreadStarted) {
+            {
+                std::lock_guard<std::mutex> lock(b.presentMutex);
+                b.presentThreadStop = true;
+                b.presentQueue.clear();
+            }
+            b.presentCv.notify_all();
+            if (b.presentThread.joinable()) {
+                b.presentThread.join();
+            }
+            b.presentThreadStarted = false;
+            b.presentThreadStop = false;
         }
         if (b.acquireSemaphore) {
             vkDestroySemaphore(device, b.acquireSemaphore, nullptr);
@@ -2277,6 +2336,27 @@ long long ffxfg_record_upscale(long long srcColorImageHandle,
                     logBridge("perf: interpolation skipped by probe (gen=0)");
                 }
             }
+            // Witch patch: pacing context for the present thread (deadline
+            // spacing across this real frame's interval).
+            b.fgBatchDelta = std::max(0.004, static_cast<double>(camData[15]) / 1000.0);
+            b.fgBatchPlanned = genCount;
+            // Gen slots are recycled by this record - do not overwrite slots
+            // the present thread has not shown yet (bounded wait; in the
+            // steady state the previous batch finished before this record).
+            if (b.presentThreadStarted) {
+                const double waitStart = ffxfg_steady_seconds();
+                while (b.presentDoneSerial.load(std::memory_order_acquire) <
+                       b.presentSerial.load(std::memory_order_acquire)) {
+                    if (ffxfg_steady_seconds() - waitStart > 0.12) {
+                        if (!(b.probeAnnounced & 16)) {
+                            b.probeAnnounced |= 16;
+                            logBridge("record: present thread lagging (batch wait timeout)");
+                        }
+                        break;
+                    }
+                    std::this_thread::sleep_for(std::chrono::microseconds(200));
+                }
+            }
             b.fgBatchBase = b.fgOutputSlot;
             b.fgBatchCount = 0;
             for (int k = 0; k < genCount; ++k) {
@@ -2372,6 +2452,207 @@ int ffxfg_last_fg_slot(void)
     return static_cast<int>((b.fgOutputSlot + b.fgSlotCount - 1) % b.fgSlotCount);
 }
 
+// Witch patch: steady clock in seconds for the pacing thread math.
+static double ffxfg_steady_seconds(void)
+{
+    return std::chrono::duration<double>(
+        std::chrono::steady_clock::now().time_since_epoch()).count();
+}
+
+// Witch patch: official-FSR3-style paced present worker. Present jobs are
+// enqueued by the game thread (which never blocks on vsync); this thread
+// shows each generated sub-frame at its deadline: batchStart +
+// index * frameDelta / (batchCount + 1), so the generated frames land
+// evenly across the real frame's interval (AMD's frame-pacing contract)
+// instead of in one burst right after the real frame.
+static void ffxfg_present_thread_run(void)
+{
+    BridgeState& b = g_bridge;
+    VkSwapchainKHR cachedSwapchain = VK_NULL_HANDLE;
+    std::vector<VkImage> cachedImages;
+    int cbIndex = 0;
+    bool acquireTimeoutLogged = false;
+
+    for (;;) {
+        BridgeState::PresentJob job = {};
+        bool haveJob = false;
+        {
+            std::unique_lock<std::mutex> lock(b.presentMutex);
+            b.presentCv.wait(lock, [&] {
+                return b.presentThreadStop || !b.presentQueue.empty();
+            });
+            if (b.presentThreadStop) {
+                return;
+            }
+            if (!b.presentQueue.empty()) {
+                job = b.presentQueue.front();
+                b.presentQueue.erase(b.presentQueue.begin());
+                haveJob = true;
+            }
+        }
+        if (!haveJob) {
+            continue;
+        }
+
+        // Pacing: wait until the slot's deadline.
+        for (;;) {
+            const double remainingMs =
+                (job.deadlineSeconds - ffxfg_steady_seconds()) * 1000.0;
+            if (remainingMs <= 0.5) {
+                break;
+            }
+            std::this_thread::sleep_for(std::chrono::microseconds(
+                static_cast<long long>(std::min(remainingMs, 4.0) * 1000.0)));
+        }
+        if (b.presentThreadStop) {
+            return;
+        }
+
+        VkSwapchainKHR swapchain = reinterpret_cast<VkSwapchainKHR>(
+            static_cast<uintptr_t>(job.swapchainHandle));
+        if (!swapchain) {
+            continue;
+        }
+        if (cachedSwapchain != swapchain) {
+            uint32_t count = 0;
+            if (vkGetSwapchainImagesKHR(b.device, swapchain, &count, nullptr) != VK_SUCCESS ||
+                count == 0) {
+                continue;
+            }
+            cachedImages.resize(count);
+            if (vkGetSwapchainImagesKHR(b.device, swapchain, &count, cachedImages.data()) != VK_SUCCESS) {
+                continue;
+            }
+            cachedSwapchain = swapchain;
+        }
+
+        uint32_t imageIndex = 0;
+        VkResult result = vkAcquireNextImageKHR(b.device, swapchain, 100000000ull,
+                                                b.acquireSemaphore, VK_NULL_HANDLE, &imageIndex);
+        if (result != VK_SUCCESS && result != VK_SUBOPTIMAL_KHR) {
+            if (result == VK_TIMEOUT && !acquireTimeoutLogged) {
+                acquireTimeoutLogged = true;
+                logBridge("present: acquire timed out (skipped one gen frame)");
+            }
+            continue;
+        }
+        if (imageIndex >= cachedImages.size() || job.slot >= b.fgSlotCount) {
+            continue;
+        }
+        VkImage swapchainImage = cachedImages[imageIndex];
+
+        VkCommandBuffer cmd = b.presentCommandBuffers[cbIndex];
+        cbIndex = (cbIndex + 1) % BridgeState::kCbRing;
+        VkCommandBufferBeginInfo beginInfo = {};
+        beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+        beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+        vkResetCommandBuffer(cmd, 0);
+        if (vkBeginCommandBuffer(cmd, &beginInfo) != VK_SUCCESS) {
+            continue;
+        }
+
+        recordImageBarrier(cmd, swapchainImage, VK_IMAGE_ASPECT_COLOR_BIT,
+                           VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                           VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, VK_ACCESS_2_NONE,
+                           VK_PIPELINE_STAGE_2_COPY_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT);
+
+        recordImageBarrier(cmd, b.fgOutputs[job.slot], VK_IMAGE_ASPECT_COLOR_BIT,
+                           VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                           VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, VK_ACCESS_2_MEMORY_WRITE_BIT,
+                           VK_PIPELINE_STAGE_2_COPY_BIT, VK_ACCESS_2_TRANSFER_READ_BIT);
+
+        VkImageBlit blit = {};
+        blit.srcSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+        blit.srcSubresource.layerCount = 1;
+        blit.srcOffsets[0] = {0, 0, 0};
+        blit.srcOffsets[1] = {static_cast<int32_t>(b.displayWidth), static_cast<int32_t>(b.displayHeight), 1};
+        // Mirror vertically: same convention as the game's own present blit.
+        blit.dstSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+        blit.dstSubresource.layerCount = 1;
+        blit.dstOffsets[0] = {0, static_cast<int32_t>(b.displayHeight), 0};
+        blit.dstOffsets[1] = {static_cast<int32_t>(b.displayWidth), 0, 1};
+        vkCmdBlitImage(cmd, b.fgOutputs[job.slot], VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                       swapchainImage, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                       1, &blit, VK_FILTER_LINEAR);
+
+        // Restore the interpolated output to GENERAL so the next frame's
+        // interpolation dispatch (which declares it as a UAV) sees the layout it
+        // expects; leaving it in TRANSFER_SRC would corrupt the barrier chain.
+        recordImageBarrier(cmd, b.fgOutputs[job.slot], VK_IMAGE_ASPECT_COLOR_BIT,
+                           VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_IMAGE_LAYOUT_GENERAL,
+                           VK_PIPELINE_STAGE_2_COPY_BIT, VK_ACCESS_2_TRANSFER_READ_BIT,
+                           VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, VK_ACCESS_2_MEMORY_READ_BIT | VK_ACCESS_2_MEMORY_WRITE_BIT);
+
+        recordImageBarrier(cmd, swapchainImage, VK_IMAGE_ASPECT_COLOR_BIT,
+                           VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
+                           VK_PIPELINE_STAGE_2_COPY_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT,
+                           VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, VK_ACCESS_2_NONE);
+
+        if (vkEndCommandBuffer(cmd) != VK_SUCCESS) {
+            continue;
+        }
+
+        VkCommandBufferSubmitInfo cmdInfo = {};
+        cmdInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO;
+        cmdInfo.commandBuffer = cmd;
+
+        VkSemaphoreSubmitInfo waitInfo = {};
+        waitInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO;
+        waitInfo.semaphore = b.acquireSemaphore;
+        waitInfo.stageMask = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT;
+
+        VkSemaphoreSubmitInfo signalInfo = {};
+        signalInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO;
+        signalInfo.semaphore = b.presentSemaphore;
+        signalInfo.stageMask = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT;
+
+        VkSubmitInfo2 submitInfo = {};
+        submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO_2;
+        submitInfo.commandBufferInfoCount = 1;
+        submitInfo.pCommandBufferInfos = &cmdInfo;
+        submitInfo.waitSemaphoreInfoCount = 1;
+        submitInfo.pWaitSemaphoreInfos = &waitInfo;
+        submitInfo.signalSemaphoreInfoCount = 1;
+        submitInfo.pSignalSemaphoreInfos = &signalInfo;
+        if (vkQueueSubmit2(b.queue, 1, &submitInfo, VK_NULL_HANDLE) != VK_SUCCESS) {
+            continue;
+        }
+
+        VkPresentInfoKHR presentInfo = {};
+        presentInfo.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
+        presentInfo.waitSemaphoreCount = 1;
+        presentInfo.pWaitSemaphores = &b.presentSemaphore;
+        presentInfo.swapchainCount = 1;
+        presentInfo.pSwapchains = &swapchain;
+        presentInfo.pImageIndices = &imageIndex;
+        result = vkQueuePresentKHR(b.queue, &presentInfo);
+        if (result == VK_SUCCESS || result == VK_SUBOPTIMAL_KHR) {
+            ffxfg_note_frame_time(b.statLastGenTime, b.statGenFps);
+            if (job.batchEnd) {
+                b.presentDoneSerial.store(job.batchSerial, std::memory_order_release);
+            }
+        }
+    }
+}
+
+// Spawn the pacing worker once (fg enabled). Returns 0 on success.
+static int ffxfg_start_present_thread(void)
+{
+    BridgeState& b = g_bridge;
+    if (!b.presentThreadStarted) {
+        b.presentThreadStarted = true;
+        b.presentThreadStop = false;
+        try {
+            b.presentThread = std::thread(ffxfg_present_thread_run);
+        } catch (...) {
+            b.presentThreadStarted = false;
+            logBridge("init: present thread spawn failed (pacing disabled)");
+            return -1;
+        }
+    }
+    return 0;
+}
+
 int ffxfg_present_interpolated(long long vkSwapchainHandle, int slot)
 {
     BridgeState& b = g_bridge;
@@ -2387,132 +2668,54 @@ int ffxfg_present_interpolated(long long vkSwapchainHandle, int slot)
         }
         return 0;
     }
+    if (b.presentThreadStarted && b.presentThreadStop) {
+        return -1;
+    }
+    if (!b.presentThreadStarted) {
+        if (ffxfg_start_present_thread() != 0) {
+            return -1;
+        }
+    }
 
     VkSwapchainKHR swapchain = reinterpret_cast<VkSwapchainKHR>(
         static_cast<uintptr_t>(vkSwapchainHandle));
     if (!swapchain) {
         return -1;
     }
-    const auto presentStart = std::chrono::steady_clock::now();
 
-    // Resolve the swapchain image array (cheap; cached by swapchain handle).
-    static VkSwapchainKHR cachedSwapchain = VK_NULL_HANDLE;
-    static std::vector<VkImage> cachedImages;
-    if (cachedSwapchain != swapchain) {
-        uint32_t count = 0;
-        if (vkGetSwapchainImagesKHR(b.device, swapchain, &count, nullptr) != VK_SUCCESS || count == 0) {
-            return -1;
+    // Batch boundary: the first slot of a batch resets the pacing context
+    // (the record side stores fgBatchCount/fgBatchDelta before presenting).
+    const double nowSec = ffxfg_steady_seconds();
+    bool batchEnd = false;
+    long long batchSerial = 0;
+    {
+        std::lock_guard<std::mutex> lock(b.presentMutex);
+        if (b.fgBatchEnqueuedIndex >= b.fgBatchPlanned) {
+            // New batch begins.
+            b.presentSerial.fetch_add(1, std::memory_order_acq_rel);
+            batchSerial = b.presentSerial.load(std::memory_order_acquire);
+            b.fgBatchStartSeconds = nowSec;
+            b.fgBatchEnqueuedIndex = 0;
         }
-        cachedImages.resize(count);
-        if (vkGetSwapchainImagesKHR(b.device, swapchain, &count, cachedImages.data()) != VK_SUCCESS) {
-            return -1;
-        }
-        cachedSwapchain = swapchain;
+        const double spacing = std::max(0.004, b.fgBatchDelta) /
+            static_cast<double>(std::max(1, b.fgBatchPlanned + 1));
+        // Slot i lands at (i + 1) * delta / (batchCount + 1): M displayed
+        // frames spread evenly between the two real frames (real at 0 and
+        // delta). Small nudge to avoid missing the target vsync.
+        const double deadline = b.fgBatchStartSeconds +
+            static_cast<double>(b.fgBatchEnqueuedIndex + 1) * spacing - 0.002;
+        batchEnd = (b.fgBatchEnqueuedIndex + 1 >= b.fgBatchPlanned);
+        BridgeState::PresentJob job = {};
+        job.swapchainHandle = vkSwapchainHandle;
+        job.slot = slot;
+        job.deadlineSeconds = deadline;
+        job.batchEnd = batchEnd;
+        job.batchSerial = batchSerial;
+        b.presentQueue.push_back(job);
+        b.fgBatchEnqueuedIndex++;
+        b.presentCv.notify_one();
     }
-
-    uint32_t imageIndex = 0;
-    VkResult result = vkAcquireNextImageKHR(b.device, swapchain, 100000000ull,
-                                            b.acquireSemaphore, VK_NULL_HANDLE, &imageIndex);
-    if (result != VK_SUCCESS && result != VK_SUBOPTIMAL_KHR) {
-        return -1;
-    }
-    if (imageIndex >= cachedImages.size()) {
-        return -1;
-    }
-    VkImage swapchainImage = cachedImages[imageIndex];
-
-    VkCommandBuffer cmd = b.presentCommandBuffers[b.presentCbIndex];
-    VkCommandBufferBeginInfo beginInfo = {};
-    beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-    beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-    vkResetCommandBuffer(cmd, 0);
-    if (vkBeginCommandBuffer(cmd, &beginInfo) != VK_SUCCESS) {
-        return -1;
-    }
-
-    recordImageBarrier(cmd, swapchainImage, VK_IMAGE_ASPECT_COLOR_BIT,
-                       VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-                       VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, VK_ACCESS_2_NONE,
-                       VK_PIPELINE_STAGE_2_COPY_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT);
-
-    recordImageBarrier(cmd, b.fgOutputs[slot], VK_IMAGE_ASPECT_COLOR_BIT,
-                       VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-                       VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, VK_ACCESS_2_MEMORY_WRITE_BIT,
-                       VK_PIPELINE_STAGE_2_COPY_BIT, VK_ACCESS_2_TRANSFER_READ_BIT);
-
-    VkImageBlit blit = {};
-    blit.srcSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-    blit.srcSubresource.layerCount = 1;
-    blit.srcOffsets[0] = {0, 0, 0};
-    blit.srcOffsets[1] = {static_cast<int32_t>(b.displayWidth), static_cast<int32_t>(b.displayHeight), 1};
-    // Mirror vertically: same convention as the game's own present blit.
-    blit.dstSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-    blit.dstSubresource.layerCount = 1;
-    blit.dstOffsets[0] = {0, static_cast<int32_t>(b.displayHeight), 0};
-    blit.dstOffsets[1] = {static_cast<int32_t>(b.displayWidth), 0, 1};
-    vkCmdBlitImage(cmd, b.fgOutputs[slot], VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-                   swapchainImage, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-                   1, &blit, VK_FILTER_LINEAR);
-
-    // Restore the interpolated output to GENERAL so the next frame's
-    // interpolation dispatch (which declares it as a UAV) sees the layout it
-    // expects; leaving it in TRANSFER_SRC would corrupt the barrier chain.
-    recordImageBarrier(cmd, b.fgOutputs[slot], VK_IMAGE_ASPECT_COLOR_BIT,
-                       VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_IMAGE_LAYOUT_GENERAL,
-                       VK_PIPELINE_STAGE_2_COPY_BIT, VK_ACCESS_2_TRANSFER_READ_BIT,
-                       VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, VK_ACCESS_2_MEMORY_READ_BIT | VK_ACCESS_2_MEMORY_WRITE_BIT);
-
-    recordImageBarrier(cmd, swapchainImage, VK_IMAGE_ASPECT_COLOR_BIT,
-                       VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
-                       VK_PIPELINE_STAGE_2_COPY_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT,
-                       VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, VK_ACCESS_2_NONE);
-
-    if (vkEndCommandBuffer(cmd) != VK_SUCCESS) {
-        return -1;
-    }
-
-    VkCommandBufferSubmitInfo cmdInfo = {};
-    cmdInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO;
-    cmdInfo.commandBuffer = cmd;
-
-    VkSemaphoreSubmitInfo waitInfo = {};
-    waitInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO;
-    waitInfo.semaphore = b.acquireSemaphore;
-    waitInfo.stageMask = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT;
-
-    VkSemaphoreSubmitInfo signalInfo = {};
-    signalInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO;
-    signalInfo.semaphore = b.presentSemaphore;
-    signalInfo.stageMask = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT;
-
-    VkSubmitInfo2 submitInfo = {};
-    submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO_2;
-    submitInfo.commandBufferInfoCount = 1;
-    submitInfo.pCommandBufferInfos = &cmdInfo;
-    submitInfo.waitSemaphoreInfoCount = 1;
-    submitInfo.pWaitSemaphoreInfos = &waitInfo;
-    submitInfo.signalSemaphoreInfoCount = 1;
-    submitInfo.pSignalSemaphoreInfos = &signalInfo;
-    if (vkQueueSubmit2(b.queue, 1, &submitInfo, VK_NULL_HANDLE) != VK_SUCCESS) {
-        return -1;
-    }
-
-    VkPresentInfoKHR presentInfo = {};
-    presentInfo.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
-    presentInfo.waitSemaphoreCount = 1;
-    presentInfo.pWaitSemaphores = &b.presentSemaphore;
-    presentInfo.swapchainCount = 1;
-    presentInfo.pSwapchains = &swapchain;
-    presentInfo.pImageIndices = &imageIndex;
-    result = vkQueuePresentKHR(b.queue, &presentInfo);
-    if (result != VK_SUCCESS && result != VK_SUBOPTIMAL_KHR) {
-        return -1;
-    }
-
-    b.presentCbIndex = (b.presentCbIndex + 1) % BridgeState::kCbRing;
-    ffxfg_note_frame_time(b.statLastGenTime, b.statGenFps);
-    perfNote(&b.perfPresent, perfMsSince(presentStart));
-    return static_cast<int>(imageIndex);
+    return 0;
 }
 
 // ---- JNI surface ------------------------------------------------------------

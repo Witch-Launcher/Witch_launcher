@@ -214,6 +214,9 @@ JNIEXPORT jint JNICALL Java_net_vda_witchlaunch_fsr3_Fsr3Native_outputSlotCount(
 JNIEXPORT jint JNICALL Java_net_vda_witchlaunch_fsr3_Fsr3Native_setFgMultiplier(
     JNIEnv* env, jclass clazz, jint multiplier);
 
+JNIEXPORT jint JNICALL Java_net_vda_witchlaunch_fsr3_Fsr3Native_setProbe(
+    JNIEnv* env, jclass clazz, jint probe);
+
 JNIEXPORT jint JNICALL Java_net_vda_witchlaunch_fsr3_Fsr3Native_pendingFgSlotCount(
     JNIEnv* env, jclass clazz);
 
