@@ -180,6 +180,10 @@ struct BridgeState {
     // dispatch runs (M - 1) times per real frame, each sub-frame at its own
     // interpolation phase.
     int fgMultiplier = 2;
+    // Interpolated-output slots actually allocated: multiplier size (one slot
+    // per generated frame + the next write). Memory matters on 3 GB devices;
+    // x2 therefore gets 2 slots (~14 MB) instead of 6 (~41 MB).
+    int fgSlotCount = kMaxFgOutputs;
     // Slots written by the current frame's FI dispatches (batch for the
     // present hook to display, oldest first).
     uint32_t fgBatchBase = 0;
@@ -294,14 +298,14 @@ void foldPerfTimestamps(BridgeState& b, int poolIndex)
     if (!pool || !b.perfPoolWritten[poolIndex]) {
         return;
     }
-    b.perfPoolWritten[poolIndex] = false;
-
     uint64_t ts[BridgeState::kPerfQueryCount] = {};
     if (vkGetQueryPoolResults(b.device, pool, 0, BridgeState::kPerfQueryCount,
                               sizeof(ts), ts, sizeof(uint64_t),
                               VK_QUERY_RESULT_64_BIT) != VK_SUCCESS) {
         return;
     }
+    b.perfPoolWritten[poolIndex] = false;
+
     if (ts[0] == 0 || ts[1] == 0 || ts[4] == 0) {
         return;
     }
@@ -774,6 +778,71 @@ FfxResource resourceFromImage(VkImage image,
 
 // ---- public implementation -------------------------------------------------
 
+// (Re)allocate the interpolated-output ring: one slot per generated frame
+// plus the next write, i.e. the multiplier size. Full allocations only run
+// before the first record (no in-flight submissions reference the old
+// images); later changes keep the existing slots and the multiplier degrades
+// to the slot count instead. Returns false only when the initial allocation
+// cannot create a single image.
+bool ensureFgOutputImages(BridgeState& b, int multiplier)
+{
+    int count = multiplier;
+    if (count < 2) {
+        count = 2;
+    }
+    if (count > kMaxFgOutputs) {
+        count = kMaxFgOutputs;
+    }
+    if (count == b.fgSlotCount) {
+        return true;
+    }
+
+    // Reallocations reference live submissions once frames have run: debounce
+    // by keeping the existing ring (the multiplier caps itself to it).
+    const bool ranFrames = b.frameID != 0 || b.havePrevPose || b.lastFrameOk;
+    if (ranFrames) {
+        if (b.fgMultiplier > b.fgSlotCount) {
+            logBridge("fg multiplier slots resize deferred to next init");
+        }
+        return true;
+    }
+
+    if (b.device) {
+        for (int i = 0; i < kMaxFgOutputs; ++i) {
+            if (b.fgOutputs[i]) {
+                vkDestroyImage(b.device, b.fgOutputs[i], nullptr);
+                b.fgOutputs[i] = VK_NULL_HANDLE;
+            }
+            if (b.fgOutputMemories[i]) {
+                vkFreeMemory(b.device, b.fgOutputMemories[i], nullptr);
+                b.fgOutputMemories[i] = VK_NULL_HANDLE;
+            }
+        }
+        for (int i = 0; i < count; ++i) {
+            if (!createImage2D(b.device, b.physicalDevice, b.displayWidth, b.displayHeight,
+                               b.colorFormat, VK_IMAGE_TILING_OPTIMAL,
+                               VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
+                               VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+                               &b.fgOutputs[i], &b.fgOutputMemories[i],
+                               nullptr, nullptr)) {
+                if (i == 0) {
+                    b.fgSlotCount = kMaxFgOutputs;
+                    return false;
+                }
+                count = i;
+                logBridge("fg outputs: reduced allocation");
+                break;
+            }
+        }
+    }
+    b.fgSlotCount = count;
+    char message[64];
+    snprintf(message, sizeof(message), "fg slots: %d (%.1fMB)", count,
+             count * static_cast<double>(b.displayWidth) * b.displayHeight * 4.0 / (1 << 20));
+    logBridge(message);
+    return true;
+}
+
 int ffxfg_init(long long vkDeviceHandle,
                long long vkPhysicalDeviceHandle,
                long long vkGetDeviceProcAddrHandle,
@@ -1062,13 +1131,25 @@ int ffxfg_init(long long vkDeviceHandle,
             qpInfo.sType = VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO;
             qpInfo.queryType = VK_QUERY_TYPE_TIMESTAMP;
             qpInfo.queryCount = BridgeState::kPerfQueryCount;
+            int poolsCreated = 0;
             for (int i = 0; i < BridgeState::kPerfQueryPools; ++i) {
                 if (vkCreateQueryPool(device, &qpInfo, nullptr,
                                       &g_bridge.perfQueryPools[i]) != VK_SUCCESS) {
                     g_bridge.perfQueryPools[i] = VK_NULL_HANDLE;
                     break;
                 }
+                poolsCreated++;
             }
+            VkQueueFamilyProperties queueProps[8] = {};
+            uint32_t queuePropCount = 8;
+            vkGetPhysicalDeviceQueueFamilyProperties(physicalDevice, &queuePropCount, queueProps);
+            const uint32_t validBits = (g_bridge.queueFamilyIndex < queuePropCount)
+                ? queueProps[g_bridge.queueFamilyIndex].timestampValidBits : 0;
+            char perfInfo[128];
+            snprintf(perfInfo, sizeof(perfInfo),
+                     "perf-gpu: period=%.1fns valid=%u pools=%d/8",
+                     g_bridge.timestampPeriodNs, validBits, poolsCreated);
+            logBridge(perfInfo);
         }
     }
 
@@ -1330,17 +1411,10 @@ int ffxfg_init(long long vkDeviceHandle,
         }
     }
     if (g_bridge.fg) {
-        for (int i = 0; i < kMaxFgOutputs; ++i) {
-            if (!createImage2D(device, physicalDevice, g_bridge.displayWidth, g_bridge.displayHeight,
-                               colorFormat, VK_IMAGE_TILING_OPTIMAL,
-                               VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
-                               VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
-                               &g_bridge.fgOutputs[i], &g_bridge.fgOutputMemories[i],
-                               nullptr, nullptr)) {
-                logBridge("init: fg output image failed");
-                ffxfg_destroy();
-                return -1;
-            }
+        if (!ensureFgOutputImages(g_bridge, g_bridge.fgMultiplier)) {
+            logBridge("init: fg output image failed");
+            ffxfg_destroy();
+            return -1;
         }
     }
 
@@ -1560,6 +1634,7 @@ int ffxfg_set_fg_multiplier(int multiplier)
         return -1;
     }
     b.fgMultiplier = multiplier;
+    ensureFgOutputImages(b, multiplier);
     return 0;
 }
 
@@ -1579,7 +1654,7 @@ int ffxfg_pending_fg_slot(int index)
         static_cast<uint32_t>(index) >= b.fgBatchCount) {
         return -1;
     }
-    return static_cast<int>((b.fgBatchBase + static_cast<uint32_t>(index)) % kMaxFgOutputs);
+    return static_cast<int>((b.fgBatchBase + static_cast<uint32_t>(index)) % b.fgSlotCount);
 }
 
 void ffxfg_get_frame_stats(float* outFps)
@@ -1739,7 +1814,8 @@ int ffxfg_record_frame(long long vkCommandBufferHandle,
     // computed the displacement between the two real frames once; each
     // sub-frame dispatch re-scales it to its own phase and writes its own
     // output slot.
-    const int genCount = std::max(1, std::min(kMaxFgOutputs, b.fgMultiplier) - 1);
+    const int genCap = std::min(b.fgMultiplier, b.fgSlotCount);
+    const int genCount = std::max(1, std::min(kMaxFgOutputs, genCap) - 1);
     b.fgBatchBase = b.fgOutputSlot;
     b.fgBatchCount = 0;
     for (int k = 0; k < genCount; ++k) {
@@ -1757,7 +1833,7 @@ int ffxfg_record_frame(long long vkCommandBufferHandle,
             logDispatchError("fg fi", error);
             return -1;
         }
-        b.fgOutputSlot = (b.fgOutputSlot + 1) % kMaxFgOutputs;
+        b.fgOutputSlot = (b.fgOutputSlot + 1) % b.fgSlotCount;
         b.fgBatchCount++;
         b.statGenFrames.fetch_add(1, std::memory_order_relaxed);
     }
@@ -1765,7 +1841,7 @@ int ffxfg_record_frame(long long vkCommandBufferHandle,
     b.statRealFrames.fetch_add(1, std::memory_order_relaxed);
 
     b.lastFrameOk = true;
-    return static_cast<int>((b.fgOutputSlot + kMaxFgOutputs - 1) % kMaxFgOutputs);
+    return static_cast<int>((b.fgOutputSlot + b.fgSlotCount - 1) % b.fgSlotCount);
 }
 
 long long ffxfg_record_upscale(long long srcColorImageHandle,
@@ -2112,7 +2188,8 @@ long long ffxfg_record_upscale(long long srcColorImageHandle,
             // Witch patch: frame generation multiplier, same loop as the
             // legacy FG path. Optical flow ran once above; each sub-frame
             // re-scales the flow to its own phase.
-            const int genCount = std::max(1, std::min(kMaxFgOutputs, b.fgMultiplier) - 1);
+            const int genCap = std::min(b.fgMultiplier, b.fgSlotCount);
+    const int genCount = std::max(1, std::min(kMaxFgOutputs, genCap) - 1);
             b.fgBatchBase = b.fgOutputSlot;
             b.fgBatchCount = 0;
             for (int k = 0; k < genCount; ++k) {
@@ -2129,7 +2206,7 @@ long long ffxfg_record_upscale(long long srcColorImageHandle,
                 if (error != FFX_OK) {
                     break;
                 }
-                b.fgOutputSlot = (b.fgOutputSlot + 1) % kMaxFgOutputs;
+                b.fgOutputSlot = (b.fgOutputSlot + 1) % b.fgSlotCount;
                 b.fgBatchCount++;
                 b.statGenFrames.fetch_add(1, std::memory_order_relaxed);
             }
@@ -2159,11 +2236,12 @@ long long ffxfg_record_upscale(long long srcColorImageHandle,
         snprintf(message, sizeof(message),
                  "perf: copy=%.1f up=%.1f of=%.1f prep=%.1f fi=%.1f total=%.1fms"
                  " gpu: copy=%.1f of=%.1f prep=%.1f fi=%.1f total=%.1fms"
-                 " present=%.1f (fgx=%d)",
+                 " present=%.1f fps=%.1f gen=%.1f (fgx=%d)",
                  b.perfCopies.emaMs, b.perfUpscale.emaMs, b.perfOf.emaMs,
                  b.perfPrepare.emaMs, b.perfFi.emaMs, b.perfTotal.emaMs,
                  b.perfGpuCopies.emaMs, b.perfGpuOf.emaMs, b.perfGpuPrep.emaMs,
                  b.perfGpuFi.emaMs, b.perfGpuTotal.emaMs, b.perfPresent.emaMs,
+                 b.statRenderFps, b.statGenFps,
                  b.fgMultiplier);
         logBridge(message);
     }
@@ -2178,7 +2256,7 @@ long long ffxfg_record_upscale(long long srcColorImageHandle,
     }
     if (b.fg) {
         // The FI loop consumed the fg slots; report the last written one.
-        writtenSlot = static_cast<int>((b.fgOutputSlot + kMaxFgOutputs - 1) % kMaxFgOutputs);
+        writtenSlot = static_cast<int>((b.fgOutputSlot + b.fgSlotCount - 1) % b.fgSlotCount);
     }
     return writtenSlot;
 }
@@ -2204,7 +2282,7 @@ int ffxfg_last_fg_slot(void)
     if (!b.lastFrameOk || !b.fg) {
         return -1;
     }
-    return static_cast<int>((b.fgOutputSlot + kMaxFgOutputs - 1) % kMaxFgOutputs);
+    return static_cast<int>((b.fgOutputSlot + b.fgSlotCount - 1) % b.fgSlotCount);
 }
 
 int ffxfg_present_interpolated(long long vkSwapchainHandle, int slot)
@@ -2212,7 +2290,7 @@ int ffxfg_present_interpolated(long long vkSwapchainHandle, int slot)
     BridgeState& b = g_bridge;
     if (!b.initialized || !b.enabled || !b.queue || !b.commandPool ||
         !b.acquireSemaphore || !b.presentSemaphore || !b.presentCommandBuffers[0] ||
-        slot < 0 || slot >= kMaxFgOutputs) {
+        slot < 0 || slot >= b.fgSlotCount) {
         return -1;
     }
 
