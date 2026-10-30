@@ -226,6 +226,15 @@ struct BridgeState {
     VkImageView synthMvsView = VK_NULL_HANDLE;
     bool synthMvsFailedLogged = false;
 
+    // Witch patch: optical-flow throttle for A11. Desktop GPUs run the full
+    // optical-flow dispatch every frame; on A11 that field alone plausibly
+    // costs 100+ ms of GPU time (no per-stage counters available). Re-running
+    // only every second record reuses the previous vector field for the
+    // skipped frames (flow stays aligned with the last computed frame) and
+    // directly measures how much OF contributes.
+    int ofRunCounter = 0;
+    bool ofThrottleAnnounced = false;
+
     // GPU timestamp profiling: a ring of query pools, one set of markers per
     // record. Results of record N are consumed (folded into the GPU EMAs)
     // when record N + kPerfQueryPools reuses the same pool; 8 records of lag
@@ -601,6 +610,27 @@ void recordCopyHostImage(VkCommandBuffer cmd,
                          uint32_t width, uint32_t height,
                          VkFormat format);
 
+// Lazy staging for the CPU mvs fallback: only allocated when the GPU synth
+// dispatch is unavailable (keeps the ~11MB host-visible allocation out of
+// the process footprint while the fast path works).
+bool ensureMvsStaging()
+{
+    BridgeState& b = g_bridge;
+    if (b.mvsStagingMapped) {
+        return true;
+    }
+    if (!createImage2D(b.device, b.physicalDevice, b.renderWidth, b.renderHeight,
+                       VK_FORMAT_R16G16_SFLOAT, VK_IMAGE_TILING_LINEAR,
+                       VK_IMAGE_USAGE_TRANSFER_SRC_BIT,
+                       VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+                       &b.mvsStaging, &b.mvsStagingMemory,
+                       &b.mvsStagingMapped, &b.mvsStagingRowPitch)) {
+        logBridge("record: mvs staging lazy alloc failed");
+        return false;
+    }
+    return true;
+}
+
 void recordSyntheticMotionVectors(VkCommandBuffer cmd, const float* camData)
 {
     BridgeState& b = g_bridge;
@@ -673,6 +703,9 @@ void recordSyntheticMotionVectors(VkCommandBuffer cmd, const float* camData)
     if (!b.synthMvsFailedLogged) {
         logBridge("record: gpu mvs synth unavailable, using cpu loop");
         b.synthMvsFailedLogged = true;
+    }
+    if (!ensureMvsStaging()) {
+        return;
     }
     writeSyntheticMotionVectors(camData);
     recordCopyHostImage(cmd, b.mvsStaging, b.mvsDevice,
@@ -1154,16 +1187,6 @@ int ffxfg_init(long long vkDeviceHandle,
     }
 
     // Staging images (LINEAR tiling, host visible) + device SRV images.
-    if (!createImage2D(device, physicalDevice, g_bridge.renderWidth, g_bridge.renderHeight,
-                       VK_FORMAT_R16G16_SFLOAT, VK_IMAGE_TILING_LINEAR,
-                       VK_IMAGE_USAGE_TRANSFER_SRC_BIT,
-                       VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
-                       &g_bridge.mvsStaging, &g_bridge.mvsStagingMemory,
-                       &g_bridge.mvsStagingMapped, &g_bridge.mvsStagingRowPitch)) {
-        logBridge("init: mvs staging failed");
-        ffxfg_destroy();
-        return -1;
-    }
 
     // GPU motion-vector synthesis: STORAGE usage lets the compute pass write
     // the field in place (falls back to the staging+copy path when the format
@@ -1173,6 +1196,22 @@ int ffxfg_init(long long vkDeviceHandle,
                                         &mvsFormatProps);
     const bool mvsStorageOk =
         (mvsFormatProps.optimalTilingFeatures & VK_FORMAT_FEATURE_STORAGE_IMAGE_BIT) != 0;
+
+    // The staging image is only needed by the CPU fallback; with the GPU
+    // synth path active the ~11MB host-visible allocation stays out of the
+    // process footprint unless the fallback actually fires (it is created
+    // lazily by ensureMvsStaging at first use).
+    if (!mvsStorageOk &&
+        !createImage2D(device, physicalDevice, g_bridge.renderWidth, g_bridge.renderHeight,
+                       VK_FORMAT_R16G16_SFLOAT, VK_IMAGE_TILING_LINEAR,
+                       VK_IMAGE_USAGE_TRANSFER_SRC_BIT,
+                       VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+                       &g_bridge.mvsStaging, &g_bridge.mvsStagingMemory,
+                       &g_bridge.mvsStagingMapped, &g_bridge.mvsStagingRowPitch)) {
+        logBridge("init: mvs staging failed");
+        ffxfg_destroy();
+        return -1;
+    }
 
     if (!createImage2D(device, physicalDevice, g_bridge.renderWidth, g_bridge.renderHeight,
                        VK_FORMAT_R16G16_SFLOAT, VK_IMAGE_TILING_OPTIMAL,
@@ -2098,11 +2137,25 @@ long long ffxfg_record_upscale(long long srcColorImageHandle,
         ofDispatch.minMaxLuminance.y = 1.0f;
         ofDispatch.opticalFlowVector = b.ofVector;
         ofDispatch.opticalFlowSCD = b.ofScd;
-        error = ffxOpticalflowContextDispatch(&b.ofContext, &ofDispatch);
-        if (error != FFX_OK) {
-            logDispatchError("fg of", error);
-            vkEndCommandBuffer(cmd);
-            return -1;
+        // Witch patch: run the optical-flow dispatch every other record in
+        // FG-only mode (A11 measurement probe: no per-stage GPU counters,
+        // so the fps delta is the only available signal; the FSR3
+        // upscaler combo path keeps the driver-spec per-frame flow).
+        // Skipped records reuse the previous flow field - flows stay
+        // aligned with the last computed frame, interpolation quality dips
+        // slightly.
+        const bool throttleOf = (b.mode == 0) &&
+                                ((b.ofRunCounter++ % 2) != 0) && (reset == 0);
+        if (!throttleOf) {
+            error = ffxOpticalflowContextDispatch(&b.ofContext, &ofDispatch);
+            if (error != FFX_OK) {
+                logDispatchError("fg of", error);
+                vkEndCommandBuffer(cmd);
+                return -1;
+            }
+        } else if (!b.ofThrottleAnnounced) {
+            b.ofThrottleAnnounced = true;
+            logBridge("perf: of throttled to every other frame (A11 probe)");
         }
         perfNote(&b.perfOf, perfMsSince(stageStart));
         stageStart = std::chrono::steady_clock::now();
