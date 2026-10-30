@@ -30,6 +30,10 @@ public class Fsr3Bridge {
             Float.parseFloat(System.getProperty("witch.fsr3.scale", "1.0f"));
     private static volatile float sharpness =
             Float.parseFloat(System.getProperty("witch.fsr3.sharpness", "0.6f"));
+    // Witch patch: frame generation multiplier M (2..6) - the number of frames
+    // displayed per real frame.
+    private static volatile int fgMultiplier =
+            Integer.getInteger("witch.fsr3.fgx", 2);
 
     // Per-frame state (render thread only).
     private static volatile Object minecraft;
@@ -71,16 +75,18 @@ public class Fsr3Bridge {
     private static boolean havePrevCam = false;
 
     public static void configure(int newUpscalerMode, int newFgEnabled,
-                                 float newScale, float newSharpness) {
+                                 int newFgMultiplier, float newScale, float newSharpness) {
         // Publish through system properties FIRST: if the game's classloader
         // defines its own copy of this class, its static init runs on first
         // hook touch and must already see the real values.
         System.setProperty("witch.fsr3.upscaler", Integer.toString(newUpscalerMode));
         System.setProperty("witch.fsr3.fg", newFgEnabled != 0 ? "1" : "0");
+        System.setProperty("witch.fsr3.fgx", Integer.toString(newFgMultiplier));
         System.setProperty("witch.fsr3.scale", Float.toString(newScale));
         System.setProperty("witch.fsr3.sharpness", Float.toString(newSharpness));
         upscalerMode = newUpscalerMode;
         fgEnabled = newFgEnabled != 0 ? 1 : 0;
+        fgMultiplier = Math.max(2, Math.min(6, newFgMultiplier));
         scale = newScale;
         sharpness = newSharpness;
     }
@@ -184,9 +190,14 @@ public class Fsr3Bridge {
             if (!nativeReady) return;
             long swapchain = surfaceSwapchain.getLong(surface);
             if (swapchain == 0) return;
-            int slot = Fsr3Native.lastFgSlot();
-            if (slot < 0) return;
-            Fsr3Native.presentInterpolated(swapchain, slot);
+            // Witch patch: multi-frame generation - present every generated
+            // sub-frame produced by the last record pass, oldest first.
+            int count = Fsr3Native.pendingFgSlotCount();
+            for (int i = 0; i < count; i++) {
+                int slot = Fsr3Native.pendingFgSlot(i);
+                if (slot < 0) break;
+                if (Fsr3Native.presentInterpolated(swapchain, slot) < 0) break;
+            }
         } catch (Throwable t) {
             logOnce("onPresent failed: " + t);
             nativeFailed = true;
@@ -304,8 +315,12 @@ public class Fsr3Bridge {
             return false;
         }
         nativeReady = true;
+        if (fgEnabled != 0) {
+            Fsr3Native.setFgMultiplier(fgMultiplier);
+        }
         System.out.println("[Fsr3Bridge] native init ok (upscaler=" + upscalerMode
-                + " fg=" + fgEnabled + " scale=" + scale + " sharp=" + sharpness
+                + " fg=" + fgEnabled + " fgx=" + fgMultiplier + " scale=" + scale
+                + " sharp=" + sharpness
                 + " render=" + renderW + "x" + renderH
                 + " display=" + displayW + "x" + displayH
                 + " fmt=" + vkFormat + " srcFmt=" + srcFormat + ")");

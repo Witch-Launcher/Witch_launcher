@@ -80,6 +80,11 @@ typedef struct FrameInterpolationConstants
 
     float   jitter[2];
     float   motionVectorScale[2];
+
+    // Witch patch: phase of the generated frame within the pair of real
+    // frames. 0.5 = classic midpoint interpolation (x2 frame generation);
+    // intermediate multi-frame generation passes lower values (1/M .. (M-1)/M).
+    float   interpolationPhase;
 } FrameInterpolationConstants;
 
 typedef struct InpaintingPyramidConstants {

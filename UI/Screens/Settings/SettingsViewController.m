@@ -211,6 +211,12 @@
             header(@"settings.group.fsr_hint"),
             header(@"settings.group.fg"),
             @{@"type": @"switch", @"label": localize(@"preference.title.fsr3_framegen", nil), @"key": @"fsr3.framegen"},
+            @{@"type": @"picker", @"label": localize(@"preference.title.fsr3_framegen_multiplier", nil), @"key": @"fsr3.framegen_multiplier", @"default": @"2", @"options": @[
+                @{@"key": @"2", @"name": @"x2"},
+                @{@"key": @"3", @"name": @"x3"},
+                @{@"key": @"4", @"name": @"x4"},
+                @{@"key": @"6", @"name": @"x6"},
+            ]},
             header(@"settings.group.fg_hint"),
             header(@"settings.group.ltw"),
             @{@"type": @"picker", @"label": localize(@"preference.title.ltw_angle_backend", nil), @"key": @"video.ltw_angle_backend", @"options": @[@"metal", @"vulkan"], @"default": @"vulkan"},

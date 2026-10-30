@@ -112,8 +112,23 @@ long long ffxfg_record_upscale(long long srcColorImage,
 // Output slot written by the last ffxfg_record_upscale call (0 or 1, -1 none).
 int ffxfg_last_upscale_slot(void);
 
-// Output slot holding the latest interpolated frame (0 or 1, -1 none).
+// Output slot holding the latest interpolated frame (or -1 none).
 int ffxfg_last_fg_slot(void);
+
+// Witch patch: frame generation multiplier M (2..6; number of frames shown
+// per real frame). Must be set before the first record call. Returns 0 on
+// success.
+int ffxfg_set_fg_multiplier(int multiplier);
+
+// Witch patch: the generated sub-frame slots produced by the last record
+// call, oldest first. The present hook shows them all (multi-frame
+// generation).
+int ffxfg_pending_fg_slot_count(void);
+int ffxfg_pending_fg_slot(int index);
+
+// Witch patch: current EMA frame rates for the launcher widget.
+// outFps[0] = real (render) fps, outFps[1] = generated-frame fps.
+void ffxfg_get_frame_stats(float* outFps);
 
 // The VkCommandBuffer recorded by the last ffxfg_record_upscale call.
 long long ffxfg_last_recorded_command_buffer(void);
@@ -183,6 +198,18 @@ JNIEXPORT jlong JNICALL Java_net_vda_witchlaunch_fsr3_Fsr3Native_getFgOutputImag
 
 JNIEXPORT jint JNICALL Java_net_vda_witchlaunch_fsr3_Fsr3Native_outputSlotCount(
     JNIEnv* env, jclass clazz);
+
+JNIEXPORT jint JNICALL Java_net_vda_witchlaunch_fsr3_Fsr3Native_setFgMultiplier(
+    JNIEnv* env, jclass clazz, jint multiplier);
+
+JNIEXPORT jint JNICALL Java_net_vda_witchlaunch_fsr3_Fsr3Native_pendingFgSlotCount(
+    JNIEnv* env, jclass clazz);
+
+JNIEXPORT jint JNICALL Java_net_vda_witchlaunch_fsr3_Fsr3Native_pendingFgSlot(
+    JNIEnv* env, jclass clazz, jint index);
+
+JNIEXPORT void JNICALL Java_net_vda_witchlaunch_fsr3_Fsr3Native_getFrameStats(
+    JNIEnv* env, jclass clazz, jfloatArray stats);
 
 #ifdef __cplusplus
 }

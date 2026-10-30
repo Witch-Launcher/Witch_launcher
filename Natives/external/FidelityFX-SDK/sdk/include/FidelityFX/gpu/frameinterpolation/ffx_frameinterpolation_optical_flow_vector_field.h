@@ -28,7 +28,7 @@ void computeOpticalFlowFieldMvs(FfxUInt32x2 dtID, FfxFloat32x2 fOpticalFlowVecto
     FfxFloat32x2 fUv = FfxFloat32x2(FfxFloat32x2(dtID)+0.5f) / GetOpticalFlowSize2();
 
     const FfxFloat32 scaleFactor = 1.0f;
-    FfxFloat32x2 fMotionVectorHalf = fOpticalFlowVector * 0.5f;
+    FfxFloat32x2 fMotionVectorHalf = fOpticalFlowVector * InterpolationPhase();
 
     // pixel position in current frame + fOpticalFlowVector-> pixel position in previous frame
     FfxFloat32x3 prevBackbufferCol = SamplePreviousBackbuffer(fUv + fOpticalFlowVector).xyz; // returns previous backbuffer color of current frame pixel position in previous frame

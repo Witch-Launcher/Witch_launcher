@@ -57,7 +57,7 @@ void reconstructPreviousDepth(FfxInt32x2 iPxPos)
     FfxFloat32x2 fMotionVector = LoadDilatedMotionVector(iPxPos + iDistortionPixelOffset);
     FfxFloat32   fDilatedDepth = LoadDilatedDepth(iPxPos + iDistortionPixelOffset);
 
-    ReconstructPrevDepth(iPxPos, 1, fDilatedDepth, fMotionVector * 0.5f, RenderSize());
+    ReconstructPrevDepth(iPxPos, 1, fDilatedDepth, fMotionVector * InterpolationPhase(), RenderSize());
 }
 
 #endif // FFX_FRAMEINTERPOLATION_RECONSTRUCT_PREVIOUS_DEPTH_H

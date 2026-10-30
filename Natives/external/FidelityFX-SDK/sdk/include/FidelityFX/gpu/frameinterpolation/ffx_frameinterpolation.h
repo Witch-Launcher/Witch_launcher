@@ -100,10 +100,10 @@ void computeInterpolatedColor(FfxUInt32x2 iPxPos, out FfxFloat32x3 fInterpolated
     FfxFloat32x2 fDisocclusionFactor = FfxFloat32x2(FFX_EQUAL(ffxSaturate(SampleDisocclusionMask(fLrUvInInterpolationRect).xy), FfxFloat32x2(1.0, 1.0)));
 
     InterpolationSourceColor fPrevColorGame = SampleTextureBilinear(false, fUvInScreenSpace, +gameMv.fMotionVector * fUvLetterBoxScale, DisplaySize()); // Get in previous frame buffer, the color of interpolated pixel
-    InterpolationSourceColor fCurrColorGame = SampleTextureBilinear(true, fUvInScreenSpace, -gameMv.fMotionVector * fUvLetterBoxScale, DisplaySize()); // Get color in current framebuffer, of color of interpolated pixel
+    InterpolationSourceColor fCurrColorGame = SampleTextureBilinear(true, fUvInScreenSpace, -gameMv.fMotionVector * fUvLetterBoxScale * CurrPhaseFactor(), DisplaySize()); // Get color in current framebuffer, of color of interpolated pixel
 
     InterpolationSourceColor fPrevColorOF = SampleTextureBilinear(false, fUvInScreenSpace, +ofMv.fMotionVector * fUvLetterBoxScale, DisplaySize());
-    InterpolationSourceColor fCurrColorOF = SampleTextureBilinear(true, fUvInScreenSpace, -ofMv.fMotionVector * fUvLetterBoxScale, DisplaySize());
+    InterpolationSourceColor fCurrColorOF = SampleTextureBilinear(true, fUvInScreenSpace, -ofMv.fMotionVector * fUvLetterBoxScale * CurrPhaseFactor(), DisplaySize());
 
     FfxFloat32 fDisoccludedFactor = 0.0f;
 
@@ -115,9 +115,9 @@ void computeInterpolatedColor(FfxUInt32x2 iPxPos, out FfxFloat32x3 fInterpolated
         // Inpaint in bi-directional disocclusion areas
         updateInPaintingWeight(fInPaintingWeight, FfxFloat32(length(fDisocclusionFactor) <= FFX_FRAMEINTERPOLATION_EPSILON));
 
-        FfxFloat32 t = 0.5f;
-        t += 0.5f * (1 - (fDisocclusionFactor.x));
-        t -= 0.5f * (1 - (fDisocclusionFactor.y));
+        FfxFloat32 t = InterpolationPhase();
+        t += (1 - InterpolationPhase()) * (1 - (fDisocclusionFactor.x));
+        t -= InterpolationPhase() * (1 - (fDisocclusionFactor.y));
         // Say if fDisocclusionFactor.x is 1 and fDisocclusionFactor.y = 0, then t will be 0. fInterpolatedColor will be entirely from fPrevColorGame 
         fInterpolatedColor = ffxLerp(fPrevColorGame.fRaw, fCurrColorGame.fRaw, ffxSaturate(t));
         fDisoccludedFactor = ffxSaturate(1 - ffxMin(fDisocclusionFactor.x, fDisocclusionFactor.y));
@@ -138,11 +138,11 @@ void computeInterpolatedColor(FfxUInt32x2 iPxPos, out FfxFloat32x3 fInterpolated
 
     {
 
-        FfxFloat32 ofT = 0.5f;
+        FfxFloat32 ofT = InterpolationPhase();
 
         if (fPrevColorOF.fBilinearWeightSum > 0 && fCurrColorOF.fBilinearWeightSum > 0)
         {
-            ofT = 0.5f;
+            ofT = InterpolationPhase();
         }
         else if (fPrevColorOF.fBilinearWeightSum > 0)
         {

@@ -1141,10 +1141,18 @@ int launchJVMWithArgs(NSString *username, id launchTarget, int width, int height
         if (fsr3Sharpness < 0.0f || fsr3Sharpness > 1.0f) {
             fsr3Sharpness = 0.6f;
         }
+        // Frame generation multiplier: the number of frames displayed per real
+        // frame (2 = classic x2, one generated frame). Values other than
+        // 2/3/4/6 fall back to 2.
+        NSInteger fsr3FgMultiplier = getPrefInt(@"fsr3.framegen_multiplier");
+        if (fsr3FgMultiplier != 2 && fsr3FgMultiplier != 3 &&
+            fsr3FgMultiplier != 4 && fsr3FgMultiplier != 6) {
+            fsr3FgMultiplier = 2;
+        }
         margv[++margc] = [NSString stringWithFormat:
-            @"-javaagent:%@/fsr3-agent.jar=mode=%ld&fg=%d&scale=%.3f&sharp=%.3f",
+            @"-javaagent:%@/fsr3-agent.jar=mode=%ld&fg=%d&fgx=%ld&scale=%.3f&sharp=%.3f",
             librariesPath, (long)fsr3Upscaler, fsr3Framegen ? 1 : 0,
-            fsr3Scale, fsr3Sharpness].UTF8String;
+            (long)fsr3FgMultiplier, fsr3Scale, fsr3Sharpness].UTF8String;
     }
 
     // F3 debug overlay metadata. The agent patches the game's debug screen at

@@ -81,6 +81,20 @@
 
         FfxFloat32x2    fJitter;
         FfxFloat32x2    fMotionVectorScale;
+
+        // Witch patch: multi-frame generation phase (0.5 for classic x2).
+        FfxFloat32      fInterpolationPhase;
+    }
+
+    // Witch patch: see the GLSL callbacks header for the phase semantics.
+    const FfxFloat32 InterpolationPhase()
+    {
+        return fInterpolationPhase;
+    }
+
+    const FfxFloat32 CurrPhaseFactor()
+    {
+        return (1.0f - fInterpolationPhase) / fInterpolationPhase;
     }
 
     const FfxFloat32x2 Jitter()

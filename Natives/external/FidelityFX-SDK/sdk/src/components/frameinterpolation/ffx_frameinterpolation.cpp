@@ -960,6 +960,8 @@ FFX_API FfxErrorCode ffxFrameInterpolationDispatch(FfxFrameInterpolationContext*
     contextPrivate->constants.opticalFlowScale[1]   = params->opticalFlowScale.y;
     contextPrivate->constants.opticalFlowBlockSize  = params->opticalFlowBlockSize;// displaySize.width / params->opticalFlowBufferSize.width;
     contextPrivate->constants.dispatchFlags         = params->flags;
+    // Witch patch: multi-frame generation phase for this sub-frame dispatch.
+    contextPrivate->constants.interpolationPhase    = params->interpolationPhase;
 
     contextPrivate->constants.cameraNear            = params->cameraNear;
     contextPrivate->constants.cameraFar             = params->cameraFar;
@@ -1199,6 +1201,11 @@ FFX_API FfxErrorCode ffxFrameInterpolationDispatch(FfxFrameInterpolationContext*
         }
 
         // store current buffer
+        // Witch patch: intermediate multi-frame generation sub-frames reuse
+        // the same pair of real frames; only the final sub-frame may rotate
+        // the previous-interpolation-source history, otherwise subsequent
+        // sub-frames would blend the current frame against itself.
+        if (!(params->flags & FFX_FRAMEINTERPOLATION_DISPATCH_INTERMEDIATE_SUBFRAME))
         {
             FfxGpuJobDescription copyJobs[] = { {FFX_GPU_JOB_COPY} };
             FfxResourceInternal  copySources[_countof(copyJobs)] = { contextPrivate->srvResources[FFX_FRAMEINTERPOLATION_RESOURCE_IDENTIFIER_CURRENT_INTERPOLATION_SOURCE] };

@@ -945,6 +945,7 @@
 "settings.group.fsr_hint" = "Upscales a lower-resolution render to native display size to gain FPS. FSR 1 is a fast spatial upscaler; FSR 2 and FSR 3 use temporal history for sharper results. Lower the render resolution scale for more FPS, or raise sharpening if the image looks soft. Requires the MoltenVK (Vulkan) renderer.";
 "settings.group.fg" = "Frame Generation (FSR 3 FG)";
 "preference.title.fsr3_framegen" = "Enable Frame Generation";
+"preference.title.fsr3_framegen_multiplier" = "Frame Generation Multiplier";
 "settings.group.fg_hint" = "Interpolates an extra frame between rendered ones, roughly doubling perceived FPS. Can be combined with any FSR upscaler above - the interpolated frames then keep the upscaled quality. Experimental: motion is estimated from the camera only, so fast scene changes may smear. Requires the MoltenVK (Vulkan) renderer.";
 "settings.group.witch" = "Witch Server";
 "settings.group.curseforge" = "CurseForge";

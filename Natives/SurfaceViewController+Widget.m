@@ -12,6 +12,9 @@
 - (void)refreshMenuItems;
 @end
 
+// FidelityFX frame generation stats (ffx_bridge.cpp, C linkage).
+extern void ffxfg_get_frame_stats(float *outFps);
+
 static NSTimer *widgetTimer;
 static BOOL widgetLastMenuOn;
 static uint64_t widgetLastSwapCount;
@@ -686,8 +689,23 @@ static NSString *widgetShortBytes(uint64_t bytes) {
         widgetLastFpsTime = 0;
     }
 
-    // FG FPS removed - always hide the label
-    self.widgetFgFpsLabel.hidden = YES;
+    // FG FPS: generated-frame rate reported by the FidelityFX bridge
+    // (0 while frame generation is off or not yet producing frames).
+    BOOL fgFpsOn = getPrefBool(@"general.widget_show_fgfps");
+    if (fgFpsOn) {
+        float fgStats[2] = {0.0f, 0.0f};
+        ffxfg_get_frame_stats(fgStats);
+        unsigned long genFps = fgStats[1] > 0.5f ? (unsigned long)lround(fgStats[1]) : 0;
+        if (genFps > 0) {
+            self.widgetFgFpsLabel.text = [NSString stringWithFormat:@"FG: +%lu", genFps];
+            self.widgetFgFpsLabel.hidden = NO;
+        } else {
+            self.widgetFgFpsLabel.text = nil;
+            self.widgetFgFpsLabel.hidden = YES;
+        }
+    } else {
+        self.widgetFgFpsLabel.hidden = YES;
+    }
 
     // CPU/GPU/temperature/battery: sample at ~1Hz when any unit is enabled
     BOOL cpuOn = getPrefBool(@"general.widget_show_cpu");
@@ -866,6 +884,9 @@ static NSString *widgetShortBytes(uint64_t bytes) {
     if (fpsOn) {
         contentW = MAX(contentW, ceil([self.widgetFpsLabel sizeThatFits:CGSizeMake(CGFLOAT_MAX, 15)].width));
     }
+    if (fgFpsOn) {
+        contentW = MAX(contentW, ceil([self.widgetFgFpsLabel sizeThatFits:CGSizeMake(CGFLOAT_MAX, 13)].width));
+    }
     if (ramTextOn) {
         contentW = MAX(contentW, ceil([self.widgetRamLabel sizeThatFits:CGSizeMake(CGFLOAT_MAX, 14)].width));
     }
@@ -915,6 +936,10 @@ static NSString *widgetShortBytes(uint64_t bytes) {
     if (fpsOn) {
         self.widgetFpsLabel.frame = CGRectMake(xPad, y, barW, 15);
         y += 17;
+    }
+    if (fgFpsOn && !self.widgetFgFpsLabel.hidden) {
+        self.widgetFgFpsLabel.frame = CGRectMake(xPad, y, barW, 13);
+        y += 15;
     }
     if (ramBarOn) {
         self.widgetBarView.frame = CGRectMake(xPad, y, barW, barH);
@@ -994,7 +1019,7 @@ static NSString *widgetShortBytes(uint64_t bytes) {
     }
     CGFloat height = y + yPad - 5;
 
-    BOOL anyContentOn = fpsOn || ramTextOn || ramBarOn || tempOn || battOn || clockOn || cpuOn || gpuOn;
+    BOOL anyContentOn = fpsOn || (fgFpsOn && !self.widgetFgFpsLabel.hidden) || ramTextOn || ramBarOn || tempOn || battOn || clockOn || cpuOn || gpuOn;
     if (!anyContentOn) {
         // Nothing enabled yet: keep a visible tile instead of an invisible sliver
         self.widgetEmptyIcon.hidden = NO;

@@ -240,8 +240,13 @@ typedef enum FfxFrameInterpolationDispatchFlags
     FFX_FRAMEINTERPOLATION_DISPATCH_DRAW_DEBUG_RESET_INDICATORS = (1 << 1),  ///< A bit indicating that the debug reset indicators will be drawn to the generated output.
     FFX_FRAMEINTERPOLATION_DISPATCH_DRAW_DEBUG_VIEW             = (1 << 2),  ///< A bit indicating that the interpolated output resource will contain debug views with relevant information.
     FFX_FRAMEINTERPOLATION_DISPATCH_DRAW_DEBUG_PACING_LINES     = (1 << 3),  ///< A bit indicating that the debug pacing lines will be drawn to the generated output.
-    FFX_FRAMEINTERPOLATION_DISPATCH_RESERVED_1 = (1 << 4),
-    FFX_FRAMEINTERPOLATION_DISPATCH_RESERVED_2 = (1 << 5), 
+    // Witch patch: multi-frame generation. Intermediate sub-frame dispatches
+    // reuse the same pair of real frames, so they must not rotate the
+    // previous-interpolation-source history (see the copy at the end of
+    // ffxFrameInterpolationDispatch). Only the final sub-frame of a real
+    // frame sets this bit off.
+    FFX_FRAMEINTERPOLATION_DISPATCH_INTERMEDIATE_SUBFRAME       = (1 << 4),
+    FFX_FRAMEINTERPOLATION_DISPATCH_RESERVED_2 = (1 << 5),
 } FfxFrameInterpolationDispatchFlags;
 
 typedef struct FfxFrameInterpolationDispatchDescription {
@@ -269,6 +274,11 @@ typedef struct FfxFrameInterpolationDispatchDescription {
 
     float                               frameTimeDelta;                     ///< The time elapsed since the last frame (expressed in milliseconds).
     bool                                reset;                              ///< A boolean value which when set to true, indicates the camera has moved discontinuously.
+
+    // Witch patch: multi-frame generation phase within the current pair of
+    // real frames, in (0, 1). 0.5 (the default) reproduces classic x2 frame
+    // generation; intermediate sub-frames use 1/M .. (M-1)/M.
+    float                               interpolationPhase;
 
     FfxBackbufferTransferFunction       backBufferTransferFunction;         ///< The transfer function use to convert interpolation source color data to linear RGB.
     float                               minMaxLuminance[2];                 ///< Min and max luminance values, used when converting HDR colors to linear RGB

@@ -17,6 +17,8 @@
 #include "ffx_bridge.h"
 
 #include <algorithm>
+#include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <cstdio>
 #include <cstdint>
@@ -41,6 +43,11 @@
 namespace {
 
 constexpr int kMaxOutputs = 2;
+// Interpolated outputs: one slot per generated sub-frame. The largest
+// supported frame generation multiplier is x6 (5 generated frames per real
+// frame), and every slot of a frame must stay alive until its presents drain
+// before the next record pass rotates back onto it.
+constexpr int kMaxFgOutputs = 6;
 
 struct BridgeState {
     bool initialized = false;
@@ -155,17 +162,36 @@ struct BridgeState {
     VkImage outputs[kMaxOutputs] = {};
     VkDeviceMemory outputMemories[kMaxOutputs] = {};
 
-    // Interpolated outputs (double buffered; written by the FI dispatch).
-    // Kept separate from the upscaler outputs so both features can run in
-    // combo: the upscaler writes outputs[], the interpolator consumes that
-    // result and writes fgOutputs[].
-    VkImage fgOutputs[kMaxOutputs] = {};
-    VkDeviceMemory fgOutputMemories[kMaxOutputs] = {};
+    // Interpolated outputs (one slot per generated sub-frame; written by the
+    // FI dispatches). Kept separate from the upscaler outputs so both features
+    // can run in combo: the upscaler writes outputs[], the interpolator
+    // consumes that result and writes fgOutputs[].
+    VkImage fgOutputs[kMaxFgOutputs] = {};
+    VkDeviceMemory fgOutputMemories[kMaxFgOutputs] = {};
 
     uint64_t frameID = 0;
     uint32_t outputSlot = 0;
     uint32_t fgOutputSlot = 0;
     bool lastFrameOk = false;
+
+    // Witch patch: frame generation multiplier M: the number of frames shown
+    // per real frame (2 = classic x2, one generated frame; up to 6). The FI
+    // dispatch runs (M - 1) times per real frame, each sub-frame at its own
+    // interpolation phase.
+    int fgMultiplier = 2;
+    // Slots written by the current frame's FI dispatches (batch for the
+    // present hook to display, oldest first).
+    uint32_t fgBatchBase = 0;
+    uint32_t fgBatchCount = 0;
+
+    // Witch patch: frame statistics for the launcher FPS widget. Timestamps
+    // are captured per event and folded into EMA rates on read.
+    std::atomic<uint64_t> statRealFrames{0};
+    std::atomic<uint64_t> statGenFrames{0};
+    double statLastRealTime = 0.0;
+    double statLastGenTime = 0.0;
+    float statRenderFps = 0.0f;
+    float statGenFps = 0.0f;
 
     // Previous camera pose for synthetic motion vectors.
     float prevPos[3] = {};
@@ -987,7 +1013,7 @@ int ffxfg_init(long long vkDeviceHandle,
         }
     }
     if (g_bridge.fg) {
-        for (int i = 0; i < kMaxOutputs; ++i) {
+        for (int i = 0; i < kMaxFgOutputs; ++i) {
             if (!createImage2D(device, physicalDevice, g_bridge.displayWidth, g_bridge.displayHeight,
                                colorFormat, VK_IMAGE_TILING_OPTIMAL,
                                VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
@@ -1105,7 +1131,7 @@ void ffxfg_destroy(void)
             b.outputs[i] = VK_NULL_HANDLE;
             b.outputMemories[i] = VK_NULL_HANDLE;
         }
-        for (int i = 0; i < kMaxOutputs; ++i) {
+        for (int i = 0; i < kMaxFgOutputs; ++i) {
             vkDestroyImage(device, b.fgOutputs[i], nullptr);
             vkFreeMemory(device, b.fgOutputMemories[i], nullptr);
             b.fgOutputs[i] = VK_NULL_HANDLE;
@@ -1160,6 +1186,59 @@ long long ffxfg_get_fg_output_image(int slot)
 int ffxfg_output_slot_count(void)
 {
     return kMaxOutputs;
+}
+
+// Witch patch: fold a frame event into an EMA rate for the FPS widget.
+static void ffxfg_note_frame_time(double& lastTime, float& emaFps)
+{
+    using namespace std::chrono;
+    double now = duration_cast<duration<double>>(steady_clock::now().time_since_epoch()).count();
+    if (lastTime > 0.0) {
+        double dt = now - lastTime;
+        if (dt > 0.0) {
+            float inst = static_cast<float>(1.0 / dt);
+            emaFps = emaFps > 0.0f ? (0.9f * emaFps + 0.1f * inst) : inst;
+        }
+    }
+    lastTime = now;
+}
+
+int ffxfg_set_fg_multiplier(int multiplier)
+{
+    BridgeState& b = g_bridge;
+    if (multiplier < 2 || multiplier > kMaxFgOutputs) {
+        return -1;
+    }
+    b.fgMultiplier = multiplier;
+    return 0;
+}
+
+int ffxfg_pending_fg_slot_count(void)
+{
+    BridgeState& b = g_bridge;
+    if (!b.initialized || !b.enabled || !b.fg || b.fgBatchCount == 0) {
+        return 0;
+    }
+    return static_cast<int>(b.fgBatchCount);
+}
+
+int ffxfg_pending_fg_slot(int index)
+{
+    BridgeState& b = g_bridge;
+    if (!b.initialized || !b.enabled || !b.fg || index < 0 ||
+        static_cast<uint32_t>(index) >= b.fgBatchCount) {
+        return -1;
+    }
+    return static_cast<int>((b.fgBatchBase + static_cast<uint32_t>(index)) % kMaxFgOutputs);
+}
+
+void ffxfg_get_frame_stats(float* outFps)
+{
+    BridgeState& b = g_bridge;
+    if (outFps) {
+        outFps[0] = b.statRenderFps;
+        outFps[1] = b.statGenFps;
+    }
 }
 
 int ffxfg_last_frame_ok(void)
@@ -1299,7 +1378,6 @@ int ffxfg_record_frame(long long vkCommandBufferHandle,
     dispatch.viewSpaceToMetersFactor = 1.0f;
     dispatch.frameTimeDelta = camData[15];
     dispatch.reset = (reset != 0);
-    dispatch.frameID = b.frameID;
     // Same resources the prepare registered: the interpolation passes read
     // the dilated depth/MVs and the previous reconstructed depth from them.
     dispatch.dilatedDepth = prepare.dilatedDepth;
@@ -1310,17 +1388,37 @@ int ffxfg_record_frame(long long vkCommandBufferHandle,
     dispatch.interpolationRect.width = static_cast<int32_t>(b.displayWidth);
     dispatch.interpolationRect.height = static_cast<int32_t>(b.displayHeight);
 
-    error = ffxFrameInterpolationDispatch(&b.fiContext, &dispatch);
-    if (error != FFX_OK) {
-        logDispatchError("fg fi", error);
-        return -1;
+    // Witch patch: frame generation multiplier. The optical flow pass above
+    // computed the displacement between the two real frames once; each
+    // sub-frame dispatch re-scales it to its own phase and writes its own
+    // output slot.
+    const int genCount = std::max(1, std::min(kMaxFgOutputs, b.fgMultiplier) - 1);
+    b.fgBatchBase = b.fgOutputSlot;
+    b.fgBatchCount = 0;
+    for (int k = 0; k < genCount; ++k) {
+        dispatch.interpolationPhase =
+            static_cast<float>(k + 1) / static_cast<float>(genCount + 1);
+        dispatch.flags = (k + 1 < genCount)
+            ? FFX_FRAMEINTERPOLATION_DISPATCH_INTERMEDIATE_SUBFRAME : 0u;
+        dispatch.output = resourceFromImage(
+            b.fgOutputs[b.fgOutputSlot], b.displayWidth, b.displayHeight,
+            b.colorFormat, L"InterpolatedOutput", FFX_RESOURCE_STATE_UNORDERED_ACCESS);
+        dispatch.frameID = b.frameID;
+        error = ffxFrameInterpolationDispatch(&b.fiContext, &dispatch);
+        b.frameID++;
+        if (error != FFX_OK) {
+            logDispatchError("fg fi", error);
+            return -1;
+        }
+        b.fgOutputSlot = (b.fgOutputSlot + 1) % kMaxFgOutputs;
+        b.fgBatchCount++;
+        b.statGenFrames.fetch_add(1, std::memory_order_relaxed);
     }
+    ffxfg_note_frame_time(b.statLastRealTime, b.statRenderFps);
+    b.statRealFrames.fetch_add(1, std::memory_order_relaxed);
 
     b.lastFrameOk = true;
-    const int writtenSlot = static_cast<int>(b.fgOutputSlot);
-    b.fgOutputSlot = (b.fgOutputSlot + 1) % kMaxOutputs;
-    b.frameID++;
-    return writtenSlot;
+    return static_cast<int>((b.fgOutputSlot + kMaxFgOutputs - 1) % kMaxFgOutputs);
 }
 
 long long ffxfg_record_upscale(long long srcColorImageHandle,
@@ -1535,9 +1633,6 @@ long long ffxfg_record_upscale(long long srcColorImageHandle,
         FfxResource depthResource = resourceFromImage(
             b.depthDevice, b.renderWidth, b.renderHeight,
             VK_FORMAT_R32_SFLOAT, L"Depth", FFX_RESOURCE_STATE_COMPUTE_READ);
-        FfxResource fgOutput = resourceFromImage(
-            b.fgOutputs[b.fgOutputSlot], b.displayWidth, b.displayHeight,
-            b.colorFormat, L"InterpolatedOutput", FFX_RESOURCE_STATE_UNORDERED_ACCESS);
 
         // Optical flow must run before the interpolation dispatch and feed
         // it (composite driver contract). Running the FI with empty
@@ -1613,7 +1708,6 @@ long long ffxfg_record_upscale(long long srcColorImageHandle,
             dispatch.renderSize.width = b.renderWidth;
             dispatch.renderSize.height = b.renderHeight;
             dispatch.currentBackBuffer = presentColor;
-            dispatch.output = fgOutput;
             dispatch.opticalFlowVector = b.ofVector;
             dispatch.opticalFlowSceneChangeDetection = b.ofScd;
             dispatch.opticalFlowBlockSize = 8;
@@ -1625,7 +1719,6 @@ long long ffxfg_record_upscale(long long srcColorImageHandle,
             dispatch.viewSpaceToMetersFactor = 1.0f;
             dispatch.frameTimeDelta = camData[15];
             dispatch.reset = (reset != 0);
-            dispatch.frameID = b.frameID;
             dispatch.dilatedDepth = prepare.dilatedDepth;
             dispatch.dilatedMotionVectors = prepare.dilatedMotionVectors;
             dispatch.reconstructedPrevDepth = prepare.reconstructedPrevDepth;
@@ -1633,8 +1726,33 @@ long long ffxfg_record_upscale(long long srcColorImageHandle,
             dispatch.interpolationRect.top = 0;
             dispatch.interpolationRect.width = static_cast<int32_t>(b.displayWidth);
             dispatch.interpolationRect.height = static_cast<int32_t>(b.displayHeight);
-            error = ffxFrameInterpolationDispatch(&b.fiContext, &dispatch);
-            b.frameID++;
+
+            // Witch patch: frame generation multiplier, same loop as the
+            // legacy FG path. Optical flow ran once above; each sub-frame
+            // re-scales the flow to its own phase.
+            const int genCount = std::max(1, std::min(kMaxFgOutputs, b.fgMultiplier) - 1);
+            b.fgBatchBase = b.fgOutputSlot;
+            b.fgBatchCount = 0;
+            for (int k = 0; k < genCount; ++k) {
+                dispatch.interpolationPhase =
+                    static_cast<float>(k + 1) / static_cast<float>(genCount + 1);
+                dispatch.flags = (k + 1 < genCount)
+                    ? FFX_FRAMEINTERPOLATION_DISPATCH_INTERMEDIATE_SUBFRAME : 0u;
+                dispatch.output = resourceFromImage(
+                    b.fgOutputs[b.fgOutputSlot], b.displayWidth, b.displayHeight,
+                    b.colorFormat, L"InterpolatedOutput", FFX_RESOURCE_STATE_UNORDERED_ACCESS);
+                dispatch.frameID = b.frameID;
+                error = ffxFrameInterpolationDispatch(&b.fiContext, &dispatch);
+                b.frameID++;
+                if (error != FFX_OK) {
+                    break;
+                }
+                b.fgOutputSlot = (b.fgOutputSlot + 1) % kMaxFgOutputs;
+                b.fgBatchCount++;
+                b.statGenFrames.fetch_add(1, std::memory_order_relaxed);
+            }
+            ffxfg_note_frame_time(b.statLastRealTime, b.statRenderFps);
+            b.statRealFrames.fetch_add(1, std::memory_order_relaxed);
         }
         if (error != FFX_OK) {
             logDispatchError("fg fi", error);
@@ -1656,8 +1774,8 @@ long long ffxfg_record_upscale(long long srcColorImageHandle,
         b.outputSlot = (b.outputSlot + 1) % kMaxOutputs;
     }
     if (b.fg) {
-        writtenSlot = static_cast<int>(b.fgOutputSlot);
-        b.fgOutputSlot = (b.fgOutputSlot + 1) % kMaxOutputs;
+        // The FI loop consumed the fg slots; report the last written one.
+        writtenSlot = static_cast<int>((b.fgOutputSlot + kMaxFgOutputs - 1) % kMaxFgOutputs);
     }
     return writtenSlot;
 }
@@ -1683,7 +1801,7 @@ int ffxfg_last_fg_slot(void)
     if (!b.lastFrameOk || !b.fg) {
         return -1;
     }
-    return static_cast<int>((b.fgOutputSlot + kMaxOutputs - 1) % kMaxOutputs);
+    return static_cast<int>((b.fgOutputSlot + kMaxFgOutputs - 1) % kMaxFgOutputs);
 }
 
 int ffxfg_present_interpolated(long long vkSwapchainHandle, int slot)
@@ -1691,7 +1809,7 @@ int ffxfg_present_interpolated(long long vkSwapchainHandle, int slot)
     BridgeState& b = g_bridge;
     if (!b.initialized || !b.enabled || !b.queue || !b.commandPool ||
         !b.acquireSemaphore || !b.presentSemaphore || !b.presentCommandBuffers[0] ||
-        slot < 0 || slot >= kMaxOutputs) {
+        slot < 0 || slot >= kMaxFgOutputs) {
         return -1;
     }
 
@@ -1816,6 +1934,7 @@ int ffxfg_present_interpolated(long long vkSwapchainHandle, int slot)
     }
 
     b.presentCbIndex = (b.presentCbIndex + 1) % BridgeState::kCbRing;
+    ffxfg_note_frame_time(b.statLastGenTime, b.statGenFps);
     return static_cast<int>(imageIndex);
 }
 
@@ -1961,4 +2080,44 @@ JNIEXPORT jint JNICALL Java_net_vda_witchlaunch_fsr3_Fsr3Native_outputSlotCount(
     (void)env;
     (void)clazz;
     return ffxfg_output_slot_count();
+}
+
+JNIEXPORT jint JNICALL Java_net_vda_witchlaunch_fsr3_Fsr3Native_setFgMultiplier(
+    JNIEnv* env, jclass clazz, jint multiplier)
+{
+    (void)env;
+    (void)clazz;
+    return ffxfg_set_fg_multiplier(static_cast<int>(multiplier));
+}
+
+JNIEXPORT jint JNICALL Java_net_vda_witchlaunch_fsr3_Fsr3Native_pendingFgSlotCount(
+    JNIEnv* env, jclass clazz)
+{
+    (void)env;
+    (void)clazz;
+    return ffxfg_pending_fg_slot_count();
+}
+
+JNIEXPORT jint JNICALL Java_net_vda_witchlaunch_fsr3_Fsr3Native_pendingFgSlot(
+    JNIEnv* env, jclass clazz, jint index)
+{
+    (void)env;
+    (void)clazz;
+    return ffxfg_pending_fg_slot(static_cast<int>(index));
+}
+
+JNIEXPORT void JNICALL Java_net_vda_witchlaunch_fsr3_Fsr3Native_getFrameStats(
+    JNIEnv* env, jclass clazz, jfloatArray stats)
+{
+    (void)clazz;
+    if (!env || !stats) {
+        return;
+    }
+    jsize len = env->GetArrayLength(stats);
+    if (len < 2) {
+        return;
+    }
+    jfloat buf[2] = {0.0f, 0.0f};
+    ffxfg_get_frame_stats(buf);
+    env->SetFloatArrayRegion(stats, 0, 2, buf);
 }

@@ -69,7 +69,25 @@
 
         FfxFloat32x2    fJitter;
         FfxFloat32x2    fMotionVectorScale;
+
+        // Witch patch: multi-frame generation phase (0.5 for classic x2).
+        FfxFloat32      fInterpolationPhase;
     } cbFI;
+
+    // Witch patch
+    FfxFloat32 InterpolationPhase()
+    {
+        return cbFI.fInterpolationPhase;
+    }
+
+    // Witch patch: the packed motion-vector fields hold phase-scaled
+    // (backward) vectors, i.e. p * (curr->prev displacement). The
+    // previous-frame sample reuses them as-is; the current-frame sample must
+    // cover the remaining (1 - p) span of the displacement.
+    FfxFloat32 CurrPhaseFactor()
+    {
+        return (1.0f - cbFI.fInterpolationPhase) / cbFI.fInterpolationPhase;
+    }
 
     FfxFloat32x2 Jitter()
     {

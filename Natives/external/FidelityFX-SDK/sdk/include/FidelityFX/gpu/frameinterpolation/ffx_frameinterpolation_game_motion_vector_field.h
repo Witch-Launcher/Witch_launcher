@@ -45,7 +45,7 @@ void computeGameFieldMvs(FfxInt32x2 iPxPos)
 
     const FfxFloat32 fDepthSample = LoadDilatedDepth(iPxPos + iDistortionPixelOffset);
     const FfxFloat32x2 fGameMotionVector = LoadDilatedMotionVector(iPxPos + iDistortionPixelOffset);
-    const FfxFloat32x2 fMotionVectorHalf = fGameMotionVector * 0.5f;
+    const FfxFloat32x2 fMotionVectorHalf = fGameMotionVector * InterpolationPhase();
     const FfxFloat32x2 fInterpolatedLocationUv = fUvInScreenSpace + fMotionVectorHalf;
 
     const FfxFloat32 fViewSpaceDepth = ConvertFromDeviceDepthToViewSpace(fDepthSample);

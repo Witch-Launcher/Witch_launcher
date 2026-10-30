@@ -31,12 +31,14 @@ public class Fsr3Agent {
 
         int mode = parseMode(agentArgs);
         int fg = parseFg(agentArgs);
+        int fgx = parseFgMultiplier(agentArgs);
         float scale = parseScale(agentArgs);
         float sharpness = parseSharpness(agentArgs);
         System.out.println("[Fsr3Agent] Initializing (upscaler=" + mode
-                + " fg=" + fg + " scale=" + scale + " sharp=" + sharpness + ")");
+                + " fg=" + fg + " fgx=" + fgx + " scale=" + scale
+                + " sharp=" + sharpness + ")");
 
-        Fsr3Bridge.configure(mode, fg, scale, sharpness);
+        Fsr3Bridge.configure(mode, fg, fgx, scale, sharpness);
 
         try {
             Fsr3Patcher.install(inst);
@@ -85,8 +87,24 @@ public class Fsr3Agent {
         return fg != 0 ? 1 : 0;
     }
 
-    private static float parseScale(String agentArgs) {
-        float scale = 1.0f;
+    private static int parseFgMultiplier(String agentArgs) {
+        int fgx = 2;
+        if (agentArgs != null) {
+            for (String part : agentArgs.split("&")) {
+                part = part.trim();
+                if (part.startsWith("fgx=")) {
+                    try {
+                        fgx = Integer.parseInt(part.substring(4).trim());
+                    } catch (NumberFormatException ignored) {}
+                }
+            }
+        }
+        if (fgx < 2) fgx = 2;
+        if (fgx > 6) fgx = 6;
+        return fgx;
+    }
+
+    private static float parseScale(String agentArgs) {        float scale = 1.0f;
         if (agentArgs != null) {
             for (String part : agentArgs.split("&")) {
                 part = part.trim();

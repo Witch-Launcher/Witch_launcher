@@ -146,6 +146,9 @@
             // Frame generation is independent and can run together with the
             // upscaler (upscale first, then interpolate the upscaled frame).
             @"framegen": @NO,
+            // Frame generation multiplier: frames displayed per real frame
+            // (2 = classic x2, one generated frame; supports 2/3/4/6).
+            @"framegen_multiplier": @(2),
             // Render resolution scale 0.25..1.0 (only used by the upscaler).
             @"resolution_scale": @(1.0),
             // RCAS sharpening 0..1 for the FSR1/FSR2/FSR3 dispatches.

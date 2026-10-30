@@ -73,4 +73,15 @@ public final class Fsr3Native {
     public static native long getFgOutputImage(int slot);
 
     public static native int outputSlotCount();
+
+    /** Witch patch: frame generation multiplier M (2..6). */
+    public static native int setFgMultiplier(int multiplier);
+
+    /** Witch patch: generated sub-frame slots pending presentation. */
+    public static native int pendingFgSlotCount();
+
+    public static native int pendingFgSlot(int index);
+
+    /** Witch patch: out[0] = render fps, out[1] = generated-frame fps. */
+    public static native void getFrameStats(float[] out);
 }
