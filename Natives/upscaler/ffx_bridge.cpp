@@ -182,6 +182,27 @@ void logBridge(const char* message)
     fprintf(stderr, "[Fsr3Bridge] %s\n", message);
 }
 
+// Log a dispatch-stage failure once per unique key so silent per-frame
+// errors become visible without spamming the log.
+void logDispatchError(const char* stage, FfxErrorCode error)
+{
+    static char loggedKeys[8][48] = {};
+    static int loggedCount = 0;
+    char key[48];
+    snprintf(key, sizeof(key), "%s:%d", stage, static_cast<int>(error));
+    for (int i = 0; i < loggedCount; ++i) {
+        if (strcmp(loggedKeys[i], key) == 0) {
+            return;
+        }
+    }
+    if (loggedCount < 8) {
+        strcpy(loggedKeys[loggedCount++], key);
+    }
+    char message[96];
+    snprintf(message, sizeof(message), "record: %s failed (err=0x%08x)", stage, static_cast<unsigned>(error));
+    logBridge(message);
+}
+
 void fsr2MessageCallback(FfxMsgType /*type*/, const wchar_t* message)
 {
     fprintf(stderr, "[Fsr2] %ls\n", message);
@@ -1234,6 +1255,7 @@ int ffxfg_record_frame(long long vkCommandBufferHandle,
 
     FfxErrorCode error = ffxFrameInterpolationPrepare(&b.fiContext, &prepare);
     if (error != FFX_OK) {
+        logDispatchError("fg prepare", error);
         return -1;
     }
 
@@ -1262,6 +1284,7 @@ int ffxfg_record_frame(long long vkCommandBufferHandle,
         ofDispatch.opticalFlowSCD = b.ofScd;
         error = ffxOpticalflowContextDispatch(&b.ofContext, &ofDispatch);
         if (error != FFX_OK) {
+            logDispatchError("fg of", error);
             return -1;
         }
     }
@@ -1289,6 +1312,7 @@ int ffxfg_record_frame(long long vkCommandBufferHandle,
 
     error = ffxFrameInterpolationDispatch(&b.fiContext, &dispatch);
     if (error != FFX_OK) {
+        logDispatchError("fg fi", error);
         return -1;
     }
 
@@ -1446,6 +1470,7 @@ long long ffxfg_record_upscale(long long srcColorImageHandle,
     }
 
     if (error != FFX_OK) {
+        logDispatchError("upscale", error);
         vkEndCommandBuffer(cmd);
         return -1;
     }
@@ -1462,10 +1487,13 @@ long long ffxfg_record_upscale(long long srcColorImageHandle,
         blit.srcSubresource.layerCount = 1;
         blit.srcOffsets[0] = {0, 0, 0};
         blit.srcOffsets[1] = {static_cast<int32_t>(b.displayWidth), static_cast<int32_t>(b.displayHeight), 1};
+        // Mirror vertically: the game's render texture content is bottom-up
+        // and the game's own blit flips Y (dstOffsets[0].y = h,
+        // dstOffsets[1].y = 0) when presenting - ours must do the same.
         blit.dstSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
         blit.dstSubresource.layerCount = 1;
-        blit.dstOffsets[0] = {0, 0, 0};
-        blit.dstOffsets[1] = {static_cast<int32_t>(b.displayWidth), static_cast<int32_t>(b.displayHeight), 1};
+        blit.dstOffsets[0] = {0, static_cast<int32_t>(b.displayHeight), 0};
+        blit.dstOffsets[1] = {static_cast<int32_t>(b.displayWidth), 0, 1};
         vkCmdBlitImage(cmd, b.outputs[b.outputSlot], VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
                        swapchainImage, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
                        1, &blit, VK_FILTER_LINEAR);
@@ -1525,6 +1553,7 @@ long long ffxfg_record_upscale(long long srcColorImageHandle,
         ofDispatch.opticalFlowSCD = b.ofScd;
         error = ffxOpticalflowContextDispatch(&b.ofContext, &ofDispatch);
         if (error != FFX_OK) {
+            logDispatchError("fg of", error);
             vkEndCommandBuffer(cmd);
             return -1;
         }
@@ -1572,6 +1601,9 @@ long long ffxfg_record_upscale(long long srcColorImageHandle,
         prepare.cameraForward[1] = camData[10];
         prepare.cameraForward[2] = camData[11];
         error = ffxFrameInterpolationPrepare(&b.fiContext, &prepare);
+        if (error != FFX_OK) {
+            logDispatchError("fg prepare", error);
+        }
         if (error == FFX_OK) {
             FfxFrameInterpolationDispatchDescription dispatch = {};
             dispatch.flags = 0;
@@ -1605,6 +1637,7 @@ long long ffxfg_record_upscale(long long srcColorImageHandle,
             b.frameID++;
         }
         if (error != FFX_OK) {
+            logDispatchError("fg fi", error);
             vkEndCommandBuffer(cmd);
             return -1;
         }
@@ -1718,10 +1751,11 @@ int ffxfg_present_interpolated(long long vkSwapchainHandle, int slot)
     blit.srcSubresource.layerCount = 1;
     blit.srcOffsets[0] = {0, 0, 0};
     blit.srcOffsets[1] = {static_cast<int32_t>(b.displayWidth), static_cast<int32_t>(b.displayHeight), 1};
+    // Mirror vertically: same convention as the game's own present blit.
     blit.dstSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
     blit.dstSubresource.layerCount = 1;
-    blit.dstOffsets[0] = {0, 0, 0};
-    blit.dstOffsets[1] = {static_cast<int32_t>(b.displayWidth), static_cast<int32_t>(b.displayHeight), 1};
+    blit.dstOffsets[0] = {0, static_cast<int32_t>(b.displayHeight), 0};
+    blit.dstOffsets[1] = {static_cast<int32_t>(b.displayWidth), 0, 1};
     vkCmdBlitImage(cmd, b.fgOutputs[slot], VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
                    swapchainImage, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
                    1, &blit, VK_FILTER_LINEAR);
