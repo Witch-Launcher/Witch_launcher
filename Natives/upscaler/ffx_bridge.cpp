@@ -17,7 +17,6 @@
 #include "ffx_bridge.h"
 
 #include <algorithm>
-#include <algorithm>
 #include <chrono>
 #include <cmath>
 #include <cstdio>
@@ -193,6 +192,35 @@ struct BridgeState {
     float statRenderFps = 0.0f;
     float statGenFps = 0.0f;
 
+    // Witch patch: per-stage host-side record timings (the FFX SDK's CPU cost
+    // of encoding each dispatch: barrier translation, descriptor sets and the
+    // MoltenVK VkCmd* calls). Folded into EMAs and logged once every
+    // kPerfLogFrames successful records so the device log pinpoints which
+    // stage dominates the frame budget.
+    struct PerfStage {
+        double emaMs = 0.0;
+        uint64_t samples = 0;
+    };
+    static constexpr int kPerfLogFrames = 60;
+    PerfStage perfCopies, perfUpscale, perfOf, perfPrepare, perfFi, perfTotal;
+    int perfLogCounter = 0;
+    // Present-hook wall time: acquire blocking + blit record + submit +
+    // vkQueuePresentKHR. Large values with fps-throttling are expected, but
+    // it distinguishes GPU-bound throttling from CPU record overhead.
+    PerfStage perfPresent;
+
+    // GPU timestamp profiling: a ring of query pools, one set of markers per
+    // record. Results of record N are consumed (folded into the GPU EMAs)
+    // when record N + kPerfQueryPools reuses the same pool; 8 records of lag
+    // guarantee the submit finished long ago. Costs ~40 bytes total.
+    static constexpr int kPerfQueryPools = 8;
+    static constexpr int kPerfQueryCount = 8;
+    VkQueryPool perfQueryPools[kPerfQueryPools] = {};
+    uint64_t perfRecordHandle = 0;
+    bool perfPoolWritten[kPerfQueryPools] = {};
+    double timestampPeriodNs = 1.0;
+    PerfStage perfGpuCopies, perfGpuOf, perfGpuPrep, perfGpuFi, perfGpuTotal;
+
     // Previous camera pose for synthetic motion vectors.
     float prevPos[3] = {};
     float prevRight[3] = {};
@@ -227,6 +255,62 @@ void logDispatchError(const char* stage, FfxErrorCode error)
     char message[96];
     snprintf(message, sizeof(message), "record: %s failed (err=0x%08x)", stage, static_cast<unsigned>(error));
     logBridge(message);
+}
+
+// Fold one sample into a stage EMA (first sample becomes the seed).
+void perfNote(BridgeState::PerfStage* stage, double deltaMs)
+{
+    stage->emaMs = (stage->samples == 0) ? deltaMs
+                                         : stage->emaMs * 0.9 + deltaMs * 0.1;
+    stage->samples++;
+}
+
+double perfMsSince(std::chrono::steady_clock::time_point start)
+{
+    return std::chrono::duration<double, std::milli>(
+               std::chrono::steady_clock::now() - start).count();
+}
+
+// Fold a pool's GPU timestamps (written by a record kPerfQueryPools frames
+// ago) into the GPU stage EMAs. Marker slots: 0 = record start, 1 = after
+// motion-data copies, 2 = after optical flow (pure FG) or the upscaler
+// dispatch (combo), 3 = after the FI prepare, 4 = after the FI dispatch loop.
+void foldPerfTimestamps(BridgeState& b, int poolIndex)
+{
+    VkQueryPool pool = b.perfQueryPools[poolIndex];
+    if (!pool || !b.perfPoolWritten[poolIndex]) {
+        return;
+    }
+    b.perfPoolWritten[poolIndex] = false;
+
+    uint64_t ts[BridgeState::kPerfQueryCount] = {};
+    if (vkGetQueryPoolResults(b.device, pool, 0, BridgeState::kPerfQueryCount,
+                              sizeof(ts), ts, sizeof(uint64_t),
+                              VK_QUERY_RESULT_64_BIT) != VK_SUCCESS) {
+        return;
+    }
+    if (ts[0] == 0 || ts[1] == 0 || ts[4] == 0) {
+        return;
+    }
+    const double period = b.timestampPeriodNs;
+    auto toMs = [&period](uint64_t last, uint64_t end) {
+        return static_cast<double>(end - last) * period / 1.0e6;
+    };
+    perfNote(&b.perfGpuCopies, toMs(ts[0], ts[1]));
+    if (ts[2]) {
+        perfNote(&b.perfGpuOf, toMs(ts[1], ts[2]));
+        if (ts[3]) {
+            perfNote(&b.perfGpuPrep, toMs(ts[2], ts[3]));
+            if (ts[4]) {
+                perfNote(&b.perfGpuFi, toMs(ts[3], ts[4]));
+            }
+        } else if (ts[4]) {
+            perfNote(&b.perfGpuFi, toMs(ts[2], ts[4]));
+        }
+    } else if (ts[4]) {
+        perfNote(&b.perfGpuFi, toMs(ts[1], ts[4]));
+    }
+    perfNote(&b.perfGpuTotal, toMs(ts[0], ts[4]));
 }
 
 void fsr2MessageCallback(FfxMsgType /*type*/, const wchar_t* message)
@@ -859,6 +943,25 @@ int ffxfg_init(long long vkDeviceHandle,
             semInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
             vkCreateSemaphore(device, &semInfo, nullptr, &g_bridge.acquireSemaphore);
             vkCreateSemaphore(device, &semInfo, nullptr, &g_bridge.presentSemaphore);
+
+            // GPU timestamp query pools for the record stages. Created
+            // feature-detected: if the pool cannot be created the profiling
+            // silently degrades to host-side timings only.
+            VkPhysicalDeviceProperties deviceProps = {};
+            vkGetPhysicalDeviceProperties(physicalDevice, &deviceProps);
+            g_bridge.timestampPeriodNs = deviceProps.limits.timestampPeriod;
+
+            VkQueryPoolCreateInfo qpInfo = {};
+            qpInfo.sType = VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO;
+            qpInfo.queryType = VK_QUERY_TYPE_TIMESTAMP;
+            qpInfo.queryCount = BridgeState::kPerfQueryCount;
+            for (int i = 0; i < BridgeState::kPerfQueryPools; ++i) {
+                if (vkCreateQueryPool(device, &qpInfo, nullptr,
+                                      &g_bridge.perfQueryPools[i]) != VK_SUCCESS) {
+                    g_bridge.perfQueryPools[i] = VK_NULL_HANDLE;
+                    break;
+                }
+            }
         }
     }
 
@@ -1447,6 +1550,12 @@ long long ffxfg_record_upscale(long long srcColorImageHandle,
     const bool needsMotionData = (b.mode != FFXFX_MODE_FSR1) || b.fg;
     const bool needsBlit = (b.mode != 0 && swapchainImageHandle != 0);
 
+    // Performance instrumentation: measure the host-side cost of each stage
+    // (motion synthesis, data copies and each FFX dispatch's record overhead)
+    // so the device log pinpoints what dominates the frame budget.
+    const auto perfStart = std::chrono::steady_clock::now();
+    auto stageStart = perfStart;
+
     VkCommandBuffer cmd = b.upscaleCommandBuffers[b.upscaleCbIndex];
     b.lastRecordedCb = 0;
     VkImage srcColor = reinterpret_cast<VkImage>(static_cast<uintptr_t>(srcColorImageHandle));
@@ -1464,6 +1573,25 @@ long long ffxfg_record_upscale(long long srcColorImageHandle,
         return -1;
     }
 
+    // GPU stage timestamps: consume the pool this record reuses (its markers
+    // are kPerfQueryPools records old, long finished by now), reset it, then
+    // start the trace. Slot 2 lands after the OF dispatch (pure FG) or after
+    // the upscaler dispatch (combo), payload labels differ per mode.
+    const int perfPoolSlot =
+        static_cast<int>(b.perfRecordHandle++ % BridgeState::kPerfQueryPools);
+    VkQueryPool perfPool = b.perfQueryPools[perfPoolSlot];
+    auto writeTs = [&](unsigned slot) {
+        if (perfPool) {
+            vkCmdWriteTimestamp(cmd, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
+                                perfPool, slot);
+        }
+    };
+    if (perfPool) {
+        foldPerfTimestamps(b, perfPoolSlot);
+        vkResetQueryPool(b.device, perfPool, 0, BridgeState::kPerfQueryCount);
+        writeTs(0);
+    }
+
     if (needsBlit) {
         // The game's own blit already ran (image is PRESENT_SRC); flip it back to
         // TRANSFER_DST, replace its contents entirely, then flip to PRESENT_SRC.
@@ -1478,6 +1606,9 @@ long long ffxfg_record_upscale(long long srcColorImageHandle,
                             b.renderWidth, b.renderHeight, VK_FORMAT_R16G16_SFLOAT);
         recordCopyHostImage(cmd, b.depthStaging, b.depthDevice,
                             b.renderWidth, b.renderHeight, VK_FORMAT_R32_SFLOAT);
+        writeTs(1);
+        perfNote(&b.perfCopies, perfMsSince(stageStart));
+        stageStart = std::chrono::steady_clock::now();
     }
 
     // No upscaler to dispatch in pure-FG mode; the placeholder previously
@@ -1568,6 +1699,9 @@ long long ffxfg_record_upscale(long long srcColorImageHandle,
             dispatch.flags = 0;
             error = ffxFsr3UpscalerContextDispatch(&b.fsr3uContext, &dispatch);
         }
+        perfNote(&b.perfUpscale, perfMsSince(stageStart));
+        stageStart = std::chrono::steady_clock::now();
+        writeTs(2);
     }
 
     if (error != FFX_OK) {
@@ -1655,6 +1789,9 @@ long long ffxfg_record_upscale(long long srcColorImageHandle,
             vkEndCommandBuffer(cmd);
             return -1;
         }
+        perfNote(&b.perfOf, perfMsSince(stageStart));
+        stageStart = std::chrono::steady_clock::now();
+        writeTs(2);
 
         FfxFrameInterpolationPrepareDescription prepare = {};
         prepare.flags = 0;
@@ -1702,6 +1839,9 @@ long long ffxfg_record_upscale(long long srcColorImageHandle,
         if (error != FFX_OK) {
             logDispatchError("fg prepare", error);
         }
+        perfNote(&b.perfPrepare, perfMsSince(stageStart));
+        stageStart = std::chrono::steady_clock::now();
+        writeTs(3);
         if (error == FFX_OK) {
             FfxFrameInterpolationDispatchDescription dispatch = {};
             dispatch.flags = 0;
@@ -1754,6 +1894,8 @@ long long ffxfg_record_upscale(long long srcColorImageHandle,
                 b.fgBatchCount++;
                 b.statGenFrames.fetch_add(1, std::memory_order_relaxed);
             }
+            perfNote(&b.perfFi, perfMsSince(stageStart));
+            writeTs(4);
             ffxfg_note_frame_time(b.statLastRealTime, b.statRenderFps);
             b.statRealFrames.fetch_add(1, std::memory_order_relaxed);
         }
@@ -1766,6 +1908,25 @@ long long ffxfg_record_upscale(long long srcColorImageHandle,
 
     if (vkEndCommandBuffer(cmd) != VK_SUCCESS) {
         return -1;
+    }
+    if (perfPool) {
+        b.perfPoolWritten[perfPoolSlot] = true;
+    }
+
+    perfNote(&b.perfTotal, perfMsSince(perfStart));
+    b.perfLogCounter++;
+    if (b.perfLogCounter % BridgeState::kPerfLogFrames == 0) {
+        char message[256];
+        snprintf(message, sizeof(message),
+                 "perf: copy=%.1f up=%.1f of=%.1f prep=%.1f fi=%.1f total=%.1fms"
+                 " gpu: copy=%.1f of=%.1f prep=%.1f fi=%.1f total=%.1fms"
+                 " present=%.1f (fgx=%d)",
+                 b.perfCopies.emaMs, b.perfUpscale.emaMs, b.perfOf.emaMs,
+                 b.perfPrepare.emaMs, b.perfFi.emaMs, b.perfTotal.emaMs,
+                 b.perfGpuCopies.emaMs, b.perfGpuOf.emaMs, b.perfGpuPrep.emaMs,
+                 b.perfGpuFi.emaMs, b.perfGpuTotal.emaMs, b.perfPresent.emaMs,
+                 b.fgMultiplier);
+        logBridge(message);
     }
 
     b.lastRecordedCb = static_cast<long long>(reinterpret_cast<uintptr_t>(cmd));
@@ -1821,6 +1982,7 @@ int ffxfg_present_interpolated(long long vkSwapchainHandle, int slot)
     if (!swapchain) {
         return -1;
     }
+    const auto presentStart = std::chrono::steady_clock::now();
 
     // Resolve the swapchain image array (cheap; cached by swapchain handle).
     static VkSwapchainKHR cachedSwapchain = VK_NULL_HANDLE;
@@ -1938,6 +2100,7 @@ int ffxfg_present_interpolated(long long vkSwapchainHandle, int slot)
 
     b.presentCbIndex = (b.presentCbIndex + 1) % BridgeState::kCbRing;
     ffxfg_note_frame_time(b.statLastGenTime, b.statGenFps);
+    perfNote(&b.perfPresent, perfMsSince(presentStart));
     return static_cast<int>(imageIndex);
 }
 
