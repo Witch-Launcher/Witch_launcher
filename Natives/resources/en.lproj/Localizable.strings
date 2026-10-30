@@ -942,6 +942,13 @@
 "preference.title.fsr3_upscaler.fsr3" = "FSR 3 Upscaler";
 "preference.title.fsr3_resolution_scale" = "Render Resolution Scale";
 "preference.title.fsr3_sharpness" = "Sharpening (RCAS)";
+"preference.title.fsr3_probe" = "Perf measurement probe";
+"preference.title.fsr3_probe.ref" = "Reference (OF half rate)";
+"preference.title.fsr3_probe.of_every_frame" = "Probe: OF every frame";
+"preference.title.fsr3_probe.of_off" = "Probe: OF off";
+"preference.title.fsr3_probe.no_fi" = "Probe: no interpolation (gen=0)";
+"preference.title.fsr3_probe.no_present" = "Probe: skip FG present";
+"preference.title.fsr3_probe.bypass" = "Probe: FG GPU bypass";
 "settings.group.fsr_hint" = "Upscales a lower-resolution render to native display size to gain FPS. FSR 1 is a fast spatial upscaler; FSR 2 and FSR 3 use temporal history for sharper results. Lower the render resolution scale for more FPS, or raise sharpening if the image looks soft. Requires the MoltenVK (Vulkan) renderer.";
 "settings.group.fg" = "Frame Generation (FSR 3 FG)";
 "preference.title.fsr3_framegen" = "Enable Frame Generation";

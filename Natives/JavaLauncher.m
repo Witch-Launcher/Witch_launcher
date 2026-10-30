@@ -1150,9 +1150,10 @@ int launchJVMWithArgs(NSString *username, id launchTarget, int width, int height
             fsr3FgMultiplier = 2;
         }
         margv[++margc] = [NSString stringWithFormat:
-            @"-javaagent:%@/fsr3-agent.jar=mode=%ld&fg=%d&fgx=%ld&scale=%.3f&sharp=%.3f",
+            @"-javaagent:%@/fsr3-agent.jar=mode=%ld&fg=%d&fgx=%ld&scale=%.3f&sharp=%.3f&probe=%ld",
             librariesPath, (long)fsr3Upscaler, fsr3Framegen ? 1 : 0,
-            (long)fsr3FgMultiplier, fsr3Scale, fsr3Sharpness].UTF8String;
+            (long)fsr3FgMultiplier, fsr3Scale, fsr3Sharpness,
+            (long)getPrefInt(@"fsr3.probe")].UTF8String;
     }
 
     // F3 debug overlay metadata. The agent patches the game's debug screen at

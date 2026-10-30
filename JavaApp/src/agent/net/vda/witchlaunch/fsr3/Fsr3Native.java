@@ -77,6 +77,9 @@ public final class Fsr3Native {
     /** Witch patch: frame generation multiplier M (2..6). */
     public static native int setFgMultiplier(int multiplier);
 
+    /** Witch patch: measurement probe bitmask (see ffxfg_set_probe). */
+    public static native int setProbe(int probe);
+
     /** Witch patch: generated sub-frame slots pending presentation. */
     public static native int pendingFgSlotCount();
 

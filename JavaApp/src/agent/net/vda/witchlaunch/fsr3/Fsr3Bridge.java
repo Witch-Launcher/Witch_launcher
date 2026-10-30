@@ -35,6 +35,11 @@ public class Fsr3Bridge {
     private static volatile int fgMultiplier =
             Integer.getInteger("witch.fsr3.fgx", 2);
 
+    // Witch patch: measurement probe bitmask (GPU cost isolation; see
+    // ffxfg_set_probe).
+    private static volatile int probe =
+            Integer.getInteger("witch.fsr3.probe", 0);
+
     // Per-frame state (render thread only).
     private static volatile Object minecraft;
     private static volatile Object lastSurface;
@@ -75,7 +80,8 @@ public class Fsr3Bridge {
     private static boolean havePrevCam = false;
 
     public static void configure(int newUpscalerMode, int newFgEnabled,
-                                 int newFgMultiplier, float newScale, float newSharpness) {
+                                 int newFgMultiplier, float newScale,
+                                 float newSharpness, int newProbe) {
         // Publish through system properties FIRST: if the game's classloader
         // defines its own copy of this class, its static init runs on first
         // hook touch and must already see the real values.
@@ -84,11 +90,13 @@ public class Fsr3Bridge {
         System.setProperty("witch.fsr3.fgx", Integer.toString(newFgMultiplier));
         System.setProperty("witch.fsr3.scale", Float.toString(newScale));
         System.setProperty("witch.fsr3.sharpness", Float.toString(newSharpness));
+        System.setProperty("witch.fsr3.probe", Integer.toString(newProbe));
         upscalerMode = newUpscalerMode;
         fgEnabled = newFgEnabled != 0 ? 1 : 0;
         fgMultiplier = Math.max(2, Math.min(6, newFgMultiplier));
         scale = newScale;
         sharpness = newSharpness;
+        probe = newProbe;
     }
 
     // ---- hook callbacks ---------------------------------------------------------
@@ -318,9 +326,12 @@ public class Fsr3Bridge {
         if (fgEnabled != 0) {
             Fsr3Native.setFgMultiplier(fgMultiplier);
         }
+        if (probe != 0) {
+            Fsr3Native.setProbe(probe);
+        }
         System.out.println("[Fsr3Bridge] native init ok (upscaler=" + upscalerMode
                 + " fg=" + fgEnabled + " fgx=" + fgMultiplier + " scale=" + scale
-                + " sharp=" + sharpness
+                + " sharp=" + sharpness + " probe=" + probe
                 + " render=" + renderW + "x" + renderH
                 + " display=" + displayW + "x" + displayH
                 + " fmt=" + vkFormat + " srcFmt=" + srcFormat + ")");

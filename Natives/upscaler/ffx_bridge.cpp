@@ -235,6 +235,11 @@ struct BridgeState {
     int ofRunCounter = 0;
     bool ofThrottleAnnounced = false;
 
+    // Measurement probe bitmask (see ffxfg_set_probe). Zero = production
+    // behavior.
+    int probeMask = 0;
+    unsigned probeAnnounced = 0;
+
     // GPU timestamp profiling: a ring of query pools, one set of markers per
     // record. Results of record N are consumed (folded into the GPU EMAs)
     // when record N + kPerfQueryPools reuses the same pool; 8 records of lag
@@ -1677,6 +1682,16 @@ int ffxfg_set_fg_multiplier(int multiplier)
     return 0;
 }
 
+int ffxfg_set_probe(int probeMask)
+{
+    BridgeState& b = g_bridge;
+    b.probeMask = probeMask & 0xf;
+    char info[96];
+    snprintf(info, sizeof(info), "probe mask set: 0x%x", b.probeMask);
+    logBridge(info);
+    return b.probeMask;
+}
+
 int ffxfg_pending_fg_slot_count(void)
 {
     BridgeState& b = g_bridge;
@@ -2143,9 +2158,24 @@ long long ffxfg_record_upscale(long long srcColorImageHandle,
         // upscaler combo path keeps the driver-spec per-frame flow).
         // Skipped records reuse the previous flow field - flows stay
         // aligned with the last computed frame, interpolation quality dips
-        // slightly.
-        const bool throttleOf = (b.mode == 0) &&
-                                ((b.ofRunCounter++ % 2) != 0) && (reset == 0);
+        // slightly. Probe bits: 1 skips OF entirely, 2 forces the
+        // driver-spec per-frame schedule.
+        bool throttleOf = (b.mode == 0) &&
+                          ((b.ofRunCounter++ % 2) != 0) && (reset == 0);
+        if (b.probeMask & 2) {
+            throttleOf = false;
+        }
+        if (b.probeMask & 1) {
+            if (!(b.probeAnnounced & 1)) {
+                b.probeAnnounced |= 1;
+                logBridge("perf: OF skipped by probe");
+            }
+            throttleOf = true;
+            b.ofThrottleAnnounced = true;
+        } else if (throttleOf && !b.ofThrottleAnnounced) {
+            b.ofThrottleAnnounced = true;
+            logBridge("perf: of throttled to every other frame (A11 probe)");
+        }
         if (!throttleOf) {
             error = ffxOpticalflowContextDispatch(&b.ofContext, &ofDispatch);
             if (error != FFX_OK) {
@@ -2153,9 +2183,6 @@ long long ffxfg_record_upscale(long long srcColorImageHandle,
                 vkEndCommandBuffer(cmd);
                 return -1;
             }
-        } else if (!b.ofThrottleAnnounced) {
-            b.ofThrottleAnnounced = true;
-            logBridge("perf: of throttled to every other frame (A11 probe)");
         }
         perfNote(&b.perfOf, perfMsSince(stageStart));
         stageStart = std::chrono::steady_clock::now();
@@ -2242,7 +2269,14 @@ long long ffxfg_record_upscale(long long srcColorImageHandle,
             // legacy FG path. Optical flow ran once above; each sub-frame
             // re-scales the flow to its own phase.
             const int genCap = std::min(b.fgMultiplier, b.fgSlotCount);
-    const int genCount = std::max(1, std::min(kMaxFgOutputs, genCap) - 1);
+    int genCount = std::max(1, std::min(kMaxFgOutputs, genCap) - 1);
+            if (b.probeMask & 4) {
+                genCount = 0;
+                if (!(b.probeAnnounced & 4)) {
+                    b.probeAnnounced |= 4;
+                    logBridge("perf: interpolation skipped by probe (gen=0)");
+                }
+            }
             b.fgBatchBase = b.fgOutputSlot;
             b.fgBatchCount = 0;
             for (int k = 0; k < genCount; ++k) {
@@ -2345,6 +2379,13 @@ int ffxfg_present_interpolated(long long vkSwapchainHandle, int slot)
         !b.acquireSemaphore || !b.presentSemaphore || !b.presentCommandBuffers[0] ||
         slot < 0 || slot >= b.fgSlotCount) {
         return -1;
+    }
+    if (b.probeMask & 8) {
+        if (!(b.probeAnnounced & 8)) {
+            b.probeAnnounced |= 8;
+            logBridge("perf: gen present skipped by probe");
+        }
+        return 0;
     }
 
     VkSwapchainKHR swapchain = reinterpret_cast<VkSwapchainKHR>(
@@ -2624,6 +2665,14 @@ JNIEXPORT jint JNICALL Java_net_vda_witchlaunch_fsr3_Fsr3Native_setFgMultiplier(
     (void)env;
     (void)clazz;
     return ffxfg_set_fg_multiplier(static_cast<int>(multiplier));
+}
+
+JNIEXPORT jint JNICALL Java_net_vda_witchlaunch_fsr3_Fsr3Native_setProbe(
+    JNIEnv* env, jclass clazz, jint probe)
+{
+    (void)env;
+    (void)clazz;
+    return ffxfg_set_probe(static_cast<int>(probe));
 }
 
 JNIEXPORT jint JNICALL Java_net_vda_witchlaunch_fsr3_Fsr3Native_pendingFgSlotCount(

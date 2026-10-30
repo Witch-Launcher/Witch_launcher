@@ -152,7 +152,11 @@
             // Render resolution scale 0.25..1.0 (only used by the upscaler).
             @"resolution_scale": @(1.0),
             // RCAS sharpening 0..1 for the FSR1/FSR2/FSR3 dispatches.
-            @"sharpness": @(0.6)
+            @"sharpness": @(0.6),
+            // Perf measurement probe bitmask for the FidelityFX bridge
+            // (1=skip OF, 2=OF every frame, 4=skip interpolation,
+            // 8=skip gen present, 12=FG GPU bypass). 0 = production.
+            @"probe": @(0)
         }.mutableCopy,
         @"zink": @{
             @"optimization_level": @(-1),

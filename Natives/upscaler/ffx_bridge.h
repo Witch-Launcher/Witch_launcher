@@ -120,6 +120,18 @@ int ffxfg_last_fg_slot(void);
 // success.
 int ffxfg_set_fg_multiplier(int multiplier);
 
+// Witch patch: measurement probe bitmask (perf tuning on A11, where MoltenVK
+// provides no usable per-stage GPU counters). Bits:
+//   1  skip the optical-flow dispatch entirely (stale flow for FI)
+//   2  run the optical-flow dispatch every frame (disables the every-other
+//      throttle that FG-only mode applies by default)
+//   4  skip the interpolation dispatch (and prepare) - no generated frames
+//   8  skip the generated-frame present batch (present hook no-ops)
+// bits compose: 12 = "FG GPU bypass" (full-bypass baseline, closest to
+// frame generation off while the record path still runs). Returns the set
+// mask.
+int ffxfg_set_probe(int probeMask);
+
 // Witch patch: the generated sub-frame slots produced by the last record
 // call, oldest first. The present hook shows them all (multi-frame
 // generation).
