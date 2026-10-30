@@ -29,12 +29,14 @@
 
 #include <FidelityFX/host/ffx_interface.h>
 #include <FidelityFX/host/ffx_frameinterpolation.h>
+#include <FidelityFX/host/ffx_opticalflow.h>
 #include <FidelityFX/host/ffx_fsr1.h>
 #include <FidelityFX/host/ffx_fsr2.h>
 #include <FidelityFX/host/ffx_fsr3upscaler.h>
 #include <FidelityFX/host/backends/vk/ffx_vk.h>
 
 #include "ffx_fsr3upscaler_private.h"
+#include "ffx_opticalflow_private.h"
 
 namespace {
 
@@ -71,6 +73,17 @@ struct BridgeState {
     FfxInterface ffxInterface = {};
     FfxFrameInterpolationContext fiContext = {};
     bool fiContextValid = false;
+
+    // Optical flow context feeding the frame interpolation dispatch (the
+    // composite driver runs ffxOpticalflowContextDispatch before the FI
+    // dispatch and wires its outputs into the FI description; without it the
+    // FI binds empty optical-flow resources).
+    FfxOpticalflowContext ofContext = {};
+    bool ofContextValid = false;
+    FfxResourceInternal ofVectorInternal = {};
+    FfxResourceInternal ofScdInternal = {};
+    FfxResource ofVector = {};
+    FfxResource ofScd = {};
 
     FfxFsr1Context fsr1Context = {};
     bool fsr1Valid = false;
@@ -659,6 +672,41 @@ int ffxfg_init(long long vkDeviceHandle,
             return -1;
         }
         g_bridge.fiContextValid = true;
+
+        // Optical flow context + shared resources (same wiring as the SDK's
+        // FSR3 composite driver: the OF dispatch writes the vectors the FI
+        // dispatch consumes).
+        FfxOpticalflowContextDescription ofDesc = {};
+        ofDesc.backendInterface = g_bridge.ffxInterface;
+        ofDesc.resolution.width = g_bridge.displayWidth;
+        ofDesc.resolution.height = g_bridge.displayHeight;
+        error = ffxOpticalflowContextCreate(&g_bridge.ofContext, &ofDesc);
+        if (error != FFX_OK) {
+            logBridge("init: ffxOpticalflowContextCreate failed");
+            return -1;
+        }
+        g_bridge.ofContextValid = true;
+
+        const uint32_t ofSharedContextId =
+            reinterpret_cast<FfxOpticalflowContext_Private*>(&g_bridge.ofContext)->effectContextId;
+        FfxOpticalflowSharedResourceDescriptions ofShared = {};
+        error = ffxOpticalflowGetSharedResourceDescriptions(&g_bridge.ofContext, &ofShared);
+        if (error != FFX_OK) {
+            logBridge("init: ffxOpticalflowGetSharedResourceDescriptions failed");
+            return -1;
+        }
+        FfxCreateResourceDescription ofVec = ofShared.opticalFlowVector;
+        error = g_bridge.ffxInterface.fpCreateResource(&g_bridge.ffxInterface, &ofVec, ofSharedContextId, &g_bridge.ofVectorInternal);
+        FfxCreateResourceDescription ofScd = ofShared.opticalFlowSCD;
+        if (error == FFX_OK) {
+            error = g_bridge.ffxInterface.fpCreateResource(&g_bridge.ffxInterface, &ofScd, ofSharedContextId, &g_bridge.ofScdInternal);
+        }
+        if (error != FFX_OK) {
+            logBridge("init: optical flow shared resources failed");
+            return -1;
+        }
+        g_bridge.ofVector = g_bridge.ffxInterface.fpGetResource(&g_bridge.ffxInterface, g_bridge.ofVectorInternal);
+        g_bridge.ofScd = g_bridge.ffxInterface.fpGetResource(&g_bridge.ffxInterface, g_bridge.ofScdInternal);
     }
 
     // Per-mode upscaler context.
@@ -954,6 +1002,14 @@ void ffxfg_destroy(void)
         ffxFrameInterpolationContextDestroy(&b.fiContext);
         b.fiContextValid = false;
     }
+    if (b.ofContextValid) {
+        ffxOpticalflowContextDestroy(&b.ofContext);
+        b.ofContextValid = false;
+        b.ofVector = {};
+        b.ofScd = {};
+        b.ofVectorInternal = {};
+        b.ofScdInternal = {};
+    }
     if (b.fsr1Valid) {
         ffxFsr1ContextDestroy(&b.fsr1Context);
         b.fsr1Valid = false;
@@ -1192,9 +1248,28 @@ int ffxfg_record_frame(long long vkCommandBufferHandle,
     dispatch.output = resourceFromImage(
         b.fgOutputs[b.fgOutputSlot], b.displayWidth, b.displayHeight,
         b.colorFormat, L"InterpolatedOutput", FFX_RESOURCE_STATE_UNORDERED_ACCESS);
-    // No optical flow: synthetic camera motion vectors only.
-    dispatch.opticalFlowScale.x = 0.0f;
-    dispatch.opticalFlowScale.y = 0.0f;
+    // Optical flow must run before the interpolation dispatch and feed it
+    // (composite driver contract); empty OF resources wedge the GPU.
+    {
+        FfxOpticalflowDispatchDescription ofDispatch = {};
+        ofDispatch.commandList = ffxGetCommandListVK(cmd);
+        ofDispatch.color = presentColor;
+        ofDispatch.reset = (reset != 0);
+        ofDispatch.backbufferTransferFunction = 0; // SDR
+        ofDispatch.minMaxLuminance.x = 0.0001f;
+        ofDispatch.minMaxLuminance.y = 1.0f;
+        ofDispatch.opticalFlowVector = b.ofVector;
+        ofDispatch.opticalFlowSCD = b.ofScd;
+        error = ffxOpticalflowContextDispatch(&b.ofContext, &ofDispatch);
+        if (error != FFX_OK) {
+            return -1;
+        }
+    }
+    dispatch.opticalFlowVector = b.ofVector;
+    dispatch.opticalFlowSceneChangeDetection = b.ofScd;
+    dispatch.opticalFlowBlockSize = 8;
+    dispatch.opticalFlowScale.x = 1.0f / static_cast<float>(b.displayWidth);
+    dispatch.opticalFlowScale.y = 1.0f / static_cast<float>(b.displayHeight);
     dispatch.cameraNear = camData[12];
     dispatch.cameraFar = camData[13];
     dispatch.cameraFovAngleVertical = camData[14];
@@ -1436,6 +1511,24 @@ long long ffxfg_record_upscale(long long srcColorImageHandle,
             b.fgOutputs[b.fgOutputSlot], b.displayWidth, b.displayHeight,
             b.colorFormat, L"InterpolatedOutput", FFX_RESOURCE_STATE_UNORDERED_ACCESS);
 
+        // Optical flow must run before the interpolation dispatch and feed
+        // it (composite driver contract). Running the FI with empty
+        // optical-flow resources binds empty views and wedges the GPU.
+        FfxOpticalflowDispatchDescription ofDispatch = {};
+        ofDispatch.commandList = ffxGetCommandListVK(cmd);
+        ofDispatch.color = presentColor;
+        ofDispatch.reset = (reset != 0);
+        ofDispatch.backbufferTransferFunction = 0; // SDR
+        ofDispatch.minMaxLuminance.x = 0.0001f;
+        ofDispatch.minMaxLuminance.y = 1.0f;
+        ofDispatch.opticalFlowVector = b.ofVector;
+        ofDispatch.opticalFlowSCD = b.ofScd;
+        error = ffxOpticalflowContextDispatch(&b.ofContext, &ofDispatch);
+        if (error != FFX_OK) {
+            vkEndCommandBuffer(cmd);
+            return -1;
+        }
+
         FfxFrameInterpolationPrepareDescription prepare = {};
         prepare.flags = 0;
         prepare.commandList = ffxGetCommandListVK(cmd);
@@ -1489,8 +1582,11 @@ long long ffxfg_record_upscale(long long srcColorImageHandle,
             dispatch.renderSize.height = b.renderHeight;
             dispatch.currentBackBuffer = presentColor;
             dispatch.output = fgOutput;
-            dispatch.opticalFlowScale.x = 0.0f;
-            dispatch.opticalFlowScale.y = 0.0f;
+            dispatch.opticalFlowVector = b.ofVector;
+            dispatch.opticalFlowSceneChangeDetection = b.ofScd;
+            dispatch.opticalFlowBlockSize = 8;
+            dispatch.opticalFlowScale.x = 1.0f / static_cast<float>(b.displayWidth);
+            dispatch.opticalFlowScale.y = 1.0f / static_cast<float>(b.displayHeight);
             dispatch.cameraNear = camData[12];
             dispatch.cameraFar = camData[13];
             dispatch.cameraFovAngleVertical = camData[14];

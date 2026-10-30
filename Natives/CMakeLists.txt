@@ -439,6 +439,7 @@ target_include_directories(Witch PRIVATE
   ${CMAKE_CURRENT_LIST_DIR}/upscaler
   ${CMAKE_CURRENT_LIST_DIR}/external/FidelityFX-SDK/sdk/include
   ${CMAKE_CURRENT_LIST_DIR}/external/FidelityFX-SDK/sdk/src/components/fsr3upscaler
+  ${CMAKE_CURRENT_LIST_DIR}/external/FidelityFX-SDK/sdk/src/components/opticalflow
   ${CMAKE_CURRENT_LIST_DIR}/external/MoltenVK/External/Vulkan-Headers/include
 )
 
