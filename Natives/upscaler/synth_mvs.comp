@@ -1,0 +1,54 @@
+// Witch patch: synthetic motion vector field for frame generation, computed
+// on the GPU. This is the exact same constant-depth camera reprojection math
+// as the launcher's CPU implementation (see ffx_bridge.cpp), but as a single
+// dispatch writing straight into the R16G16_SFLOAT device image the FidelityFX
+// frame-interpolation passes sample. The CPU loop at full render resolution
+// cost 400-860 ms per frame on A11; this dispatch costs a few ms.
+//
+// Regenerate the SPIR-V header: ./generate_synth_mvs.sh
+
+#version 450
+
+layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
+
+layout(set = 0, binding = 0, rg16f) uniform image2D outMvs;
+
+layout(push_constant) uniform PushConstants {
+    vec4 prevPos;
+    vec4 prevRight;
+    vec4 prevUp;
+    vec4 prevFwd;
+    vec4 pos;
+    vec4 right;
+    vec4 up;
+    vec4 fwd;
+    vec4 misc;   // x=focalX, y=focalY, z=referenceDepth, w=havePrevPose (0/1)
+    vec4 dims;   // x=width, y=height
+} pc;
+
+void main()
+{
+    uvec2 gid = gl_GlobalInvocationID.xy;
+    if (gid.x >= uint(pc.dims.x) || gid.y >= uint(pc.dims.y)) {
+        return;
+    }
+
+    const float ndcX = (2.0 * (float(gid.x) + 0.5) / pc.dims.x) - 1.0;
+    const float ndcY = 1.0 - (2.0 * (float(gid.y) + 0.5) / pc.dims.y);
+
+    vec2 mv = vec2(0.0);
+    if (pc.misc.w > 0.5) {
+        vec3 ray = pc.prevFwd.xyz + ndcX * pc.prevRight.xyz + ndcY * pc.prevUp.xyz;
+        ray = normalize(ray);
+        vec3 world = pc.prevPos.xyz + ray * pc.misc.z;
+        vec3 rel = world - pc.pos.xyz;
+        float depthNew = max(dot(rel, pc.fwd.xyz), 0.05);
+        float lateralNewX = dot(rel, pc.right.xyz);
+        float lateralNewY = dot(rel, pc.up.xyz);
+        float ndcNewX = (lateralNewX / depthNew) * pc.misc.x * 2.0 / pc.dims.x;
+        float ndcNewY = (lateralNewY / depthNew) * pc.misc.y * 2.0 / pc.dims.y;
+        mv = clamp(vec2(ndcNewX, ndcNewY) - vec2(ndcX, ndcY), vec2(-2.0), vec2(2.0));
+    }
+
+    imageStore(outMvs, ivec2(gid), vec4(mv, 0.0, 0.0));
+}

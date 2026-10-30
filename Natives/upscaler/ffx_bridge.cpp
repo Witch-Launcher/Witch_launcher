@@ -16,6 +16,8 @@
 
 #include "ffx_bridge.h"
 
+#include "synth_mvs_vk.h"
+
 #include <algorithm>
 #include <chrono>
 #include <cmath>
@@ -208,6 +210,17 @@ struct BridgeState {
     // vkQueuePresentKHR. Large values with fps-throttling are expected, but
     // it distinguishes GPU-bound throttling from CPU record overhead.
     PerfStage perfPresent;
+
+    // GPU synthetic motion vector pipeline (see synth_mvs.comp). Falls back
+    // to the legacy CPU per-pixel fill when unavailable.
+    VkShaderModule synthMvsShader = VK_NULL_HANDLE;
+    VkPipeline synthMvsPipeline = VK_NULL_HANDLE;
+    VkPipelineLayout synthMvsLayout = VK_NULL_HANDLE;
+    VkDescriptorSetLayout synthMvsSetLayout = VK_NULL_HANDLE;
+    VkDescriptorPool synthMvsPool = VK_NULL_HANDLE;
+    VkDescriptorSet synthMvsDescSet = VK_NULL_HANDLE;
+    VkImageView synthMvsView = VK_NULL_HANDLE;
+    bool synthMvsFailedLogged = false;
 
     // GPU timestamp profiling: a ring of query pools, one set of markers per
     // record. Results of record N are consumed (folded into the GPU EMAs)
@@ -566,6 +579,100 @@ void writeSyntheticMotionVectors(const float* camData)
     g_bridge.prevFwd[1] = fwd[1];
     g_bridge.prevFwd[2] = fwd[2];
     g_bridge.havePrevPose = true;
+}
+
+void recordImageBarrier(VkCommandBuffer cmd,
+                        VkImage image,
+                        VkImageAspectFlags aspect,
+                        VkImageLayout oldLayout,
+                        VkImageLayout newLayout,
+                        VkPipelineStageFlags2 srcStage,
+                        VkAccessFlags2 srcAccess,
+                        VkPipelineStageFlags2 dstStage,
+                        VkAccessFlags2 dstAccess);
+
+void recordCopyHostImage(VkCommandBuffer cmd,
+                         VkImage staging,
+                         VkImage deviceImage,
+                         uint32_t width, uint32_t height,
+                         VkFormat format);
+
+void recordSyntheticMotionVectors(VkCommandBuffer cmd, const float* camData)
+{
+    BridgeState& b = g_bridge;
+    if (b.synthMvsPipeline && b.synthMvsDescSet && b.synthMvsLayout) {
+        const float* pos = &camData[0];
+        const float* right = &camData[3];
+        const float* up = &camData[6];
+        const float* fwd = &camData[9];
+        const float fovY = camData[14];
+        const float focalY = (b.renderHeight > 0 && fovY > 0.0f)
+            ? (0.5f * static_cast<float>(b.renderHeight) / std::tan(0.5f * fovY))
+            : 0.0f;
+
+        // Push constants: 10 vec4 (160 bytes), one row per block member.
+        float pc[10 * 4] = {};
+        const float* rows[4] = {b.prevPos, b.prevRight, b.prevUp, b.prevFwd};
+        for (int r = 0; r < 4; ++r) {
+            for (int c = 0; c < 3; ++c) {
+                pc[r * 4 + c] = rows[r][c];
+            }
+        }
+        for (int i = 0; i < 3; ++i) {
+            pc[16 + i] = pos[i];
+            pc[20 + i] = right[i];
+            pc[24 + i] = up[i];
+            pc[28 + i] = fwd[i];
+        }
+        pc[32] = focalY;          // focalX == focalY
+        pc[33] = focalY;
+        pc[34] = 8.0f;            // reference depth in meters
+        pc[35] = b.havePrevPose ? 1.0f : 0.0f;
+        pc[36] = static_cast<float>(b.renderWidth);
+        pc[37] = static_cast<float>(b.renderHeight);
+
+        // Storage write: previous layout is discarded (the dispatch covers
+        // the whole image), then hand it back to the sampling passes.
+        recordImageBarrier(cmd, b.mvsDevice, VK_IMAGE_ASPECT_COLOR_BIT,
+                           VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL,
+                           VK_PIPELINE_STAGE_2_NONE, VK_ACCESS_2_NONE,
+                           VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_ACCESS_2_SHADER_WRITE_BIT);
+        vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, b.synthMvsPipeline);
+        vkCmdPushConstants(cmd, b.synthMvsLayout, VK_SHADER_STAGE_COMPUTE_BIT,
+                           0, sizeof(pc), pc);
+        vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, b.synthMvsLayout,
+                                0, 1, &b.synthMvsDescSet, 0, nullptr);
+        vkCmdDispatch(cmd, (b.renderWidth + 7) / 8, (b.renderHeight + 7) / 8, 1);
+        recordImageBarrier(cmd, b.mvsDevice, VK_IMAGE_ASPECT_COLOR_BIT,
+                           VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                           VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_ACCESS_2_SHADER_WRITE_BIT,
+                           VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, VK_ACCESS_2_SHADER_READ_BIT);
+
+        // Same semantics as the CPU path: the just-recorded frame becomes the
+        // previous pose for the next synthesis.
+        b.prevPos[0] = pos[0];
+        b.prevPos[1] = pos[1];
+        b.prevPos[2] = pos[2];
+        b.prevRight[0] = right[0];
+        b.prevRight[1] = right[1];
+        b.prevRight[2] = right[2];
+        b.prevUp[0] = up[0];
+        b.prevUp[1] = up[1];
+        b.prevUp[2] = up[2];
+        b.prevFwd[0] = fwd[0];
+        b.prevFwd[1] = fwd[1];
+        b.prevFwd[2] = fwd[2];
+        b.havePrevPose = true;
+        return;
+    }
+
+    if (!b.synthMvsFailedLogged) {
+        logBridge("record: gpu mvs synth unavailable, using cpu loop");
+        b.synthMvsFailedLogged = true;
+    }
+    writeSyntheticMotionVectors(camData);
+    recordCopyHostImage(cmd, b.mvsStaging, b.mvsDevice,
+                        b.renderWidth, b.renderHeight, VK_FORMAT_R16G16_SFLOAT);
 }
 
 void recordImageBarrier(VkCommandBuffer cmd,
@@ -977,9 +1084,19 @@ int ffxfg_init(long long vkDeviceHandle,
         return -1;
     }
 
+    // GPU motion-vector synthesis: STORAGE usage lets the compute pass write
+    // the field in place (falls back to the staging+copy path when the format
+    // cannot back a storage image).
+    VkFormatProperties mvsFormatProps = {};
+    vkGetPhysicalDeviceFormatProperties(physicalDevice, VK_FORMAT_R16G16_SFLOAT,
+                                        &mvsFormatProps);
+    const bool mvsStorageOk =
+        (mvsFormatProps.optimalTilingFeatures & VK_FORMAT_FEATURE_STORAGE_IMAGE_BIT) != 0;
+
     if (!createImage2D(device, physicalDevice, g_bridge.renderWidth, g_bridge.renderHeight,
                        VK_FORMAT_R16G16_SFLOAT, VK_IMAGE_TILING_OPTIMAL,
-                       VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
+                       VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT |
+                           (mvsStorageOk ? VK_IMAGE_USAGE_STORAGE_BIT : 0),
                        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
                        &g_bridge.mvsDevice, &g_bridge.mvsDeviceMemory,
                        nullptr, nullptr)) {
@@ -1008,6 +1125,103 @@ int ffxfg_init(long long vkDeviceHandle,
         logBridge("init: depth device image failed");
         ffxfg_destroy();
         return -1;
+    }
+
+    // Witch patch: synthetic motion vector pipeline. The CPU per-pixel loop
+    // measured 400-860 ms/frame at full render resolution on A11; the shader
+    // is a single dispatch. Handled feature-detected and falls back to the
+    // legacy CPU fill when pipeline creation or the storage format fails.
+    if (mvsStorageOk) {
+        VkShaderModuleCreateInfo moduleInfo = {};
+        moduleInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
+        moduleInfo.codeSize = kSynthMvsSpirvSize;
+        moduleInfo.pCode = reinterpret_cast<const uint32_t*>(kSynthMvsSpirv);
+        if (vkCreateShaderModule(device, &moduleInfo, nullptr,
+                                 &g_bridge.synthMvsShader) == VK_SUCCESS) {
+            VkDescriptorSetLayoutBinding mvsBinding = {};
+            mvsBinding.binding = 0;
+            mvsBinding.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+            mvsBinding.descriptorCount = 1;
+            mvsBinding.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+            VkDescriptorSetLayoutCreateInfo setLayoutInfo = {};
+            setLayoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+            setLayoutInfo.bindingCount = 1;
+            setLayoutInfo.pBindings = &mvsBinding;
+            if (vkCreateDescriptorSetLayout(device, &setLayoutInfo, nullptr,
+                                            &g_bridge.synthMvsSetLayout) == VK_SUCCESS) {
+                // 10 vec4 worlds, 160 bytes.
+                VkPushConstantRange pushRange = {};
+                pushRange.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+                pushRange.offset = 0;
+                pushRange.size = 10 * sizeof(float) * 4;
+                VkPipelineLayoutCreateInfo layoutInfo = {};
+                layoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+                layoutInfo.setLayoutCount = 1;
+                layoutInfo.pSetLayouts = &g_bridge.synthMvsSetLayout;
+                layoutInfo.pushConstantRangeCount = 1;
+                layoutInfo.pPushConstantRanges = &pushRange;
+                if (vkCreatePipelineLayout(device, &layoutInfo, nullptr,
+                                           &g_bridge.synthMvsLayout) == VK_SUCCESS) {
+                    VkComputePipelineCreateInfo pipeInfo = {};
+                    pipeInfo.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
+                    pipeInfo.stage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+                    pipeInfo.stage.stage = VK_SHADER_STAGE_COMPUTE_BIT;
+                    pipeInfo.stage.module = g_bridge.synthMvsShader;
+                    pipeInfo.stage.pName = "main";
+                    pipeInfo.layout = g_bridge.synthMvsLayout;
+                    if (vkCreateComputePipelines(device, VK_NULL_HANDLE, 1, &pipeInfo,
+                                                 nullptr,
+                                                 &g_bridge.synthMvsPipeline) != VK_SUCCESS) {
+                        g_bridge.synthMvsPipeline = VK_NULL_HANDLE;
+                    }
+                }
+            }
+        }
+        if (g_bridge.synthMvsPipeline) {
+            VkImageViewCreateInfo viewInfo = {};
+            viewInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+            viewInfo.image = g_bridge.mvsDevice;
+            viewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
+            viewInfo.format = VK_FORMAT_R16G16_SFLOAT;
+            viewInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+            viewInfo.subresourceRange.levelCount = 1;
+            viewInfo.subresourceRange.layerCount = 1;
+            if (vkCreateImageView(device, &viewInfo, nullptr,
+                                  &g_bridge.synthMvsView) == VK_SUCCESS) {
+                VkDescriptorPoolSize poolSize = {};
+                poolSize.type = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+                poolSize.descriptorCount = 1;
+                VkDescriptorPoolCreateInfo poolCreateInfo = {};
+                poolCreateInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+                poolCreateInfo.maxSets = 1;
+                poolCreateInfo.poolSizeCount = 1;
+                poolCreateInfo.pPoolSizes = &poolSize;
+                if (vkCreateDescriptorPool(device, &poolCreateInfo, nullptr,
+                                           &g_bridge.synthMvsPool) == VK_SUCCESS) {
+                    VkDescriptorSetAllocateInfo setAllocInfo = {};
+                    setAllocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+                    setAllocInfo.descriptorPool = g_bridge.synthMvsPool;
+                    setAllocInfo.descriptorSetCount = 1;
+                    setAllocInfo.pSetLayouts = &g_bridge.synthMvsSetLayout;
+                    if (vkAllocateDescriptorSets(device, &setAllocInfo,
+                                                 &g_bridge.synthMvsDescSet) == VK_SUCCESS) {
+                        VkDescriptorImageInfo imageInfo = {};
+                        imageInfo.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+                        imageInfo.imageView = g_bridge.synthMvsView;
+                        VkWriteDescriptorSet write = {};
+                        write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+                        write.dstSet = g_bridge.synthMvsDescSet;
+                        write.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+                        write.descriptorCount = 1;
+                        write.pImageInfo = &imageInfo;
+                        vkUpdateDescriptorSets(device, 1, &write, 0, nullptr);
+                    }
+                }
+            }
+        }
+        if (!g_bridge.synthMvsPipeline) {
+            logBridge("init: gpu mvs synthesis unavailable, cpu fallback");
+        }
     }
 
     // FI dilate/reconstruct UAVs. The interpolation pipelines write these as
@@ -1187,6 +1401,39 @@ void ffxfg_destroy(void)
 
     VkDevice device = b.device;
     if (device) {
+        if (b.synthMvsDescSet) {
+            b.synthMvsDescSet = VK_NULL_HANDLE;
+        }
+        if (b.synthMvsPool) {
+            vkDestroyDescriptorPool(device, b.synthMvsPool, nullptr);
+            b.synthMvsPool = VK_NULL_HANDLE;
+        }
+        if (b.synthMvsView) {
+            vkDestroyImageView(device, b.synthMvsView, nullptr);
+            b.synthMvsView = VK_NULL_HANDLE;
+        }
+        if (b.synthMvsPipeline) {
+            vkDestroyPipeline(device, b.synthMvsPipeline, nullptr);
+            b.synthMvsPipeline = VK_NULL_HANDLE;
+        }
+        if (b.synthMvsLayout) {
+            vkDestroyPipelineLayout(device, b.synthMvsLayout, nullptr);
+            b.synthMvsLayout = VK_NULL_HANDLE;
+        }
+        if (b.synthMvsSetLayout) {
+            vkDestroyDescriptorSetLayout(device, b.synthMvsSetLayout, nullptr);
+            b.synthMvsSetLayout = VK_NULL_HANDLE;
+        }
+        if (b.synthMvsShader) {
+            vkDestroyShaderModule(device, b.synthMvsShader, nullptr);
+            b.synthMvsShader = VK_NULL_HANDLE;
+        }
+        for (int i = 0; i < BridgeState::kPerfQueryPools; ++i) {
+            if (b.perfQueryPools[i]) {
+                vkDestroyQueryPool(device, b.perfQueryPools[i], nullptr);
+                b.perfQueryPools[i] = VK_NULL_HANDLE;
+            }
+        }
         if (b.mvsStagingMapped) {
             vkUnmapMemory(device, b.mvsStagingMemory);
             b.mvsStagingMapped = nullptr;
@@ -1371,12 +1618,9 @@ int ffxfg_record_frame(long long vkCommandBufferHandle,
         static_cast<uintptr_t>(vkCommandBufferHandle));
     VkImage srcColor = reinterpret_cast<VkImage>(static_cast<uintptr_t>(srcColorImageHandle));
 
-    writeSyntheticMotionVectors(camData);
+    recordSyntheticMotionVectors(cmd, camData);
 
-    // Upload the motion vectors into the device image.
-    recordCopyHostImage(cmd, b.mvsStaging, b.mvsDevice,
-                        b.renderWidth, b.renderHeight, VK_FORMAT_R16G16_SFLOAT);
-    // Depth upload is only needed once; harmless to repeat.
+    // Upload the depth image (GPU MVs wrote the motion field in place).
     recordCopyHostImage(cmd, b.depthStaging, b.depthDevice,
                         b.renderWidth, b.renderHeight, VK_FORMAT_R32_SFLOAT);
 
@@ -1561,10 +1805,6 @@ long long ffxfg_record_upscale(long long srcColorImageHandle,
     VkImage srcColor = reinterpret_cast<VkImage>(static_cast<uintptr_t>(srcColorImageHandle));
     VkImage swapchainImage = reinterpret_cast<VkImage>(static_cast<uintptr_t>(swapchainImageHandle));
 
-    if (needsMotionData) {
-        writeSyntheticMotionVectors(camData);
-    }
-
     VkCommandBufferBeginInfo beginInfo = {};
     beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
     beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
@@ -1602,8 +1842,7 @@ long long ffxfg_record_upscale(long long srcColorImageHandle,
     }
 
     if (needsMotionData) {
-        recordCopyHostImage(cmd, b.mvsStaging, b.mvsDevice,
-                            b.renderWidth, b.renderHeight, VK_FORMAT_R16G16_SFLOAT);
+        recordSyntheticMotionVectors(cmd, camData);
         recordCopyHostImage(cmd, b.depthStaging, b.depthDevice,
                             b.renderWidth, b.renderHeight, VK_FORMAT_R32_SFLOAT);
         writeTs(1);
