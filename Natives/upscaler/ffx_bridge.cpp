@@ -119,7 +119,10 @@ struct BridgeState {
     // buffer joins the game's frame submission) and the frame generation
     // extra present (own acquire/submit/present).
     VkCommandPool commandPool = VK_NULL_HANDLE;
-    // Ring of primary command buffers for the per-frame FidelityFX work.
+    // Witch patch: dedicated pool for the paced-present worker thread
+    // (pools are not internally synchronized; one pool per recording
+    // thread).
+    VkCommandPool presentCommandPool = VK_NULL_HANDLE;    // Ring of primary command buffers for the per-frame FidelityFX work.
     // Rotating avoids resetting a buffer that a previous submission may
     // still hold pending (the game can call submit() more than once/frame).
     static constexpr int kCbRing = 3;
@@ -1184,12 +1187,34 @@ int ffxfg_init(long long vkDeviceHandle,
             cbInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
             cbInfo.commandPool = g_bridge.commandPool;
             cbInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-            cbInfo.commandBufferCount = 2 * BridgeState::kCbRing;
-            VkCommandBuffer commandBuffers[2 * BridgeState::kCbRing] = {};
+            cbInfo.commandBufferCount = BridgeState::kCbRing;
+            VkCommandBuffer commandBuffers[BridgeState::kCbRing] = {};
             if (vkAllocateCommandBuffers(device, &cbInfo, commandBuffers) == VK_SUCCESS) {
                 for (int i = 0; i < BridgeState::kCbRing; ++i) {
                     g_bridge.upscaleCommandBuffers[i] = commandBuffers[i];
-                    g_bridge.presentCommandBuffers[i] = commandBuffers[BridgeState::kCbRing + i];
+                }
+            }
+
+            // Witch patch: the paced-present worker records from its own
+            // pool - Vulkan command pools are not internally synchronized,
+            // so two threads must never record from the same pool (crashed
+            // inside MVKImage::applyImageMemoryBarrier before this).
+            VkCommandPoolCreateInfo presentPoolInfo = {};
+            presentPoolInfo.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
+            presentPoolInfo.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
+            presentPoolInfo.queueFamilyIndex = g_bridge.queueFamilyIndex;
+            if (vkCreateCommandPool(device, &presentPoolInfo, nullptr,
+                                    &g_bridge.presentCommandPool) == VK_SUCCESS) {
+                VkCommandBufferAllocateInfo presentCbInfo = {};
+                presentCbInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+                presentCbInfo.commandPool = g_bridge.presentCommandPool;
+                presentCbInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+                presentCbInfo.commandBufferCount = BridgeState::kCbRing;
+                VkCommandBuffer presentBuffers[BridgeState::kCbRing] = {};
+                if (vkAllocateCommandBuffers(device, &presentCbInfo, presentBuffers) == VK_SUCCESS) {
+                    for (int i = 0; i < BridgeState::kCbRing; ++i) {
+                        g_bridge.presentCommandBuffers[i] = presentBuffers[i];
+                    }
                 }
             }
 
@@ -1637,6 +1662,10 @@ void ffxfg_destroy(void)
             b.upscaleCbIndex = 0;
             b.presentCbIndex = 0;
             b.lastRecordedCb = 0;
+        }
+        if (b.presentCommandPool) {
+            vkDestroyCommandPool(device, b.presentCommandPool, nullptr);
+            b.presentCommandPool = VK_NULL_HANDLE;
         }
         vkDestroyImage(device, b.mvsStaging, nullptr);
         vkFreeMemory(device, b.mvsStagingMemory, nullptr);
@@ -2656,7 +2685,7 @@ static int ffxfg_start_present_thread(void)
 int ffxfg_present_interpolated(long long vkSwapchainHandle, int slot)
 {
     BridgeState& b = g_bridge;
-    if (!b.initialized || !b.enabled || !b.queue || !b.commandPool ||
+    if (!b.initialized || !b.enabled || !b.queue || !b.presentCommandPool ||
         !b.acquireSemaphore || !b.presentSemaphore || !b.presentCommandBuffers[0] ||
         slot < 0 || slot >= b.fgSlotCount) {
         return -1;
