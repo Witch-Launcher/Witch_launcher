@@ -690,8 +690,8 @@ static NSString *const kVerCell = @"VerCell";
 }
 
 - (void)installModpack:(NSDictionary *)ver mcVersion:(NSString *)mcVersion {
-    // CurseForge packs are manifest.json zips, not Modrinth .mrpack files, so
-    // they can't go through MrpackInstaller — save to Downloads instead.
+    // CurseForge packs are manifest.json zips; the installer now understands
+    // both manifest.json and Modrinth's modrinth.index.json.
     if ([ModSourceService isCurseForgeMod:_mod]) {
         [self downloadCurseForgeModpack:ver];
         return;
@@ -699,8 +699,6 @@ static NSString *const kVerCell = @"VerCell";
     DownloadProgressOverlay *overlay = [DownloadProgressOverlay showInView:self.view title:localize(@"progress.installing_modpack", nil)];
     [overlay updateProgress:0 message:localize(@"progress.msg.dl_modpack", nil)];
 
-    NSString *filename = ver[@"filename"] ?: @"modpack.mrpack";
-
     __weak typeof(self) weakSelf = self;
     [overlay setCancelBlock:^{
         [weakSelf.currentDownloadTask cancel];
@@ -715,7 +713,8 @@ static NSString *const kVerCell = @"VerCell";
             return;
         }
 
-        [MrpackInstaller installMrpackAtPath:dlPath title:_mod[@"title"] hostVC:self removeOnCompletion:YES];
+        [overlay dismiss];
+        [MrpackInstaller installModpackAtPath:dlPath title:_mod[@"title"] hostVC:self removeOnCompletion:YES];
     }];
 }
 
@@ -723,11 +722,6 @@ static NSString *const kVerCell = @"VerCell";
     DownloadProgressOverlay *overlay = [DownloadProgressOverlay showInView:self.view title:localize(@"progress.downloading_modpack", nil)];
     [overlay updateProgress:0 message:localize(@"progress.msg.dl_modpack", nil)];
 
-    NSString *filename = ver[@"filename"] ?: @"modpack.zip";
-    if (![[filename.pathExtension lowercaseString] isEqualToString:@"zip"]) {
-        filename = [[filename stringByDeletingPathExtension] stringByAppendingPathExtension:@"zip"];
-    }
-
     __weak typeof(self) weakSelf = self;
     [overlay setCancelBlock:^{
         [weakSelf.currentDownloadTask cancel];
@@ -741,18 +735,10 @@ static NSString *const kVerCell = @"VerCell";
             dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 1.0 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{ [overlay dismiss]; });
             return;
         }
-        NSString *downloadsPath = VersionDirectoryManager.shared.downloadsPath;
-        [[NSFileManager defaultManager] createDirectoryAtPath:downloadsPath withIntermediateDirectories:YES attributes:nil error:nil];
-        NSString *targetPath = [downloadsPath stringByAppendingPathComponent:filename];
-        [[NSFileManager defaultManager] removeItemAtPath:targetPath error:nil];
-        NSError *moveError = nil;
-        [[NSFileManager defaultManager] moveItemAtPath:dlPath toPath:targetPath error:&moveError];
         [overlay dismiss];
-        if (moveError) {
-            showDialog(@"Error", moveError.localizedDescription ?: @"Could not save modpack.");
-        } else {
-            showDialog(localize(@"Downloaded", nil), [NSString stringWithFormat:localize(@"modpack.cf_saved_downloads", nil), filename]);
-        }
+        ModDetailViewController *strongSelf = weakSelf;
+        if (!strongSelf) return;
+        [MrpackInstaller installModpackAtPath:dlPath title:strongSelf.mod[@"title"] hostVC:strongSelf removeOnCompletion:YES];
     }];
 }
 

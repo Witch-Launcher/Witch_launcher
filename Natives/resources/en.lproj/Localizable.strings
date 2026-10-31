@@ -1185,6 +1185,8 @@
 "modpack.missing_index" = "Missing index";
 "skin.updated" = "Skin updated!";
 "modpack.files_failed" = "Some files failed";
+"modpack.partial_failed" = "%lu file(s) could not be downloaded. Some content may be missing.";
+"modpack.import_button" = "Import .mrpack/.zip";
 "account.2fa_message" = "Your account is protected with two factor auth. Enter the 6-digit code from your authenticator app.";
 
 /* Supplement: misc labels */

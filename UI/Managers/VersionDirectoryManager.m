@@ -76,7 +76,11 @@
         }
     }
 
-    if ([versionId.lowercaseString containsString:@"neoforge"]) {
+    NSString *declaredLoader = [json[@"modLoader"] isKindOfClass:[NSString class]] ? json[@"modLoader"] : nil;
+    if (declaredLoader.length > 0) {
+        // Modpack profiles written by MrpackInstaller carry an explicit loader.
+        profile.modLoader = declaredLoader;
+    } else if ([versionId.lowercaseString containsString:@"neoforge"]) {
         profile.modLoader = @"NeoForge";
     } else if ([versionId.lowercaseString containsString:@"fabric"]) {
         profile.modLoader = @"Fabric";
@@ -87,16 +91,17 @@
     } else if ([versionId.lowercaseString containsString:@"optifine"]) {
         profile.modLoader = @"OptiFine";
     } else if (json[@"inheritsFrom"] != nil) {
-        NSString *mainClass = json[@"mainClass"] ?: @"";
-        if ([mainClass containsString:@"fabric"]) {
+        NSString *mainClass = [json[@"mainClass"] isKindOfClass:[NSString class]] ? json[@"mainClass"] : @"";
+        NSString *loaderHint = mainClass.lowercaseString;
+        if ([loaderHint containsString:@"fabric"]) {
             profile.modLoader = @"Fabric";
-        } else if ([mainClass containsString:@"forge"]) {
-            profile.modLoader = @"Forge";
-        } else if ([mainClass containsString:@"quilt"]) {
-            profile.modLoader = @"Quilt";
-        } else if ([mainClass containsString:@"neoforged"] || [mainClass containsString:@"neoforge"]) {
+        } else if ([loaderHint containsString:@"neoforged"] || [loaderHint containsString:@"neoforge"]) {
             profile.modLoader = @"NeoForge";
-        } else if ([mainClass containsString:@"optifine"] || [mainClass containsString:@"OptiFine"]) {
+        } else if ([loaderHint containsString:@"forge"]) {
+            profile.modLoader = @"Forge";
+        } else if ([loaderHint containsString:@"quilt"]) {
+            profile.modLoader = @"Quilt";
+        } else if ([loaderHint containsString:@"optifine"]) {
             profile.modLoader = @"OptiFine";
         } else {
             profile.modLoader = @"Vanilla";

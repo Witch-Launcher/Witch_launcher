@@ -236,19 +236,56 @@ static const NSUInteger kMaxFinishedTasks = 60;
     }
 
     NSString *dir = targetPath.stringByDeletingLastPathComponent;
-    [[NSFileManager defaultManager] createDirectoryAtPath:dir withIntermediateDirectories:YES attributes:nil error:nil];
+    NSFileManager *fm = [NSFileManager defaultManager];
+    [fm createDirectoryAtPath:dir withIntermediateDirectories:YES attributes:nil error:nil];
+    // Download beside the destination first, then swap it in. A failed or
+    // partial transfer must not destroy the file that is already installed.
+    NSString *partPath = [targetPath stringByAppendingFormat:@".%@.part", NSUUID.UUID.UUIDString];
 
     NSURLRequest *request = [NSURLRequest requestWithURL:url];
     NSURLSessionDownloadTask *task = [[AFHTTPSessionManager manager] downloadTaskWithRequest:request progress:nil destination:^NSURL *(NSURL *targetPath_, NSURLResponse *response) {
-        NSString *suggested = response.suggestedFilename ?: targetPath.lastPathComponent;
-        NSString *finalPath = [targetPath.stringByDeletingLastPathComponent stringByAppendingPathComponent:suggested];
-        return [NSURL fileURLWithPath:finalPath];
+        // Use the caller's destination verbatim. CDN/proxy URLs sometimes end
+        // in an opaque path, so trusting suggestedFilename can drop extensions
+        // (e.g. modpack jars) or write to the wrong folder.
+        return [NSURL fileURLWithPath:partPath];
     } completionHandler:^(NSURLResponse *response, NSURL *filePath, NSError *error) {
         if (error) {
+            [fm removeItemAtPath:partPath error:nil];
             if (completion) completion(NO, error);
-        } else {
-            if (completion) completion(YES, nil);
+            return;
         }
+        NSError *moveError = nil;
+        BOOL moved = NO;
+        if ([fm fileExistsAtPath:targetPath]) {
+            // Atomic swap on the same volume: the installed file stays in
+            // place if anything goes wrong.
+            moved = [fm replaceItemAtURL:[NSURL fileURLWithPath:targetPath]
+                           withItemAtURL:[NSURL fileURLWithPath:partPath]
+                          backupItemName:nil
+                                 options:0
+                        resultingItemURL:nil
+                                   error:&moveError];
+        } else {
+            moved = [fm moveItemAtPath:partPath toPath:targetPath error:&moveError];
+        }
+        if (!moved && [fm fileExistsAtPath:targetPath]) {
+            // Some filesystems reject replaceItemAtURL; fall back to a
+            // backup-and-swap so a failure still leaves the old file intact.
+            NSString *backupPath = [targetPath stringByAppendingFormat:@".%@.old", NSUUID.UUID.UUIDString];
+            if ([fm moveItemAtPath:targetPath toPath:backupPath error:nil]) {
+                NSError *swapError = nil;
+                if ([fm moveItemAtPath:partPath toPath:targetPath error:&swapError]) {
+                    moved = YES;
+                    moveError = nil;
+                    [fm removeItemAtPath:backupPath error:nil];
+                } else {
+                    [fm moveItemAtPath:backupPath toPath:targetPath error:nil];
+                    moveError = swapError;
+                }
+            }
+        }
+        if (!moved) [fm removeItemAtPath:partPath error:nil];
+        if (completion) completion(moved, moveError);
     }];
     [task resume];
 }

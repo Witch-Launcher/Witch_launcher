@@ -79,8 +79,15 @@
             // Return a lightweight placeholder task handle; the real task is
             // created after URL resolution. Callers only use it for cancel.
             [CurseForgeService.shared resolveDownloadURLForProject:projectId fileId:fileId completion:^(NSString *resolved, NSError *error) {
-                if (resolved.length > 0) {
-                    inner = [self downloadFromURL:resolved name:filename progressBytes:progressBytes completion:completion];
+                NSString *downloadURL = resolved;
+                if (downloadURL.length == 0) {
+                    // CurseForge hides downloadUrl for files whose authors did
+                    // not opt into third-party distribution. The public CDN
+                    // layout still serves them.
+                    downloadURL = [CurseForgeService cdnURLForFileId:fileId fileName:filename];
+                }
+                if (downloadURL.length > 0) {
+                    inner = [self downloadFromURL:downloadURL name:filename progressBytes:progressBytes completion:completion];
                 } else if (completion) {
                     completion(nil, error ?: [NSError errorWithDomain:@"ModSourceService" code:-2
                         userInfo:@{NSLocalizedDescriptionKey: @"Could not resolve download URL"}]);
@@ -120,7 +127,9 @@
     NSString *destDir = [NSTemporaryDirectory() stringByAppendingPathComponent:
                          [NSString stringWithFormat:@"amethyst-dl-%@", NSUUID.UUID.UUIDString]];
     [[NSFileManager defaultManager] createDirectoryAtPath:destDir withIntermediateDirectories:YES attributes:nil error:nil];
-    NSString *destPath = [destDir stringByAppendingPathComponent:name];
+    NSString *safeName = name.length > 0 ? name.lastPathComponent : @"file.jar";
+    if (safeName.length == 0) safeName = @"file.jar";
+    NSString *destPath = [destDir stringByAppendingPathComponent:safeName];
     NSURLSessionDownloadTask *task = [[NSURLSession sharedSession] downloadTaskWithURL:url
         completionHandler:^(NSURL *location, NSURLResponse *response, NSError *error) {
             if (error) {
