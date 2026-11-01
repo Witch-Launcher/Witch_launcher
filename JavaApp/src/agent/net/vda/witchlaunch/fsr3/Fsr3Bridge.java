@@ -212,6 +212,58 @@ public class Fsr3Bridge {
         }
     }
 
+    // Witch patch: VulkanGpuSurface.configure / close destroy the swapchain
+    // (and every presentable image) on the render thread. The bridge must
+    // never present on cached images from the old swapchain afterwards.
+    private static boolean dbgSurfaceConfigure, dbgSurfaceClose;
+
+    public static void onSurfaceConfigure(Object surface, Object configuration) {
+        if (!dbgSurfaceConfigure) {
+            dbgSurfaceConfigure = true;
+            System.out.println("[Fsr3Bridge] onSurfaceConfigure (surface="
+                    + (surface != null) + " config=" + describeConfiguration(configuration)
+                    + ")");
+        }
+        invalidateSwapchain(surface, "configure");
+    }
+
+    public static void onSurfaceClose(Object surface) {
+        if (!dbgSurfaceClose) {
+            dbgSurfaceClose = true;
+            System.out.println("[Fsr3Bridge] onSurfaceClose (surface="
+                    + (surface != null) + ")");
+        }
+        invalidateSwapchain(surface, "close");
+    }
+
+    private static void invalidateSwapchain(Object surface, String reason) {
+        try {
+            long swapchain = 0;
+            if (surface != null) {
+                ensureReflection();
+                swapchain = surfaceSwapchain.getLong(surface);
+            }
+            if (nativeReady) {
+                Fsr3Native.swapchainDestroyed(swapchain);
+            }
+            System.out.println("[Fsr3Bridge] swapchain invalidated (" + reason
+                    + " handle=" + swapchain + ")");
+        } catch (Throwable t) {
+            logOnce("swapchain invalidate failed: " + t);
+        }
+    }
+
+    private static String describeConfiguration(Object configuration) {
+        if (configuration == null) return "null";
+        try {
+            Method w = configuration.getClass().getMethod("width");
+            Method h = configuration.getClass().getMethod("height");
+            return w.invoke(configuration) + "x" + h.invoke(configuration);
+        } catch (Throwable t) {
+            return configuration.getClass().getSimpleName();
+        }
+    }
+
     // ---- Window getters (body-replaced) -----------------------------------------
 
     public static int scaledWidth(Object window) {

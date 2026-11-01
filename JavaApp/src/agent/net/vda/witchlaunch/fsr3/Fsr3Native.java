@@ -61,11 +61,18 @@ public final class Fsr3Native {
     public static native long lastRecordedCommandBuffer();
 
     /**
-     * Frame generation pacing: acquire a swapchain image, blit the
-     * interpolated output slot into it, submit and present. Returns the
-     * acquired index or -1.
+     * Frame generation present: blit the interpolated output slot into an
+     * acquired swapchain image and present it (render thread). Returns 0 when
+     * presented or skipped, -1 when the swapchain failed.
      */
     public static native int presentInterpolated(long vkSwapchain, int slot);
+
+    /**
+     * The surface is about to destroy {@code vkSwapchain} (configure/close):
+     * drop cached images and reset the present sync objects. Pass 0 when the
+     * handle is unknown.
+     */
+    public static native void swapchainDestroyed(long vkSwapchain);
 
     public static native long getOutputImage(int slot);
 

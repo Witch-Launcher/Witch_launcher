@@ -1,0 +1,4 @@
+framework module MetalBridgeKit {
+  header "MetalBridgeKit-Swift.h"
+  requires objc
+}

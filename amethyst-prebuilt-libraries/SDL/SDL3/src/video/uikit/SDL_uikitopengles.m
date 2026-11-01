@@ -94,32 +94,40 @@ static void *UIKit_GL_Library;
 
 SDL_FunctionPointer UIKit_GL_GetProcAddress(SDL_VideoDevice *_this, const char *proc)
 {
-    /* Look through all SO's for the proc symbol.  Here's why:
-     * -Looking for the path to the OpenGL Library seems not to work in the iOS Simulator.
-     * -We don't know that the path won't change in the future. */
-    SDL_FunctionPointer address = UIKit_GL_Library ? (SDL_FunctionPointer)dlsym(UIKit_GL_Library, proc) : NULL;
-    if (!address && UIKit_GL_Library) {
-        typedef SDL_FunctionPointer (*EGLGetProcAddressFn)(const char *);
+    /* Resolve through the same dispatch entry point LWJGL's GL provider uses
+     * (eglGetProcAddress, then OSMesaGetProcAddress) before falling back to
+     * dlsym. Resolving glGetError via dlsym while LWJGL resolves it through
+     * OSMesaGetProcAddress returns two different stubs for the same function
+     * and makes the game reject the backend. */
+    typedef SDL_FunctionPointer (*EGLGetProcAddressFn)(const char *);
+    typedef SDL_FunctionPointer (*OSMesaGetProcAddressFn)(const char *);
+    SDL_FunctionPointer address = NULL;
+    if (UIKit_GL_Library) {
         EGLGetProcAddressFn eglGetProcAddress = (EGLGetProcAddressFn)dlsym(UIKit_GL_Library, "eglGetProcAddress");
         if (eglGetProcAddress) {
             address = eglGetProcAddress(proc);
+        }
+        if (!address) {
+            OSMesaGetProcAddressFn osMesaGetProcAddress = (OSMesaGetProcAddressFn)dlsym(UIKit_GL_Library, "OSMesaGetProcAddress");
+            if (osMesaGetProcAddress) {
+                address = osMesaGetProcAddress(proc);
+            }
+        }
+        if (!address) {
+            address = (SDL_FunctionPointer)dlsym(UIKit_GL_Library, proc);
         }
     }
     if (!address) {
         address = (SDL_FunctionPointer)dlsym(RTLD_DEFAULT, proc);
     }
+    if (!address) {
+        EGLGetProcAddressFn eglGetProcAddress = (EGLGetProcAddressFn)dlsym(RTLD_DEFAULT, "eglGetProcAddress");
+        if (eglGetProcAddress) {
+            address = eglGetProcAddress(proc);
+        }
+    }
     if (SDL_strcmp(proc, "glGetError") == 0) {
         NSLog(@"[SDL] glGetError resolved to %p (library %p)", (void *)address, UIKit_GL_Library);
-    }
-    if (!address) {
-        typedef void *(*SDL_EGLGetProcAddressFn)(const char *);
-        static SDL_EGLGetProcAddressFn eglGetProcAddress;
-        if (!eglGetProcAddress) {
-            eglGetProcAddress = (SDL_EGLGetProcAddressFn)dlsym(RTLD_DEFAULT, "eglGetProcAddress");
-        }
-        if (eglGetProcAddress) {
-            address = (SDL_FunctionPointer)eglGetProcAddress(proc);
-        }
     }
     return address;
 }

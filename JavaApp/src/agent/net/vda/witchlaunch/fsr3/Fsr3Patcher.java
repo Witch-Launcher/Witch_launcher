@@ -145,6 +145,33 @@ public class Fsr3Patcher implements ClassFileTransformer {
                 m.code = injectPrefix(parser, m, new int[]{0x2A},
                         "onPresent", "(Ljava/lang/Object;)V");
                 modified = true;
+            } else if ("configure".equals(name)
+                    && "(Lcom/mojang/renderpearl/api/device/GpuSurface$Configuration;)V".equals(desc)) {
+                // Runs before the surface destroys its swapchain: the bridge
+                // drops every image it cached from it.
+                System.out.println("[Fsr3Patcher] patching VulkanGpuSurface.configure");
+                m.code = injectPrefix(parser, m, new int[]{0x2A, 0x2B},
+                        "onSurfaceConfigure", "(Ljava/lang/Object;Ljava/lang/Object;)V");
+                modified = true;
+            } else if ("close".equals(name) && "()V".equals(desc)) {
+                System.out.println("[Fsr3Patcher] patching VulkanGpuSurface.close");
+                m.code = injectPrefix(parser, m, new int[]{0x2A},
+                        "onSurfaceClose", "(Ljava/lang/Object;)V");
+                modified = true;
+            } else if ("isSuboptimal".equals(name) && "()Z".equals(desc)) {
+                // MoltenVK marks a swapchain suboptimal whenever its extent
+                // differs from the layer's natural drawable size. The launcher
+                // deliberately renders below native resolution, so the flag is
+                // permanently set and Minecraft recreates the swapchain every
+                // frame (vkDeviceWaitIdle + destroy + create), collapsing the
+                // frame rate. SUBOPTIMAL is advisory; real window resizes and
+                // vsync changes still set windowSurfaceNeedsReconfiguring.
+                System.out.println("[Fsr3Patcher] patching VulkanGpuSurface.isSuboptimal");
+                m.code = new byte[]{0x03, (byte) 0xAC}; // iconst_0; ireturn
+                m.maxStack = 1;
+                m.maxLocals = 1;
+                m.codeExcAndSubAttrs = null;
+                modified = true;
             }
         }
         return modified ? parser.write() : null;

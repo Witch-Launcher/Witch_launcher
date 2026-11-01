@@ -75,87 +75,43 @@ public final class Tools {
     public static final String ASSETS_PATH = DIR_GAME_NEW + "/assets";
     public static final String OBSOLETE_RESOURCES_PATH=DIR_GAME_NEW + "/resources";
 
-    // Voxy fix: RocksDB native is not usable on iOS (macOS build SIGILLs on
-    // A11). Voxy reads <world>/voxy/config.json and uses whatever storage
-    // backend is written there, so force every save (existing AND newly
-    // created in-game) to use the pure-Java "Memory" backend (TYPE=Memory)
-    // instead of the default RocksDB+ZSTD.
-    //
-    // A watchdog thread keeps scanning <gameDir>/saves while the game runs,
-    // because worlds created after launch would otherwise get Voxy's default
-    // config (RocksDB) and crash the JVM the moment it loads the native lib.
-    private static void injectVoxyMemoryStorageConfig() {
-        injectVoxyMemoryStorageConfigOnce();
-        Thread watcher = new Thread(new Runnable() {
-            public void run() {
-                long deadline = System.currentTimeMillis() + 15L * 60L * 1000L;
-                while (System.currentTimeMillis() < deadline) {
-                    try { Thread.sleep(2000L); } catch (InterruptedException e) { break; }
-                    try { injectVoxyMemoryStorageConfigOnce(false); } catch (Throwable ignored) {}
-                }
-            }
-        }, "VoxyConfigWatcher");
-        watcher.setDaemon(true);
-        watcher.start();
-    }
-
-    private static void injectVoxyMemoryStorageConfigOnce() {
-        injectVoxyMemoryStorageConfigOnce(true);
-    }
-
-    private static void injectVoxyMemoryStorageConfigOnce(boolean verbose) {
-        try {
-            File savesDir = new File(DIR_GAME_PROFILE, "saves");
-            if (!savesDir.isDirectory()) {
-                if (verbose) {
-                    System.out.println("[Voxy Fix] No saves dir at " + savesDir + ", skipping");
-                }
-                return;
-            }
-            String memoryConfig = "{\n" +
-                "  \"version\": 1,\n" +
-                "  \"disabled\": false,\n" +
-                "  \"sectionStorageConfig\": {\n" +
-                "    \"TYPE\": \"Serializer\",\n" +
-                "    \"storage\": {\n" +
-                "      \"TYPE\": \"Memory\"\n" +
-                "    }\n" +
-                "  }\n" +
-                "}";
-            File[] worlds = savesDir.listFiles();
-            if (worlds == null) return;
-            int patched = 0;
-            for (File world : worlds) {
-                if (!world.isDirectory() || !new File(world, "level.dat").exists()) continue;
-                File voxyDir = new File(world, "voxy");
-                File configFile = new File(voxyDir, "config.json");
-                if (configFile.exists()) {
-                    // Skip already-configured worlds
-                    try {
-                        byte[] b = new byte[(int) configFile.length()];
-                        java.io.FileInputStream fis = new java.io.FileInputStream(configFile);
-                        try { int rd = 0; while (rd < b.length) { int r = fis.read(b, rd, b.length - rd); if (r < 0) break; rd += r; } }
-                        finally { fis.close(); }
-                        if (new String(b, java.nio.charset.StandardCharsets.UTF_8).contains("Memory")) continue;
-                    } catch (Exception ignored) {}
-                }
-                voxyDir.mkdirs();
-                try (java.io.FileOutputStream fos = new java.io.FileOutputStream(configFile)) {
-                    fos.write(memoryConfig.getBytes(java.nio.charset.StandardCharsets.UTF_8));
-                }
-                patched++;
-            }
-            if (verbose || patched > 0) {
-                System.out.println("[Voxy Fix] Injected Memory storage config into " + patched + " world(s)");
-            }
-        } catch (Exception e) {
-            System.err.println("[Voxy Fix] Failed to inject voxy config: " + e);
+    // Voxy 0.2.20 uses RocksDB+ZSTD for its persistent section store. Older
+    // Witch builds could not load RocksDB on iOS (the bundled macOS arm64
+    // binary uses ARMv8.3 RCPC instructions that SIGILL on A11), so they
+    // rewrote every save to Voxy's volatile "Memory" backend. RocksDB is now
+    // built for iOS, so remove only those legacy injected configs and let
+    // Voxy generate its default persistent RocksDB config again.
+    private static void migrateLegacyVoxyMemoryStorageConfig() {
+        File savesDir = new File(DIR_GAME_PROFILE, "saves");
+        if (!savesDir.isDirectory()) return;
+        File[] worlds = savesDir.listFiles();
+        if (worlds == null) return;
+        int migrated = 0;
+        for (File world : worlds) {
+            if (!world.isDirectory() || !new File(world, "level.dat").exists()) continue;
+            File configFile = new File(new File(world, "voxy"), "config.json");
+            if (!configFile.isFile()) continue;
+            try {
+                JsonObject root = JsonParser.parseString(read(configFile.getAbsolutePath())).getAsJsonObject();
+                JsonObject serializer = root.getAsJsonObject("sectionStorageConfig");
+                JsonObject storage = serializer == null ? null : serializer.getAsJsonObject("storage");
+                boolean legacy = root.has("version") && root.get("version").getAsInt() == 1
+                        && root.has("disabled") && !root.get("disabled").getAsBoolean()
+                        && serializer != null && serializer.has("TYPE")
+                        && "Serializer".equals(serializer.get("TYPE").getAsString())
+                        && storage != null && storage.has("TYPE")
+                        && "Memory".equals(storage.get("TYPE").getAsString());
+                if (legacy && configFile.delete()) migrated++;
+            } catch (Throwable ignored) {}
+        }
+        if (migrated > 0) {
+            System.out.println("[Voxy Fix] Removed legacy Memory storage config from " + migrated + " world(s); Voxy will recreate RocksDB storage");
         }
     }
 
     public static void launchMinecraft(MinecraftAccount profile, final JMinecraftVersionList.Version versionInfo) throws Throwable {
         System.out.println("[DEBUG] launchMinecraft: id=" + versionInfo.id + " inheritsFrom=" + versionInfo.inheritsFrom + " assets=" + versionInfo.assets + " mainClass=" + versionInfo.mainClass);
-        injectVoxyMemoryStorageConfig();
+        migrateLegacyVoxyMemoryStorageConfig();
         // Forge/NeoForge/Fabric log4j configs write logs/latest.log relative to
         // the process working directory; create it before the game's logging
         // starts or its RollingRandomAccessFile appender fails to open.

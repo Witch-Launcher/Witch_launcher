@@ -1595,7 +1595,7 @@ void glTexSubImage2D(GLenum target, GLint level, GLint xoffset, GLint yoffset, G
                         fix.format, fix.type, fix.pixels);
         }
     }
-    if (detailIndex >= 0) {
+    if (detailIndex >= 0 && fix.has_client_pointer()) {
         static int detailCount[11] = {};
         if (detailCount[detailIndex] < 4) {
             ++detailCount[detailIndex];

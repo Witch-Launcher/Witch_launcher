@@ -145,10 +145,17 @@ void ffxfg_get_frame_stats(float* outFps);
 // The VkCommandBuffer recorded by the last ffxfg_record_upscale call.
 long long ffxfg_last_recorded_command_buffer(void);
 
-// Frame generation pacing: acquires a swapchain image (bridge-owned semaphore),
-// blits the interpolated output slot into it, submits on the game's graphics
-// queue and presents it. Returns the acquired index or -1 on failure.
+// Frame generation present: blits the interpolated output slot into an
+// acquired swapchain image and presents it, on the caller's (render) thread.
+// Sync objects and the swapchain image list are bridge-owned. Returns 0 when
+// presented or skipped, -1 on a swapchain error (generated frames pause until
+// the surface is reconfigured).
 int ffxfg_present_interpolated(long long vkSwapchain, int slot);
+
+// The surface is about to destroy vkSwapchain (GpuSurface.configure/close,
+// on the render thread): drop every cached image and rebuild the present sync
+// objects on the next present. Pass 0 when the handle is unknown.
+void ffxfg_swapchain_destroyed(long long vkSwapchain);
 
 // The VkImage of an output slot (double buffered).
 long long ffxfg_get_output_image(int slot);
@@ -201,6 +208,9 @@ JNIEXPORT jlong JNICALL Java_net_vda_witchlaunch_fsr3_Fsr3Native_lastRecordedCom
 
 JNIEXPORT jint JNICALL Java_net_vda_witchlaunch_fsr3_Fsr3Native_presentInterpolated(
     JNIEnv* env, jclass clazz, jlong vkSwapchain, jint slot);
+
+JNIEXPORT void JNICALL Java_net_vda_witchlaunch_fsr3_Fsr3Native_swapchainDestroyed(
+    JNIEnv* env, jclass clazz, jlong vkSwapchain);
 
 JNIEXPORT jlong JNICALL Java_net_vda_witchlaunch_fsr3_Fsr3Native_getOutputImage(
     JNIEnv* env, jclass clazz, jint slot);

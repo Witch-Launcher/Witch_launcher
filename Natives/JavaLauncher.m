@@ -958,9 +958,23 @@ int launchJVMWithArgs(NSString *username, id launchTarget, int width, int height
     margv[++margc] = "-Dorg.lwjgl.system.allocator=system";
     //margv[++margc] = "-Dorg.lwjgl.util.NoChecks=true";
     margv[++margc] = "-Dlog4j2.formatMsgNoLookups=true";
-    // Voxy on iOS: cap geometry buffer at 256MB (iPhone 8 has 2GB RAM; Voxy
-    // defaults to a 3.7GB SSBO allocation which fails with GL_OUT_OF_MEMORY)
-    margv[++margc] = "-Dvoxy.geometryBufferSizeOverrideMB=256";
+    // Voxy sizes its geometry SSBO from GL_MAX_SHADER_STORAGE_BLOCK_SIZE by
+    // rounding up to the next power of two and then doubling it. MobileGL
+    // advertises at most 512MB, so Voxy asks for 1GB even though Metal's
+    // maxBufferLength on A11 is ~747MB and the 2GB Jetsam budget cannot hold
+    // it. Use Voxy's supported override, but scale it with the device instead
+    // of pinning every iPhone to the 2GB-phone value.
+    size_t physMB = (size_t)(NSProcessInfo.processInfo.physicalMemory / (1024 * 1024));
+    size_t availMB = availableMemoryMB();
+    int voxyGeometryMB = 256;
+    if (physMB >= 4096 && (availMB == 0 || availMB >= 1800)) {
+        voxyGeometryMB = 512;
+    } else if (physMB >= 3072 && (availMB == 0 || availMB >= 1400)) {
+        voxyGeometryMB = 384;
+    }
+    NSLog(@"[JavaLauncher] Voxy geometry buffer: %d MB (physical=%zu MB, jetsam allowance=%zu MB)",
+          voxyGeometryMB, physMB, availMB);
+    margv[++margc] = [NSString stringWithFormat:@"-Dvoxy.geometryBufferSizeOverrideMB=%d", voxyGeometryMB].UTF8String;
 
     // Preset OpenGL libname
     const char *glLibName = getenv("AMETHYST_RENDERER");
@@ -1132,7 +1146,9 @@ int launchJVMWithArgs(NSString *username, id launchTarget, int width, int height
     } else {
         fsr3Upscaler = 0;
     }
-    if (fsr3Upscaler > 0 || fsr3Framegen) {
+    const BOOL fsr3Active = (fsr3Upscaler > 0 || fsr3Framegen);
+    setenv("WITCH_MVK_SUBGROUP_WORKGROUP", fsr3Active ? "1" : "0", 1);
+    if (fsr3Active) {
         float fsr3Scale = getPrefFloat(@"fsr3.resolution_scale");
         if (fsr3Scale <= 0.0f || fsr3Scale > 1.0f) {
             fsr3Scale = 1.0f;
