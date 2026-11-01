@@ -4,6 +4,9 @@
 #import "utils.h"
 #import "FontManager.h"
 #import "WitchAppAttest.h"
+#import "PluginsViewController.h"
+#import "WitchPluginManager.h"
+#import "WitchPluginRuntime.h"
 
 // SurfaceViewController
 extern dispatch_group_t fatalExitGroup;
@@ -17,6 +20,11 @@ extern dispatch_group_t fatalExitGroup;
     // Install the custom-font swizzle before any UIKit view is constructed so
     // every UIFont created by the launcher respects the user font.
     [FontManager install];
+    [WitchPluginManager.shared reload];
+    [WitchPluginRuntime.shared loadEnabledPlugins];
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        [WitchPluginManager.shared verifyInstalledPlugins];
+    });
     // Home-screen icon is fixed at build time (APP_ICON / asset catalog).
     // No runtime icon switching anymore: an alternate icon chosen by an older
     // build stays memoized by SpringBoard across updates, so devices that used
@@ -50,6 +58,11 @@ extern dispatch_group_t fatalExitGroup;
     return YES;
 }
 
+
+
+- (BOOL)application:(UIApplication *)application openURL:(NSURL *)url options:(NSDictionary<UIApplicationOpenURLOptionsKey, id> *)options {
+    return [PluginsViewController handleIncomingURL:url presenter:currentVC()];
+}
 
 - (UISceneConfiguration *)application:(UIApplication *)application configurationForConnectingSceneSession:(UISceneSession *)connectingSceneSession options:(UISceneConnectionOptions *)options {
     // Called when a new scene session is being created.

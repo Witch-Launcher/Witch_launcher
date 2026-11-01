@@ -127,6 +127,46 @@
 			</array>
 		</dict>
 	</array>
+	<key>CFBundleDocumentTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleTypeName</key>
+			<string>Witch Plugin Package</string>
+			<key>CFBundleTypeRole</key>
+			<string>Editor</string>
+			<key>LSHandlerRank</key>
+			<string>Owner</string>
+			<key>LSItemContentTypes</key>
+			<array>
+				<string>com.witch.plugin-package</string>
+			</array>
+		</dict>
+	</array>
+	<key>LSSupportsOpeningDocumentsInPlace</key>
+	<true/>
+	<key>UTExportedTypeDeclarations</key>
+	<array>
+		<dict>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>public.data</string>
+				<string>public.archive</string>
+			</array>
+			<key>UTTypeDescription</key>
+			<string>Witch Plugin Package</string>
+			<key>UTTypeIdentifier</key>
+			<string>com.witch.plugin-package</string>
+			<key>UTTypeTagSpecification</key>
+			<dict>
+				<key>public.filename-extension</key>
+				<array>
+					<string>plgw</string>
+				</array>
+				<key>public.mime-type</key>
+				<string>application/x-witch-plugin</string>
+			</dict>
+		</dict>
+	</array>
 	<key>CFBundleVersion</key>
 	<string>0.0.4</string>
 	<key>GCSupportedGameControllers</key>

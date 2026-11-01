@@ -29,6 +29,7 @@ include_directories(
   "external/ballpa1n"
   "external/ballpa1n/wrapped"
   "external/mach"
+  "PluginKit"
   "../UI"
   "../UI/Common"
   "../UI/Common/MMMarkdown"
@@ -43,6 +44,7 @@ include_directories(
   "../UI/Screens/Shader"
   "../UI/Screens/Server"
    "../UI/Screens/Settings"
+   "../UI/Screens/Plugins"
    "../UI/Screens/Account"
    "../UI/Screens/Download"
    "../UI/Screens/FileBrowser"
@@ -326,6 +328,10 @@ egl_bridge.m
     ios_uikit_bridge.m
     utils.m
     WitchBranchDefaults.m
+    PluginKit/WitchPlugin.m
+    PluginKit/WitchPluginManager.m
+    PluginKit/WitchPluginRuntime.m
+    PluginKit/WitchPluginTheme.m
 
    # UI
    ../UI/Common/ThemeManager.m
@@ -406,6 +412,9 @@ egl_bridge.m
    ../UI/Screens/Settings/LauncherUpdateViewController.m
    ../UI/Screens/Settings/RuntimeDownloadViewController.m
    ../UI/Screens/Settings/F3SettingsViewController.m
+   ../UI/Screens/Plugins/PluginsViewController.m
+   ../UI/Screens/Plugins/PluginDetailViewController.m
+   ../UI/Screens/Plugins/PluginSettingsViewController.m
    ../UI/Screens/Account/AccountViewController.m
    ../UI/Screens/Perf/PerfSettingsViewController.m
    ../UI/Screens/Perf/PerfHistoryViewController.m
@@ -463,6 +472,7 @@ target_link_libraries(Witch
   "-framework GameController"
   "-framework IOSurface"
   "-framework IOKit"
+  "-framework JavaScriptCore"
   "-framework PhotosUI"
   "-framework QuartzCore"
   "-framework Security"

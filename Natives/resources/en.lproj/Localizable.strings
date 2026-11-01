@@ -1381,3 +1381,95 @@
 "keyboard.action.paste" = "Paste";
 "keyboard.action.select_all" = "Select All";
 "keyboard.action.hide" = "Hide Keyboard";
+
+"Plugins" = "Plugins";
+
+"Installed Plugins" = "Installed Plugins";
+
+"Install Plugin" = "Install Plugin";
+
+"Install" = "Install";
+
+"Plugin Installed" = "Plugin Installed";
+
+"%@ was installed. Restart the launcher to load it." = "%@ was installed. Restart the launcher to load it.";
+
+"Trust key %@? Plugins signed by this key will be treated as trusted until removed." = "Trust key %@? Plugins signed by this key will be treated as trusted until removed.";
+
+"Safe Mode" = "Safe Mode";
+
+"Safe mode is active" = "Safe mode is active";
+
+"Plugins are skipped at launch." = "Plugins are skipped at launch.";
+
+"Plugins load normally at launch." = "Plugins load normally at launch.";
+
+"Turn on to skip all plugins at launch. Changes apply after restart." = "Turn on to skip all plugins at launch. Changes apply after restart.";
+
+"All plugins are paused. Turn off safe mode to load them again." = "All plugins are paused. Turn off safe mode to load them again.";
+
+"No plugins installed. Tap + to install a .plgw package." = "No plugins installed. Tap + to install a .plgw package.";
+
+"Verified" = "Verified";
+
+"Unverified" = "Unverified";
+
+"Verified by the Witch registry" = "Verified by the Witch registry";
+
+"Revoked by the Witch registry" = "Revoked by the Witch registry";
+
+"Unverified. Install only if you trust the author." = "Unverified. Install only if you trust the author.";
+
+"Revoked" = "Revoked";
+
+"Blocked by the Witch registry" = "Blocked by the Witch registry";
+
+"Blocked" = "Blocked";
+
+"Plugin package is too large" = "Plugin package is too large";
+
+"About" = "About";
+
+"Security" = "Security";
+
+"License" = "License";
+
+"Source Code" = "Source Code";
+
+"Plugin API" = "Plugin API";
+
+"Registry status" = "Registry status";
+
+"Signature" = "Signature";
+
+"Signing key" = "Signing key";
+
+"Checksums SHA-256" = "Checksums SHA-256";
+
+"Trusted publisher key" = "Trusted publisher key";
+
+"Valid self-signed / developer key" = "Valid self-signed / developer key";
+
+"Plugin Settings" = "Plugin Settings";
+
+"Options provided by the plugin" = "Options provided by the plugin";
+
+"Trust this developer key" = "Trust this developer key";
+
+"Publisher key trusted" = "Publisher key trusted";
+
+"Trusting a key allows its plugins to use advanced UI hooks." = "Trusting a key allows its plugins to use advanced UI hooks.";
+
+"Uninstall Plugin" = "Uninstall Plugin";
+
+"Trust Developer Key" = "Trust Developer Key";
+
+"Trust" = "Trust";
+
+"Uninstall" = "Uninstall";
+
+"Remove %@ and its settings?" = "Remove %@ and its settings?";
+
+"This plugin does not expose settings." = "This plugin does not expose settings.";
+
+"Unsupported setting type" = "Unsupported setting type";

@@ -91,6 +91,7 @@
             @{@"type": @"navigate", @"label": localize(@"settings.launcher_update", nil), @"vc": @"LauncherUpdateViewController"},
             @{@"type": @"navigate", @"label": localize(@"settings.runtime_download", nil), @"vc": @"RuntimeDownloadViewController"},
             @{@"type": @"navigate", @"label": localize(@"settings.storage", nil), @"vc": @"StorageManagerViewController"},
+            @{@"type": @"navigate", @"label": localize(@"Plugins", nil), @"vc": @"PluginsViewController"},
             @{@"type": @"navigate", @"label": localize(@"perf.title", nil), @"vc": @"PerfSettingsViewController"},
             @{@"type": @"navigate", @"label": localize(@"f3.title", nil), @"vc": @"F3SettingsViewController"},
             @{@"type": @"picker", @"label": localize(@"launcher_update.channel.title", nil), @"key": @"launcher.update_channel", @"options": @[

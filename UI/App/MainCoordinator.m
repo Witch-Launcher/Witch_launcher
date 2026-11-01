@@ -63,7 +63,7 @@ static const NSTimeInterval kLaunchAutoHideDelay = 3.0;
 
 @implementation MainCoordinator
 
-- (instancetype)initWithRootVC:(AmethystRootViewController *)rootVC {
+- (instancetype)initWithRootVC:(id<WitchRootHost>)rootVC {
     self = [super init];
     if (self) {
         _rootVC = rootVC;
@@ -258,7 +258,7 @@ static const NSTimeInterval kLaunchAutoHideDelay = 3.0;
     DownloadTasksViewController *vc = [[DownloadTasksViewController alloc] initWithLaunchTask:self.downloadTask];
     UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:vc];
     nav.modalPresentationStyle = UIModalPresentationFormSheet;
-    UIViewController *presenter = self.rootVC.presentedViewController ?: self.rootVC;
+    UIViewController *presenter = self.rootVC.presentedViewController ?: (UIViewController *)self.rootVC;
     [presenter presentViewController:nav animated:YES completion:nil];
 }
 

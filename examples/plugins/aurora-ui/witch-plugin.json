@@ -1,0 +1,15 @@
+{
+  "id": "com.witch.example.aurora-ui",
+  "name": "Aurora UI",
+  "version": "1.0.0",
+  "author": "Witch Examples",
+  "description": "Giao diện launcher hoàn toàn mới với thanh điều hướng bên, thẻ hành động và bảng điều khiển hiện đại.",
+  "details": "Aurora UI thay thế shell và màn hình chính của launcher bằng bố cục mới. Các màn Mods, Modpacks, Shaders, Resource Packs, Maps và Settings vẫn dùng nội dung gốc nhưng nằm trong khung Aurora.",
+  "license": "MIT",
+  "source": "https://github.com/example/witch-aurora-ui",
+  "api": 1,
+  "entrypoints": {
+    "native": "AuroraUI.dylib"
+  },
+  "permissions": []
+}

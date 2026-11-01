@@ -9,12 +9,16 @@
 #import "ThemeManager.h"
 #import "VersionDirectoryManager.h"
 #import "PLProfiles.h"
+#import "WitchPluginRuntime.h"
+#import "WitchRootHost.h"
 
 #include <objc/runtime.h>
 #include "ios_uikit_bridge.h"
 #import "AppSheet.h"
 #include "utils.h"
 #import "AppErrorDialog.h"
+
+static UIViewController<WitchRootHost> *WitchRootHostForLaunch(void);
 
 void internal_showDialog(NSString* title, NSString* message) {
     NSLog(@"[UI] Dialog shown: %@: %@", title, message);
@@ -182,7 +186,7 @@ void UIKit_returnToSplitView() {
                 window.rootViewController = tmpRootVC;
                 tmpRootVC = nil;
             } else {
-                AmethystRootViewController *rootVC = [[AmethystRootViewController alloc] init];
+                UIViewController<WitchRootHost> *rootVC = WitchRootHostForLaunch();
                 MainCoordinator *coordinator = [[MainCoordinator alloc] initWithRootVC:rootVC];
                 rootVC.coordinator = coordinator;
                 window.rootViewController = rootVC;
@@ -196,8 +200,16 @@ void UIKit_returnToSplitView() {
     [[NSNotificationCenter defaultCenter] postNotificationName:@"VersionDidChangeNotification" object:nil userInfo:@{}];
 }
 
+static UIViewController<WitchRootHost> *WitchRootHostForLaunch(void) {
+    UIViewController *customRoot = [WitchPluginRuntime.shared createCustomRootViewController];
+    if (customRoot && [customRoot conformsToProtocol:@protocol(WitchRootHost)]) {
+        return (UIViewController<WitchRootHost> *)customRoot;
+    }
+    return (UIViewController<WitchRootHost> *)[[AmethystRootViewController alloc] init];
+}
+
 void launchInitialViewController(UIWindow *window) {
-    AmethystRootViewController *rootVC = [[AmethystRootViewController alloc] init];
+    UIViewController<WitchRootHost> *rootVC = WitchRootHostForLaunch();
     MainCoordinator *coordinator = [[MainCoordinator alloc] initWithRootVC:rootVC];
     rootVC.coordinator = coordinator;
     window.rootViewController = rootVC;

@@ -64,3 +64,8 @@ __pycache__/
 # temp build/clone scratch dirs (do not commit)
 .tmp-*/
 Natives/external/FidelityFX-SDK/.build-sc/
+
+# Plugin signing keys and built packages
+/keys/
+*.plgw
+examples/plugins/**/*.dylib

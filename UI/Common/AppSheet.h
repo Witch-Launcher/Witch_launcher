@@ -34,6 +34,13 @@ NS_ASSUME_NONNULL_BEGIN
                  destructive:(BOOL)destructive
                    onConfirm:(nullable void(^)(void))onConfirm;
 
++ (void)showConfirmWithTitle:(nullable NSString *)title
+                     message:(nullable NSString *)message
+                confirmTitle:(nullable NSString *)confirmTitle
+                 destructive:(BOOL)destructive
+                   onConfirm:(nullable void(^)(void))onConfirm
+                    onCancel:(nullable void(^)(void))onCancel;
+
 // Text prompt with one field.
 + (void)showPromptWithTitle:(nullable NSString *)title
                     message:(nullable NSString *)message

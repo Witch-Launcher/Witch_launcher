@@ -1,0 +1,37 @@
+{
+  "id": "com.witch.example.hello",
+  "name": "Hello Witch",
+  "version": "1.0.0",
+  "author": "Witch Examples",
+  "description": "A minimal JavaScript and theme plugin for the Witch launcher.",
+  "license": "MIT",
+  "source": "https://github.com/example/witch-hello-plugin",
+  "api": 1,
+  "entrypoints": {
+    "js": "main.js"
+  },
+  "ui": {
+    "theme": "theme.json"
+  },
+  "permissions": [],
+  "settings": [
+    {
+      "key": "greeting",
+      "type": "text",
+      "label": "Greeting",
+      "description": "Logged when the launcher starts.",
+      "default": "Hello from Witch!"
+    },
+    {
+      "key": "accent",
+      "type": "picker",
+      "label": "Accent color",
+      "default": "#7c5cff",
+      "options": [
+        { "key": "#7c5cff", "name": "Amethyst" },
+        { "key": "#ff5c8a", "name": "Rose" },
+        { "key": "#5cffb1", "name": "Mint" }
+      ]
+    }
+  ]
+}

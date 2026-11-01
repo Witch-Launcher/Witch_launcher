@@ -3,6 +3,7 @@
 #import <PhotosUI/PhotosUI.h>
 #import "utils.h"
 #import "AmethystBlurView.h"
+#import "WitchPluginTheme.h"
 
 NSString * const ThemeDidChangeNotification = @"ThemeDidChangeNotification";
 NSString * const ShellBorderDidChangeNotification = @"ShellBorderDidChangeNotification";
@@ -125,6 +126,7 @@ NSString * const ShellBorderDidChangeNotification = @"ShellBorderDidChangeNotifi
 - (UIColor *)colorOverrideForKey:(NSString *)key darkMode:(BOOL)dark {
     UIColor *color = _colorOverrides[[self modePrefKeyFor:key dark:dark]];
     if (!color) color = _colorOverrides[key];
+    if (!color) color = [WitchPluginTheme colorForKey:key dark:dark];
     return color;
 }
 
@@ -316,6 +318,7 @@ static void WalkPresentedForScale(UIViewController *from, CGFloat scale, ThemeMa
         // coordinates never change.
         UIViewController *root = window.rootViewController;
         BOOL zoomable = (rootClass && root && [root isKindOfClass:rootClass]) ||
+            (root && [root conformsToProtocol:NSProtocolFromString(@"WitchRootHost")]) ||
             (appSheetHostClass && root && [root isKindOfClass:appSheetHostClass]);
         if (zoomable) {
             [self applyUIScaleToRootView:root.view inWindow:window];
@@ -389,8 +392,9 @@ static void WalkNavBarsForTheme(UIView *view, UINavigationBarAppearance *appeara
         Class rootClass = NSClassFromString(@"AmethystRootViewController");
         void (^apply)(UIWindow *) = ^(UIWindow *window) {
             WalkNavBarsForTheme(window, appearance, tint);
-            if (rootClass && window.rootViewController &&
-                [window.rootViewController isKindOfClass:rootClass]) {
+            if (window.rootViewController &&
+                ((rootClass && [window.rootViewController isKindOfClass:rootClass]) ||
+                 [window.rootViewController conformsToProtocol:NSProtocolFromString(@"WitchRootHost")])) {
                 window.tintColor = tint;
             }
         };

@@ -24,6 +24,8 @@
 // Optional: CurseForge API key for direct mode (if you want to ship a fallback key)
 // Leave empty to force Witch proxy or user-owned key
 #define WITCH_DEFAULT_CURSEFORGE_API_KEY @""
+#define WITCH_PLUGIN_OFFICIAL_KEY_ID @""
+#define WITCH_PLUGIN_OFFICIAL_PUBLIC_KEY @""
 
 // 2) Master encryption key (obfuscated) — chỉ có khi WITCH_ENCRYPTION_KEY được set trong CI
 // Ví dụ khi có key: (được tạo bởi scripts/encrypt_witch_config.py)

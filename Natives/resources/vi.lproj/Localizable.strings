@@ -1368,3 +1368,103 @@
 "keyboard.action.paste" = "Dán";
 "keyboard.action.select_all" = "Chọn tất cả";
 "keyboard.action.hide" = "Ẩn bàn phím";
+
+"Plugins" = "Plugin";
+
+"Installed Plugins" = "Plugin đã cài";
+
+"Install Plugin" = "Cài plugin";
+
+"Install" = "Cài đặt";
+
+"Plugin Installed" = "Đã cài plugin";
+
+"%@ was installed. Restart the launcher to load it." = "Đã cài %@. Khởi động lại launcher để nạp plugin.";
+
+"Trust key %@? Plugins signed by this key will be treated as trusted until removed." = "Tin cậy khóa %@? Các plugin được ký bằng khóa này sẽ được tin cậy cho đến khi bạn gỡ.";
+
+"Safe Mode" = "Chế độ an toàn";
+
+"Safe mode is active" = "Chế độ an toàn đang bật";
+
+"Plugins are skipped at launch." = "Plugin sẽ không được nạp khi khởi động.";
+
+"Plugins load normally at launch." = "Plugin được nạp bình thường khi khởi động.";
+
+"Turn on to skip all plugins at launch. Changes apply after restart." = "Bật để bỏ qua tất cả plugin khi khởi động. Thay đổi có hiệu lực sau khi khởi động lại.";
+
+"All plugins are paused. Turn off safe mode to load them again." = "Tất cả plugin đang tạm dừng. Tắt chế độ an toàn để nạp lại.";
+
+"No plugins installed. Tap + to install a .plgw package." = "Chưa có plugin. Nhấn + để cài gói .plgw.";
+
+"Verified" = "Đã xác minh";
+
+"Unverified" = "Chưa xác minh";
+
+"Verified by the Witch registry" = "Đã được Witch registry xác minh";
+
+"Revoked by the Witch registry" = "Đã bị Witch registry thu hồi";
+
+"Unverified. Install only if you trust the author." = "Chưa xác minh. Chỉ cài nếu bạn tin tưởng tác giả.";
+
+"Revoked" = "Đã thu hồi";
+
+"Blocked by the Witch registry" = "Đã bị Witch registry chặn";
+
+"Blocked" = "Đã chặn";
+
+"Plugin package is too large" = "Gói plugin quá lớn";
+
+"About" = "Thông tin";
+
+"Security" = "Bảo mật";
+
+"Manage" = "Quản lý";
+
+"Version" = "Phiên bản";
+
+"Author" = "Tác giả";
+
+"License" = "Giấy phép";
+
+"Source Code" = "Mã nguồn";
+
+"Plugin API" = "API plugin";
+
+"Registry status" = "Trạng thái xác minh";
+
+"Signature" = "Chữ ký";
+
+"Signing key" = "Khóa ký";
+
+"Checksums SHA-256" = "Mã kiểm tra SHA-256";
+
+"Trusted publisher key" = "Khóa nhà phát hành tin cậy";
+
+"Valid self-signed / developer key" = "Chữ ký tự ký hợp lệ";
+
+"Plugin Settings" = "Cài đặt plugin";
+
+"Options provided by the plugin" = "Tùy chọn do plugin cung cấp";
+
+"Enabled" = "Bật";
+
+"Trust this developer key" = "Tin cậy khóa nhà phát triển";
+
+"Publisher key trusted" = "Khóa nhà phát hành đã tin cậy";
+
+"Trusting a key allows its plugins to use advanced UI hooks." = "Tin cậy khóa sẽ cho phép plugin dùng các hook UI nâng cao.";
+
+"Uninstall Plugin" = "Gỡ plugin";
+
+"Trust Developer Key" = "Tin cậy khóa nhà phát triển";
+
+"Trust" = "Tin cậy";
+
+"Uninstall" = "Gỡ";
+
+"Remove %@ and its settings?" = "Gỡ %@ và cài đặt của plugin?";
+
+"This plugin does not expose settings." = "Plugin này không có cài đặt.";
+
+"Unsupported setting type" = "Loại cài đặt chưa hỗ trợ";

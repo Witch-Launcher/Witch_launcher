@@ -105,6 +105,7 @@ Witch is built on the work of [Boardwalk](https://github.com/zhuowei/Boardwalk),
 - Themes, accent colors, blur, borders, corner radius, custom launcher fonts, and app icons.
 - In-game **F3 device information**: device chip, iOS version, launcher name/version, build number, and build type.
 - Optional **Witch Server**, CurseForge, and AI integrations for advanced setups.
+- Signed **`.plgw` plugins** with JavaScript, theme, native, and declarative settings support. See [`docs/plugins`](docs/plugins/README.md).
 - **52 in-app languages**, including right-to-left language packs and fun locales.
 
 ---

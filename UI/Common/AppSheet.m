@@ -538,6 +538,10 @@ typedef NS_ENUM(NSUInteger, AppSheetMode) {
 }
 
 + (void)showConfirmWithTitle:(NSString *)title message:(NSString *)message confirmTitle:(NSString *)confirmTitle destructive:(BOOL)destructive onConfirm:(void(^)(void))onConfirm {
+    [self showConfirmWithTitle:title message:message confirmTitle:confirmTitle destructive:destructive onConfirm:onConfirm onCancel:nil];
+}
+
++ (void)showConfirmWithTitle:(NSString *)title message:(NSString *)message confirmTitle:(NSString *)confirmTitle destructive:(BOOL)destructive onConfirm:(void(^)(void))onConfirm onCancel:(void(^)(void))onCancel {
     dispatch_async(dispatch_get_main_queue(), ^{
         [HapticManager.shared play:HapticTypeWarning];
         AppSheetHostVC *host = [[AppSheetHostVC alloc] init];
@@ -547,6 +551,7 @@ typedef NS_ENUM(NSUInteger, AppSheetMode) {
         host.confirmTitle = confirmTitle;
         host.destructive = destructive;
         host.onConfirmAction = onConfirm;
+        host.onCancel = onCancel;
         [self presentHost:host];
     });
 }

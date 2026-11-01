@@ -1,0 +1,106 @@
+{
+  "id": "com.witch.example.theme-studio",
+  "name": "Theme Studio",
+  "version": "1.0.0",
+  "author": "Witch Examples",
+  "description": "Đổi màu toàn bộ giao diện launcher với bộ màu, màu nhấn và độ tương phản tùy chỉnh.",
+  "details": "Theme Studio áp dụng màu cho nền, thẻ, sidebar, topbar, bảng phải, chữ và viền. Thay đổi trong Plugin Settings được áp dụng sau khi khởi động lại launcher.",
+  "license": "MIT",
+  "source": "https://github.com/example/witch-theme-studio",
+  "api": 1,
+  "entrypoints": {
+    "js": "main.js"
+  },
+  "permissions": [],
+  "settings": [
+    {
+      "key": "master",
+      "type": "switch",
+      "label": "Bật Theme Studio",
+      "description": "Tắt để dùng lại màu giao diện mặc định. Cần khởi động lại launcher.",
+      "default": true
+    },
+    {
+      "key": "preset",
+      "type": "picker",
+      "label": "Bộ màu",
+      "description": "Chọn phong cách tổng thể. Cần khởi động lại launcher.",
+      "default": "amethyst",
+      "options": [
+        { "key": "amethyst", "name": "Amethyst" },
+        { "key": "midnight", "name": "Midnight Blue" },
+        { "key": "cyberpunk", "name": "Cyberpunk" },
+        { "key": "forest", "name": "Forest" },
+        { "key": "daylight", "name": "Daylight" }
+      ]
+    },
+    {
+      "key": "accent",
+      "type": "picker",
+      "label": "Màu nhấn",
+      "description": "Màu cho nút, liên kết và điểm nhấn. Cần khởi động lại launcher.",
+      "default": "auto",
+      "options": [
+        { "key": "auto", "name": "Theo bộ màu" },
+        { "key": "#a98bff", "name": "Tím Amethyst" },
+        { "key": "#ff5c8a", "name": "Hồng Rose" },
+        { "key": "#ffb84d", "name": "Cam Amber" },
+        { "key": "#4ade80", "name": "Xanh Mint" },
+        { "key": "#4da3ff", "name": "Xanh Sky" },
+        { "key": "#ff2bd6", "name": "Hồng Neon" },
+        { "key": "#e8e3ff", "name": "Trắng Lavender" }
+      ]
+    },
+    {
+      "key": "background",
+      "type": "picker",
+      "label": "Màu nền",
+      "description": "Ghi đè màu nền của bộ màu. Cần khởi động lại launcher.",
+      "default": "auto",
+      "options": [
+        { "key": "auto", "name": "Theo bộ màu" },
+        { "key": "#05050a", "name": "Đen tuyền" },
+        { "key": "#0b0714", "name": "Tím đêm" },
+        { "key": "#0b1220", "name": "Xanh đêm" },
+        { "key": "#101014", "name": "Xám than" },
+        { "key": "#f4f1fb", "name": "Trắng Lavender" },
+        { "key": "#edf7f1", "name": "Trắng Mint" }
+      ]
+    },
+    {
+      "key": "textTone",
+      "type": "picker",
+      "label": "Tông chữ",
+      "description": "Tự động chọn chữ sáng hoặc tối theo màu nền. Cần khởi động lại launcher.",
+      "default": "auto",
+      "options": [
+        { "key": "auto", "name": "Tự động" },
+        { "key": "light", "name": "Chữ sáng" },
+        { "key": "dark", "name": "Chữ tối" }
+      ]
+    },
+    {
+      "key": "depth",
+      "type": "slider",
+      "label": "Độ tối nền",
+      "description": "Tăng để nền và các bề mặt tối hơn. Cần khởi động lại launcher.",
+      "default": 0.35,
+      "min": 0,
+      "max": 1
+    },
+    {
+      "key": "contrast",
+      "type": "switch",
+      "label": "Tăng tương phản",
+      "description": "Làm chữ phụ và viền rõ hơn. Cần khởi động lại launcher.",
+      "default": false
+    },
+    {
+      "key": "glow",
+      "type": "switch",
+      "label": "Viền phát sáng",
+      "description": "Dùng màu nhấn cho viền giao diện. Cần khởi động lại launcher.",
+      "default": true
+    }
+  ]
+}

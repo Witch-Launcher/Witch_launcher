@@ -12,6 +12,7 @@
 #import "WitchLogSnapshot.h"
 #import "AppSheet.h"
 #import "ErrorPresenter.h"
+#import "PluginsViewController.h"
 
 extern UIWindow *mainWindow;
 
@@ -76,6 +77,14 @@ static NSString *const kMinecraftGPUBackgroundTaskPrefix = @"com.witch.zad626.mi
     mainWindow = self.window;
     launchInitialViewController(self.window);
     [self.window makeKeyAndVisible];
+    if (connectionOptions.URLContexts.count > 0) {
+        NSURL *url = connectionOptions.URLContexts.allObjects.firstObject.URL;
+        if (url) {
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.4 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+                [PluginsViewController handleIncomingURL:url presenter:currentVC()];
+            });
+        }
+    }
     // Kiểm tra crash ra màn hình chính ở lần trước (flag còn lại + latestlog/.ips)
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         [self checkForPreviousCrashAndPrompt];
@@ -95,6 +104,12 @@ static NSString *const kMinecraftGPUBackgroundTaskPrefix = @"com.witch.zad626.mi
     }
 }
 
+
+
+- (void)scene:(UIScene *)scene openURLContexts:(NSSet<UIOpenURLContext *> *)URLContexts {
+    UIOpenURLContext *context = URLContexts.allObjects.firstObject;
+    if (context.URL) [PluginsViewController handleIncomingURL:context.URL presenter:currentVC()];
+}
 
 - (void)sceneDidDisconnect:(UIScene *)scene {
     // Called as the scene is being released by the system.
