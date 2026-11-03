@@ -1505,3 +1505,10 @@
 "splash.starting_title" = "Starting Minecraft";
 "splash.starting_message" = "Witch is starting the Java runtime. The game window appears when the game is ready.";
 "splash.starting_hint" = "Customize this screen with Documents/Splash/splash.png or splash.mp4";
+
+"appearance.launch_splash" = "Startup splash screen";
+"appearance.splash_background" = "Splash background";
+"splash.status_none" = "None";
+"splash.status_image" = "Image";
+"splash.status_video" = "Video";
+"splash.status_bundled" = "Bundled";

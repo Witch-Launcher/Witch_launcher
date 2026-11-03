@@ -1500,3 +1500,10 @@
 "splash.starting_title" = "Đang khởi động Minecraft";
 "splash.starting_message" = "Witch đang khởi động môi trường Java. Cửa sổ game sẽ hiện ra khi sẵn sàng.";
 "splash.starting_hint" = "Tuỳ chỉnh màn hình này bằng Documents/Splash/splash.png hoặc splash.mp4";
+
+"appearance.launch_splash" = "Màn hình chờ khởi động";
+"appearance.splash_background" = "Nền màn hình chờ";
+"splash.status_none" = "Không có";
+"splash.status_image" = "Hình ảnh";
+"splash.status_video" = "Video";
+"splash.status_bundled" = "Mặc định trong app";

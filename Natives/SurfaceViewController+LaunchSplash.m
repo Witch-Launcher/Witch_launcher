@@ -1,6 +1,7 @@
 #import "SurfaceViewController+LaunchSplash.h"
 #import "SurfaceViewController+Widget.h"
 #import "LaunchSplashView.h"
+#import "LauncherPreferences.h"
 #import <QuartzCore/QuartzCore.h>
 
 static NSTimer *launchSplashTimer;
@@ -11,6 +12,7 @@ static __weak LaunchSplashView *launchSplashView;
 
 - (void)presentLaunchSplash {
     [self dismissLaunchSplash];
+    if (!getPrefBool(@"appearance.launch_splash")) return;
     launchSplashBaselineSwap = pojavSwapCount();
     LaunchSplashView *splash = [[LaunchSplashView alloc] initWithFrame:self.view.bounds];
     splash.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;

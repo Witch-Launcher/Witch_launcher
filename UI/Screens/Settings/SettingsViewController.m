@@ -15,8 +15,54 @@
 #import <PhotosUI/PhotosUI.h>
 #import <UniformTypeIdentifiers/UniformTypeIdentifiers.h>
 
+
+static NSArray<NSString *> *WitchSplashVideoExtensions(void) {
+    return @[@"mp4", @"mov", @"m4v"];
+}
+
+static NSArray<NSString *> *WitchSplashImageExtensions(void) {
+    return @[@"png", @"jpg", @"jpeg", @"heic"];
+}
+
+static NSArray<NSString *> *WitchSplashAllowedExtensions(void) {
+    return [WitchSplashVideoExtensions() arrayByAddingObjectsFromArray:WitchSplashImageExtensions()];
+}
+
+static NSString *WitchSplashDirectoryPath(void) {
+    NSString *documents = [NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES) firstObject];
+    return [documents stringByAppendingPathComponent:@"Splash"];
+}
+
+static NSString *WitchSplashMediaKindInDirectory(NSString *directory) {
+    NSFileManager *fm = [NSFileManager defaultManager];
+    NSArray<NSString *> *names = [fm contentsOfDirectoryAtPath:directory error:nil];
+    if (![names isKindOfClass:[NSArray class]]) return nil;
+    BOOL video = NO, image = NO;
+    for (NSString *name in names) {
+        if ([name hasPrefix:@"."]) continue;
+        NSString *ext = name.pathExtension.lowercaseString;
+        if ([WitchSplashVideoExtensions() containsObject:ext]) video = YES;
+        if ([WitchSplashImageExtensions() containsObject:ext]) image = YES;
+    }
+    if (video) return @"video";
+    if (image) return @"image";
+    return nil;
+}
+
+static NSString *WitchSplashBundleMediaKind(void) {
+    NSBundle *bundle = NSBundle.mainBundle;
+    for (NSString *ext in WitchSplashVideoExtensions()) {
+        if ([bundle pathForResource:@"splash" ofType:ext inDirectory:@"Splash"].length > 0) return @"video";
+    }
+    for (NSString *ext in WitchSplashImageExtensions()) {
+        if ([bundle pathForResource:@"splash" ofType:ext inDirectory:@"Splash"].length > 0) return @"image";
+    }
+    return nil;
+}
+
 @interface SettingsViewController () <UITableViewDelegate, UITableViewDataSource, UIScrollViewDelegate, UIColorPickerViewControllerDelegate, UINavigationControllerDelegate, UIImagePickerControllerDelegate, PHPickerViewControllerDelegate, UIDocumentPickerDelegate, UISearchBarDelegate>
 @property (nonatomic) BOOL importingFont;
+@property (nonatomic) BOOL splashPicking;
 @property (nonatomic) NSArray *sections;
 @property (nonatomic) UIScrollView *tabBarScroll;
 @property (nonatomic) UIView *tabBarGlassHost;
@@ -310,6 +356,8 @@
             @{@"type": @"color", @"label": localize(@"appearance.right_panel_color", nil), @"key": @"amethyst_rightpanel_bg_color"},
             @{@"type": @"color", @"label": localize(@"appearance.content_card_color", nil), @"key": @"amethyst_card_bg_color"},
             @{@"type": @"image", @"label": localize(@"appearance.background", nil)},
+            @{@"type": @"switch", @"label": localize(@"appearance.launch_splash", nil), @"key": @"appearance.launch_splash"},
+            @{@"type": @"splash", @"label": localize(@"appearance.splash_background", nil)},
             @{@"type": @"font", @"label": localize(@"appearance.launcher_font", nil)},
             @{@"type": @"slider", @"label": localize(@"appearance.ui_scale", nil), @"key": @"amethyst_ui_scale", @"min": @50, @"max": @150, @"suffix": @"%"},
             @{@"type": @"label", @"label": localize(@"appearance.ui_scale_hint", nil)},
@@ -1166,6 +1214,14 @@
             cell.backgroundColor = ThemeManager.shared.cardBackgroundColor;
             cell.textLabel.textColor = ThemeManager.shared.primaryTextColor;
             cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
+        } else if ([type isEqualToString:@"splash"]) {
+            cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleValue1 reuseIdentifier:cellId];
+            cell.textLabel.font = [UIFont systemFontOfSize:15];
+            cell.detailTextLabel.font = [UIFont systemFontOfSize:14];
+            cell.backgroundColor = ThemeManager.shared.cardBackgroundColor;
+            cell.textLabel.textColor = ThemeManager.shared.primaryTextColor;
+            cell.detailTextLabel.textColor = ThemeManager.shared.accentColor;
+            cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
         } else if ([type isEqualToString:@"credit"]) {
             cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleValue1 reuseIdentifier:cellId];
             cell.textLabel.font = [UIFont systemFontOfSize:15];
@@ -1200,7 +1256,7 @@
 
     cell.textLabel.text = nil;
     cell.detailTextLabel.text = nil;
-    if ([type isEqualToString:@"switch"] || [type isEqualToString:@"picker"] || [type isEqualToString:@"navigate"] || [type isEqualToString:@"color"] || [type isEqualToString:@"image"] || [type isEqualToString:@"export"] || [type isEqualToString:@"import"] || [type isEqualToString:@"credit"] || [type isEqualToString:@"author"] || [type isEqualToString:@"link"] || [type isEqualToString:@"label"] || [type isEqualToString:@"font"]) {
+    if ([type isEqualToString:@"switch"] || [type isEqualToString:@"picker"] || [type isEqualToString:@"navigate"] || [type isEqualToString:@"color"] || [type isEqualToString:@"image"] || [type isEqualToString:@"splash"] || [type isEqualToString:@"export"] || [type isEqualToString:@"import"] || [type isEqualToString:@"credit"] || [type isEqualToString:@"author"] || [type isEqualToString:@"link"] || [type isEqualToString:@"label"] || [type isEqualToString:@"font"]) {
         cell.textLabel.text = item[@"label"];
     }
 
@@ -1219,6 +1275,9 @@
             }
         }
         cell.detailTextLabel.text = display;
+        cell.accessoryView = nil;
+    } else if ([type isEqualToString:@"splash"]) {
+        cell.detailTextLabel.text = [self splashMediaStatus];
         cell.accessoryView = nil;
     } else if ([type isEqualToString:@"font"]) {
         cell.detailTextLabel.text = [FontManager shared].displayName;
@@ -1341,6 +1400,8 @@
             else [self showColorPickerForKey:item[@"key"] label:item[@"label"]];
         } else if ([type isEqualToString:@"image"]) {
             [self showImagePicker];
+        } else if ([type isEqualToString:@"splash"]) {
+            [self showSplashPicker];
         } else if ([type isEqualToString:@"export"]) {
             [self exportAppearance];
         } else if ([type isEqualToString:@"import"]) {
@@ -1387,6 +1448,8 @@
         }
     } else if ([type isEqualToString:@"image"]) {
         [self showImagePicker];
+    } else if ([type isEqualToString:@"splash"]) {
+        [self showSplashPicker];
     } else if ([type isEqualToString:@"font"]) {
         [self showFontMenu];
     } else if ([type isEqualToString:@"export"]) {
@@ -1984,6 +2047,141 @@
     }];
 }
 
+- (void)showSplashPicker {
+    [AppSheet showOptionsWithTitle:localize(@"appearance.splash_background", nil)
+                           message:[self splashMediaStatus]
+                           options:@[
+        @{@"title": localize(@"Choose Image from Library", nil), @"icon": @"photo"},
+        @{@"title": localize(@"Choose Video from Library", nil), @"icon": @"video"},
+        @{@"title": localize(@"Remove Background", nil), @"icon": @"trash", @"destructive": @YES},
+        @{@"title": localize(@"Done", nil), @"icon": @"checkmark"},
+    ] selectedIndex:NSNotFound selection:^(NSInteger idx) {
+        if (idx == 0) {
+            self.splashPicking = YES;
+            [self openPhotoLibraryWithFilter:[PHPickerFilter imagesFilter]];
+        } else if (idx == 1) {
+            self.splashPicking = YES;
+            [self openPhotoLibraryWithFilter:[PHPickerFilter videosFilter]];
+        } else if (idx == 2) {
+            [self clearSplashMedia];
+        }
+    }];
+}
+
+- (NSString *)splashMediaStatus {
+    NSString *directory = WitchSplashDirectoryPath();
+    NSString *kind = WitchSplashMediaKindInDirectory(directory);
+    if (!kind) kind = WitchSplashBundleMediaKind();
+    if ([kind isEqualToString:@"video"]) return localize(@"splash.status_video", nil);
+    if ([kind isEqualToString:@"image"]) return localize(@"splash.status_image", nil);
+    return localize(@"splash.status_none", nil);
+}
+
+- (void)clearSplashMedia {
+    NSFileManager *fm = [NSFileManager defaultManager];
+    NSString *directory = WitchSplashDirectoryPath();
+    NSArray<NSString *> *names = [fm contentsOfDirectoryAtPath:directory error:nil];
+    for (NSString *name in names) {
+        if ([name hasPrefix:@"."]) continue;
+        [fm removeItemAtPath:[directory stringByAppendingPathComponent:name] error:nil];
+    }
+    [HapticManager.shared play:HapticTypeLight];
+    [self reloadTables];
+}
+
+- (void)saveSplashMediaFromURL:(NSURL *)url preferredExtension:(NSString *)preferredExtension {
+    NSFileManager *fm = [NSFileManager defaultManager];
+    NSString *directory = WitchSplashDirectoryPath();
+    [fm createDirectoryAtPath:directory withIntermediateDirectories:YES attributes:nil error:nil];
+    NSArray<NSString *> *contents = [fm contentsOfDirectoryAtPath:directory error:nil];
+    for (NSString *name in contents) {
+        if ([name hasPrefix:@"."]) continue;
+        [fm removeItemAtPath:[directory stringByAppendingPathComponent:name] error:nil];
+    }
+    NSString *ext = url.pathExtension.lowercaseString;
+    if (![WitchSplashAllowedExtensions() containsObject:ext]) {
+        ext = preferredExtension;
+    }
+    NSString *dest = [directory stringByAppendingPathComponent:[@"splash" stringByAppendingPathExtension:ext]];
+    BOOL access = [url startAccessingSecurityScopedResource];
+    NSError *copyError = nil;
+    BOOL ok = [fm copyItemAtURL:url toURL:[NSURL fileURLWithPath:dest] error:&copyError];
+    if (!ok) {
+        NSData *data = [NSData dataWithContentsOfURL:url options:0 error:&copyError];
+        if (data) {
+            ok = [data writeToFile:dest atomically:YES];
+        }
+    }
+    if (access) [url stopAccessingSecurityScopedResource];
+    dispatch_async(dispatch_get_main_queue(), ^{
+        if (!ok) {
+            NSLog(@"[saveSplashMedia] copy failed: %@ (source: %@)", copyError, url);
+            showDialog(localize(@"Error", nil), localize(@"Could not copy the video. Please try another file.", nil));
+            return;
+        }
+        [HapticManager.shared play:HapticTypeSuccess];
+        [self reloadTables];
+    });
+}
+
+- (void)saveSplashImage:(UIImage *)image {
+    NSString *directory = WitchSplashDirectoryPath();
+    NSFileManager *fm = [NSFileManager defaultManager];
+    [fm createDirectoryAtPath:directory withIntermediateDirectories:YES attributes:nil error:nil];
+    NSArray<NSString *> *contents = [fm contentsOfDirectoryAtPath:directory error:nil];
+    for (NSString *name in contents) {
+        if ([name hasPrefix:@"."]) continue;
+        [fm removeItemAtPath:[directory stringByAppendingPathComponent:name] error:nil];
+    }
+    NSString *dest = [directory stringByAppendingPathComponent:@"splash.png"];
+    [UIImagePNGRepresentation(image) writeToFile:dest atomically:YES];
+    [HapticManager.shared play:HapticTypeSuccess];
+    [self reloadTables];
+}
+
+- (void)handleSplashResults:(NSArray<PHPickerResult *> *)results {
+    PHPickerResult *result = results.firstObject;
+    NSItemProvider *provider = result.itemProvider;
+    if (!provider) return;
+    if ([provider hasItemConformingToTypeIdentifier:UTTypeMovie.identifier]) {
+        [provider loadFileRepresentationForTypeIdentifier:UTTypeMovie.identifier
+                                        completionHandler:^(NSURL *url, NSError *error) {
+            if (url) {
+                [self saveSplashMediaFromURL:url preferredExtension:@"mp4"];
+                return;
+            }
+            dispatch_async(dispatch_get_main_queue(), ^{
+                showDialog(localize(@"Error", nil), localize(@"Could not copy the video. Please try another file.", nil));
+            });
+        }];
+        return;
+    }
+    if ([provider hasItemConformingToTypeIdentifier:UTTypeImage.identifier]) {
+        [provider loadFileRepresentationForTypeIdentifier:UTTypeImage.identifier
+                                        completionHandler:^(NSURL *url, NSError *error) {
+            if (url) {
+                [self saveSplashMediaFromURL:url preferredExtension:@"png"];
+                return;
+            }
+            [provider loadObjectOfClass:[UIImage class]
+                    completionHandler:^(id<NSItemProviderReading> object, NSError *loadError) {
+                UIImage *image = [object isKindOfClass:[UIImage class]] ? (UIImage *)object : nil;
+                if (image) {
+                    dispatch_async(dispatch_get_main_queue(), ^{ [self saveSplashImage:image]; });
+                } else {
+                    dispatch_async(dispatch_get_main_queue(), ^{
+                        showDialog(localize(@"Error", nil), localize(@"Could not copy the video. Please try another file.", nil));
+                    });
+                }
+            }];
+        }];
+        return;
+    }
+    dispatch_async(dispatch_get_main_queue(), ^{
+        showDialog(localize(@"Error", nil), localize(@"Could not copy the video. Please try another file.", nil));
+    });
+}
+
 - (void)openPhotoLibraryWithFilter:(PHPickerFilter *)filter {
     if (@available(iOS 14, *)) {
         PHPickerConfiguration *config = [[PHPickerConfiguration alloc] init];
@@ -2004,6 +2202,11 @@
 - (void)picker:(PHPickerViewController *)picker didFinishPicking:(NSArray<PHPickerResult *> *)results {
     [picker dismissViewControllerAnimated:YES completion:nil];
     if (results.count == 0) return;
+    if (self.splashPicking) {
+        self.splashPicking = NO;
+        [self handleSplashResults:results];
+        return;
+    }
 
     PHPickerResult *result = results.firstObject;
     NSItemProvider *provider = result.itemProvider;
@@ -2046,6 +2249,17 @@
 
 - (void)imagePickerController:(UIImagePickerController *)picker didFinishPickingMediaWithInfo:(NSDictionary<UIImagePickerControllerInfoKey,id> *)info {
     [picker dismissViewControllerAnimated:YES completion:nil];
+    if (self.splashPicking) {
+        self.splashPicking = NO;
+        NSURL *videoURL = info[UIImagePickerControllerMediaURL];
+        if (videoURL) {
+            [self saveSplashMediaFromURL:videoURL preferredExtension:@"mp4"];
+            return;
+        }
+        UIImage *image = info[UIImagePickerControllerOriginalImage];
+        if (image) [self saveSplashImage:image];
+        return;
+    }
     if (picker.mediaTypes.count > 1 || [picker.mediaTypes.firstObject isEqualToString:UTTypeMovie.identifier]) {
         NSURL *videoURL = info[UIImagePickerControllerMediaURL];
         if (videoURL) {
