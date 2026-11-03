@@ -1512,3 +1512,5 @@
 "splash.status_image" = "Image";
 "splash.status_video" = "Video";
 "splash.status_bundled" = "Bundled";
+
+"appearance.splash_blur" = "Splash background blur";

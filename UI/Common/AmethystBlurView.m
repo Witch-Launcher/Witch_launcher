@@ -90,9 +90,16 @@ static NSString * const kDefaultBlurPrefKey = @"amethyst_settings_blur";
 - (CGFloat)intensity { return [AmethystBlurView intensityForKey:_prefKey]; }
 
 + (UIBlurEffect *)materialForIntensity:(CGFloat)t {
-    // One adaptive material; perceived strength is driven by the wrap alpha.
+    UIBlurEffectStyle style;
+    if (t <= 1.0 / 3.0) {
+        style = UIBlurEffectStyleSystemUltraThinMaterial;
+    } else if (t <= 2.0 / 3.0) {
+        style = UIBlurEffectStyleSystemThinMaterial;
+    } else {
+        style = UIBlurEffectStyleSystemMaterial;
+    }
     if (@available(iOS 13.0, *)) {
-        return [UIBlurEffect effectWithStyle:UIBlurEffectStyleSystemThinMaterial];
+        return [UIBlurEffect effectWithStyle:style];
     }
     return [UIBlurEffect effectWithStyle:UIBlurEffectStyleLight];
 }
@@ -128,10 +135,9 @@ static NSString * const kDefaultBlurPrefKey = @"amethyst_settings_blur";
             }
             [self updateGlassCornerConfiguration];
         } else {
-            // Linear scaling: 1% → wrapper alpha 0.01 (barely-there frost),
-            // 100% → full material. Discrete material buckets would make any
-            // nonzero value look like ~90% blur, which is exactly the bug.
-            _effectWrap.alpha = t;
+            // buckets; the full material at all times so the blur is a real
+            // gaussian sampling of the backdrop, never a dimming overlay.
+            _effectWrap.alpha = 1.0;
             UIBlurEffect *newEffect = [AmethystBlurView materialForIntensity:t];
             if (![_effectView.effect isEqual:newEffect]) {
                 [_effectView setEffect:newEffect];
@@ -142,10 +148,9 @@ static NSString * const kDefaultBlurPrefKey = @"amethyst_settings_blur";
     // Readability tint follows light/dark and scales down with intensity so
     // low slider values stay virtually invisible. Glass already supplies its
     // own material, so it needs much less extra tint than the blur fallback.
-    BOOL dark = ThemeManager.shared.isDarkMode;
-    UIColor *base = dark ? [UIColor colorWithWhite:0 alpha:1] : [UIColor colorWithWhite:1 alpha:1];
-    _tintView.backgroundColor = base;
-    _tintView.alpha = on ? ((glass ? 0.055 : 0.12) * t) : 0.0;
+    // No extra tint: the blur must stay translucent and show what is behind,
+    // never dim or darken it.
+    _tintView.alpha = 0.0;
 }
 
 - (void)layoutSubviews {

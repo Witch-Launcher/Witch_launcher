@@ -358,6 +358,7 @@ static NSString *WitchSplashBundleMediaKind(void) {
             @{@"type": @"image", @"label": localize(@"appearance.background", nil)},
             @{@"type": @"switch", @"label": localize(@"appearance.launch_splash", nil), @"key": @"appearance.launch_splash"},
             @{@"type": @"splash", @"label": localize(@"appearance.splash_background", nil)},
+            @{@"type": @"slider", @"label": localize(@"appearance.splash_blur", nil), @"key": @"appearance.splash_blur", @"min": @0, @"max": @100, @"suffix": @"%"},
             @{@"type": @"font", @"label": localize(@"appearance.launcher_font", nil)},
             @{@"type": @"slider", @"label": localize(@"appearance.ui_scale", nil), @"key": @"amethyst_ui_scale", @"min": @50, @"max": @150, @"suffix": @"%"},
             @{@"type": @"label", @"label": localize(@"appearance.ui_scale_hint", nil)},
@@ -1649,6 +1650,9 @@ static NSString *WitchSplashBundleMediaKind(void) {
         [[NSUserDefaults standardUserDefaults] setFloat:val forKey:item[@"key"]];
         [[NSUserDefaults standardUserDefaults] synchronize];
         [self broadcastThemeDebounced];
+    } else if ([item[@"key"] isEqualToString:@"appearance.splash_blur"]) {
+        [[NSUserDefaults standardUserDefaults] setFloat:val forKey:item[@"key"]];
+        [[NSUserDefaults standardUserDefaults] synchronize];
     } else if ([item[@"key"] hasPrefix:@"amethyst_"] && [item[@"key"] hasSuffix:@"_blur"]) {
         // Save UI panel blur to NSUserDefaults — the store AmethystBlurView
         // actually reads. setPrefFloat would write the launcher plist and the

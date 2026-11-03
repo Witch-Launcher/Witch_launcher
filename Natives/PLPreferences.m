@@ -101,6 +101,9 @@
             @"cursortype_hidden_enabled": @YES,
             @"cursortype_hidden_cursor": @"default"
         }.mutableCopy,
+        @"appearance": @{
+            @"launch_splash": @YES,
+        }.mutableCopy,
         @"java": @{
             @"java_homes": @{
                 @"0": @{
@@ -470,16 +473,17 @@
         NSString *section = [key substringToIndex:dotRange.location];
         NSString *keyName = [key substringFromIndex:dotRange.location + 1];
         NSMutableDictionary *target = self.instancePref ?: self.globalPref;
-        if (target[section]) {
-            target[section][keyName] = value;
-            if (target == self.instancePref) {
-                [self saveInstancePref];
-            } else {
-                [self saveGlobalPref];
-            }
-            NSLog(@"[PLPreferences] Created new preference %@ = %@", key, value);
-            return YES;
+        if (!target[section]) {
+            target[section] = [NSMutableDictionary dictionary];
         }
+        target[section][keyName] = value;
+        if (target == self.instancePref) {
+            [self saveInstancePref];
+        } else {
+            [self saveGlobalPref];
+        }
+        NSLog(@"[PLPreferences] Created new preference %@ = %@", key, value);
+        return YES;
     }
     NSLog(@"[PLPreferences] Setter could not find preference %@", key);
     return NO;

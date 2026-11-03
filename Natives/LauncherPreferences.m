@@ -18,9 +18,6 @@ void loadPreferences(BOOL reset) {
     } else {
         pref = [[PLPreferences alloc] initWithAutomaticMigrator];
     }
-    if (![pref getObject:@"appearance.launch_splash"]) {
-        [pref setObject:@"appearance.launch_splash" value:@YES];
-    }
 }
 
 void toggleIsolatedPref(BOOL forceEnable) {

@@ -1507,3 +1507,5 @@
 "splash.status_image" = "Hình ảnh";
 "splash.status_video" = "Video";
 "splash.status_bundled" = "Mặc định trong app";
+
+"appearance.splash_blur" = "Độ mờ nền màn hình chờ";

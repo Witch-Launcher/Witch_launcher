@@ -23,6 +23,7 @@
 @property (nonatomic) NSInteger selectedIndex;
 @property (nonatomic) NSArray<NSLayoutConstraint *> *chromeConstraints;
 @property (nonatomic) BOOL modpackExportInProgress;
+@property (nonatomic) UIBarButtonItem *exportBarButtonItem;
 @end
 
 // A rail tab: SF-symbol icon centered above the label in a vertical stack.
@@ -114,9 +115,10 @@
                                                                  target:self
                                                                  action:@selector(exportModpackTapped)];
     exportItem.accessibilityLabel = localize(@"modpack.export_title", nil);
+    self.exportBarButtonItem = exportItem;
     self.navigationItem.rightBarButtonItems = @[
-        exportItem,
         [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemSave target:self action:@selector(saveTapped)],
+        exportItem,
         [[UIBarButtonItem alloc] initWithImage:[UIImage systemImageNamed:@"rectangle.3.group"] style:UIBarButtonItemStylePlain target:self action:@selector(cycleTabPosition)],
     ];
     self.view.backgroundColor = ThemeManager.shared.contentBackgroundColor;
@@ -411,7 +413,7 @@
                              version:(NSString *)version
                               author:(NSString *)author {
     self.modpackExportInProgress = YES;
-    self.navigationItem.rightBarButtonItems.firstObject.enabled = NO;
+    self.exportBarButtonItem.enabled = NO;
     DownloadProgressOverlay *overlay = [DownloadProgressOverlay showBlurredInView:self.view
                                                                            title:localize(@"modpack.export_title", nil)
                                                                          blurred:YES];
@@ -427,7 +429,7 @@
                        completion:^(NSString *path, NSError *error) {
         __strong typeof(weakSelf) self = weakSelf;
         self.modpackExportInProgress = NO;
-        self.navigationItem.rightBarButtonItems.firstObject.enabled = YES;
+        self.exportBarButtonItem.enabled = YES;
         if (error) {
             [overlay dismiss];
             [ErrorPresenter showError:localize(@"modpack.export_failed", nil)
@@ -448,7 +450,7 @@
         applicationActivities:nil];
     UIPopoverPresentationController *popover = activity.popoverPresentationController;
     if (popover) {
-        UIBarButtonItem *anchor = self.navigationItem.rightBarButtonItems.firstObject;
+        UIBarButtonItem *anchor = self.exportBarButtonItem;
         if (anchor) {
             popover.barButtonItem = anchor;
         } else {

@@ -40,12 +40,24 @@ static NSString *WitchSplashPathForExtensions(NSArray<NSString *> *extensions) {
     return nil;
 }
 
+static CGFloat WitchSplashBlurIntensity(void) {
+    float v = [[NSUserDefaults standardUserDefaults] floatForKey:@"appearance.splash_blur"];
+    return MAX(0.0f, MIN(v, 100.0f)) / 100.0f;
+}
+
+static UIBlurEffectStyle WitchSplashBlurStyle(CGFloat t) {
+    if (t <= 1.0 / 3.0) return UIBlurEffectStyleSystemUltraThinMaterial;
+    if (t <= 2.0 / 3.0) return UIBlurEffectStyleSystemThinMaterial;
+    return UIBlurEffectStyleSystemMaterial;
+}
+
 @interface LaunchSplashView ()
 @property (nonatomic, strong, nullable) UIImageView *imageView;
 @property (nonatomic, strong, nullable) AVPlayer *player;
 @property (nonatomic, strong, nullable) AVPlayerItem *playerItem;
 @property (nonatomic, copy, nullable) id<NSObject> playerObserver;
 @property (nonatomic, strong, nullable) AVPlayerLayer *playerLayer;
+@property (nonatomic, strong) UIVisualEffectView *blurView;
 @property (nonatomic, strong) UIView *scrim;
 @property (nonatomic, strong) UILabel *titleLabel;
 @property (nonatomic, strong) UILabel *messageLabel;
@@ -126,6 +138,27 @@ static NSString *WitchSplashPathForExtensions(NSArray<NSString *> *extensions) {
             }
         }
     }
+    UIVisualEffectView *blurView = [[UIVisualEffectView alloc] initWithEffect:nil];
+    blurView.translatesAutoresizingMaskIntoConstraints = NO;
+    blurView.userInteractionEnabled = NO;
+    blurView.hidden = WitchSplashBlurIntensity() <= 0.0f;
+    CGFloat blurT = WitchSplashBlurIntensity();
+    if (blurT > 0.0f) {
+        if (@available(iOS 13.0, *)) {
+            blurView.effect = [UIBlurEffect effectWithStyle:WitchSplashBlurStyle(blurT)];
+        } else {
+            blurView.effect = [UIBlurEffect effectWithStyle:UIBlurEffectStyleLight];
+        }
+    }
+    [self addSubview:blurView];
+    [NSLayoutConstraint activateConstraints:@[
+        [blurView.leadingAnchor constraintEqualToAnchor:self.leadingAnchor],
+        [blurView.trailingAnchor constraintEqualToAnchor:self.trailingAnchor],
+        [blurView.topAnchor constraintEqualToAnchor:self.topAnchor],
+        [blurView.bottomAnchor constraintEqualToAnchor:self.bottomAnchor],
+    ]];
+    self.blurView = blurView;
+
     UIView *scrim = [[UIView alloc] init];
     scrim.translatesAutoresizingMaskIntoConstraints = NO;
     scrim.backgroundColor = [UIColor.blackColor colorWithAlphaComponent:self.mediaActive ? 0.40 : 0.0];
