@@ -1468,3 +1468,24 @@
 "This plugin does not expose settings." = "Plugin này không có cài đặt.";
 
 "Unsupported setting type" = "Loại cài đặt chưa hỗ trợ";
+
+"modpack.export_title" = "Xuất modpack";
+"modpack.export_message" = "Chọn định dạng modpack để xuất.";
+"modpack.export_modrinth" = "Modrinth (.mrpack)";
+"modpack.export_modrinth_desc" = "Modrinth App, Prism Launcher, ATLauncher";
+"modpack.export_curseforge" = "CurseForge (.zip)";
+"modpack.export_curseforge_desc" = "CurseForge App và các launcher tương thích";
+"modpack.export_prompt_message" = "Xuất dưới dạng %@. Các tệp không thể khớp trực tuyến sẽ được đóng gói trong modpack.";
+"modpack.export_name" = "Tên modpack";
+"modpack.export_version" = "Phiên bản";
+"modpack.export_author" = "Tác giả";
+"modpack.export_prepare" = "Đang quét tệp của profile...";
+"modpack.export_hash" = "Đang tính mã băm (%lu tệp)...";
+"modpack.export_lookup" = "Đang đối chiếu tệp với Modrinth...";
+"modpack.export_lookup_cf" = "Đang đối chiếu tệp với CurseForge...";
+"modpack.export_writing" = "Đang nén tệp (%lu)...";
+"modpack.export_done" = "Đã xuất modpack";
+"modpack.export_failed" = "Không thể xuất modpack";
+"modpack.export_no_version" = "Profile này chưa chọn phiên bản.";
+"modpack.export_missing_dir" = "Không tìm thấy thư mục profile.";
+"modpack.export_no_content" = "Profile này không có mod, resource pack, shader hoặc config để xuất.";

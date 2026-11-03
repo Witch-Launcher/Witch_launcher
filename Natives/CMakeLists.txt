@@ -374,6 +374,7 @@ egl_bridge.m
     ../UI/Managers/CursorTypeManager.m
     ../UI/Managers/WindowsCursorParser.m
     ../UI/Managers/InstalledModsManager.m
+   ../UI/Managers/ModpackExporter.m
    ../UI/Managers/DependencyResolver.m
    ../UI/Managers/ProfileAvatarManager.m
    ../UI/Managers/ModIconReader.m

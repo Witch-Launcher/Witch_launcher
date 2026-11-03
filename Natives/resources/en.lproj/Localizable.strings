@@ -1473,3 +1473,24 @@
 "This plugin does not expose settings." = "This plugin does not expose settings.";
 
 "Unsupported setting type" = "Unsupported setting type";
+
+"modpack.export_title" = "Export Modpack";
+"modpack.export_message" = "Choose the pack format to export.";
+"modpack.export_modrinth" = "Modrinth (.mrpack)";
+"modpack.export_modrinth_desc" = "Modrinth App, Prism Launcher, ATLauncher";
+"modpack.export_curseforge" = "CurseForge (.zip)";
+"modpack.export_curseforge_desc" = "CurseForge App and compatible launchers";
+"modpack.export_prompt_message" = "Export as %@. Files that cannot be matched online are bundled inside the pack.";
+"modpack.export_name" = "Pack name";
+"modpack.export_version" = "Version";
+"modpack.export_author" = "Author";
+"modpack.export_prepare" = "Scanning profile files...";
+"modpack.export_hash" = "Hashing files (%lu)...";
+"modpack.export_lookup" = "Matching files with Modrinth...";
+"modpack.export_lookup_cf" = "Matching files with CurseForge...";
+"modpack.export_writing" = "Packing files (%lu)...";
+"modpack.export_done" = "Modpack exported";
+"modpack.export_failed" = "Could not export modpack";
+"modpack.export_no_version" = "This profile has no version selected.";
+"modpack.export_missing_dir" = "The profile directory could not be found.";
+"modpack.export_no_content" = "This profile has no mods, resource packs, shaders or configs to export.";
