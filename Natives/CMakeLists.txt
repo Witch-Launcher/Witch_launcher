@@ -314,6 +314,8 @@ add_executable(Witch
   SceneExternalDelegate.m
   SurfaceViewController.m
   SurfaceViewController+HangDetect.m
+  SurfaceViewController+LaunchSplash.m
+  LaunchSplashView.m
   GameLaunchChecks.m
   SurfaceViewController+ExternalDisplay.m
   SurfaceViewController+LogView.m

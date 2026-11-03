@@ -1501,3 +1501,7 @@
 "modpack.export_no_version" = "This profile has no version selected.";
 "modpack.export_missing_dir" = "The profile directory could not be found.";
 "modpack.export_no_content" = "This profile has no mods, resource packs, shaders or configs to export.";
+
+"splash.starting_title" = "Starting Minecraft";
+"splash.starting_message" = "Witch is starting the Java runtime. The game window appears when the game is ready.";
+"splash.starting_hint" = "Customize this screen with Documents/Splash/splash.png or splash.mp4";

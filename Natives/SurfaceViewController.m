@@ -20,6 +20,7 @@
 #import "PLProfiles.h"
 #import "SurfaceViewController.h"
 #import "SurfaceViewController+HangDetect.h"
+#import "SurfaceViewController+LaunchSplash.h"
 #import "GameLaunchChecks.h"
 #import "TrackedTextField.h"
 #import "UIKit+hook.h"
@@ -857,6 +858,7 @@ static GameSurfaceView* pojavWindow;
 
 - (void)beginMinecraftLaunch {
     [self startBlackScreenWatchdog];
+    [self presentLaunchSplash];
     [[PerfRecorder shared] startWithMetadata:@{
         @"version": self.metadata[@"id"] ?: @"",
         @"instance": self.metadata[@"instanceName"] ?: @""

@@ -1496,3 +1496,7 @@
 "modpack.export_no_version" = "Profile này chưa chọn phiên bản.";
 "modpack.export_missing_dir" = "Không tìm thấy thư mục profile.";
 "modpack.export_no_content" = "Profile này không có mod, resource pack, shader hoặc config để xuất.";
+
+"splash.starting_title" = "Đang khởi động Minecraft";
+"splash.starting_message" = "Witch đang khởi động môi trường Java. Cửa sổ game sẽ hiện ra khi sẵn sàng.";
+"splash.starting_hint" = "Tuỳ chỉnh màn hình này bằng Documents/Splash/splash.png hoặc splash.mp4";
