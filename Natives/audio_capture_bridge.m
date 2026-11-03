@@ -161,6 +161,14 @@ static CaptureHandle *createCapture(int sampleRate) {
 
 static void destroyCapture(CaptureHandle *handle) {
     if (!handle) return;
+    // Stop the tap and the engine before tearing down the shared context:
+    // the tap callback references it, so destroying it first was a use-after-free.
+    if (handle->engine) {
+        AVAudioEngine *e = (__bridge_transfer AVAudioEngine*)handle->engine;
+        [e.inputNode removeTapOnBus:0];
+        [e stop];
+        handle->engine = NULL;
+    }
     if (handle->ctx) {
         pthread_mutex_lock(&handle->ctx->mutex);
         handle->ctx->running = NO;
@@ -169,12 +177,6 @@ static void destroyCapture(CaptureHandle *handle) {
         pthread_mutex_unlock(&handle->ctx->mutex);
         ctx_destroy(handle->ctx);
         handle->ctx = NULL;
-    }
-    if (handle->engine) {
-        AVAudioEngine *e = (__bridge_transfer AVAudioEngine*)handle->engine;
-        [e.inputNode removeTapOnBus:0];
-        [e stop];
-        handle->engine = NULL;
     }
     if (handle->outputFormat) {
         AVAudioFormat *f = (__bridge_transfer AVAudioFormat*)handle->outputFormat;

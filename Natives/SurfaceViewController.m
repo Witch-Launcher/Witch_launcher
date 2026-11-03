@@ -80,6 +80,8 @@ static GameSurfaceView* pojavWindow;
 
 @property(nonatomic) id mouseConnectCallback, mouseDisconnectCallback;
 @property(nonatomic) id controllerConnectCallback, controllerDisconnectCallback;
+@property(nonatomic) id cursorTypeCallback, mouseScaleCallback, controlScaleCallback;
+@property(nonatomic) CADisplayLink *gamepadDisplayLink;
 
 @property(nonatomic) CGFloat screenScale;
 @property(nonatomic) CGFloat mouseSpeed;
@@ -153,12 +155,19 @@ static GameSurfaceView* pojavWindow;
         [GyroInput tick];
         [ControllerInput tick];
     };
+    // Invalidate any leftover link from a previous session before adding a
+    // new one; otherwise each game session leaks one run-loop entry.
+    if (self.gamepadDisplayLink) {
+        [self.gamepadDisplayLink invalidate];
+        self.gamepadDisplayLink = nil;
+    }
     CADisplayLink *displayLink = [CADisplayLink displayLinkWithTarget:tickInput selector:@selector(invoke)];
     if (@available(iOS 15.0, tvOS 15.0, *)) {
         float maxFPS = UIScreen.mainScreen.maximumFramesPerSecond;
         displayLink.preferredFrameRateRange = CAFrameRateRangeMake(30, maxFPS, maxFPS);
     }
     [displayLink addToRunLoop:NSRunLoop.currentRunLoop forMode:NSRunLoopCommonModes];
+    self.gamepadDisplayLink = displayLink;
 
     CGFloat screenScale = UIScreen.mainScreen.scale;
 
@@ -286,16 +295,21 @@ static GameSurfaceView* pojavWindow;
     self.swipeableButtons = [[NSMutableArray alloc] init];
 
     [KeyboardInput initKeycodeTable];
+    __weak typeof(self) weakSelf = self;
     self.mouseConnectCallback = [[NSNotificationCenter defaultCenter] addObserverForName:GCMouseDidConnectNotification object:nil queue:[NSOperationQueue mainQueue] usingBlock:^(NSNotification *note) {
+        typeof(self) strongSelf = weakSelf;
+        if (!strongSelf) return;
         NSLog(@"Input: Mouse connected!");
         GCMouse* mouse = note.object;
-        [self registerMouseCallbacks:mouse];
+        [strongSelf registerMouseCallbacks:mouse];
         virtualMouseEnabled = YES;
-        self.mousePointerView.hidden = isGrabbing;
-        AmethystSetSystemPointerHidden(self.view, YES);
-        [self setNeedsUpdateOfPrefersPointerLocked];
+        strongSelf.mousePointerView.hidden = isGrabbing;
+        AmethystSetSystemPointerHidden(strongSelf.view, YES);
+        [strongSelf setNeedsUpdateOfPrefersPointerLocked];
     }];
     self.mouseDisconnectCallback = [[NSNotificationCenter defaultCenter] addObserverForName:GCMouseDidDisconnectNotification object:nil queue:[NSOperationQueue mainQueue] usingBlock:^(NSNotification *note) {
+        typeof(self) strongSelf = weakSelf;
+        if (!strongSelf) return;
         NSLog(@"Input: Mouse disconnected!");
         GCMouse* mouse = note.object;
         mouse.mouseInput.mouseMovedHandler = nil;
@@ -303,9 +317,9 @@ static GameSurfaceView* pojavWindow;
         mouse.mouseInput.middleButton.pressedChangedHandler = nil;
         mouse.mouseInput.rightButton.pressedChangedHandler = nil;
         [mouse.mouseInput.auxiliaryButtons makeObjectsPerformSelector:@selector(setPressedChangedHandler:) withObject:nil];
-        [self setNeedsUpdateOfPrefersPointerLocked];
+        [strongSelf setNeedsUpdateOfPrefersPointerLocked];
         if (getPrefBool(@"control.hardware_hide")) {
-            self.ctrlView.hidden = NO;
+            strongSelf.ctrlView.hidden = NO;
         }
     }];
     if (GCMouse.current != nil) {
@@ -313,48 +327,58 @@ static GameSurfaceView* pojavWindow;
     }
 
     // Observe cursor type changes from the game (via GLFW/SDL3 JNI calls)
-    [[NSNotificationCenter defaultCenter] addObserverForName:CursorTypeDidChangeNotification
+    self.cursorTypeCallback = [[NSNotificationCenter defaultCenter] addObserverForName:CursorTypeDidChangeNotification
                                                       object:nil
                                                        queue:[NSOperationQueue mainQueue]
                                                   usingBlock:^(NSNotification *note) {
+        typeof(self) strongSelf = weakSelf;
+        if (!strongSelf) return;
         if (!virtualMouseEnabled) return;
         NSString *typeId = note.userInfo[@"typeId"];
         if (typeId) {
             CGRect displayFrame = [CursorManager displayFrameForMouseFrame:virtualMouseFrame typeId:typeId];
-            self.mousePointerView.image = [CursorTypeManager imageForType:typeId displaySize:displayFrame.size];
-            self.mousePointerView.frame = displayFrame;
+            strongSelf.mousePointerView.image = [CursorTypeManager imageForType:typeId displaySize:displayFrame.size];
+            strongSelf.mousePointerView.frame = displayFrame;
         }
     }];
 
     // Live update for mouse/button scale sliders (Settings -> Controls)
     // Previous bug: slider saved pref but never refreshed virtualMouseFrame / mousePointerView until relaunch.
     // Now observe and apply immediately, including hitbox-aware displayFrame recalculation.
-    [[NSNotificationCenter defaultCenter] addObserverForName:@"MouseScaleDidChangeNotification" object:nil queue:[NSOperationQueue mainQueue] usingBlock:^(NSNotification *note) {
-        [self handleControlScaleChange];
+    self.mouseScaleCallback = [[NSNotificationCenter defaultCenter] addObserverForName:@"MouseScaleDidChangeNotification" object:nil queue:[NSOperationQueue mainQueue] usingBlock:^(NSNotification *note) {
+        typeof(self) strongSelf = weakSelf;
+        if (!strongSelf) return;
+        [strongSelf handleControlScaleChange];
     }];
-    [[NSNotificationCenter defaultCenter] addObserverForName:@"ControlScaleDidChangeNotification" object:nil queue:[NSOperationQueue mainQueue] usingBlock:^(NSNotification *note) {
-        [self handleControlScaleChange];
+    self.controlScaleCallback = [[NSNotificationCenter defaultCenter] addObserverForName:@"ControlScaleDidChangeNotification" object:nil queue:[NSOperationQueue mainQueue] usingBlock:^(NSNotification *note) {
+        typeof(self) strongSelf = weakSelf;
+        if (!strongSelf) return;
+        [strongSelf handleControlScaleChange];
     }];
 
     // TODO: deal with multiple controllers by letting users decide which one to use?
     self.controllerConnectCallback = [[NSNotificationCenter defaultCenter] addObserverForName:GCControllerDidConnectNotification object:nil queue:[NSOperationQueue mainQueue] usingBlock:^(NSNotification *note) {
+        typeof(self) strongSelf = weakSelf;
+        if (!strongSelf) return;
         NSLog(@"Input: Controller connected!");
         GCController* controller = note.object;
         [ControllerInput initKeycodeTable];
         [ControllerInput registerControllerCallbacks:controller];
-        self.mousePointerView.hidden = isGrabbing;
+        strongSelf.mousePointerView.hidden = isGrabbing;
         virtualMouseEnabled = YES;
-        AmethystSetSystemPointerHidden(self.view, YES);
+        AmethystSetSystemPointerHidden(strongSelf.view, YES);
         if (getPrefBool(@"control.hardware_hide")) {
-            self.ctrlView.hidden = YES;
+            strongSelf.ctrlView.hidden = YES;
         }
     }];
     self.controllerDisconnectCallback = [[NSNotificationCenter defaultCenter] addObserverForName:GCControllerDidDisconnectNotification object:nil queue:[NSOperationQueue mainQueue] usingBlock:^(NSNotification *note) {
+        typeof(self) strongSelf = weakSelf;
+        if (!strongSelf) return;
         NSLog(@"Input: Controller disconnected!");
         GCController* controller = note.object;
         [ControllerInput unregisterControllerCallbacks:controller];
         if (getPrefBool(@"control.hardware_hide")) {
-            self.ctrlView.hidden = NO;
+            strongSelf.ctrlView.hidden = NO;
         }
     }];
     if (GCController.controllers.count == 1) {
@@ -397,9 +421,68 @@ static GameSurfaceView* pojavWindow;
     [self setNeedsUpdateOfPrefersPointerLocked];
 }
 
+// Invalidate every timer/observer/display link this session created. Called
+// when the game session ends (viewWillDisappear) and again from dealloc as a
+// safety net. Without this, block-based observers and the 0.25s sweep timer
+// retain the whole view controller after the game is gone.
+- (void)witch_teardownGameSession {
+    if (self.gamepadDisplayLink) {
+        [self.gamepadDisplayLink invalidate];
+        self.gamepadDisplayLink = nil;
+    }
+    if (staleTouchSweepTimer) {
+        [staleTouchSweepTimer invalidate];
+        staleTouchSweepTimer = nil;
+    }
+    [self performSelector:@selector(widgetStopTimer)];
+
+    NSNotificationCenter *nc = [NSNotificationCenter defaultCenter];
+    [nc removeObserver:self name:@"ResolutionDidChangeNotification" object:nil];
+    id tokens[] = {
+        self.mouseConnectCallback,
+        self.mouseDisconnectCallback,
+        self.controllerConnectCallback,
+        self.controllerDisconnectCallback,
+        self.cursorTypeCallback,
+        self.mouseScaleCallback,
+        self.controlScaleCallback,
+    };
+    for (size_t i = 0; i < sizeof(tokens) / sizeof(tokens[0]); i++) {
+        if (tokens[i]) {
+            [nc removeObserver:tokens[i]];
+        }
+    }
+    self.mouseConnectCallback = nil;
+    self.mouseDisconnectCallback = nil;
+    self.controllerConnectCallback = nil;
+    self.controllerDisconnectCallback = nil;
+    self.cursorTypeCallback = nil;
+    self.mouseScaleCallback = nil;
+    self.controlScaleCallback = nil;
+
+    // If a hardware mouse is still attached it owns block handlers that
+    // reference this controller; clear them so the mouse singleton does not
+    // pin the view controller after the game session ends.
+    if (GCMouse.current) {
+        GCMouse *mouse = GCMouse.current;
+        mouse.mouseInput.mouseMovedHandler = nil;
+        mouse.mouseInput.leftButton.pressedChangedHandler = nil;
+        mouse.mouseInput.middleButton.pressedChangedHandler = nil;
+        mouse.mouseInput.rightButton.pressedChangedHandler = nil;
+        [mouse.mouseInput.auxiliaryButtons makeObjectsPerformSelector:@selector(setPressedChangedHandler:) withObject:nil];
+    }
+}
+
 - (void)viewWillDisappear:(BOOL)animated {
     [super viewWillDisappear:animated];
-    [self performSelector:@selector(widgetStopTimer)];
+    // Do NOT tear the session down here: this also fires for temporary
+    // presentations (share sheet, crash screen, settings over the game).
+    // Session cleanup belongs to dealloc, which runs when UIKit releases
+    // this controller after UIKit_returnToSplitView changes rootVC.
+}
+
+- (void)dealloc {
+    [self witch_teardownGameSession];
 }
 
 - (void)updateAudioSettings {
@@ -842,10 +925,11 @@ static GameSurfaceView* pojavWindow;
     [self updateControlHiddenState:self.toggleHidden];
 
     if (menuButton) {
+        __weak typeof(self) weakSelf = self;
         NSMutableArray *items = [NSMutableArray new];
         for (int i = 0; i < self.menuArray.count; i++) {
             UIAction *item = [UIAction actionWithTitle:localize(self.menuArray[i], nil) image:nil identifier:nil
-                handler:^(id action) {[self didSelectMenuItem:i];}];
+                handler:^(id action) { [weakSelf didSelectMenuItem:i]; }];
             [items addObject:item];
         }
         menuButton.menu = [UIMenu menuWithTitle:@"" image:nil identifier:nil
@@ -1507,8 +1591,9 @@ static NSTimer* staleTouchSweepTimer = nil;
 - (void)ensureTouchControllerSweepTimer
 {
     if (staleTouchSweepTimer != nil) return;
+    __weak typeof(self) weakSelf = self;
     staleTouchSweepTimer = [NSTimer scheduledTimerWithTimeInterval:0.25 repeats:YES block:^(NSTimer* timer) {
-        [self sendTouchControllerStaleUps];
+        [weakSelf sendTouchControllerStaleUps];
     }];
 }
 

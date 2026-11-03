@@ -20,11 +20,11 @@ The package root must contain `witch-plugin.json`, `checksums.json`, and `witch-
 1. Copy the `.plgw` file to the device.
 2. Open `Settings > Plugins`.
 3. Tap `+` and choose the package.
-4. Review the name, version, author, license, and source URL.
-5. Confirm the install.
-6. Restart the launcher.
+4. Wait for the registry verification to complete.
+5. Review the verified package details.
+6. Confirm the install and restart the launcher.
 
-The launcher verifies the package signature and every checksum before installing. Registry verification runs after installation and updates the status badge.
+The launcher verifies the package signature and every checksum locally, then queries the Witch registry before installing. Only registry-verified builds can be installed. If the registry is unavailable or the build is not verified, the install is rejected.
 
 ## Plugin states
 
@@ -35,13 +35,40 @@ The launcher verifies the package signature and every checksum before installing
 | Revoked | The registry revoked this build. The launcher disables it. |
 | Invalid | The registry rejected the build, or the package no longer matches the verified checksums. |
 
-A valid self-signed package is installable. It is shown as unverified and signed by a developer key until the publisher key is explicitly trusted or the build is registry-verified.
+Only builds verified by the Witch registry are installable. A self-signed package can be inspected locally, but it must be submitted and verified by the registry before the launcher will install it.
 
 ## Safe mode
 
 Safe mode skips every plugin at launch. It is enabled manually by creating `SAFE_MODE` in the launcher's hidden data directory, or automatically after repeated runtime failures.
 
 Runtime loading uses a marker per plugin. If a plugin fails while loading, the launcher increments its crash count. At two failures the launcher enters safe mode.
+
+## Plugin configuration
+
+The launcher stores user-facing plugin configuration in `plugins.json` in the launcher's visible app directory (`POJAV_HOME/plugins.json`). The launch log prints the exact path. The file is created automatically and is safe to edit while the launcher is stopped.
+
+```json
+{
+  "version": 1,
+  "plugins": {
+    "com.example.hello": {
+      "enabled": true,
+      "settings": {
+        "accent": "#7c5cff"
+      },
+      "features": {
+        "experimental-ui": false
+      }
+    }
+  }
+}
+```
+
+- `enabled` controls whether the plugin loads at launch.
+- `settings` overrides the plugin's normal settings.
+- `features` exposes `feature.<name>` values through the plugin settings API, for example `Witch.getSetting("feature.experimental-ui", true)` or native `get_setting("feature.experimental-ui")`.
+
+If a plugin misbehaves but the launcher does not detect the failure, set `enabled` to `false` in this file and restart. An invalid JSON file is left untouched and reported in the launch log; the launcher falls back to each plugin's internal state.
 
 ## Runtime support
 

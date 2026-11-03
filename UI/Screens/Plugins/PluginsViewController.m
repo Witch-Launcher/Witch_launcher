@@ -5,6 +5,7 @@
 #import "WitchPluginTheme.h"
 #import "ThemeManager.h"
 #import "AmethystBlurView.h"
+#import "DownloadProgressOverlay.h"
 #import "AppSheet.h"
 #import "HapticManager.h"
 #import "utils.h"
@@ -21,6 +22,7 @@
 @interface PluginsViewController () <UITableViewDelegate, UITableViewDataSource, UIDocumentPickerDelegate>
 @property (nonatomic) UITableView *tableView;
 @property (nonatomic) NSArray<WitchPlugin *> *plugins;
+@property (nonatomic) DownloadProgressOverlay *verificationOverlay;
 @end
 
 @implementation PluginsViewController
@@ -104,38 +106,59 @@
                 showDialog(localize(@"Install Failed", nil), inspectError.localizedDescription ?: @"Invalid plugin package");
                 return;
             }
-            NSDictionary *manifest = info[@"manifest"];
-            NSString *name = [manifest[@"name"] isKindOfClass:[NSString class]] ? manifest[@"name"] : @"Plugin";
-            NSString *pluginID = [manifest[@"id"] isKindOfClass:[NSString class]] ? manifest[@"id"] : @"";
-            NSString *version = [manifest[@"version"] isKindOfClass:[NSString class]] ? manifest[@"version"] : @"";
-            NSString *author = [manifest[@"author"] isKindOfClass:[NSString class]] ? manifest[@"author"] : @"Unknown";
-            NSString *license = [manifest[@"license"] isKindOfClass:[NSString class]] ? manifest[@"license"] : @"";
-            NSString *source = [manifest[@"source"] isKindOfClass:[NSString class]] ? manifest[@"source"] : @"";
-            NSString *message = [NSString stringWithFormat:@"%@ %@\nAuthor: %@\nLicense: %@\nSource: %@\n\nSignature is valid. Registry verification is checked after install.\n\nOnly install plugins from authors you trust.", name, version, author, license, source];
-            [AppSheet showConfirmWithTitle:localize(@"Install Plugin", nil) message:message confirmTitle:localize(@"Install", nil) destructive:NO onConfirm:^{
-                [self installLocalPackage:localURL name:name pluginID:pluginID];
-            } onCancel:^{
-                [[NSFileManager defaultManager] removeItemAtPath:localURL.path error:nil];
-            }];
+            [self verifyPackage:info localURL:localURL];
         });
     });
 }
 
-- (void)installLocalPackage:(NSURL *)url name:(NSString *)name pluginID:(NSString *)pluginID {
+- (void)verifyPackage:(NSDictionary *)info localURL:(NSURL *)localURL {
+    self.verificationOverlay = [DownloadProgressOverlay showInView:self.view title:localize(@"Verifying Plugin", nil)];
+    [self.verificationOverlay updateProgress:0.5f message:localize(@"Checking the Witch registry", nil)];
+    __weak typeof(self) weakSelf = self;
+    [WitchPluginManager.shared verifyPackageInfo:info completion:^(BOOL verified, NSError *verifyError) {
+        PluginsViewController *strongSelf = weakSelf;
+        if (!strongSelf) return;
+        [strongSelf hideVerificationOverlay];
+        if (!verified) {
+            [[NSFileManager defaultManager] removeItemAtPath:localURL.path error:nil];
+            showDialog(localize(@"Verification Failed", nil), verifyError.localizedDescription ?: localize(@"Registry verification failed.", nil));
+            return;
+        }
+        NSDictionary *manifest = info[@"manifest"];
+        NSString *name = [manifest[@"name"] isKindOfClass:[NSString class]] ? manifest[@"name"] : @"Plugin";
+        NSString *pluginID = [manifest[@"id"] isKindOfClass:[NSString class]] ? manifest[@"id"] : @"";
+        NSString *version = [manifest[@"version"] isKindOfClass:[NSString class]] ? manifest[@"version"] : @"";
+        NSString *author = [manifest[@"author"] isKindOfClass:[NSString class]] ? manifest[@"author"] : @"Unknown";
+        NSString *license = [manifest[@"license"] isKindOfClass:[NSString class]] ? manifest[@"license"] : @"";
+        NSString *source = [manifest[@"source"] isKindOfClass:[NSString class]] ? manifest[@"source"] : @"";
+        NSString *message = [NSString stringWithFormat:@"%@ %@\nAuthor: %@\nLicense: %@\nSource: %@\n\n%@", name, version, author, license, source, localize(@"Verified by the Witch plugin registry. Signature and checksums are valid.", nil)];
+        [AppSheet showConfirmWithTitle:localize(@"Install Plugin", nil) message:message confirmTitle:localize(@"Install", nil) destructive:NO onConfirm:^{
+            [strongSelf installLocalPackage:localURL info:info name:name pluginID:pluginID];
+        } onCancel:^{
+            [[NSFileManager defaultManager] removeItemAtPath:localURL.path error:nil];
+        }];
+    }];
+}
+
+- (void)hideVerificationOverlay {
+    [self.verificationOverlay dismiss];
+    self.verificationOverlay = nil;
+}
+
+- (void)installLocalPackage:(NSURL *)url info:(NSDictionary *)info name:(NSString *)name pluginID:(NSString *)pluginID {
     dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
         NSError *error = nil;
-        BOOL installed = [WitchPluginManager.shared installPackageAtURL:url error:&error];
+        BOOL installed = [WitchPluginManager.shared installPackageAtURL:url expectedInfo:info error:&error];
         dispatch_async(dispatch_get_main_queue(), ^{
             [[NSFileManager defaultManager] removeItemAtPath:url.path error:nil];
             if (!installed) {
                 showDialog(localize(@"Install Failed", nil), error.localizedDescription ?: @"Cannot install plugin");
                 return;
             }
+            NSLog(@"[Plugins] Installed %@ (%@) after registry verification", pluginID, name);
             [self reloadContent];
             [WitchPluginTheme reload];
             [ThemeManager.shared broadcastThemeChange];
-            WitchPlugin *plugin = pluginID.length > 0 ? [WitchPluginManager.shared pluginWithID:pluginID] : nil;
-            if (plugin) [WitchPluginManager.shared verifyPlugin:plugin completion:^(BOOL verified, NSError *verifyError) {}];
             showDialog(localize(@"Plugin Installed", nil), [NSString stringWithFormat:localize(@"%@ was installed. Restart the launcher to load it.", nil), name]);
         });
     });
@@ -236,7 +259,8 @@
 
 - (NSString *)tableView:(UITableView *)tableView titleForFooterInSection:(NSInteger)section {
     if (section == 0) return WitchPluginManager.shared.safeMode ? localize(@"All plugins are paused. Turn off safe mode to load them again.", nil) : localize(@"Turn on to skip all plugins at launch. Changes apply after restart.", nil);
-    return self.plugins.count == 0 ? localize(@"No plugins installed. Tap + to install a .plgw package.", nil) : nil;
+    if (self.plugins.count == 0) return localize(@"No plugins installed. Tap + to install a .plgw package.", nil);
+    return [NSString stringWithFormat:localize(@"Advanced: edit %@ in the app folder to disable a plugin manually.", nil), WitchPluginManager.shared.configurationPath.lastPathComponent ?: @"plugins.json"];
 }
 
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {

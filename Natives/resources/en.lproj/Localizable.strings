@@ -1474,6 +1474,13 @@
 
 "Unsupported setting type" = "Unsupported setting type";
 
+"Verifying Plugin" = "Verifying Plugin";
+"Checking the Witch registry" = "Checking the Witch registry";
+"Verification Failed" = "Verification Failed";
+"Registry verification failed." = "Registry verification failed.";
+"Verified by the Witch plugin registry. Signature and checksums are valid." = "Verified by the Witch plugin registry. Signature and checksums are valid.";
+"Advanced: edit %@ in the app folder to disable a plugin manually." = "Advanced: edit %@ in the app folder to disable a plugin manually.";
+
 "modpack.export_title" = "Export Modpack";
 "modpack.export_message" = "Choose the pack format to export.";
 "modpack.export_modrinth" = "Modrinth (.mrpack)";

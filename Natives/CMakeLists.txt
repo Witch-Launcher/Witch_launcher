@@ -251,6 +251,7 @@ add_executable(Witch
   external/fishhook/fishhook.c
   UIKit+hook.m
   MemSampler.m
+  WitchMemoryPressure.m
   PerfRecorder.m
 
   authenticator/BaseAuthenticator.m
@@ -456,6 +457,8 @@ target_include_directories(Witch PRIVATE
 target_link_libraries(Witch
   PUBLIC AFNetworking
   ffx_fsr3_vk
+  "-liconv"
+  "-lc++"
   TouchControllerBridge
   lzma
   z

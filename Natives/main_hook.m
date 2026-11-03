@@ -288,6 +288,8 @@ void *hooked_dlopen_26_ppl(const char *path, int mode) {
     // restore old thread states
     thread_set_state(thread, ARM_DEBUG_STATE64, (thread_state_t)&origDebugState, ARM_DEBUG_STATE64_COUNT);
     thread_swap_exception_ports(thread, mask, handler, behavior, flavor, &mask, &masksCnt, &handler, &behavior, &flavor);
+    // mach_thread_self() hands us a send right that is never released.
+    mach_port_deallocate(mach_task_self(), thread);
     
     return result;
 }

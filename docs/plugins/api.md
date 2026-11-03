@@ -71,6 +71,25 @@ The factory returns a retained object; the launcher takes ownership of it for th
 
 Native plugins are only importable on installations that permit unsigned or developer-signed dynamic libraries. On SideStore and stock iOS, this may require a JIT/dyld bypass. JavaScript and theme plugins do not require native loading.
 
+## Settings
+
+Plugin settings are stored in the plugin's `state.json` and mirrored to `plugins.json` in the launcher's app folder. The launcher merges the global configuration at startup, so a user can disable a plugin or override individual settings manually.
+
+```json
+{
+  "version": 1,
+  "plugins": {
+    "com.example.plugin": {
+      "enabled": true,
+      "settings": { "accent": "#8b5cf6" },
+      "features": { "compact_layout": true }
+    }
+  }
+}
+```
+
+Keys in `features` are exposed to the plugin as `feature.<name>` settings. Read them with `host->get_setting` or `Witch.getSetting`; values can be strings, numbers, booleans, or JSON objects. The manifest's `settings` array declares defaults and UI controls, while `plugins.json` holds the user's overrides.
+
 ## Theme
 
 Theme colors are merged from enabled plugins. Static `theme.json` colors are applied first; `Witch.setThemeColor` overrides are merged afterward. If several plugins define the same key, the last plugin in sorted order wins.

@@ -140,6 +140,16 @@ static void WPHostSetRootViewFactory(void *userdata, WitchPluginRootViewFactory 
     });
 }
 
+static NSString *WPVerificationLabel(WitchPluginVerificationState state) {
+    switch (state) {
+        case WitchPluginVerificationStateVerified: return @"verified";
+        case WitchPluginVerificationStateRevoked: return @"revoked";
+        case WitchPluginVerificationStateInvalid: return @"invalid";
+        case WitchPluginVerificationStateUnverified:
+        default: return @"unverified";
+    }
+}
+
 @implementation WitchPluginRuntime
 
 + (WitchPluginRuntime *)shared {
@@ -163,10 +173,18 @@ static void WPHostSetRootViewFactory(void *userdata, WitchPluginRootViewFactory 
     WitchPluginManager *manager = WitchPluginManager.shared;
     [manager recoverFromCrashMarkers];
     [manager reload];
+    NSLog(@"[Plugins] Configuration: %@", manager.configurationPath ?: @"unavailable");
+    NSLog(@"[Plugins] Installed plugins: %lu", (unsigned long)manager.plugins.count);
+    for (WitchPlugin *plugin in manager.plugins) {
+        NSLog(@"[Plugins] - %@ v%@ enabled=%@ verification=%@ path=%@",
+              plugin.pluginID, plugin.version, plugin.enabled ? @"yes" : @"no",
+              WPVerificationLabel(plugin.verificationState), plugin.installPath);
+    }
     if (manager.safeMode) {
         NSLog(@"[Plugins] Safe mode active; no plugins loaded");
         return;
     }
+    NSMutableArray<NSString *> *active = [NSMutableArray array];
     for (WitchPlugin *plugin in manager.plugins) {
         if (!plugin.enabled) continue;
         if (plugin.verificationState == WitchPluginVerificationStateRevoked || plugin.verificationState == WitchPluginVerificationStateInvalid) continue;
@@ -176,8 +194,9 @@ static void WPHostSetRootViewFactory(void *userdata, WitchPluginRootViewFactory 
             [manager markPluginIDInvalid:plugin.pluginID message:integrityError.localizedDescription];
             continue;
         }
-        [self loadPlugin:plugin];
+        if ([self loadPlugin:plugin]) [active addObject:plugin.pluginID];
     }
+    NSLog(@"[Plugins] Active plugins: %@", active.count > 0 ? [active componentsJoinedByString:@", "] : @"none");
 }
 
 - (void)releaseNativePluginID:(NSString *)pluginID {
@@ -316,6 +335,7 @@ static void WPHostSetRootViewFactory(void *userdata, WitchPluginRootViewFactory 
         return NO;
     }
     [WitchPluginManager.shared noteRuntimeSuccessForPluginID:plugin.pluginID];
+    NSLog(@"[Plugin:%@] Loaded %@ v%@", plugin.pluginID, plugin.name, plugin.version);
     [WitchPluginTheme reload];
     [[NSNotificationCenter defaultCenter] postNotificationName:WitchPluginsDidChangeNotification object:self];
     return YES;

@@ -924,9 +924,10 @@ int ffxfg_init(long long vkDeviceHandle,
 {
     (void)depthInverted;  // TODO: pass through to the context flags
 
-    if (g_bridge.initialized) {
-        ffxfg_destroy();
-    }
+    // Always start from a clean slate: a previous init attempt that failed
+    // midway may have left FFX contexts/shared resources behind even though
+    // initialized is false, and those must not survive a re-init.
+    ffxfg_destroy();
 
     VkDevice device = reinterpret_cast<VkDevice>(static_cast<uintptr_t>(vkDeviceHandle));
     VkPhysicalDevice physicalDevice = reinterpret_cast<VkPhysicalDevice>(
@@ -948,6 +949,7 @@ int ffxfg_init(long long vkDeviceHandle,
 
     if (!device || !physicalDevice || !getDeviceProcAddr) {
         logBridge("init: null device handles");
+        ffxfg_destroy();
         return -1;
     }
 
@@ -959,10 +961,12 @@ int ffxfg_init(long long vkDeviceHandle,
     if (mode != 0 && mode != FFXFX_MODE_FSR1 &&
         mode != FFXFX_MODE_FSR2 && mode != FFXFX_MODE_FSR3UPSCALE) {
         logBridge("init: unknown mode");
+        ffxfg_destroy();
         return -1;
     }
     if (mode == 0 && fgEnabled == 0) {
         logBridge("init: nothing enabled");
+        ffxfg_destroy();
         return -1;
     }
 
@@ -985,7 +989,7 @@ int ffxfg_init(long long vkDeviceHandle,
     // the device log (ffxGetInterfaceVK rejects undersized buffers with a
     // generic error code).
     const size_t requiredScratch = ffxGetScratchMemorySizeVK(physicalDevice, 4);
-    g_bridge.scratch.resize(requiredScratch + (8u << 20));
+    g_bridge.scratch.resize(requiredScratch);
 
     {
         char buf[256];
@@ -1005,6 +1009,7 @@ int ffxfg_init(long long vkDeviceHandle,
     FfxDevice ffxDevice = ffxGetDeviceVK(&deviceContext);
     if (!ffxDevice) {
         logBridge("init: ffxGetDeviceVK failed");
+        ffxfg_destroy();
         return -1;
     }
 
@@ -1018,6 +1023,7 @@ int ffxfg_init(long long vkDeviceHandle,
         snprintf(buf, sizeof(buf), "init: ffxGetInterfaceVK failed (0x%x)",
                  static_cast<unsigned>(error));
         logBridge(buf);
+        ffxfg_destroy();
         return -1;
     }
 
@@ -1041,6 +1047,7 @@ int ffxfg_init(long long vkDeviceHandle,
         error = ffxFrameInterpolationContextCreate(&g_bridge.fiContext, &fiDesc);
         if (error != FFX_OK) {
             logBridge("init: ffxFrameInterpolationContextCreate failed");
+            ffxfg_destroy();
             return -1;
         }
         g_bridge.fiContextValid = true;
@@ -1055,6 +1062,7 @@ int ffxfg_init(long long vkDeviceHandle,
         error = ffxOpticalflowContextCreate(&g_bridge.ofContext, &ofDesc);
         if (error != FFX_OK) {
             logBridge("init: ffxOpticalflowContextCreate failed");
+            ffxfg_destroy();
             return -1;
         }
         g_bridge.ofContextValid = true;
@@ -1065,6 +1073,7 @@ int ffxfg_init(long long vkDeviceHandle,
         error = ffxOpticalflowGetSharedResourceDescriptions(&g_bridge.ofContext, &ofShared);
         if (error != FFX_OK) {
             logBridge("init: ffxOpticalflowGetSharedResourceDescriptions failed");
+            ffxfg_destroy();
             return -1;
         }
         FfxCreateResourceDescription ofVec = ofShared.opticalFlowVector;
@@ -1075,6 +1084,7 @@ int ffxfg_init(long long vkDeviceHandle,
         }
         if (error != FFX_OK) {
             logBridge("init: optical flow shared resources failed");
+            ffxfg_destroy();
             return -1;
         }
         g_bridge.ofVector = g_bridge.ffxInterface.fpGetResource(&g_bridge.ffxInterface, g_bridge.ofVectorInternal);
@@ -1095,6 +1105,7 @@ int ffxfg_init(long long vkDeviceHandle,
         error = ffxFsr1ContextCreate(&g_bridge.fsr1Context, &fsr1Desc);
         if (error != FFX_OK) {
             logBridge("init: ffxFsr1ContextCreate failed");
+            ffxfg_destroy();
             return -1;
         }
         g_bridge.fsr1Valid = true;
@@ -1111,6 +1122,7 @@ int ffxfg_init(long long vkDeviceHandle,
         error = ffxFsr2ContextCreate(&g_bridge.fsr2Context, &fsr2Desc);
         if (error != FFX_OK) {
             logBridge("init: ffxFsr2ContextCreate failed");
+            ffxfg_destroy();
             return -1;
         }
         g_bridge.fsr2Valid = true;
@@ -1127,6 +1139,7 @@ int ffxfg_init(long long vkDeviceHandle,
         error = ffxFsr3UpscalerContextCreate(&g_bridge.fsr3uContext, &fsr3uDesc);
         if (error != FFX_OK) {
             logBridge("init: ffxFsr3UpscalerContextCreate failed");
+            ffxfg_destroy();
             return -1;
         }
         g_bridge.fsr3uValid = true;
@@ -1139,6 +1152,7 @@ int ffxfg_init(long long vkDeviceHandle,
         error = ffxFsr3UpscalerGetSharedResourceDescriptions(&g_bridge.fsr3uContext, &sharedDescs);
         if (error != FFX_OK) {
             logBridge("init: ffxFsr3UpscalerGetSharedResourceDescriptions failed");
+            ffxfg_destroy();
             return -1;
         }
         FfxCreateResourceDescription dilD = sharedDescs.dilatedDepth;
@@ -1153,6 +1167,7 @@ int ffxfg_init(long long vkDeviceHandle,
         }
         if (error != FFX_OK) {
             logBridge("init: fsr3 upscaler shared resources failed");
+            ffxfg_destroy();
             return -1;
         }
         g_bridge.fsr3uDilatedDepth = g_bridge.ffxInterface.fpGetResource(&g_bridge.ffxInterface, g_bridge.fsr3uDilatedDepthInternal);
@@ -1698,6 +1713,11 @@ void ffxfg_destroy(void)
         b.recDepthDevice = VK_NULL_HANDLE;
         b.recDepthDeviceMemory = VK_NULL_HANDLE;
     }
+    // The FFX interface no longer references scratch after the backend
+    // context is destroyed; return the (potentially several hundred MB)
+    // vector to the CRT instead of keeping it alive until the next init.
+    b.scratch.clear();
+    b.scratch.shrink_to_fit();
     b.device = VK_NULL_HANDLE;
     b.physicalDevice = VK_NULL_HANDLE;
     b.queue = VK_NULL_HANDLE;

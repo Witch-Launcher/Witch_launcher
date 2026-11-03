@@ -5,5 +5,6 @@
 - (void)actionStartStopLogOutput;
 - (void)actionToggleLogOutput;
 + (void)appendToLog:(NSString *)line;
++ (void)trimLogToMaxLines:(NSUInteger)maxLines;
 + (void)handleExitCode:(int)code;
 @end

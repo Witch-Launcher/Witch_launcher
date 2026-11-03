@@ -17,7 +17,9 @@
 #define SPECIALBTN_LOGOUTPUT -100
 
 static BOOL shouldHitEnterAfterWindowShown;
-static SurfaceView* surfaceView;
+// weak: the surface is owned by the view hierarchy; keeping this strong pinned
+// the whole Java GUI (views, rgbArray, CGImages) after the screen closed.
+static __weak SurfaceView* surfaceView;
 
 static jclass class_CTCAndroidInput;
 static jmethodID method_ReceiveInput;
@@ -132,6 +134,15 @@ void AWTInputBridge_sendKey(int keycode) {
     self.colorSpace = CGColorSpaceCreateDeviceRGB();
     return self;
 }
+
+- (void)dealloc {
+    free(rgbArray);
+    rgbArray = NULL;
+    if (self.colorSpace) {
+        CGColorSpaceRelease(self.colorSpace);
+        self.colorSpace = NULL;
+    }
+}
 @end
 
 @interface ScrollableSurfaceView<UIScrollViewDelegate> : UIScrollView
@@ -143,9 +154,10 @@ void AWTInputBridge_sendKey(int keycode) {
 @implementation ScrollableSurfaceView
 
 - (instancetype)initWithFrame:(CGRect)frame {
-    surfaceView = [[SurfaceView alloc] initWithFrame:frame];
+    SurfaceView *localSurface = [[SurfaceView alloc] initWithFrame:frame];
+    surfaceView = localSurface;
     self = [super initWithFrame:frame];
-    [self addSubview:surfaceView];
+    [self addSubview:localSurface];
     self.delegate = (id)self;
 
     self.virtualMouseFrame = CGRectMake(frame.size.width / 2, frame.size.height / 2, 18, 27);
@@ -230,6 +242,8 @@ void AWTInputBridge_sendKey(int keycode) {
 @property(nonatomic) ControlLayout* ctrlView;
 @property(nonatomic) PLLogOutputView* logOutputView;
 @property(nonatomic) ScrollableSurfaceView* surfaceScrollView;
+@property(nonatomic) CADisplayLink* gameDisplayLink;
+@property(nonatomic) id cursorTypeCallback;
 
 @end
 
@@ -264,16 +278,19 @@ void AWTInputBridge_sendKey(int keycode) {
     AmethystSetSystemPointerHidden(self.view, virtualMouseEnabled);
 
     // Observe cursor type changes from the game (via GLFW/SDL3 JNI calls)
-    [[NSNotificationCenter defaultCenter] addObserverForName:CursorTypeDidChangeNotification
+    __weak typeof(self) weakSelf = self;
+    self.cursorTypeCallback = [[NSNotificationCenter defaultCenter] addObserverForName:CursorTypeDidChangeNotification
                                                       object:nil
                                                        queue:[NSOperationQueue mainQueue]
                                                   usingBlock:^(NSNotification *note) {
+        typeof(self) strongSelf = weakSelf;
+        if (!strongSelf) return;
         if (!virtualMouseEnabled) return;
         NSString *typeId = note.userInfo[@"typeId"];
         if (typeId) {
-            CGRect displayFrame = [CursorManager displayFrameForMouseFrame:self.surfaceScrollView.virtualMouseFrame typeId:typeId];
-            self.surfaceScrollView.mousePointerView.image = [CursorTypeManager imageForType:typeId displaySize:displayFrame.size];
-            self.surfaceScrollView.mousePointerView.frame = displayFrame;
+            CGRect displayFrame = [CursorManager displayFrameForMouseFrame:strongSelf.surfaceScrollView.virtualMouseFrame typeId:typeId];
+            strongSelf.surfaceScrollView.mousePointerView.image = [CursorTypeManager imageForType:typeId displaySize:displayFrame.size];
+            strongSelf.surfaceScrollView.mousePointerView.frame = displayFrame;
         }
     }];
 
@@ -327,11 +344,17 @@ void AWTInputBridge_sendKey(int keycode) {
  
     // Register the display loop
     dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
-        CADisplayLink *displayLink = [CADisplayLink displayLinkWithTarget:surfaceView selector:@selector(refreshBuffer)];
+        typeof(self) strongSelf = weakSelf;
+        SurfaceView *target = surfaceView;
+        if (!strongSelf || !target) {
+            return;
+        }
+        CADisplayLink *displayLink = [CADisplayLink displayLinkWithTarget:target selector:@selector(refreshBuffer)];
         if (@available(iOS 15.0, tvOS 15.0, *)) {
             displayLink.preferredFrameRateRange = CAFrameRateRangeMake(30, 120, 120);
         }
         [displayLink addToRunLoop:NSRunLoop.currentRunLoop forMode:NSRunLoopCommonModes];
+        strongSelf.gameDisplayLink = displayLink;
         [NSRunLoop.currentRunLoop run];
     });
 
@@ -547,6 +570,20 @@ dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
         self.surfaceScrollView.virtualMouseFrame = [CursorManager mouseFrameForDisplayFrame:self.surfaceScrollView.mousePointerView.frame typeId:activeTypeId];
     }];
     [super viewWillTransitionToSize:size withTransitionCoordinator:coordinator];
+}
+
+- (void)dealloc {
+    // Stop the Java -> iOS refresh loop before the surface and its rgbArray
+    // are released. Otherwise the CADisplayLink keeps the surface view alive
+    // and keeps polling a half-destroyed JNI bridge.
+    if (self.gameDisplayLink) {
+        [self.gameDisplayLink invalidate];
+        self.gameDisplayLink = nil;
+    }
+    if (self.cursorTypeCallback) {
+        [[NSNotificationCenter defaultCenter] removeObserver:self.cursorTypeCallback];
+        self.cursorTypeCallback = nil;
+    }
 }
 
 - (UIRectEdge)preferredScreenEdgesDeferringSystemGestures {

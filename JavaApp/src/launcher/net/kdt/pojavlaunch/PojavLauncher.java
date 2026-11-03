@@ -90,6 +90,8 @@ public class PojavLauncher {
             Class.forName("com.github.caciocavallosilano.cacio.ctc.CTCPreloadClassLoader");
         } catch (ClassNotFoundException e) {}
 
+        startMemoryProbe();
+
         String runJar = System.getProperty("pojav.runJar");
         if (runJar != null) {
             // Forge/NeoForge installers: run headless with --installClient into the
@@ -457,6 +459,43 @@ public class PojavLauncher {
         Files.move(tmp.toPath(), jar.toPath(), StandardCopyOption.REPLACE_EXISTING);
         System.out.println("[MixinFix] emptied IMixinService providers in " + jar);
         return true;
+    }
+
+    private static void startMemoryProbe() {
+        if (!"1".equals(System.getenv("WITCH_MEM_PROBE"))) {
+            return;
+        }
+        Thread probe = new Thread(() -> {
+            try {
+                while (true) {
+                    Runtime rt = Runtime.getRuntime();
+                    long total = rt.totalMemory();
+                    long free = rt.freeMemory();
+                    long max = rt.maxMemory();
+                    StringBuilder direct = new StringBuilder();
+                    for (java.lang.management.BufferPoolMXBean pool
+                            : java.lang.management.ManagementFactory
+                                .getPlatformMXBeans(java.lang.management.BufferPoolMXBean.class)) {
+                        direct.append(pool.getName()).append('=')
+                              .append(pool.getMemoryUsed() / 1048576L).append("MB/")
+                              .append(pool.getTotalCapacity() / 1048576L).append("MB ");
+                    }
+                    System.out.println("[JVM-Mem] heap used=" + ((total - free) / 1048576L)
+                            + "MB committed=" + (total / 1048576L)
+                            + "MB max=" + (max / 1048576L)
+                            + "MB pools=" + direct.toString().trim());
+                    System.out.flush();
+                    Thread.sleep(10000L);
+                }
+            } catch (InterruptedException e) {
+                // probe thread stopped
+            } catch (Throwable t) {
+                System.err.println("[JVM-Mem] probe failed: " + t);
+                System.err.flush();
+            }
+        }, "witch-mem-probe");
+        probe.setDaemon(true);
+        probe.start();
     }
 
     public static void launchMinecraft(String[] args) throws Throwable {

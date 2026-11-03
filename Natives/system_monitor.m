@@ -18,8 +18,12 @@ int tm_cpu_usage(tm_cpu_usage_t *out) {
     natural_t cpuCount = 0;
     processor_info_array_t info = NULL;
     mach_msg_type_number_t infoCount = 0;
-    kern_return_t kr = host_processor_info(mach_host_self(), PROCESSOR_CPU_LOAD_INFO,
+    // mach_host_self() creates a send right; without mach_port_deallocate it
+    // leaks one port right per 1 Hz sample (PerfRecorder polls this).
+    mach_port_t host = mach_host_self();
+    kern_return_t kr = host_processor_info(host, PROCESSOR_CPU_LOAD_INFO,
                                            &cpuCount, &info, &infoCount);
+    mach_port_deallocate(mach_task_self(), host);
     if (kr != KERN_SUCCESS || cpuCount == 0 || info == NULL) {
         if (info) {
             vm_deallocate(mach_task_self(), (vm_address_t)info, infoCount * sizeof(integer_t));

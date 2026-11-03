@@ -1469,6 +1469,13 @@
 
 "Unsupported setting type" = "Loại cài đặt chưa hỗ trợ";
 
+"Verifying Plugin" = "Đang xác minh plugin";
+"Checking the Witch registry" = "Đang kiểm tra Witch registry";
+"Verification Failed" = "Xác minh thất bại";
+"Registry verification failed." = "Witch registry không thể xác minh plugin này.";
+"Verified by the Witch plugin registry. Signature and checksums are valid." = "Đã được Witch plugin registry xác minh. Chữ ký và mã kiểm tra đều hợp lệ.";
+"Advanced: edit %@ in the app folder to disable a plugin manually." = "Nâng cao: sửa %@ trong thư mục ứng dụng để tắt thủ công nếu plugin gặp lỗi.";
+
 "modpack.export_title" = "Xuất modpack";
 "modpack.export_message" = "Chọn định dạng modpack để xuất.";
 "modpack.export_modrinth" = "Modrinth (.mrpack)";

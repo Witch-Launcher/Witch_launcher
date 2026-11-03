@@ -22,11 +22,14 @@ static NSString * const WPManifestName = @"witch-plugin.json";
 static NSString * const WPChecksumsName = @"checksums.json";
 static NSString * const WPSignatureName = @"witch-plugin.sig";
 static NSString * const WPStateName = @"state.json";
+static NSString * const WPConfigurationName = @"plugins.json";
+static NSString * const WPFeaturePrefix = @"feature.";
 static const NSInteger WitchPluginAPIVersion = 1;
 static const unsigned long long WP_MAX_PACKAGE_BYTES = 32ULL * 1024 * 1024;
 static const unsigned long long WP_MAX_EXTRACTED_BYTES = 128ULL * 1024 * 1024;
 static const NSUInteger WP_MAX_PACKAGE_FILES = 2048;
 static const NSUInteger WP_MAX_STATE_BYTES = 1024 * 1024;
+static const NSUInteger WP_MAX_CONFIGURATION_BYTES = 4 * 1024 * 1024;
 
 static NSError *WPError(NSInteger code, NSString *message) {
     return [NSError errorWithDomain:WPErrorDomain code:code userInfo:@{NSLocalizedDescriptionKey: message ?: @"Plugin error"}];
@@ -106,6 +109,16 @@ static BOOL WPValidSHA256(NSString *value) {
     if (![value isKindOfClass:[NSString class]] || value.length != 64) return NO;
     NSCharacterSet *allowed = [NSCharacterSet characterSetWithCharactersInString:@"0123456789abcdef"];
     return [[value lowercaseString] rangeOfCharacterFromSet:allowed.invertedSet].location == NSNotFound;
+}
+
+static NSString *WPConfigurationPath(void) {
+    const char *home = getenv("POJAV_HOME");
+    if (!home) return nil;
+    return [@(home) stringByAppendingPathComponent:WPConfigurationName];
+}
+
+static BOOL WPJSONSerializable(NSString *key, id value) {
+    return key.length > 0 && value && [NSJSONSerialization isValidJSONObject:@{key: value}];
 }
 
 static NSString *WPDefaultState(void) {
@@ -212,6 +225,9 @@ static BOOL WPVerifySignature(NSData *message, NSData *signature, NSData *public
 @property (nonatomic, readwrite) BOOL safeMode;
 @property (nonatomic, readwrite) NSArray<WitchPlugin *> *plugins;
 @property (nonatomic, readwrite) NSString *pluginsDirectory;
+@property (nonatomic, readwrite) NSString *configurationPath;
+@property (nonatomic) NSMutableDictionary *configuration;
+@property (nonatomic) BOOL configurationInvalid;
 @end
 
 @implementation WitchPluginManager
@@ -231,12 +247,155 @@ static BOOL WPVerifySignature(NSData *message, NSData *signature, NSData *public
     if (self) {
         _plugins = @[];
         _pluginsDirectory = amethyst_hidden_dir(@"plugins");
+        _configurationPath = WPConfigurationPath();
+        _configuration = [NSMutableDictionary dictionary];
         _safeMode = WPFileExists(WPSafeModePath()) || WPFileExists(WPLegacySafeModePath());
     }
     return self;
 }
 
+- (void)reloadConfiguration {
+    self.configurationPath = WPConfigurationPath();
+    self.configuration = [NSMutableDictionary dictionary];
+    self.configurationInvalid = NO;
+    if (self.configurationPath.length == 0) return;
+    NSData *data = [NSData dataWithContentsOfFile:self.configurationPath];
+    if (!data) return;
+    if (data.length > WP_MAX_CONFIGURATION_BYTES) {
+        self.configurationInvalid = YES;
+        NSLog(@"[Plugins] Configuration is too large: %@", self.configurationPath);
+        return;
+    }
+    id json = [NSJSONSerialization JSONObjectWithData:data options:0 error:nil];
+    if (![json isKindOfClass:[NSDictionary class]]) {
+        self.configurationInvalid = YES;
+        NSLog(@"[Plugins] Cannot parse configuration: %@", self.configurationPath);
+        return;
+    }
+    NSMutableDictionary *root = [json mutableCopy];
+    id plugins = root[@"plugins"];
+    if (plugins != nil && ![plugins isKindOfClass:[NSDictionary class]]) {
+        self.configurationInvalid = YES;
+        NSLog(@"[Plugins] Configuration plugins must be an object: %@", self.configurationPath);
+        return;
+    }
+    self.configuration = root;
+}
+
+- (nullable NSDictionary *)configurationEntryForPluginID:(NSString *)pluginID {
+    if (self.configurationInvalid || pluginID.length == 0) return nil;
+    NSDictionary *plugins = self.configuration[@"plugins"];
+    if (![plugins isKindOfClass:[NSDictionary class]]) return nil;
+    NSDictionary *entry = plugins[pluginID];
+    return [entry isKindOfClass:[NSDictionary class]] ? entry : nil;
+}
+
+- (NSMutableDictionary *)mutablePluginsForConfiguration {
+    NSMutableDictionary *root = self.configuration ? [self.configuration mutableCopy] : [NSMutableDictionary dictionary];
+    id plugins = root[@"plugins"];
+    NSMutableDictionary *entries = [plugins isKindOfClass:[NSDictionary class]] ? [plugins mutableCopy] : [NSMutableDictionary dictionary];
+    root[@"version"] = @1;
+    root[@"plugins"] = entries;
+    self.configuration = root;
+    return entries;
+}
+
+- (BOOL)writeConfiguration:(NSError **)error {
+    if (self.configurationPath.length == 0) {
+        if (error) *error = WPError(90, @"Plugin configuration path is unavailable");
+        return NO;
+    }
+    if (self.configurationInvalid) {
+        if (error) *error = WPError(91, @"Plugin configuration contains invalid JSON");
+        return NO;
+    }
+    NSMutableDictionary *root = self.configuration ? [self.configuration mutableCopy] : [NSMutableDictionary dictionary];
+    root[@"version"] = @1;
+    if (![root[@"plugins"] isKindOfClass:[NSDictionary class]]) root[@"plugins"] = @{};
+    self.configuration = root;
+    NSData *data = [NSJSONSerialization dataWithJSONObject:root options:NSJSONWritingPrettyPrinted error:error];
+    if (!data) return NO;
+    if (data.length > WP_MAX_CONFIGURATION_BYTES) {
+        if (error) *error = WPError(90, @"Plugin configuration is too large");
+        return NO;
+    }
+    return [data writeToFile:self.configurationPath options:NSDataWritingAtomic error:error];
+}
+
+- (NSDictionary *)settingsWithoutFeatureKeys:(NSDictionary *)settings {
+    NSMutableDictionary *regular = [NSMutableDictionary dictionary];
+    for (NSString *key in settings) {
+        if (![key isKindOfClass:[NSString class]] || [key hasPrefix:WPFeaturePrefix]) continue;
+        regular[key] = settings[key];
+    }
+    return regular;
+}
+
+- (void)writeInitialConfigurationIfNeeded {
+    if (self.configurationPath.length == 0 || self.configurationInvalid) return;
+    if ([[NSFileManager defaultManager] fileExistsAtPath:self.configurationPath]) return;
+    NSMutableDictionary *entries = [self mutablePluginsForConfiguration];
+    for (WitchPlugin *plugin in self.plugins) {
+        NSMutableDictionary *entry = [NSMutableDictionary dictionary];
+        entry[@"enabled"] = @(plugin.enabled);
+        entry[@"version"] = plugin.version ?: @"";
+        entry[@"settings"] = [self settingsWithoutFeatureKeys:plugin.settings];
+        entry[@"features"] = @{};
+        entries[plugin.pluginID] = entry;
+    }
+    if ([self writeConfiguration:nil]) {
+        NSLog(@"[Plugins] Created configuration: %@", self.configurationPath);
+    }
+}
+
+- (void)addConfigurationForPluginID:(NSString *)pluginID version:(NSString *)version {
+    if (self.configurationPath.length == 0 || self.configurationInvalid || pluginID.length == 0) return;
+    NSMutableDictionary *entries = [self mutablePluginsForConfiguration];
+    NSMutableDictionary *entry = [entries[pluginID] isKindOfClass:[NSDictionary class]] ? [entries[pluginID] mutableCopy] : [NSMutableDictionary dictionary];
+    entry[@"enabled"] = @YES;
+    entry[@"version"] = version ?: @"";
+    if (![entry[@"settings"] isKindOfClass:[NSDictionary class]]) entry[@"settings"] = @{};
+    if (![entry[@"features"] isKindOfClass:[NSDictionary class]]) entry[@"features"] = @{};
+    entries[pluginID] = entry;
+    [self writeConfiguration:nil];
+}
+
+- (void)updateConfigurationForPluginID:(NSString *)pluginID enabled:(BOOL)enabled {
+    if (self.configurationPath.length == 0 || self.configurationInvalid || pluginID.length == 0) return;
+    NSMutableDictionary *entries = [self mutablePluginsForConfiguration];
+    NSMutableDictionary *entry = [entries[pluginID] isKindOfClass:[NSDictionary class]] ? [entries[pluginID] mutableCopy] : [NSMutableDictionary dictionary];
+    entry[@"enabled"] = @(enabled);
+    entries[pluginID] = entry;
+    [self writeConfiguration:nil];
+}
+
+- (void)updateConfigurationForPluginID:(NSString *)pluginID settingKey:(NSString *)key value:(id)value {
+    if (self.configurationPath.length == 0 || self.configurationInvalid || pluginID.length == 0 || key.length == 0 || !value) return;
+    NSMutableDictionary *entries = [self mutablePluginsForConfiguration];
+    NSMutableDictionary *entry = [entries[pluginID] isKindOfClass:[NSDictionary class]] ? [entries[pluginID] mutableCopy] : [NSMutableDictionary dictionary];
+    NSMutableDictionary *settings = [entry[@"settings"] isKindOfClass:[NSDictionary class]] ? [entry[@"settings"] mutableCopy] : [NSMutableDictionary dictionary];
+    NSMutableDictionary *features = [entry[@"features"] isKindOfClass:[NSDictionary class]] ? [entry[@"features"] mutableCopy] : [NSMutableDictionary dictionary];
+    if ([key hasPrefix:WPFeaturePrefix]) {
+        NSString *feature = [key substringFromIndex:WPFeaturePrefix.length];
+        if (feature.length > 0) features[feature] = value;
+    } else {
+        settings[key] = value;
+    }
+    entry[@"settings"] = settings;
+    entry[@"features"] = features;
+    entries[pluginID] = entry;
+    [self writeConfiguration:nil];
+}
+
+- (void)removeConfigurationForPluginID:(NSString *)pluginID {
+    if (self.configurationPath.length == 0 || self.configurationInvalid || pluginID.length == 0) return;
+    NSMutableDictionary *entries = [self mutablePluginsForConfiguration];
+    [entries removeObjectForKey:pluginID];
+    [self writeConfiguration:nil];
+}
+
 - (void)reload {
+    [self reloadConfiguration];
     NSString *root = amethyst_hidden_dir(@"plugins");
     self.pluginsDirectory = root;
     self.safeMode = WPFileExists(WPSafeModePath()) || WPFileExists(WPLegacySafeModePath());
@@ -260,6 +419,7 @@ static BOOL WPVerifySignature(NSData *message, NSData *signature, NSData *public
         return [a.name localizedCaseInsensitiveCompare:b.name];
     }];
     self.plugins = found;
+    [self writeInitialConfigurationIfNeeded];
 }
 
 - (nullable WitchPlugin *)pluginWithID:(NSString *)pluginID {
@@ -292,6 +452,30 @@ static BOOL WPVerifySignature(NSData *message, NSData *signature, NSData *public
     NSDictionary *state = data ? [NSJSONSerialization JSONObjectWithData:data options:0 error:nil] : nil;
     NSMutableDictionary *merged = [[self defaultStateForPlugin:pluginID] mutableCopy];
     if ([state isKindOfClass:[NSDictionary class]]) [merged addEntriesFromDictionary:state];
+    NSDictionary *configuration = [self configurationEntryForPluginID:pluginID];
+    if (configuration) {
+        if ([configuration[@"enabled"] isKindOfClass:[NSNumber class]]) {
+            merged[@"enabled"] = @([configuration[@"enabled"] boolValue]);
+        }
+        NSMutableDictionary *settings = [merged[@"settings"] isKindOfClass:[NSDictionary class]] ? [merged[@"settings"] mutableCopy] : [NSMutableDictionary dictionary];
+        NSDictionary *configuredSettings = configuration[@"settings"];
+        if ([configuredSettings isKindOfClass:[NSDictionary class]]) {
+            for (NSString *key in configuredSettings) {
+                id value = configuredSettings[key];
+                if (WPJSONSerializable(key, value)) settings[key] = value;
+            }
+        }
+        NSDictionary *features = configuration[@"features"];
+        if ([features isKindOfClass:[NSDictionary class]]) {
+            for (NSString *key in features) {
+                id value = features[key];
+                if (![key isKindOfClass:[NSString class]] || key.length == 0) continue;
+                NSString *settingKey = [WPFeaturePrefix stringByAppendingString:key];
+                if (WPJSONSerializable(settingKey, value)) settings[settingKey] = value;
+            }
+        }
+        merged[@"settings"] = settings;
+    }
     return merged;
 }
 
@@ -684,17 +868,37 @@ static BOOL WPVerifySignature(NSData *message, NSData *signature, NSData *public
     state[@"verificationMessage"] = message.length > 0 ? message : @"Plugin files failed integrity verification";
     state[@"enabled"] = @NO;
     [self writeState:state pluginID:pluginID directory:plugin.installPath error:nil];
+    [self updateConfigurationForPluginID:pluginID enabled:NO];
     [self reload];
     [WitchPluginTheme reload];
     [[NSNotificationCenter defaultCenter] postNotificationName:WitchPluginsDidChangeNotification object:self];
 }
 
 - (BOOL)installPackageAtURL:(NSURL *)url error:(NSError **)error {
+    return [self installPackageAtURL:url expectedInfo:nil error:error];
+}
+
+- (BOOL)installPackageAtURL:(NSURL *)url expectedInfo:(NSDictionary *)expectedInfo error:(NSError **)error {
     NSString *temp = [NSTemporaryDirectory() stringByAppendingPathComponent:[NSString stringWithFormat:@"witch-plugin-install-%@", NSUUID.UUID.UUIDString]];
     NSDictionary *info = [self inspectPackageAtURL:url extractTo:temp error:error];
     if (!info) {
         [[NSFileManager defaultManager] removeItemAtPath:temp error:nil];
         return NO;
+    }
+    if (expectedInfo) {
+        NSDictionary *expectedManifest = [expectedInfo[@"manifest"] isKindOfClass:[NSDictionary class]] ? expectedInfo[@"manifest"] : @{};
+        NSDictionary *expectedState = [expectedInfo[@"state"] isKindOfClass:[NSDictionary class]] ? expectedInfo[@"state"] : @{};
+        NSDictionary *actualManifest = info[@"manifest"];
+        NSDictionary *actualState = info[@"state"];
+        BOOL matches = [WPString(expectedManifest[@"id"]) isEqualToString:WPString(actualManifest[@"id"])] &&
+                       [WPString(expectedManifest[@"version"]) isEqualToString:WPString(actualManifest[@"version"])] &&
+                       [WPString(expectedState[@"artifactSha256"]) isEqualToString:WPString(actualState[@"artifactSha256"])] &&
+                       [WPString(expectedState[@"checksumsSha256"]) isEqualToString:WPString(actualState[@"checksumsSha256"])];
+        if (!matches) {
+            if (error) *error = WPError(92, @"Plugin package changed after verification");
+            [[NSFileManager defaultManager] removeItemAtPath:temp error:nil];
+            return NO;
+        }
     }
     NSDictionary *manifest = info[@"manifest"];
     NSString *pluginID = WPString(manifest[@"id"]);
@@ -718,6 +922,7 @@ static BOOL WPVerifySignature(NSData *message, NSData *signature, NSData *public
     NSString *publicKey = WPString(signature[@"publicKey"]);
     if (state[@"trusted"] && [state[@"trusted"] boolValue]) WPPinKey(keyID, publicKey);
     [self writeState:state pluginID:pluginID directory:destination error:nil];
+    [self addConfigurationForPluginID:pluginID version:WPString(manifest[@"version"])];
     [self reload];
     [WitchPluginTheme reload];
     [[NSNotificationCenter defaultCenter] postNotificationName:WitchPluginsDidChangeNotification object:self];
@@ -732,6 +937,7 @@ static BOOL WPVerifySignature(NSData *message, NSData *signature, NSData *public
     }
     if (![[NSFileManager defaultManager] removeItemAtPath:plugin.installPath error:error]) return NO;
     [[NSFileManager defaultManager] removeItemAtPath:[self markerPathForPluginID:pluginID] error:nil];
+    [self removeConfigurationForPluginID:pluginID];
     [self reload];
     [WitchPluginTheme reload];
     [[NSNotificationCenter defaultCenter] postNotificationName:WitchPluginsDidChangeNotification object:self];
@@ -763,6 +969,7 @@ static BOOL WPVerifySignature(NSData *message, NSData *signature, NSData *public
     NSMutableDictionary *state = [plugin.state mutableCopy];
     state[@"enabled"] = @(enabled);
     if (![self writeState:state pluginID:pluginID directory:plugin.installPath error:error]) return NO;
+    [self updateConfigurationForPluginID:pluginID enabled:enabled];
     [plugin updateState:state];
     [WitchPluginTheme reload];
     [[NSNotificationCenter defaultCenter] postNotificationName:WitchPluginsDidChangeNotification object:self];
@@ -788,11 +995,16 @@ static BOOL WPVerifySignature(NSData *message, NSData *signature, NSData *public
     return YES;
 }
 
-- (void)verifyPlugin:(WitchPlugin *)plugin completion:(void (^)(BOOL, NSError * _Nullable))completion {
+- (nullable NSURL *)verificationURLForPluginID:(NSString *)pluginID
+                                         version:(NSString *)version
+                                 checksumsSha256:(NSString *)checksumsSha256
+                                  artifactSha256:(NSString *)artifactSha256
+                                           keyID:(NSString *)keyID
+                                           error:(NSError **)error {
     NSString *base = WPBaseURL();
     if (base.length == 0) {
-        if (completion) dispatch_async(dispatch_get_main_queue(), ^{ completion(NO, WPError(70, @"Verification server is not configured")); });
-        return;
+        if (error) *error = WPError(70, @"Verification server is not configured");
+        return nil;
     }
     NSURLComponents *components = [NSURLComponents componentsWithString:[base stringByAppendingString:@"/v1/plugins/verify"]];
     NSMutableArray *items = [NSMutableArray array];
@@ -800,17 +1012,32 @@ static BOOL WPVerifySignature(NSData *message, NSData *signature, NSData *public
         if (value.length == 0) return;
         [items addObject:[NSURLQueryItem queryItemWithName:name value:value]];
     };
-    add(@"id", plugin.pluginID);
-    add(@"version", plugin.version);
-    add(@"checksumsSha256", plugin.checksumsSha256);
-    add(@"artifactSha256", plugin.artifactSha256);
-    add(@"keyId", plugin.signatureKeyID);
+    add(@"id", pluginID);
+    add(@"version", version);
+    add(@"checksumsSha256", checksumsSha256);
+    add(@"artifactSha256", artifactSha256);
+    add(@"keyId", keyID);
     components.queryItems = items;
     if (!components.URL) {
-        if (completion) dispatch_async(dispatch_get_main_queue(), ^{ completion(NO, WPError(75, @"Invalid verification server URL")); });
+        if (error) *error = WPError(75, @"Invalid verification server URL");
+        return nil;
+    }
+    return components.URL;
+}
+
+- (void)verifyPlugin:(WitchPlugin *)plugin completion:(void (^)(BOOL, NSError * _Nullable))completion {
+    NSError *urlError = nil;
+    NSURL *verificationURL = [self verificationURLForPluginID:plugin.pluginID
+                                                      version:plugin.version
+                                              checksumsSha256:plugin.checksumsSha256
+                                               artifactSha256:plugin.artifactSha256
+                                                        keyID:plugin.signatureKeyID
+                                                        error:&urlError];
+    if (!verificationURL) {
+        if (completion) dispatch_async(dispatch_get_main_queue(), ^{ completion(NO, urlError); });
         return;
     }
-    NSMutableURLRequest *request = [NSMutableURLRequest requestWithURL:components.URL];
+    NSMutableURLRequest *request = [NSMutableURLRequest requestWithURL:verificationURL];
     request.timeoutInterval = 15;
     request.HTTPMethod = @"GET";
     [request setValue:@"WitchLauncher/1.0" forHTTPHeaderField:@"User-Agent"];
@@ -864,6 +1091,9 @@ static BOOL WPVerifySignature(NSData *message, NSData *signature, NSData *public
         }
         NSError *saveError = nil;
         [self writeState:state pluginID:plugin.pluginID directory:plugin.installPath error:&saveError];
+        if (state[@"enabled"] && ![state[@"enabled"] boolValue]) {
+            [self updateConfigurationForPluginID:plugin.pluginID enabled:NO];
+        }
         dispatch_async(dispatch_get_main_queue(), ^{
             [plugin updateState:state];
             [WitchPluginTheme reload];
@@ -880,6 +1110,61 @@ static BOOL WPVerifySignature(NSData *message, NSData *signature, NSData *public
         if (plugin.checksumsSha256.length == 0 || plugin.artifactSha256.length == 0) continue;
         [self verifyPlugin:plugin completion:nil];
     }
+}
+
+- (void)verifyPackageInfo:(NSDictionary *)info completion:(void (^)(BOOL, NSError * _Nullable))completion {
+    NSDictionary *manifest = [info[@"manifest"] isKindOfClass:[NSDictionary class]] ? info[@"manifest"] : @{};
+    NSDictionary *state = [info[@"state"] isKindOfClass:[NSDictionary class]] ? info[@"state"] : @{};
+    NSError *urlError = nil;
+    NSURL *verificationURL = [self verificationURLForPluginID:WPString(manifest[@"id"])
+                                                      version:WPString(manifest[@"version"])
+                                              checksumsSha256:WPString(state[@"checksumsSha256"])
+                                               artifactSha256:WPString(state[@"artifactSha256"])
+                                                        keyID:WPString(state[@"keyId"])
+                                                        error:&urlError];
+    if (!verificationURL) {
+        if (completion) dispatch_async(dispatch_get_main_queue(), ^{ completion(NO, urlError); });
+        return;
+    }
+    NSMutableURLRequest *request = [NSMutableURLRequest requestWithURL:verificationURL];
+    request.timeoutInterval = 15;
+    request.HTTPMethod = @"GET";
+    [request setValue:@"WitchLauncher/1.0" forHTTPHeaderField:@"User-Agent"];
+    NSURLSessionDataTask *task = [NSURLSession.sharedSession dataTaskWithRequest:request completionHandler:^(NSData *data, NSURLResponse *response, NSError *networkError) {
+        if (networkError) {
+            if (completion) dispatch_async(dispatch_get_main_queue(), ^{ completion(NO, networkError); });
+            return;
+        }
+        NSInteger statusCode = [response isKindOfClass:[NSHTTPURLResponse class]] ? ((NSHTTPURLResponse *)response).statusCode : 0;
+        if (statusCode >= 400) {
+            if (completion) dispatch_async(dispatch_get_main_queue(), ^{ completion(NO, WPError(71, [NSString stringWithFormat:@"Registry verification failed (HTTP %ld)", (long)statusCode])); });
+            return;
+        }
+        NSDictionary *json = data ? [NSJSONSerialization JSONObjectWithData:data options:0 error:nil] : nil;
+        if (![json isKindOfClass:[NSDictionary class]]) {
+            if (completion) dispatch_async(dispatch_get_main_queue(), ^{ completion(NO, WPError(71, @"Invalid verification response")); });
+            return;
+        }
+        if (![json[@"ok"] boolValue]) {
+            NSString *serverError = WPString(json[@"error"]);
+            if (completion) dispatch_async(dispatch_get_main_queue(), ^{ completion(NO, WPError(71, serverError.length > 0 ? serverError : @"Registry verification failed")); });
+            return;
+        }
+        BOOL verified = [json[@"verified"] boolValue];
+        NSString *status = WPString(json[@"status"]);
+        NSString *reason = WPString(json[@"reason"]);
+        if ([status isEqualToString:@"unavailable"]) {
+            if (completion) dispatch_async(dispatch_get_main_queue(), ^{ completion(NO, WPError(71, reason.length > 0 ? reason : @"Registry verification is unavailable")); });
+            return;
+        }
+        if (verified) {
+            if (completion) dispatch_async(dispatch_get_main_queue(), ^{ completion(YES, nil); });
+            return;
+        }
+        NSString *message = reason.length > 0 ? reason : @"This plugin is not verified by the Witch registry";
+        if (completion) dispatch_async(dispatch_get_main_queue(), ^{ completion(NO, WPError(78, message)); });
+    }];
+    [task resume];
 }
 
 - (NSDictionary *)settingsForPluginID:(NSString *)pluginID {
@@ -902,6 +1187,7 @@ static BOOL WPVerifySignature(NSData *message, NSData *signature, NSData *public
     settings[key] = value;
     state[@"settings"] = settings;
     if (![self writeState:state pluginID:pluginID directory:plugin.installPath error:error]) return NO;
+    [self updateConfigurationForPluginID:pluginID settingKey:key value:value];
     [plugin updateState:state];
     [[NSNotificationCenter defaultCenter] postNotificationName:WitchPluginsDidChangeNotification object:self];
     return YES;
@@ -961,6 +1247,7 @@ static BOOL WPVerifySignature(NSData *message, NSData *signature, NSData *public
     state[@"enabled"] = @NO;
     state[@"verificationMessage"] = @"Disabled after a runtime failure";
     [self writeState:state pluginID:pluginID directory:plugin.installPath error:nil];
+    [self updateConfigurationForPluginID:pluginID enabled:NO];
     [[NSFileManager defaultManager] removeItemAtPath:[self markerPathForPluginID:pluginID] error:nil];
     if (crashes >= 2) [self setSafeMode:YES error:nil];
     [self reload];
@@ -993,6 +1280,7 @@ static BOOL WPVerifySignature(NSData *message, NSData *signature, NSData *public
             state[@"enabled"] = @NO;
             state[@"verificationMessage"] = @"Disabled after the launcher terminated while this plugin was loading";
             [self writeState:state pluginID:pluginID directory:plugin.installPath error:nil];
+            [self updateConfigurationForPluginID:pluginID enabled:NO];
             if (crashes >= 2) [self setSafeMode:YES error:nil];
         }
         [[NSFileManager defaultManager] removeItemAtPath:[runtime stringByAppendingPathComponent:entry] error:nil];

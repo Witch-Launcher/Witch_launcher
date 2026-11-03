@@ -24,6 +24,8 @@ NS_ASSUME_NONNULL_BEGIN
 + (nullable NSString *)importCursorFromImage:(UIImage *)image withName:(NSString *)name error:(NSError **)error;
 + (CGRect)displayFrameForMouseFrame:(CGRect)mouseFrame;
 + (CGRect)mouseFrameForDisplayFrame:(CGRect)displayFrame;
+/// Drop the hot-path caches (type dirs, hitboxes, geometry, composited images).
++ (void)invalidateCursorRuntimeCaches;
 
 #pragma mark - Per-type cursor pool
 

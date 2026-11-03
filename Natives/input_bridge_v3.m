@@ -1190,7 +1190,11 @@ static void aasdl_pushTextInput(uint32_t codepoint) {
      * produced random characters in chat. Keep a heap copy alive. */
     t->text = strdup(utf8);
     if (!t->text) return;
-    aasdl_PushEvent(&ev);
+    int pushed = aasdl_PushEvent(&ev);
+    if (pushed == 0) {
+        // SDL did not take ownership on failure; do not strand the heap copy.
+        free((void *)t->text);
+    }
 }
 
 /* Mirrors a UIKit touch into an SDL touch finger event. The launcher tracks a

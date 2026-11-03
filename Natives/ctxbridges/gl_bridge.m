@@ -558,7 +558,9 @@ static int (*gTglesReadbackFn)(int, int, unsigned char[4]) = NULL;
 static void (*gTglesSetDebugLogFn)(int) = NULL;
 static int (*gTglesGetDebugLogFn)(char *, int) = NULL;
 static int (*gTglesEglGetErrorFn)(void) = NULL;
-static CALayer *gTglesAttachedLayer = NULL;
+// weak: the surface view owns the layer; a static strong reference kept the
+// entire CALayer tree (and its contents) alive after the surface closed.
+static __weak CALayer *gTglesAttachedLayer = NULL;
 
 // Cached: env + renderer never change at runtime.
 //

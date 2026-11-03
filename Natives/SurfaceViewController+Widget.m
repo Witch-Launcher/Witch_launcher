@@ -368,7 +368,10 @@ static NSString *widgetShortBytes(uint64_t bytes) {
     [self updateWidgetMode];
 
     [self widgetStopTimer];
-    widgetTimer = [NSTimer scheduledTimerWithTimeInterval:0.5 target:self selector:@selector(widgetTick) userInfo:nil repeats:YES];
+    __weak typeof(self) weakSelf = self;
+    widgetTimer = [NSTimer scheduledTimerWithTimeInterval:0.5 repeats:YES block:^(NSTimer *timer) {
+        [weakSelf widgetTick];
+    }];
     [[NSRunLoop mainRunLoop] addTimer:widgetTimer forMode:NSRunLoopCommonModes];
     [self widgetTick];
 }

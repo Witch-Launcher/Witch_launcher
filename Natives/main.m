@@ -193,32 +193,43 @@ void init_redirectStdio() {
         static BOOL filteredSessionID;
         ssize_t rsize;
         char buf[2048];
+        // This block lives for the whole process and its GCD autorelease pool
+        // is only drained when the block returns, so every per-chunk NSString /
+        // NSData would otherwise accumulate until a Jetsam kill. Keep one pool
+        // per read iteration, and only fsync periodically instead of per chunk.
+        CFAbsoluteTime lastSync = CFAbsoluteTimeGetCurrent();
         while((rsize = read(pfd[0], buf, sizeof(buf)-1)) > 0) {
-            if (rsize < 2048) {
-                buf[rsize] = '\0';
-            }
-            // Filter out Session ID here
-            int index;
-            if (!filteredSessionID) {
-                char *sessionStr = strstr(buf, "(Session ID is ");
-                if (sessionStr) {
-                    char *censorStr = "(Session ID is <censored>)\n\0";
-                    strcpy(sessionStr, censorStr);
-                    rsize = strlen(buf);
-                    filteredSessionID = true;
+            @autoreleasepool {
+                if (rsize < 2048) {
+                    buf[rsize] = '\0';
                 }
+                // Filter out Session ID here
+                if (!filteredSessionID) {
+                    char *sessionStr = strstr(buf, "(Session ID is ");
+                    if (sessionStr) {
+                        char *censorStr = "(Session ID is <censored>)\n\0";
+                        strcpy(sessionStr, censorStr);
+                        rsize = strlen(buf);
+                        filteredSessionID = true;
+                    }
+                }
+                if (canAppendToLog) {
+                    [PLLogOutputView appendToLog:@(buf)];
+                }
+                [file writeData:[NSData dataWithBytes:buf length:rsize]];
+                CFAbsoluteTime now = CFAbsoluteTimeGetCurrent();
+                if (now - lastSync >= 2.0) {
+                    [file synchronizeFile];
+                    lastSync = now;
+                }
+                struct timespec ts;
+                clock_gettime(CLOCK_MONOTONIC_RAW, &ts);
+                atomic_store_explicit(&g_lastLogWriteMs,
+                    (uint64_t)ts.tv_sec * 1000 + (uint64_t)(ts.tv_nsec / 1000000),
+                    memory_order_relaxed);
             }
-            if (canAppendToLog) {
-                [PLLogOutputView appendToLog:@(buf)];
-            }
-            [file writeData:[NSData dataWithBytes:buf length:rsize]];
-            [file synchronizeFile];
-            struct timespec ts;
-            clock_gettime(CLOCK_MONOTONIC_RAW, &ts);
-            atomic_store_explicit(&g_lastLogWriteMs,
-                (uint64_t)ts.tv_sec * 1000 + (uint64_t)(ts.tv_nsec / 1000000),
-                memory_order_relaxed);
         }
+        [file synchronizeFile];
         [file closeFile];
     });
 

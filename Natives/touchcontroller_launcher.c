@@ -25,6 +25,12 @@
 
 // ===== Ring buffer (same semantics as the mod's ring_buffer.c) =====
 
+typedef struct message message_t;
+static void message_free(message_t* msg);
+// Bound the queue; otherwise the launcher accumulates every touch move for
+// the whole session when the game-side transport is not draining.
+#define MAX_QUEUE_MESSAGES 8192
+
 typedef struct ring_buffer {
     void** queue;
     size_t capacity;
@@ -58,18 +64,28 @@ static int ring_buffer_enqueue(ring_buffer_t* buf, void* data) {
     size_t used = (buf->tail >= buf->head) ? (buf->tail - buf->head) : (buf->capacity - (buf->head - buf->tail));
     size_t remaining = (buf->capacity - 1) - used;
     if (remaining == 0) {
-        if (buf->capacity >= SIZE_MAX / 2) return -1;
-        size_t new_capacity = buf->capacity * 2;
-        void** new_queue = realloc(buf->queue, new_capacity * sizeof(void*));
-        if (!new_queue) return -1;
-        buf->queue = new_queue;
-        if (buf->tail < buf->head) {
-            size_t head_section_size = buf->capacity - buf->head;
-            size_t new_head_pos = new_capacity - head_section_size;
-            memmove(&buf->queue[new_head_pos], &buf->queue[buf->head], head_section_size * sizeof(void*));
-            buf->head = new_head_pos;
+        if (buf->capacity >= MAX_QUEUE_MESSAGES) {
+            // Drop the oldest message; the game does not need an ever-growing
+            // backlog of stale pointer events.
+            void* oldest = buf->queue[buf->head];
+            buf->queue[buf->head] = NULL;
+            buf->head++;
+            buf->head %= buf->capacity;
+            message_free((message_t*)oldest);
+        } else {
+            if (buf->capacity >= SIZE_MAX / 2) return -1;
+            size_t new_capacity = buf->capacity * 2;
+            void** new_queue = realloc(buf->queue, new_capacity * sizeof(void*));
+            if (!new_queue) return -1;
+            buf->queue = new_queue;
+            if (buf->tail < buf->head) {
+                size_t head_section_size = buf->capacity - buf->head;
+                size_t new_head_pos = new_capacity - head_section_size;
+                memmove(&buf->queue[new_head_pos], &buf->queue[buf->head], head_section_size * sizeof(void*));
+                buf->head = new_head_pos;
+            }
+            buf->capacity = new_capacity;
         }
-        buf->capacity = new_capacity;
     }
     buf->queue[buf->tail++] = data;
     buf->tail = buf->tail % buf->capacity;
@@ -91,6 +107,12 @@ typedef struct message {
     size_t size;
     void* data;
 } message_t;
+
+static void message_free(message_t* msg) {
+    if (msg == NULL) return;
+    free(msg->data);
+    free(msg);
+}
 
 typedef struct queue {
     ring_buffer_t* launcher_to_game; // launcher send -> game receive

@@ -168,7 +168,7 @@
 		</dict>
 	</array>
 	<key>CFBundleVersion</key>
-	<string>0.0.4</string>
+	<string>0.0.5</string>
 	<key>GCSupportedGameControllers</key>
 	<array>
 		<dict>

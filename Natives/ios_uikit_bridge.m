@@ -11,6 +11,7 @@
 #import "PLProfiles.h"
 #import "WitchPluginRuntime.h"
 #import "WitchRootHost.h"
+#import "MemSampler.h"
 
 #include <objc/runtime.h>
 #include "ios_uikit_bridge.h"
@@ -174,6 +175,10 @@ UIInterfaceOrientationMask amethyst_orientation_mask(void) {
 // were never in Info.plist, so iOS fell back to the wrong default icon.
 
 void UIKit_returnToSplitView() {
+    // The game session is over (normal exit, crash screen, or installer).
+    // Stop the 2s footprint sampler so it does not keep a timer, a serial
+    // queue and stdout logging alive on the launcher screen.
+    WitchMemSamplerStop();
     dispatch_async(dispatch_get_main_queue(), ^{
         UIWindow *window = UIWindow.mainWindow;
 

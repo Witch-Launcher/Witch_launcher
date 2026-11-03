@@ -69,18 +69,31 @@ NSString *const MobileGLPrefSection = @"mobilegl";
     setenv("MOBILEGL_ADVERTISE_FP64", [advertiseFP64 boolValue] ? "1" : "0", 1);
 
     id framesInFlight = getPrefObject(@"mobilegl.frames_in_flight");
+    int framesValue = framesInFlight ? (int)[framesInFlight integerValue]
+        : (NSProcessInfo.processInfo.physicalMemory >= (6ULL * 1024 * 1024 * 1024) ? 3 : 2);
+    // Every frame-in-flight keeps its own arena slot/high-water mark. An
+    // unclamped value from an old config could multiply the MobileGL arena
+    // and push a 4 GB device straight into Jetsam.
+    if (framesValue < 1) framesValue = 1;
+    if (framesValue > 4) framesValue = 4;
     char framesStr[16];
-    snprintf(framesStr, sizeof(framesStr), "%d", framesInFlight ? (int)[framesInFlight integerValue] : 3);
+    snprintf(framesStr, sizeof(framesStr), "%d", framesValue);
     setenv("MOBILEGL_MAGMA_FRAMESINFLIGHT", framesStr, 1);
 
     id vmaBlockSize = getPrefObject(@"mobilegl.vma_block_size");
+    int vmaValue = vmaBlockSize ? (int)[vmaBlockSize integerValue] : 32;
+    if (vmaValue < 8) vmaValue = 8;
+    if (vmaValue > 64) vmaValue = 64;
     char vmaStr[16];
-    snprintf(vmaStr, sizeof(vmaStr), "%d", vmaBlockSize ? (int)[vmaBlockSize integerValue] : 32);
+    snprintf(vmaStr, sizeof(vmaStr), "%d", vmaValue);
     setenv("MOBILEGL_MAGMA_VMA_BLOCK_SIZE_MB", vmaStr, 1);
 
     id largeBufferAdopt = getPrefObject(@"mobilegl.large_buffer_adopt_size");
+    int adoptValue = largeBufferAdopt ? (int)[largeBufferAdopt integerValue] : 4;
+    if (adoptValue < 1) adoptValue = 1;
+    if (adoptValue > 16) adoptValue = 16;
     char adoptStr[16];
-    snprintf(adoptStr, sizeof(adoptStr), "%d", largeBufferAdopt ? (int)[largeBufferAdopt integerValue] : 4);
+    snprintf(adoptStr, sizeof(adoptStr), "%d", adoptValue);
     setenv("MOBILEGL_LARGE_BUFFER_ADOPT_MB", adoptStr, 1);
 
     id coherentAsFlush = getPrefObject(@"mobilegl.coherent_as_flush");

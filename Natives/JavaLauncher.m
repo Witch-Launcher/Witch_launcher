@@ -80,21 +80,45 @@ static size_t availableMemoryMB(void) {
     return (size_t)(avail / (1024 * 1024));
 }
 
-// Caps the requested heap so Java + JVM overhead + native GL/Metal buffers
-// always fit under the real Jetsam kill allowance. Returns the capped value.
+// Direct ByteBuffers (LWJGL/Sodium/Iris) default to a cap equal to -Xmx when
+// MaxDirectMemorySize is absent, so heap + direct can silently use 2x -Xmx
+// before the JVM even starts counting native/GPU memory. Reserve part of the
+// budget for them and cap the rest explicitly.
+static const int kDirectMemoryReserveMB = 320;
+// JVM native arenas, CodeCache/JIT mirror, the launcher itself and the
+// GL/Metal driver's own allocations. Kept deliberately conservative: the
+// 2 GiB per-process Jetsam ceiling does not grow with physical RAM.
+static const int kNativeReserveMB = 512;
+
+static int maxDirectMemoryMB(int heapMB) {
+    int direct = heapMB / 3;
+    if (direct < 192) direct = 192;
+    if (direct > 384) direct = 384;
+    return direct;
+}
+
+// Caps the requested heap so Java heap + direct buffers + JVM native/GPU
+// overhead fit under the real Jetsam kill allowance. Physical RAM alone is a
+// bad basis: 6 GB devices were still killed after ~30 minutes with 1.5-1.8 GB
+// heaps because direct memory scaled with -Xmx and the process ceiling did not.
 static int capAllocationToJetsamAllowance(int allocmem) {
-    if (getEntitlementValue(@"com.apple.private.memorystatus")) {
-        // updateJetsamControl() raised the task limit itself, no cap needed.
-        return allocmem;
-    }
+    double physicalMB = (double)NSProcessInfo.processInfo.physicalMemory / 1048576.0;
     size_t availableMem = availableMemoryMB();
+    double budget;
     if (availableMem > 0) {
-        int byAllowance = (int)((double)availableMem * 0.6);
-        if (byAllowance < allocmem) {
-            NSLog(@"[JavaLauncher] RAM capped: %d MB -> %d MB (only %zu MB left before the Jetsam kill limit; add the memorystatus entitlement to raise it)",
-                  allocmem, byAllowance, availableMem);
-            return (int)MAX(384, byAllowance);
-        }
+        budget = MIN((double)availableMem * 0.85, physicalMB * 0.5);
+    } else {
+        // Unknown Jetsam allowance: fall back to a conservative share of RAM.
+        budget = physicalMB * 0.35;
+    }
+    int maxHeap = (int)budget - kDirectMemoryReserveMB - kNativeReserveMB;
+    if (maxHeap < 384) maxHeap = 384;
+    if (maxHeap > 1536) maxHeap = 1536;
+    if (allocmem > maxHeap) {
+        NSLog(@"[JavaLauncher] RAM capped: %d MB -> %d MB (budget=%.0f MB, available=%zu MB, physical=%.0f MB; direct/native reservation=%d MB)",
+              allocmem, maxHeap, budget, availableMem, physicalMB,
+              kDirectMemoryReserveMB + kNativeReserveMB);
+        return maxHeap;
     }
     return allocmem;
 }
@@ -854,31 +878,25 @@ int launchJVMWithArgs(NSString *username, id launchTarget, int width, int height
         getEntitlementValue(@"com.apple.developer.kernel.increased-memory-limit"),
         getEntitlementValue(@"com.apple.developer.kernel.extended-virtual-addressing"),
         getEntitlementValue(@"com.apple.security.cs.disable-library-validation"));
-    if (getPrefBool(@"java.auto_ram")) {
+    BOOL manualAllocation = !getPrefBool(@"java.auto_ram");
+    if (!manualAllocation) {
         CGFloat autoRatio = getEntitlementValue(@"com.apple.private.memorystatus") ? 0.4 : 0.25;
         allocmem = roundf((NSProcessInfo.processInfo.physicalMemory / 1048576) * autoRatio);
-        // Auto sizing is derived from physical RAM, not from the process's
-        // Jetsam allowance, so it can over-allocate on sideloaded installs
-        // (no memorystatus entitlement) where the kill limit is fixed and
-        // low. Keep the allowance cap here to prevent launch-time Jetsam kills.
-        allocmem = capAllocationToJetsamAllowance(allocmem);
     } else {
-        // Manual allocation: honor the user's setting as-is. The JVM commits
-        // heap lazily (ParallelGC), so -Xmx is a ceiling, not a preallocation.
-        // Just warn when the requested heap exceeds the actual Jetsam kill
-        // allowance so the user knows a memory-heavy session may be killed.
+        // Manual allocation: the JVM commits heap lazily, so -Xmx is a
+        // ceiling, but a ceiling above the Jetsam budget still kills the
+        // process before the game can plateau. Clamp it, don't just warn.
         allocmem = getPrefInt(@"java.allocated_memory");
-        if (!getEntitlementValue(@"com.apple.private.memorystatus")) {
-            size_t availableMem = availableMemoryMB();
-            if (availableMem > 0 && (size_t)allocmem > availableMem) {
-                NSLog(@"[JavaLauncher] Warning: requested %d MB heap exceeds the Jetsam kill allowance (~%zu MB); the game may be killed when its memory usage approaches the limit", allocmem, availableMem);
-                showDialog(localize(@"Warning", nil),
-                    [NSString stringWithFormat:@"You requested %d MB RAM, but the kill limit (Jetsam) of a Sideloaded install is only about %zu MB. Memory above this force-closes the game mid-play. Use Auto RAM or set a value below %zu MB.",
-                        allocmem, availableMem, availableMem]);
-            }
-        }
     }
-    NSLog(@"[JavaLauncher] Max RAM allocation is set to %d MB", allocmem);
+    int requestedAlloc = allocmem;
+    allocmem = capAllocationToJetsamAllowance(allocmem);
+    if (manualAllocation && allocmem != requestedAlloc) {
+        showDialog(localize(@"Warning", nil),
+            [NSString stringWithFormat:@"Your %d MB RAM setting exceeds the safe budget for this device/install. Witch reduced it to %d MB so Minecraft is not force-closed by iOS (Jetsam) mid-play. Lower the render distance or use Auto RAM for more headroom.",
+                requestedAlloc, allocmem]);
+    }
+    int directmem = maxDirectMemoryMB(allocmem);
+    NSLog(@"[JavaLauncher] Max RAM allocation is set to %d MB (direct buffer cap %d MB)", allocmem, directmem);
     if (!validateVirtualMemorySpace(allocmem)) {
         UIKit_returnToSplitView();
         if (getEntitlementValue(@"com.apple.developer.kernel.increased-memory-limit")) {
@@ -899,6 +917,12 @@ int launchJVMWithArgs(NSString *username, id launchTarget, int width, int height
     }
     margv[++margc] = "-Xms128M";
     margv[++margc] = [NSString stringWithFormat:@"-Xmx%dM", allocmem].UTF8String;
+    // Without this, HotSpot defaults the direct-buffer cap to Runtime.maxMemory()
+    // (sun/misc/VM.java: directMemory = maxMemory), so LWJGL/Sodium/Iris direct
+    // buffers can add another -Xmx of native memory on top of the Java heap.
+    // That is the main cause of the ~30-minute Jetsam kill on both 4 GB and
+    // 6 GB devices. Users can still override it from java.java_args.
+    margv[++margc] = [NSString stringWithFormat:@"-XX:MaxDirectMemorySize=%dM", directmem].UTF8String;
     // One line per GC ("700M->300M(768M)") in latestlog: the only way to
     // see the JVM's used/committed heap without rebuilding MC's logging.
     // Accepted by every JDK we ship (JDK8 natively, JDK9+ as an alias of
@@ -966,11 +990,14 @@ int launchJVMWithArgs(NSString *username, id launchTarget, int width, int height
     // of pinning every iPhone to the 2GB-phone value.
     size_t physMB = (size_t)(NSProcessInfo.processInfo.physicalMemory / (1024 * 1024));
     size_t availMB = availableMemoryMB();
-    int voxyGeometryMB = 256;
+    // Lower defaults: the old 256/384/512 MB + Sodium/Iris buffers alone
+    // exceed a 2 GiB Jetsam envelope. The user can still raise this via
+    // java.java_args if Voxy is installed and the device has headroom.
+    int voxyGeometryMB = 128;
     if (physMB >= 4096 && (availMB == 0 || availMB >= 1800)) {
-        voxyGeometryMB = 512;
+        voxyGeometryMB = 256;
     } else if (physMB >= 3072 && (availMB == 0 || availMB >= 1400)) {
-        voxyGeometryMB = 384;
+        voxyGeometryMB = 192;
     }
     NSLog(@"[JavaLauncher] Voxy geometry buffer: %d MB (physical=%zu MB, jetsam allowance=%zu MB)",
           voxyGeometryMB, physMB, availMB);
@@ -1277,7 +1304,12 @@ int launchJVMWithArgs(NSString *username, id launchTarget, int width, int height
     }
     if (mirrorEnabled) {
         margv[++margc] = "-XX:+MirrorMappedCodeCache";
-        NSLog(@"[JavaLauncher] MirrorMappedCodeCache enabled on iOS %ld.%ld", (long)NSProcessInfo.processInfo.operatingSystemVersion.majorVersion, (long)NSProcessInfo.processInfo.operatingSystemVersion.minorVersion);
+        // The mirror maps RW+RX aliases of the CodeCache; the default
+        // ReservedCodeCacheSize (240 MB on JDK 17+) commits pages as JIT warms
+        // up. 128 MB is ample for Minecraft + Iris and leaves headroom under
+        // the 2 GiB Jetsam ceiling.
+        margv[++margc] = "-XX:ReservedCodeCacheSize=128m";
+        NSLog(@"[JavaLauncher] MirrorMappedCodeCache enabled on iOS %ld.%ld (code cache capped at 128 MB)", (long)NSProcessInfo.processInfo.operatingSystemVersion.majorVersion, (long)NSProcessInfo.processInfo.operatingSystemVersion.minorVersion);
 
         // Big mirror preflight: reserve + PROVE the full-size mirror region
         // before the JVM exists and offer it to the script, so libjvm's own
@@ -1573,15 +1605,20 @@ int launchJVMWithArgs(NSString *username, id launchTarget, int width, int height
     startJVMStartupWatchdog(jit26Handshake, jitNowMs());
 
     // Footprint sampler for Jetsam diagnosis (native + GPU memory invisible
-    // to JVM heap stats). Logs every 5s until the process dies.
+    // to JVM heap stats). Logs every 2s until the process dies.
     // Fully gated by debug.mem_sample_log (Developer switch, default ON):
     // OFF = zero [MemSample]/[MobileGL-MemStats] lines, no timer at all.
     // A missing key (old installs) means ON.
     id memLogPref = getPrefObject(@"debug.mem_sample_log");
-    WitchMemSamplerSetEnabled(memLogPref ? [memLogPref boolValue] : YES);
+    BOOL memLogEnabled = memLogPref ? [memLogPref boolValue] : YES;
+    WitchMemSamplerSetEnabled(memLogEnabled);
     WitchMemSamplerStart();
+    // Tell the Java launcher to emit [JVM-Mem] lines (heap + direct buffer
+    // pools) with the same debug switch; this is what identifies whether the
+    // 30-minute growth is heap, direct ByteBuffers, or native/GPU memory.
+    setenv("WITCH_MEM_PROBE", memLogEnabled ? "1" : "0", 1);
 
-    return pJLI_Launch(++margc, margv,
+    jint jliResult = pJLI_Launch(++margc, margv,
                    0, NULL, // sizeof(const_jargs) / sizeof(char *), const_jargs,
                    0, NULL, // sizeof(const_appclasspath) / sizeof(char *), const_appclasspath,
                    // These values are ignored in Java 17, so keep it anyways
@@ -1591,6 +1628,10 @@ int launchJVMWithArgs(NSString *username, id launchTarget, int width, int height
                    "java", "openjdk",
                    /* (const_jargs != NULL) ? JNI_TRUE : */ JNI_FALSE,
                    JNI_TRUE, JNI_FALSE, JNI_TRUE);
+    // The JVM is gone once JLI_Launch returns. A later memory warning must not
+    // dial the old JavaVM pointer in WitchMemoryPressure's System.gc() path.
+    runtimeJavaVMPtr = NULL;
+    return jliResult;
 }
 
 // ==================== JVM Startup Watchdog ====================
