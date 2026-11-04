@@ -389,6 +389,7 @@ static NSString *WitchSplashBundleMediaKind(void) {
             @{@"type": @"text", @"label": localize(@"preference.title.debug_mirror_mapped_code_cache", nil), @"key": @"debug.debug_mirror_mapped_code_cache", @"placeholder": @"-1"},
             @{@"type": @"switch", @"label": localize(@"preference.title.debug_hide_home_indicator", nil), @"key": @"debug.debug_hide_home_indicator"},
             @{@"type": @"switch", @"label": localize(@"preference.title.debug_auto_correction", nil), @"key": @"debug.debug_auto_correction"},
+            @{@"type": @"switch", @"label": localize(@"preference.title.overlay_log_in_game", nil), @"key": @"general.overlay_log_in_game"},
             @{@"type": @"switch", @"label": localize(@"preference.title.debug_render_log", nil), @"key": @"debug.debug_render_log"},
             @{@"type": @"switch", @"label": localize(@"preference.title.debug_mem_sample_log", nil), @"key": @"debug.mem_sample_log"},
             header(@"settings.group.dev_server"),

@@ -7,6 +7,7 @@
 #import "SurfaceViewController.h"
 #import "utils.h"
 #import "AppSheet.h"
+#import "WitchLogOverlay.h"
 
 @implementation SurfaceViewController(Navigation)
 
@@ -237,7 +238,11 @@ static CGPoint lastCenterPoint;
     } else if ([key isEqualToString:@"game.menu.perf_start"]) {
         [self actionStartRecording];
     } else if ([key isEqualToString:@"game.menu.log_output"]) {
-        [self.logOutputView actionToggleLogOutput];
+        if (getPrefBool(@"general.overlay_log_in_game")) {
+            [[WitchLogOverlay sharedOverlay] toggleInView:self.view];
+        } else {
+            [self.logOutputView actionToggleLogOutput];
+        }
     } else if ([key isEqualToString:@"game.menu.custom_controls"]) {
         [self actionOpenCustomControls];
     } else if ([key isEqualToString:@"Settings"]) {

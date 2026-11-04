@@ -390,6 +390,7 @@ static GameSurfaceView* pojavWindow;
     [self.rootView addSubview:self.inputTextField];
 
     [self performSelector:@selector(initCategory_LogView)];
+    [self performSelector:@selector(installOverlayLogGestureIfEnabled)];
 
     // [self setPreferredFramesPerSecond:1000];
     [self updateJetsamControl];

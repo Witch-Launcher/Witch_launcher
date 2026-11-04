@@ -35,6 +35,10 @@
             @"widget_cpu_style": @"percent",
             @"widget_scale": @(100),
             @"widget_position": @"",
+            @"mainsidebar_portrait": @"bottom",
+            @"mainsidebar_landscape": @"left",
+            @"orientation_lock": @"off",
+            @"lock_landscape": @NO,
         }.mutableCopy,
         @"video": @{ // Video & Audio
             @"renderer": @"auto",

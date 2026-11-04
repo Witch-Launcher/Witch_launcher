@@ -316,6 +316,7 @@ add_executable(Witch
   SurfaceViewController+HangDetect.m
   SurfaceViewController+LaunchSplash.m
   LaunchSplashView.m
+  WitchLogOverlay.m
   GameLaunchChecks.m
   SurfaceViewController+ExternalDisplay.m
   SurfaceViewController+LogView.m
@@ -360,6 +361,7 @@ egl_bridge.m
     ../UI/Common/AmethystProjectCell.m
     ../UI/Common/UIView+LiquidGlass.m
     ../UI/Common/AmethystBlurView.m
+    ../UI/Common/LinearProgressView.m
    ../UI/Common/BlurredDialog.m
    ../UI/Common/AppErrorDialog.m
    ../UI/Common/ErrorPresenter.m
@@ -420,6 +422,8 @@ egl_bridge.m
    ../UI/Screens/Plugins/PluginDetailViewController.m
    ../UI/Screens/Plugins/PluginSettingsViewController.m
    ../UI/Screens/Account/AccountViewController.m
+   ../UI/Screens/Account/Skin3DView.m
+   ../UI/Screens/Account/SkinTextureManager.m
    ../UI/Screens/Perf/PerfSettingsViewController.m
    ../UI/Screens/Perf/PerfHistoryViewController.m
    ../UI/Screens/Perf/PerfChartViewController.m
@@ -481,6 +485,7 @@ target_link_libraries(Witch
   "-framework JavaScriptCore"
   "-framework PhotosUI"
   "-framework QuartzCore"
+  "-framework SceneKit"
   "-framework Security"
   "-framework Metal"
   "-framework MetalKit"

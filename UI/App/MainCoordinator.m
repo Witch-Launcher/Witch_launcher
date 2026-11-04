@@ -189,11 +189,12 @@ static const NSTimeInterval kLaunchAutoHideDelay = 3.0;
 }
 
 - (void)showAccount {
+    // Full-screen page: no navigation bar / sheet chrome, so the account
+    // manager uses the whole display (the panel has its own close button).
     AccountViewController *vc = [[AccountViewController alloc] init];
     vc.coordinator = self;
-    UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:vc];
-    vc.navigationItem.rightBarButtonItem = [[UIBarButtonItem alloc] initWithTitle:localize(@"Done", nil) style:UIBarButtonItemStyleDone target:self action:@selector(dismissTopSheet)];
-    [self.rootVC presentContentAsSheet:nav];
+    vc.modalPresentationStyle = UIModalPresentationFullScreen;
+    [self.rootVC presentViewController:vc animated:YES completion:nil];
 }
 
 - (void)dismissTopSheet {

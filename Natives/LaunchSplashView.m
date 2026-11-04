@@ -1,6 +1,7 @@
 #import "LaunchSplashView.h"
 #import "utils.h"
-
+#import "ThemeManager.h"
+#import "WitchLogOverlay.h"
 #import <AVFoundation/AVFoundation.h>
 
 NS_ASSUME_NONNULL_BEGIN
@@ -55,7 +56,7 @@ static UIBlurEffectStyle WitchSplashBlurStyle(CGFloat t) {
 @property (nonatomic, strong, nullable) UIImageView *imageView;
 @property (nonatomic, strong, nullable) AVPlayer *player;
 @property (nonatomic, strong, nullable) AVPlayerItem *playerItem;
-@property (nonatomic, copy, nullable) id<NSObject> playerObserver;
+@property (nonatomic, strong, nullable) id<NSObject> playerObserver;
 @property (nonatomic, strong, nullable) AVPlayerLayer *playerLayer;
 @property (nonatomic, strong) UIVisualEffectView *blurView;
 @property (nonatomic, strong) UIView *scrim;
@@ -63,10 +64,10 @@ static UIBlurEffectStyle WitchSplashBlurStyle(CGFloat t) {
 @property (nonatomic, strong) UILabel *messageLabel;
 @property (nonatomic, strong) UILabel *hintLabel;
 @property (nonatomic, strong) UIStackView *contentStack;
+@property (nonatomic, strong) UIVisualEffectView *panel;
 @property (nonatomic, strong) UIView *barTrack;
-@property (nonatomic, strong) UIView *barFill;
-@property (nonatomic, strong) NSLayoutConstraint *barFillLeading;
-@property (nonatomic) CGFloat barFillWidth;
+@property (nonatomic, strong) CALayer *barOne;
+@property (nonatomic, strong) CALayer *barTwo;
 @property (nonatomic) BOOL mediaActive;
 @end
 
@@ -92,7 +93,7 @@ static UIBlurEffectStyle WitchSplashBlurStyle(CGFloat t) {
 
 - (void)layoutSubviews {
     [super layoutSubviews];
-    CGFloat maxWidth = MIN(440, self.bounds.size.width - 48);
+    CGFloat maxWidth = MIN(280, self.bounds.size.width - 96);
     if (maxWidth < 0) maxWidth = 0;
     if (self.messageLabel.preferredMaxLayoutWidth != maxWidth) {
         self.messageLabel.preferredMaxLayoutWidth = maxWidth;
@@ -173,82 +174,105 @@ static UIBlurEffectStyle WitchSplashBlurStyle(CGFloat t) {
 }
 
 - (void)buildContent {
-    self.titleLabel = [self makeLabelWithFont:[UIFont systemFontOfSize:26 weight:UIFontWeightSemibold] alpha:1.0];
+    self.titleLabel = [self makeLabelWithFont:[UIFont systemFontOfSize:16 weight:UIFontWeightSemibold] alpha:0.98];
     self.titleLabel.text = localize(@"splash.starting_title", nil);
 
-    self.messageLabel = [self makeLabelWithFont:[UIFont systemFontOfSize:15 weight:UIFontWeightRegular] alpha:0.72];
-    self.messageLabel.numberOfLines = 0;
-    self.messageLabel.preferredMaxLayoutWidth = 440;
+    self.messageLabel = [self makeLabelWithFont:[UIFont systemFontOfSize:11 weight:UIFontWeightRegular] alpha:0.72];
+    self.messageLabel.numberOfLines = 2;
+    self.messageLabel.preferredMaxLayoutWidth = 236;
     self.messageLabel.text = localize(@"splash.starting_message", nil);
 
-    UIView *track = [[UIView alloc] init];
+    UIView *track = [[UIView alloc] initWithFrame:CGRectMake(0, 0, 190, 3)];
     track.translatesAutoresizingMaskIntoConstraints = NO;
-    track.backgroundColor = [UIColor.whiteColor colorWithAlphaComponent:0.16];
-    track.layer.cornerRadius = 3;
+    UIColor *accent = ThemeManager.shared.accentColor ?: UIColor.whiteColor;
+    track.backgroundColor = [accent colorWithAlphaComponent:0.22];
+    track.layer.cornerRadius = 1.5;
     track.layer.masksToBounds = YES;
     track.isAccessibilityElement = YES;
     track.accessibilityLabel = localize(@"splash.starting_message", nil);
+    track.accessibilityTraits = UIAccessibilityTraitUpdatesFrequently;
     self.barTrack = track;
 
-    UIView *fill = [[UIView alloc] init];
-    fill.translatesAutoresizingMaskIntoConstraints = NO;
-    fill.backgroundColor = [UIColor.whiteColor colorWithAlphaComponent:0.95];
-    fill.layer.cornerRadius = 3;
-    fill.layer.masksToBounds = YES;
-    [track addSubview:fill];
-    self.barFill = fill;
+    CGFloat barWidth = 76;
+    NSArray *colors = @[accent, accent];
+    for (NSInteger i = 0; i < 2; i++) {
+        CALayer *bar = [CALayer layer];
+        bar.frame = CGRectMake(0, 0, barWidth, 3);
+        bar.cornerRadius = 1.5;
+        bar.backgroundColor = [colors[i] colorWithAlphaComponent:0.95].CGColor;
+        [track.layer addSublayer:bar];
+        if (i == 0) self.barOne = bar; else self.barTwo = bar;
+    }
 
-    self.barFillWidth = 96;
-    self.barFillLeading = [fill.leadingAnchor constraintEqualToAnchor:track.leadingAnchor];
     [NSLayoutConstraint activateConstraints:@[
-        [track.widthAnchor constraintEqualToConstant:260],
-        [track.heightAnchor constraintEqualToConstant:6],
-        self.barFillLeading,
-        [fill.widthAnchor constraintEqualToConstant:self.barFillWidth],
-        [fill.topAnchor constraintEqualToAnchor:track.topAnchor],
-        [fill.bottomAnchor constraintEqualToAnchor:track.bottomAnchor],
+        [track.widthAnchor constraintEqualToConstant:190],
+        [track.heightAnchor constraintEqualToConstant:3],
     ]];
 
     UIStackView *stack = [[UIStackView alloc] initWithArrangedSubviews:@[self.titleLabel, self.messageLabel, track]];
     stack.translatesAutoresizingMaskIntoConstraints = NO;
     stack.axis = UILayoutConstraintAxisVertical;
     stack.alignment = UIStackViewAlignmentCenter;
-    stack.spacing = 18;
-    [stack setCustomSpacing:36 afterView:self.messageLabel];
-    [self addSubview:stack];
+    stack.spacing = 6;
+    [stack setCustomSpacing:12 afterView:self.messageLabel];
+    stack.isAccessibilityElement = NO;
+
+    // Compact floating card pinned to the bottom: leaves the whole top area
+    // free for the log overlay (three-finger tap).
+    UIVisualEffectView *panel = [[UIVisualEffectView alloc] initWithEffect:[UIBlurEffect effectWithStyle:UIBlurEffectStyleSystemUltraThinMaterialDark]];
+    panel.translatesAutoresizingMaskIntoConstraints = NO;
+    panel.layer.cornerRadius = 18;
+    panel.layer.masksToBounds = YES;
+    panel.layer.borderWidth = 1;
+    panel.layer.borderColor = [UIColor colorWithWhite:1 alpha:0.14].CGColor;
+    [panel.contentView addSubview:stack];
+    [self addSubview:panel];
+    self.panel = panel;
     self.contentStack = stack;
 
     [NSLayoutConstraint activateConstraints:@[
-        [stack.centerXAnchor constraintEqualToAnchor:self.centerXAnchor],
-        [stack.centerYAnchor constraintEqualToAnchor:self.centerYAnchor],
-        [stack.leadingAnchor constraintGreaterThanOrEqualToAnchor:self.leadingAnchor constant:24],
-        [stack.trailingAnchor constraintLessThanOrEqualToAnchor:self.trailingAnchor constant:-24],
+        [stack.topAnchor constraintEqualToAnchor:panel.contentView.topAnchor constant:12],
+        [stack.bottomAnchor constraintEqualToAnchor:panel.contentView.bottomAnchor constant:-13],
+        [stack.leadingAnchor constraintEqualToAnchor:panel.contentView.leadingAnchor constant:14],
+        [stack.trailingAnchor constraintEqualToAnchor:panel.contentView.trailingAnchor constant:-14],
+        [panel.centerXAnchor constraintEqualToAnchor:self.centerXAnchor],
+        [panel.widthAnchor constraintEqualToConstant:264],
     ]];
 
-    UILabel *hint = [self makeLabelWithFont:[UIFont systemFontOfSize:12 weight:UIFontWeightRegular] alpha:0.45];
-    hint.text = localize(@"splash.starting_hint", nil);
+    UILabel *hint = [self makeLabelWithFont:[UIFont systemFontOfSize:11.5 weight:UIFontWeightMedium] alpha:0.62];
+    hint.text = localize(@"splash.three_finger_log_hint", nil);
     hint.numberOfLines = 1;
     hint.adjustsFontSizeToFitWidth = YES;
-    hint.minimumScaleFactor = 0.7;
-    hint.hidden = self.mediaActive;
+    hint.minimumScaleFactor = 0.72;
     [self addSubview:hint];
     self.hintLabel = hint;
-    NSLayoutConstraint *safeBottom = [self.safeAreaLayoutGuide.bottomAnchor constraintEqualToAnchor:self.hintLabel.bottomAnchor constant:16];
     if (@available(iOS 11.0, *)) {
         [NSLayoutConstraint activateConstraints:@[
-            [self.hintLabel.centerXAnchor constraintEqualToAnchor:self.centerXAnchor],
-            [self.hintLabel.leadingAnchor constraintEqualToAnchor:self.leadingAnchor constant:16],
-            [self.hintLabel.trailingAnchor constraintEqualToAnchor:self.trailingAnchor constant:-16],
-            safeBottom,
+            [panel.bottomAnchor constraintEqualToAnchor:self.safeAreaLayoutGuide.bottomAnchor constant:-46],
+            [hint.centerXAnchor constraintEqualToAnchor:self.centerXAnchor],
+            [hint.leadingAnchor constraintEqualToAnchor:self.leadingAnchor constant:20],
+            [hint.trailingAnchor constraintEqualToAnchor:self.trailingAnchor constant:-20],
+            [self.safeAreaLayoutGuide.bottomAnchor constraintEqualToAnchor:hint.bottomAnchor constant:16],
         ]];
     } else {
         [NSLayoutConstraint activateConstraints:@[
-            [self.hintLabel.centerXAnchor constraintEqualToAnchor:self.centerXAnchor],
-            [self.hintLabel.leadingAnchor constraintEqualToAnchor:self.leadingAnchor constant:16],
-            [self.hintLabel.trailingAnchor constraintEqualToAnchor:self.trailingAnchor constant:-16],
-            [self.hintLabel.bottomAnchor constraintEqualToAnchor:self.bottomAnchor constant:-24],
+            [panel.bottomAnchor constraintEqualToAnchor:self.bottomAnchor constant:-58],
+            [hint.centerXAnchor constraintEqualToAnchor:self.centerXAnchor],
+            [hint.leadingAnchor constraintEqualToAnchor:self.leadingAnchor constant:20],
+            [hint.trailingAnchor constraintEqualToAnchor:self.trailingAnchor constant:-20],
+            [hint.bottomAnchor constraintEqualToAnchor:self.bottomAnchor constant:-18],
         ]];
     }
+
+    UITapGestureRecognizer *tap3 = [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(handleThreeFingerTap:)];
+    tap3.numberOfTouchesRequired = 3;
+    [self addGestureRecognizer:tap3];
+}
+
+- (void)handleThreeFingerTap:(UITapGestureRecognizer *)gesture {
+    if (gesture.state != UIGestureRecognizerStateEnded) return;
+    UIView *host = self.superview ?: self;
+    [[WitchLogOverlay sharedOverlay] toggleInView:host];
 }
 
 - (UILabel *)makeLabelWithFont:(UIFont *)font alpha:(CGFloat)alpha {
@@ -263,17 +287,26 @@ static UIBlurEffectStyle WitchSplashBlurStyle(CGFloat t) {
 }
 
 - (void)startAnimating {
-    self.barFillLeading.constant = 0;
-    [self layoutIfNeeded];
-    self.barFillLeading.constant = 164.0;
-    [UIView animateWithDuration:1.6 delay:0 options:UIViewAnimationOptionRepeat | UIViewAnimationOptionAutoreverse | UIViewAnimationOptionCurveEaseInOut | UIViewAnimationOptionAllowUserInteraction animations:^{
-        [self layoutIfNeeded];
-    } completion:nil];
+    CGFloat trackWidth = 190.0;
+    CGFloat barWidth = 76.0;
+    CAMediaTimingFunction *easing = [CAMediaTimingFunction functionWithControlPoints:0.4 :0.0 :0.2 :1.0];
+    NSArray *bars = @[self.barOne, self.barTwo];
+    for (NSInteger i = 0; i < bars.count; i++) {
+        CALayer *bar = bars[i];
+        CABasicAnimation *anim = [CABasicAnimation animationWithKeyPath:@"position.x"];
+        anim.fromValue = @(-barWidth / 2);
+        anim.toValue = @(trackWidth + barWidth / 2);
+        anim.duration = 1.15;
+        anim.timingFunction = easing;
+        anim.repeatCount = HUGE_VALF;
+        anim.beginTime = CACurrentMediaTime() + (double)i * 0.575;
+        [bar addAnimation:anim forKey:@"position.x"];
+    }
 }
 
 - (void)stopAnimating {
-    [self.barFill.layer removeAllAnimations];
-    [self layoutIfNeeded];
+    [self.barOne removeAnimationForKey:@"position.x"];
+    [self.barTwo removeAnimationForKey:@"position.x"];
 }
 
 - (void)didMoveToSuperview {

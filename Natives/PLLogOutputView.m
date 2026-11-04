@@ -5,6 +5,8 @@
 #import "CrashScreenViewController.h"
 #import "AppSheet.h"
 
+NSNotificationName const WitchLogLineDidAppendNotification = @"WitchLogLineDidAppendNotification";
+
 @interface PLLogOutputView()<UITableViewDataSource, UITableViewDelegate>
 @property(nonatomic) UITableView* logTableView;
 @property(nonatomic) UINavigationBar* navigationBar;
@@ -147,12 +149,22 @@ static const NSUInteger kMaxLogLines = 2000;
 }
 
 - (void)actionStartStopLogOutput {
-    canAppendToLog = !canAppendToLog;
-    UINavigationItem* item = self.navigationBar.items[0];
-    item.leftBarButtonItem =
-        [[UIBarButtonItem alloc] initWithBarButtonSystemItem:
-            canAppendToLog ? UIBarButtonSystemItemPause : UIBarButtonSystemItemPlay
-        target:self action:@selector(actionStartStopLogOutput)];
+    [PLLogOutputView setCaptureEnabled:!canAppendToLog];
+}
+
++ (void)setCaptureEnabled:(BOOL)enabled {
+    canAppendToLog = enabled;
+    UINavigationItem *item = current.navigationBar.items.firstObject;
+    if (item) {
+        item.leftBarButtonItem =
+            [[UIBarButtonItem alloc] initWithBarButtonSystemItem:
+                enabled ? UIBarButtonSystemItemPause : UIBarButtonSystemItemPlay
+             target:current action:@selector(actionStartStopLogOutput)];
+    }
+}
+
++ (BOOL)captureEnabled {
+    return canAppendToLog;
 }
 
 - (void)actionToggleLogOutput {
@@ -181,6 +193,7 @@ static const NSUInteger kMaxLogLines = 2000;
     if (line.length == 0 || !logLines) {
         return;
     }
+    [[NSNotificationCenter defaultCenter] postNotificationName:WitchLogLineDidAppendNotification object:nil userInfo:@{@"line": line}];
     PLLogOutputView *view = current;
     if (!view) {
         // No live log panel: keep the buffer trimmed and drop the line instead
@@ -220,6 +233,11 @@ static const NSUInteger kMaxLogLines = 2000;
     [view.logTableView 
         scrollToRowAtIndexPath:indexPath
         atScrollPosition:UITableViewScrollPositionBottom animated:NO];
+}
+
++ (NSString *)fullLogText {
+    if (!logLines.count) return @"";
+    return [logLines componentsJoinedByString:@"\n"];
 }
 
 + (void)appendToLog:(NSString *)string {
