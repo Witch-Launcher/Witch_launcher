@@ -49,6 +49,7 @@ include_directories(
    "../UI/Screens/Download"
    "../UI/Screens/FileBrowser"
    "../UI/Screens/Perf"
+   "../UI/Screens/JITMemory"
    "../UI/Screens/ProfileSettings"
    "../UI/Screens/AI"
   "installer/modpack"
@@ -388,6 +389,10 @@ egl_bridge.m
    ../UI/Managers/WitchUpdateService.m
    ../UI/Managers/WitchRuntimeService.m
    ../UI/Managers/WitchJREPatcher.c
+   ../UI/Managers/WitchJITHelperClient.m
+   ../UI/Managers/WitchJITCoordinator.m
+   ../UI/Managers/WitchVPNHelper.m
+   ../UI/Screens/JITMemory/WitchJITSettingsViewController.m
     ../UI/Screens/MainMenu/MainMenuViewController.m
      WitchAIService.m
      WitchLogReporter.m

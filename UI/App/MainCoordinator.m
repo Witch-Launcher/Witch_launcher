@@ -35,6 +35,8 @@
 #import "PLProfiles.h"
 #import "MinecraftResourceUtils.h"
 #import "ElySkinHead.h"
+#import "WitchJITCoordinator.h"
+#import "WitchJITSettingsViewController.h"
 
 static const NSTimeInterval kLaunchAutoHideDelay = 3.0;
 
@@ -570,8 +572,6 @@ static const NSTimeInterval kLaunchAutoHideDelay = 3.0;
 }
 
 - (void)performJITCheckAndLaunch {
-    BOOL hasTrollStoreJIT = getEntitlementValue(@"com.apple.private.local.sandboxed-jit");
-
     if (isJITEnabled(false)) {
         [self finishLaunch];
         return;
@@ -582,10 +582,22 @@ static const NSTimeInterval kLaunchAutoHideDelay = 3.0;
         return;
     }
 
-    requestExternalJITEnable();
+    NSString *method = WitchJITCoordinator.shared.resolvedMethod;
+    NSLog(@"[JIT] Launch method: %@ (selected=%@)", method, WitchJITCoordinator.shared.selectedMethod);
+    if ([method isEqualToString:@"builtin"]) {
+        [self performBuiltInJITAndLaunch];
+        return;
+    }
+    if (![method isEqualToString:@"wait"]) {
+        [WitchJITCoordinator.shared requestExternalJITEnable];
+    }
+    [self presentWaitJITAlertForMethod:method];
+}
 
+- (void)presentWaitJITAlertForMethod:(NSString *)method {
+    BOOL hasTrollStoreJIT = getEntitlementValue(@"com.apple.private.local.sandboxed-jit");
     NSString *waitMessage;
-    if (hasTrollStoreJIT) {
+    if ([method isEqualToString:@"trollstore"] || hasTrollStoreJIT) {
         waitMessage = localize(@"launcher.wait_jit_trollstore.message", nil);
     } else if (DeviceNeedsDebugJITMapping()) {
         waitMessage = localize(@"launcher.wait_jit_stikdebug.message", nil);
@@ -608,6 +620,51 @@ static const NSTimeInterval kLaunchAutoHideDelay = 3.0;
             }];
         });
     });
+}
+
+- (void)performBuiltInJITAndLaunch {
+    self.jitAlert = [UIAlertController alertControllerWithTitle:localize(@"jit.starting.title", nil)
+        message:localize(@"jit.starting.message", nil)
+        preferredStyle:UIAlertControllerStyleAlert];
+    [self.rootVC presentViewController:self.jitAlert animated:YES completion:nil];
+
+    __weak typeof(self) weakSelf = self;
+    [WitchJITCoordinator.shared enableBuiltInJITWithCompletion:^(BOOL success, NSString *errorMessage) {
+        MainCoordinator *strongSelf = weakSelf;
+        if (!strongSelf) return;
+        [strongSelf.jitAlert dismissViewControllerAnimated:YES completion:^{
+            strongSelf.jitAlert = nil;
+            if (success) {
+                [strongSelf finishLaunch];
+            } else {
+                [strongSelf presentBuiltInJITFailure:errorMessage];
+            }
+        }];
+    }];
+}
+
+- (void)presentBuiltInJITFailure:(NSString *)message {
+    UIAlertController *alert = [UIAlertController alertControllerWithTitle:localize(@"jit.failed.title", nil)
+        message:message ?: localize(@"jit.failed.message", nil)
+        preferredStyle:UIAlertControllerStyleAlert];
+    [alert addAction:[UIAlertAction actionWithTitle:localize(@"jit.open_settings", nil)
+                                              style:UIAlertActionStyleDefault
+                                            handler:^(UIAlertAction *action) {
+        WitchJITSettingsViewController *vc = [WitchJITSettingsViewController new];
+        UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:vc];
+        nav.modalPresentationStyle = UIModalPresentationFormSheet;
+        [self.rootVC presentViewController:nav animated:YES completion:nil];
+    }]];
+    [alert addAction:[UIAlertAction actionWithTitle:localize(@"jit.use_stikdebug", nil)
+                                              style:UIAlertActionStyleDefault
+                                            handler:^(UIAlertAction *action) {
+        [WitchJITCoordinator.shared requestExternalJITEnable];
+        [self presentWaitJITAlertForMethod:@"stikdebug"];
+    }]];
+    [alert addAction:[UIAlertAction actionWithTitle:localize(@"Cancel", nil)
+                                              style:UIAlertActionStyleCancel
+                                            handler:nil]];
+    [self.rootVC presentViewController:alert animated:YES completion:nil];
 }
 
 - (void)finishLaunch {

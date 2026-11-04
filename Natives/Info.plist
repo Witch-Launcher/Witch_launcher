@@ -191,6 +191,7 @@
 		<string>sidestore</string>
 		<string>apple-magnifier</string>
 		<string>trollstore</string>
+		<string>localdevvpn</string>
 	</array>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
@@ -201,9 +202,10 @@
 	<key>NSBonjourServices</key>
 	<array>
 		<string>_altserver._tcp</string>
+		<string>_remotepairing._tcp</string>
 	</array>
 	<key>NSLocalNetworkUsageDescription</key>
-	<string>Witch uses the local network to find and communicate with AltServer and LAN servers.</string>
+	<string>Witch uses the local network to find AltServer, LAN servers, and the device's RemotePairing service for Built-in StikJIT.</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Witch uses the microphone to enable support for voice chat mods.</string>
 	<key>UIApplicationSceneManifest</key>

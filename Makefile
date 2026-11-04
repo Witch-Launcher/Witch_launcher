@@ -115,6 +115,9 @@ POJAV_JRE8_DIR        ?= $(SOURCEDIR)/depends/java-8-openjdk
 POJAV_JRE17_DIR       ?= $(SOURCEDIR)/depends/java-17-openjdk
 POJAV_JRE21_DIR       ?= $(SOURCEDIR)/depends/java-21-openjdk
 POJAV_JRE25_DIR       ?= $(SOURCEDIR)/depends/java-25-openjdk
+STIKJIT_XCFRAMEWORK  := $(SOURCEDIR)/third_party/stikjit/StikJIT.xcframework
+WITCH_JIT_HELPER_DIR := $(SOURCEDIR)/tools/WitchJITHelper
+WITCH_JIT_HELPER_BUILD := $(WORKINGDIR)/jit-helper-build
 # App icon set to use: AppIcon-Light (official) or AppIcon-Development (dev builds).
 # Non-release builds carry the dev logo (local `make` + the GitHub beta
 # workflow); only RELEASE=1 builds keep the official blue one.
@@ -190,6 +193,9 @@ METHOD_MACHO = \
 METHOD_MACHO_JRE = \
 	for file in $$(find $(1)); do \
 		if [[ "$$file" == *"/lib/server/libjvm.dylib" ]]; then \
+			continue; \
+		fi; \
+		if [[ "$$file" == *"/PlugIns/"* || "$$file" == *"/Frameworks/StikJIT.framework/"* ]]; then \
 			continue; \
 		fi; \
 		if [[ "$$(file $$file)" == *"Mach-O"* ]]; then \
@@ -826,7 +832,29 @@ lwgjl:
 	find "$$LWJGL41_DIR/bin/RELEASE" -name '*.jar' ! -name '*-natives-*' ! -name '*-sources.jar' -exec cp {} "$(SOURCEDIR)/JavaApp/libs/lwjgl41/" \; 2>/dev/null || true; \
 	echo '[Witch v$(VERSION)] lwgjl - end'
 
-payload: native dep_mg spvc dep_mobilegl dep_tgles dep_tglmt dep_metalbridge lwgjl java jre assets
+jit-helper: native
+	echo '[Witch v$(VERSION)] jit-helper - start'
+	@if [ '$(PLATFORM)' != '2' ]; then \
+		echo 'Skipping Built-in StikJIT helper (iOS-only build)'; exit 0; \
+	fi
+	@if [ ! -d '$(STIKJIT_XCFRAMEWORK)/ios-arm64/StikJIT.framework' ]; then \
+		echo 'ERROR: StikJIT.xcframework is missing. See third_party/stikjit/README.md'; exit 1; \
+	fi
+	@command -v xcodegen >/dev/null 2>&1 || { echo 'ERROR: xcodegen is required for the JIT helper (brew install xcodegen)'; exit 1; }
+	cd $(WITCH_JIT_HELPER_DIR) && xcodegen generate --quiet
+	cd $(WITCH_JIT_HELPER_DIR) && xcodebuild -project WitchJITHelper.xcodeproj -target WitchJITHelper \
+		-sdk iphoneos -configuration Release \
+		SYMROOT=$(WITCH_JIT_HELPER_BUILD)/sym OBJROOT=$(WITCH_JIT_HELPER_BUILD)/obj \
+		CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
+		ONLY_ACTIVE_ARCH=NO ARCHS=arm64 build
+	mkdir -p $(WORKINGDIR)/Witch.app/PlugIns $(WORKINGDIR)/Witch.app/Frameworks
+	rm -rf $(WORKINGDIR)/Witch.app/PlugIns/WitchJITHelper.appex
+	cp -R $(WITCH_JIT_HELPER_BUILD)/sym/Release-iphoneos/WitchJITHelper.appex $(WORKINGDIR)/Witch.app/PlugIns/
+	rm -rf $(WORKINGDIR)/Witch.app/Frameworks/StikJIT.framework
+	cp -R $(STIKJIT_XCFRAMEWORK)/ios-arm64/StikJIT.framework $(WORKINGDIR)/Witch.app/Frameworks/
+	echo '[Witch v$(VERSION)] jit-helper - end'
+
+payload: native dep_mg spvc dep_mobilegl dep_tgles dep_tglmt dep_metalbridge lwgjl java jre assets jit-helper
 	echo '[Witch v$(VERSION)] payload - start'
 	rm -f $(WORKINGDIR)/Witch.app/*.png
 	$(call METHOD_DIRCHECK,$(WORKINGDIR)/Witch.app/libs)
@@ -834,6 +862,15 @@ payload: native dep_mg spvc dep_mobilegl dep_tgles dep_tglmt dep_metalbridge lwg
 	$(call METHOD_DIRCHECK,$(WORKINGDIR)/Witch.app/libs_caciocavallo17)
 	cp -R $(SOURCEDIR)/Natives/resources/en.lproj/LaunchScreen.storyboardc $(WORKINGDIR)/Witch.app/Base.lproj/ || exit 1
 	cp -R $(SOURCEDIR)/Natives/resources/* $(WORKINGDIR)/Witch.app/ || exit 1
+	if [ '$(PLATFORM)' = '2' ]; then \
+		mkdir -p $(WORKINGDIR)/Witch.app/PlugIns $(WORKINGDIR)/Witch.app/Frameworks; \
+		if [ ! -d '$(WORKINGDIR)/Witch.app/PlugIns/WitchJITHelper.appex' ]; then \
+			echo 'ERROR: WitchJITHelper.appex was not staged'; exit 1; \
+		fi; \
+		if [ ! -d '$(WORKINGDIR)/Witch.app/Frameworks/StikJIT.framework' ]; then \
+			echo 'ERROR: StikJIT.framework was not staged'; exit 1; \
+		fi; \
+	fi
 	cp $(WORKINGDIR)/*.dylib $(WORKINGDIR)/Witch.app/Frameworks/ || exit 1
 	cp -R $(SOURCEDIR)/JavaApp/libs/others/* $(WORKINGDIR)/Witch.app/libs/ || exit 1
 	cp $(SOURCEDIR)/JavaApp/build/launcher.jar $(SOURCEDIR)/JavaApp/build/patchjna_agent.jar $(SOURCEDIR)/JavaApp/build/cacio-init-agent.jar $(SOURCEDIR)/JavaApp/build/f3agent.jar $(SOURCEDIR)/JavaApp/build/fsr3-agent.jar $(WORKINGDIR)/Witch.app/libs/ || exit 1
@@ -934,6 +971,14 @@ payload: native dep_mg spvc dep_mobilegl dep_tgles dep_tglmt dep_metalbridge lwg
 	# interrupted run: ldid -S recursively walks the bundle and fails while
 	# re-signing when a stale _CodeSignature/CodeResources is present.
 	rm -rf $(OUTPUTDIR)/Payload/Witch.app/_CodeSignature;
+	# Nested code first: framework and app extension are iOS 17.4+ binaries and
+	# must stay signed even though the app's 14.0 retag skipped them.
+	if [ -d $(OUTPUTDIR)/Payload/Witch.app/Frameworks/StikJIT.framework ]; then \
+		ldid -S $(OUTPUTDIR)/Payload/Witch.app/Frameworks/StikJIT.framework || exit 1; \
+	fi
+	if [ -d $(OUTPUTDIR)/Payload/Witch.app/PlugIns/WitchJITHelper.appex ]; then \
+		ldid -S $(OUTPUTDIR)/Payload/Witch.app/PlugIns/WitchJITHelper.appex || exit 1; \
+	fi
 	ldid -S $(OUTPUTDIR)/Payload/Witch.app;
 	if [ '$(TROLLSTORE_JIT_ENT)' == '1' ]; then \
 		ldid -S$(SOURCEDIR)/entitlements.trollstore.xml $(OUTPUTDIR)/Payload/Witch.app/Witch; \
@@ -953,6 +998,12 @@ deploy:
 		ldid -S $(WORKINGDIR)/Witch.app || exit 1; \
 		ldid -S$(SOURCEDIR)/entitlements.trollstore.xml $(WORKINGDIR)/Witch.app/Witch || exit 1; \
 		sudo mv $(WORKINGDIR)/*.dylib $(PREFIX)Applications/Witch.app/Frameworks/ || exit 1; \
+		if [ -d $(WORKINGDIR)/Witch.app/PlugIns/WitchJITHelper.appex ]; then \
+			sudo mkdir -p $(PREFIX)Applications/Witch.app/PlugIns; \
+			sudo rm -rf $(PREFIX)Applications/Witch.app/PlugIns/WitchJITHelper.appex; \
+			sudo cp -R $(WORKINGDIR)/Witch.app/PlugIns/WitchJITHelper.appex $(PREFIX)Applications/Witch.app/PlugIns/ || exit 1; \
+			sudo cp -R $(WORKINGDIR)/Witch.app/Frameworks/StikJIT.framework $(PREFIX)Applications/Witch.app/Frameworks/ || exit 1; \
+		fi; \
 		sudo mv $(WORKINGDIR)/Witch.app/Witch $(PREFIX)Applications/Witch.app/Witch || exit 1; \
 		sudo mv $(SOURCEDIR)/JavaApp/build/*.jar $(PREFIX)Applications/Witch.app/libs/ || exit 1; \
 		cd $(PREFIX)Applications/Witch.app/Frameworks || exit 1; \
@@ -997,6 +1048,17 @@ dsym: payload
 codesign:
 	echo '[Witch v$(VERSION)] codesign - start'
 	cp '$(PROVISIONING)' $(OUTPUTDIR)/Payload/Witch.app/embedded.mobileprovision
+	# Helper and framework are separate code. Sign them with the same identity
+	# before the main binary; METHOD_MACHO_JRE deliberately skips them.
+	if [ -d $(OUTPUTDIR)/Payload/Witch.app/Frameworks/StikJIT.framework ]; then \
+		codesign --remove-signature $(OUTPUTDIR)/Payload/Witch.app/Frameworks/StikJIT.framework || true; \
+		codesign -f -s $(SIGNING_TEAMID) --generate-entitlement-der $(OUTPUTDIR)/Payload/Witch.app/Frameworks/StikJIT.framework || exit 1; \
+	fi
+	if [ -d $(OUTPUTDIR)/Payload/Witch.app/PlugIns/WitchJITHelper.appex ]; then \
+		cp '$(PROVISIONING)' $(OUTPUTDIR)/Payload/Witch.app/PlugIns/WitchJITHelper.appex/embedded.mobileprovision || true; \
+		codesign --remove-signature $(OUTPUTDIR)/Payload/Witch.app/PlugIns/WitchJITHelper.appex || true; \
+		codesign -f -s $(SIGNING_TEAMID) --generate-entitlement-der $(OUTPUTDIR)/Payload/Witch.app/PlugIns/WitchJITHelper.appex || exit 1; \
+	fi
 	$(call METHOD_MACHO_JRE,$(OUTPUTDIR)/Payload/Witch.app,$(call METHOD_CODESIGN,$(SIGNING_TEAMID),$$file))
 	$(call METHOD_MACHO_JRE,$(OUTPUTDIR)/java_runtimes,$(call METHOD_CODESIGN,$(SIGNING_TEAMID),$$file))
 	echo '[Witch v$(VERSION)] codesign - end'

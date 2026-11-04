@@ -106,7 +106,7 @@ jobs:
         run: |
           brew untap aws/tap 2>/dev/null || true
           brew update
-          brew install make wget ldid autoconf pkg-config
+          brew install make wget ldid autoconf pkg-config xcodegen
           sudo mkdir -p /usr/local/bin
           # map the gmake binary symlink seamlessly across the target build runner paths
           sudo ln -sf /opt/homebrew/bin/gmake /usr/local/bin/gmake

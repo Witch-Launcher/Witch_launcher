@@ -32,6 +32,10 @@ DuyAnh662 (Za_d626)
 - [LTW render](https://github.com/MojoLauncher/LTW): [LGPL-3.0 license](https://github.com/MojoLauncher/LTW/blob/master/LICENSE)
 - [MMMarkdown](https://github.com/mdiep/MMMarkdown.git): [MIT License](https://github.com/mdiep/MMMarkdown/blob/master/LICENSE.md) render file Markdown for main menu
 - Thanks to [MCHeads](https://mc-heads.net) for providing Minecraft avatars.
+- [StikJIT](https://github.com/StikDebug/StikJIT): [MPL-2.0 License](https://github.com/StikDebug/StikJIT/blob/main/LICENSE) — Built-in JIT helper.
+- [StikDebug](https://github.com/StikDebug/StikDebug): [AGPL-3.0 License](https://github.com/StikDebug/StikDebug/blob/main/LICENSE) — JIT scripts and pairing guide.
+- [LocalDevVPN](https://github.com/jkcoxson/LocalDevVPN): [StosVPN License](https://github.com/jkcoxson/LocalDevVPN/blob/main/LICENSE) — loopback VPN hand-off (URL scheme only).
+- [Husk](https://github.com/Leviidev/Husk): [GPL-2.0-or-later](https://github.com/Leviidev/Husk/blob/main/LICENSE) — reference implementation of the app-extension JIT helper.
 
 ### Upstream and community
 

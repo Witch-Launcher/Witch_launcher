@@ -104,6 +104,7 @@ Witch is built on the work of [Boardwalk](https://github.com/zhuowei/Boardwalk),
 - Auto RAM management for devices with limited memory.
 - Themes, accent colors, blur, borders, corner radius, custom launcher fonts, and app icons.
 - In-game **F3 device information**: device chip, iOS version, launcher name/version, build number, and build type.
+- **Built-in StikJIT**: enable JIT from Settings with an embedded helper extension, a pairing file, and LocalDevVPN — no separate StikDebug app required on iOS 17.4+. See [`docs/builtin-jit.md`](docs/builtin-jit.md).
 - Optional **Witch Server**, CurseForge, and AI integrations for advanced setups.
 - Signed **`.plgw` plugins** with JavaScript, theme, native, and declarative settings support. See [`docs/plugins`](docs/plugins/README.md).
 - **52 in-app languages**, including right-to-left language packs and fun locales.
@@ -151,6 +152,7 @@ Minecraft: Java Edition needs JIT, and Witch cannot launch the game without it.
 
 - **SideStore / AltStore-style installs:** enable JIT for Witch and keep the required VPN/debugger connection active. The in-app message refers to **LocalDevVPN** and `CS_DEBUGGED`.
 - **StikDebug:** attach StikDebug to Witch and enable JIT. On **iOS 26/27**, StikDebug must stay attached while the game is running. `UniversalJIT26.js` is copied to the clipboard when needed.
+- **Built-in StikJIT (iOS 17.4+):** import a remote pairing file in **Settings → Game → JIT**, connect LocalDevVPN, and choose the Built-in method. Witch embeds its own helper extension, so StikDebug is not required. See [`docs/builtin-jit.md`](docs/builtin-jit.md).
 - **TrollStore:** enable **URL Scheme** in TrollStore if Witch keeps waiting for JIT.
 - **Jailbroken devices:** use your preferred JIT enabler.
 - If the launcher stays on the **Waiting for JIT** screen, check the debugger connection, the VPN, and the TrollStore URL Scheme setting before relaunching.
