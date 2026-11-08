@@ -363,21 +363,6 @@ jobs:
           echo "--- resolved ---"
           grep -E '^(APP_VERSION|SHORT_SHA|BUILD_DATE|BUILD_TAG)=' "$GITHUB_OUTPUT" | tail -n 8 || true
 
-      - name: Generate checksums
-        shell: bash
-        run: |
-          cd downloaded || exit 0
-          shopt -s globstar nullglob
-          FILES=(**/*.ipa **/*.tipa *.ipa *.tipa)
-          if [ ${#FILES[@]} -eq 0 ]; then
-            echo "No ipa/tipa found under downloaded/ — listing tree:"
-            find . -maxdepth 4 -type f | head -n 50
-            exit 0
-          fi
-          sha256sum "${FILES[@]}" | tee ../checksums.txt
-          echo "--- checksums.txt ---"
-          cat ../checksums.txt
-
       - name: "Generate release notes (concise EN)"
         env:
           GITHUB_EVENT_BEFORE: ${{ github.event.before }}
@@ -405,7 +390,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: pre-release
-          name: ${{ steps.version.outputs.BASE_VERSION }}
+          name: Witch Launcher Beta ${{ steps.version.outputs.BASE_VERSION }}
           body_path: RELEASE_NOTES.md
           prerelease: true
           draft: false
@@ -413,8 +398,6 @@ jobs:
           files: |
             downloaded/**/*.ipa
             downloaded/**/*.tipa
-            checksums.txt
-            RELEASE_NOTES.md
 
       - name: Notify Discord (compact summary, no mentions)
         if: always()

@@ -74,17 +74,6 @@ jobs:
             echo "::warning::Could not resolve pre-release tag SHA locally (shallow clone). Skipping ancestor check."
           fi
 
-      - name: Generate checksums
-        shell: bash
-        run: |
-          cd promoted || exit 1
-          shopt -s globstar nullglob
-          FILES=(**/*.ipa **/*.tipa *.ipa *.tipa)
-          if [ ${#FILES[@]} -eq 0 ]; then echo "::error::No ipa/tipa under promoted/"; exit 1; fi
-          sha256sum "${FILES[@]}" | tee ../checksums.txt
-          echo "--- checksums.txt ---"
-          cat ../checksums.txt
-
       - name: "Generate release notes (concise EN)"
         env:
           GITHUB_EVENT_BEFORE: ${{ github.event.before }}
@@ -111,7 +100,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: release
-          name: ${{ steps.version.outputs.BASE_VERSION }}
+          name: Witch Launcher Stable ${{ steps.version.outputs.BASE_VERSION }}
           body_path: RELEASE_NOTES.md
           prerelease: false
           draft: false
@@ -119,8 +108,6 @@ jobs:
           files: |
             promoted/**/*.ipa
             promoted/**/*.tipa
-            checksums.txt
-            RELEASE_NOTES.md
 
       - name: Notify Discord (compact summary, no mentions)
         if: always()

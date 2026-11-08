@@ -4,7 +4,7 @@ Generate Witch release notes from scripts/ci/release_template.md.
 
 The template drives everything: headings, bullet format, tables.
 Placeholders: {{version}} {{channel}} {{short_sha}} {{date_utc}} {{owner}}
-{{repo}} {{prev_tag}} {{tag}} and, inside a "### <section>" block, per-commit
+{{repo}} {{prev_tag}} {{tag}} and, inside a "## <section>" block, per-commit
 {{message}} {{author}} {{short_sha}} {{pr_number}} (and per row {{user1}},
 {{user2}} for contributors).
 
@@ -45,6 +45,7 @@ PREFIX_RE = re.compile(r"^(\w+)(\([^)]*\))?(!)?:\s*")
 PR_RE = re.compile(r"\(#(\d+)\)\s*$")
 TOKEN_RE = re.compile(r"\{\{\s*([a-z0-9_]+)\s*\}\}")
 BULLET_RE = re.compile(r"^\s*[-*]\s")
+SECTION_RE = re.compile(r"^(#{2,4})\s+(.+?)\s*$")
 
 
 def run(cmd, cwd="."):
@@ -124,8 +125,9 @@ def render(template, ctx, commits):
     i = 0
     while i < len(lines):
         line = lines[i]
-        if line.startswith("### "):
-            section = line[4:].strip()
+        header = SECTION_RE.match(line)
+        if header:
+            section = header.group(2)
             j = i + 1
             variants = []
             while j < len(lines) and BULLET_RE.match(lines[j]) and "{{" in lines[j]:
@@ -149,7 +151,7 @@ def render(template, ctx, commits):
 
     contributors = [n for n, _ in Counter(c["author"] for c in commits if c["author"] != "unknown").most_common(20)]
     if not contributors:
-        text = re.sub(r"(?m)^### Contributors\n.*\n?", "", text)
+        text = re.sub(r"(?m)^#{2,4}\s*Contributors\n.*\n?", "", text)
     else:
         text = text.replace("@{{user1}}, @{{user2}}", ", ".join(f"@{n}" for n in contributors))
 
