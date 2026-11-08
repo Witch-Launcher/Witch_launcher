@@ -1,6 +1,6 @@
 [submodule "amethyst-prebuilt-libraries/renderers/ANGLE/angle"]
 	path = amethyst-prebuilt-libraries/renderers/ANGLE/angle
-	url = https://github.com/Ynnyny/angle.git
+	url = https://github.com/Witch-Launcher/angle.git
 [submodule "Natives/external/NG-GL4ES/3rdparty/glslang"]
 	path = Natives/external/NG-GL4ES/3rdparty/glslang
 	url = https://github.com/KhronosGroup/glslang.git
@@ -9,10 +9,10 @@
 	url = https://github.com/KhronosGroup/SPIRV-Cross.git
 [submodule "source"]
 	path = source
-	url = https://github.com/Ynnyny/source-mesa.git
+	url = https://github.com/Witch-Launcher/source-mesa.git
 [submodule "Natives/external/MobileGL"]
 	path = Natives/external/MobileGL
-	url = https://github.com/Ynnyny/MobileGL-fix.git
+	url = https://github.com/Witch-Launcher/MobileGL-fix.git
 [submodule "Natives/external/MoltenVK"]
 	path = Natives/external/MoltenVK
-	url = https://github.com/KhronosGroup/MoltenVK.git
+	url = https://github.com/Witch-Launcher/MoltenVK-iOS-edit.git
