@@ -63,20 +63,21 @@ $(CLASSES): $(OUTPUTDIR)/%.class: $(SOURCEDIR)/%.java
 	fi; \
 	find "$$staging" -name "$$base*.class" -exec cp {} "$$out" \;
 
-# Depends on the merged LWJGL jar: the iOS shims it carries (MacosUtil,
-# GLFWNativeCocoa) are also embedded into launcher.jar (/macosfix/) so
-# patchMacPlatformShims() can overwrite mod-bundled REAL copies of those
-# classes inside game-directory jars (Essential et al).
-$(OUTPUTDIR)/launcher.jar: $(CLASSES) $(OUTPUTDIR)/lwjgl-3.4.1.jar
+# The iOS shims (MacosUtil, GLFWNativeCocoa) are embedded into launcher.jar
+# (/macosfix/) so patchMacPlatformShims() can overwrite mod-bundled REAL copies
+# of those classes inside game-directory jars (Essential et al). They are read
+# from the compiled classes directory, NOT from lwjgl-3.4.1.jar: that jar must
+# not carry com/mojang/blaze3d/platform (see the lwjgl rules below).
+$(OUTPUTDIR)/launcher.jar: $(CLASSES)
 	@set -e
 	@echo "Creating $@"
 	@cp -r $(SOURCEDIR)/launcher/META-INF $(basename $@)/ 2>/dev/null || true
 	@mkdir -p $(basename $@)/lwjglfix
 	@unzip -o -p libs/lwjgl41/lwjgl.jar org/lwjgl/system/Library.class > $(basename $@)/lwjglfix/Library.class
 	@mkdir -p $(basename $@)/macosfix
-	@unzip -o -p $(OUTPUTDIR)/lwjgl-3.4.1.jar com/mojang/blaze3d/platform/MacosUtil.class > $(basename $@)/macosfix/MacosUtil.class
-	@unzip -o -p $(OUTPUTDIR)/lwjgl-3.4.1.jar org/lwjgl/glfw/GLFWNativeCocoa.class > $(basename $@)/macosfix/GLFWNativeCocoa.class
-	@unzip -o -p $(OUTPUTDIR)/lwjgl-3.4.1.jar 'org/lwjgl/glfw/GLFWNativeCocoa$$Functions.class' > '$(basename $@)/macosfix/GLFWNativeCocoa$$Functions.class'
+	@cp $(OUTPUTDIR)/lwjgl/com/mojang/blaze3d/platform/MacosUtil.class $(basename $@)/macosfix/MacosUtil.class
+	@cp $(OUTPUTDIR)/lwjgl/org/lwjgl/glfw/GLFWNativeCocoa.class $(basename $@)/macosfix/GLFWNativeCocoa.class
+	@cp '$(OUTPUTDIR)/lwjgl/org/lwjgl/glfw/GLFWNativeCocoa$$Functions.class' '$(basename $@)/macosfix/GLFWNativeCocoa$$Functions.class'
 	@mkdir -p $(basename $@)/launchwrapper
 	@cp libs/launchwrapper-1.12.jar $(basename $@)/launchwrapper/launchwrapper-1.12.jar
 	@find $(basename $@) -name '*.class' -size 0 | grep -v '\$$' && { echo "Error: found empty class files"; exit 1; } || true
@@ -105,6 +106,15 @@ $(OUTPUTDIR)/lwjgl-3.3.3.jar: $(CLASSES)
 		org/lwjgl/opengl/GL20.class \
 		org/lwjgl/opengl/ARBShaderObjects.class \
 		org/lwjgl/openal/AL10.class
+	# Forge's BootStrapLauncher builds a JPMS layer from the classpath jars. An
+	# automatic module ("lwjgl", named after lwjgl.jar) exports every package
+	# it contains, so leaving com.mojang.blaze3d.platform in here collides with
+	# the "minecraft" module (the srg client jar also has that package):
+	# "Module minecraft contains package com.mojang.blaze3d.platform, module
+	# lwjgl exports package com.mojang.blaze3d.platform to minecraft" ->
+	# ResolutionException, Forge never starts. MacosUtil is applied inside the
+	# game jar by patchMacPlatformShims() and kept in launcher.jar (/macosfix/).
+	@rm -rf $(OUTPUTDIR)/lwjgl33_lib/com/mojang/blaze3d
 	@$(BOOTJDK)/jar -cf $@ -C $(OUTPUTDIR)/lwjgl33_lib .
 
 # Build LWJGL 3.3.6
@@ -122,6 +132,8 @@ $(OUTPUTDIR)/lwjgl-3.3.6.jar: $(CLASSES)
 		org/lwjgl/opengl/GL20.class \
 		org/lwjgl/opengl/ARBShaderObjects.class \
 		org/lwjgl/openal/AL10.class
+	# See lwjgl-3.3.3: strip com.mojang.blaze3d.platform (Forge module clash).
+	@rm -rf $(OUTPUTDIR)/lwjgl36_lib/com/mojang/blaze3d
 	@$(BOOTJDK)/jar -cf $@ -C $(OUTPUTDIR)/lwjgl36_lib .
 
 $(OUTPUTDIR)/lwjgl-3.4.1.jar: $(CLASSES)
@@ -146,6 +158,8 @@ $(OUTPUTDIR)/lwjgl-3.4.1.jar: $(CLASSES)
 	# org/jspecify from lwjgl-core would split the package with the real
 	# org.jspecify:jspecify jar -> "Split package: org.jspecify". Strip it.
 	@rm -rf $(OUTPUTDIR)/lwjgl41_lib/org/jspecify
+	# See lwjgl-3.3.3: strip com.mojang.blaze3d.platform (Forge module clash).
+	@rm -rf $(OUTPUTDIR)/lwjgl41_lib/com/mojang/blaze3d
 	@$(BOOTJDK)/jar -cf $@ -C $(OUTPUTDIR)/lwjgl41_lib .
 
 # Legacy alias

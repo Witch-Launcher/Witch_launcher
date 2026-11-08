@@ -137,6 +137,7 @@ static NSString *WitchSplashBundleMediaKind(void) {
             @{@"type": @"navigate", @"label": localize(@"settings.launcher_update", nil), @"vc": @"LauncherUpdateViewController"},
             @{@"type": @"navigate", @"label": localize(@"settings.runtime_download", nil), @"vc": @"RuntimeDownloadViewController"},
             @{@"type": @"navigate", @"label": localize(@"settings.storage", nil), @"vc": @"StorageManagerViewController"},
+            @{@"type": @"navigate", @"label": localize(@"Backup & Restore", nil), @"vc": @"BackupSettingsViewController"},
             @{@"type": @"navigate", @"label": localize(@"Plugins", nil), @"vc": @"PluginsViewController"},
             @{@"type": @"navigate", @"label": localize(@"perf.title", nil), @"vc": @"PerfSettingsViewController"},
             @{@"type": @"navigate", @"label": localize(@"f3.title", nil), @"vc": @"F3SettingsViewController"},
@@ -145,6 +146,7 @@ static NSString *WitchSplashBundleMediaKind(void) {
                 @{@"key": @"1", @"name": @"Beta (pre-release)"},
                 @{@"key": @"2", @"name": localize(@"launcher_update.channel.stable", nil)},
             ], @"default": @"0"},
+            @{@"type": @"switch", @"label": localize(@"launcher_update.auto_check", nil), @"key": @"witch.update_auto_check"},
         ]},
         @{@"title": localize(@"Game", nil), @"items": @[
             header(@"settings.group.display"),
@@ -360,6 +362,8 @@ static NSString *WitchSplashBundleMediaKind(void) {
             @{@"type": @"switch", @"label": localize(@"appearance.launch_splash", nil), @"key": @"appearance.launch_splash"},
             @{@"type": @"splash", @"label": localize(@"appearance.splash_background", nil)},
             @{@"type": @"slider", @"label": localize(@"appearance.splash_blur", nil), @"key": @"appearance.splash_blur", @"min": @0, @"max": @100, @"suffix": @"%"},
+            @{@"type": @"switch", @"label": localize(@"preference.title.log_auto_scroll", nil), @"key": @"general.log_auto_scroll"},
+            @{@"type": @"slider", @"label": localize(@"preference.title.log_scroll_speed", nil), @"key": @"general.log_scroll_speed", @"min": @25, @"max": @300, @"suffix": @"%"},
             @{@"type": @"font", @"label": localize(@"appearance.launcher_font", nil)},
             @{@"type": @"slider", @"label": localize(@"appearance.ui_scale", nil), @"key": @"amethyst_ui_scale", @"min": @50, @"max": @150, @"suffix": @"%"},
             @{@"type": @"label", @"label": localize(@"appearance.ui_scale_hint", nil)},
@@ -1316,9 +1320,10 @@ static NSString *WitchSplashBundleMediaKind(void) {
             // settings/topbar/sidebar/rightpanel blur.
             val = [[NSUserDefaults standardUserDefaults] floatForKey:item[@"key"]];
         } else if ([item[@"key"] isEqualToString:@"amethyst_ui_border_radius"] ||
+                   [item[@"key"] isEqualToString:@"amethyst_ui_border_width"] ||
                    [item[@"key"] isEqualToString:@"amethyst_shell_gap"] ||
                    [item[@"key"] isEqualToString:@"amethyst_shell_inner_gap"] ||
-                   [item[@"key"] isEqualToString:@"amethyst_bar_border_width"]) {
+                   [item[@"key"] isEqualToString:@"appearance.splash_blur"]) {
             val = [[NSUserDefaults standardUserDefaults] floatForKey:item[@"key"]];
         } else {
             val = getPrefFloat(item[@"key"]);
@@ -1329,7 +1334,7 @@ static NSString *WitchSplashBundleMediaKind(void) {
             }
         }
         if (val == 0 && [item[@"key"] isEqualToString:@"control.camera_sensitivity"]) val = 100;
-        if (val == 0 && ![item[@"key"] isEqualToString:@"amethyst_bg_blur"] && ![item[@"key"] isEqualToString:@"amethyst_ui_opacity"] && !([item[@"key"] hasPrefix:@"amethyst_"] && [item[@"key"] hasSuffix:@"_blur"]) && ![item[@"key"] isEqualToString:@"general.widget_bg_opacity"] && ![item[@"key"] isEqualToString:@"amethyst_ui_border_radius"] && ![item[@"key"] isEqualToString:@"amethyst_shell_gap"] && ![item[@"key"] isEqualToString:@"amethyst_shell_inner_gap"] && ![item[@"key"] isEqualToString:@"amethyst_ui_border_width"] && ![item[@"key"] isEqualToString:@"amethyst_ui_border_enabled"] && !disabled) val = [item[@"min"] floatValue] + ([item[@"max"] floatValue] - [item[@"min"] floatValue]) / 2;
+        if (val == 0 && ![item[@"key"] isEqualToString:@"amethyst_bg_blur"] && ![item[@"key"] isEqualToString:@"amethyst_ui_opacity"] && !([item[@"key"] hasPrefix:@"amethyst_"] && [item[@"key"] hasSuffix:@"_blur"]) && ![item[@"key"] isEqualToString:@"general.widget_bg_opacity"] && ![item[@"key"] isEqualToString:@"amethyst_ui_border_radius"] && ![item[@"key"] isEqualToString:@"amethyst_shell_gap"] && ![item[@"key"] isEqualToString:@"amethyst_shell_inner_gap"] && ![item[@"key"] isEqualToString:@"amethyst_ui_border_width"] && ![item[@"key"] isEqualToString:@"amethyst_ui_border_enabled"] && ![item[@"key"] isEqualToString:@"appearance.splash_blur"] && !disabled) val = [item[@"min"] floatValue] + ([item[@"max"] floatValue] - [item[@"min"] floatValue]) / 2;
         sl.minimumValue = [item[@"min"] floatValue];
         sl.maximumValue = [item[@"max"] floatValue];
         sl.value = val;

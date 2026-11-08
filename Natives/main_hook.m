@@ -7,7 +7,9 @@
 #import "MemSampler.h"
 
 #include <dlfcn.h>
+#include <errno.h>
 #include <libgen.h>
+#include <sys/sysctl.h>
 #include <pthread.h>
 #include <signal.h>
 #include <stdlib.h>
@@ -195,7 +197,30 @@ static BOOL pathIsUnderRoot(const char *path, const char *root) {
     return strncmp(path, root, rootLen) == 0 && (path[rootLen] == '/' || path[rootLen] == '\0');
 }
 
+// LabyMod's voice chat downloads macos-aarch64-librnnoise.dylib, built for
+// Apple silicon macOS (ARMv8.3+). On A11 and older the first call dies with
+// SIGILL and takes the whole JVM down. Refuse the load there so the addon
+// falls back to no noise suppression instead of crashing the game.
+static BOOL cpuSupportsArmv83(void) {
+    static int supported = -1;
+    if (supported < 0) {
+        int value = 0;
+        size_t size = sizeof(value);
+        supported = (sysctlbyname("hw.optional.armv8_3", &value, &size, NULL, 0) == 0 && value != 0) ? 1 : 0;
+    }
+    return supported == 1;
+}
+
 void* hooked_dlopen(const char* path, int mode) {
+    if (path && strstr(path, "librnnoise") && !cpuSupportsArmv83()) {
+        static BOOL logged = NO;
+        if (!logged) {
+            logged = YES;
+            NSLog(@"[RNNoise] skipping %s: macOS build needs ARMv8.3, this CPU lacks it (noise suppression disabled)", path);
+        }
+        errno = ENOTSUP;
+        return NULL;
+    }
     const char *mvk = signedMoltenVKPath(path);
     if (mvk) {
         // Java-level error messages print the originally requested path, so

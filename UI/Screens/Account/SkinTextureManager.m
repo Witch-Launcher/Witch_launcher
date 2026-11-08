@@ -2,6 +2,24 @@
 #import "utils.h"
 
 static NSString *const kLocalModelKeyPrefix = @"account.local_skin_model.";
+static NSString *const kLocalProfileId = @"00000000-0000-0000-0000-000000000000";
+
+// Older Microsoft accounts may not have xboxGamertag stored (it was added in a
+// later login flow). A real, non-zero profile UUID is enough to identify a
+// Microsoft account; local accounts always use the zero UUID. Demo accounts
+// have the zero UUID plus an Xbox gamertag.
+static BOOL SkinAccountIsMicrosoft(NSDictionary *account) {
+    if ([account[@"accountType"] isEqualToString:@"elyby"]) return NO;
+    // Local accounts always store the zero UUID, so a real profile UUID is the
+    // most reliable premium marker — xboxGamertag is missing on accounts saved
+    // by older login flows. Demo accounts have the zero UUID plus a gamertag.
+    NSString *profileId = account[@"profileId"];
+    if (![profileId isKindOfClass:NSString.class] || profileId.length == 0) return NO;
+    if ([profileId isEqualToString:kLocalProfileId]) {
+        return [account[@"xboxGamertag"] length] > 0;
+    }
+    return YES;
+}
 
 @implementation SkinTextureManager
 
@@ -66,6 +84,42 @@ static NSString *const kLocalModelKeyPrefix = @"account.local_skin_model.";
     return [self bundledDefaultHeadSlim:[self localPrefersSlimForUsername:username] size:size];
 }
 
++ (UIImage *)headImageFromSkinImage:(UIImage *)skin size:(CGFloat)size {
+    CGImageRef skinCG = skin.CGImage;
+    if (!skinCG) return nil;
+    CGFloat scale = CGImageGetWidth(skinCG) / 64.0;
+    if (scale <= 0) return nil;
+    // Legacy 64x32 skins have no hat layer; their lower half is not a texture
+    // atlas entry for the head, so only crop the base face.
+    BOOL hasOverlay = CGImageGetHeight(skinCG) >= 64 * scale;
+    size = MAX(1.0, size);
+
+    UIGraphicsImageRendererFormat *format = [UIGraphicsImageRendererFormat defaultFormat];
+    format.opaque = NO;
+    UIGraphicsImageRenderer *renderer = [[UIGraphicsImageRenderer alloc] initWithSize:CGSizeMake(size, size) format:format];
+    return [renderer imageWithActions:^(UIGraphicsImageRendererContext *ctx) {
+        CGContextRef c = ctx.CGContext;
+        CGContextSetInterpolationQuality(c, kCGInterpolationNone);
+        // Base face (8,8) then the hat/overlay layer (40,8), matching the
+        // vanilla skin layout. Transparent overlays leave the base visible.
+        CGRect regions[2] = {
+            CGRectMake(8 * scale, 8 * scale, 8 * scale, 8 * scale),
+            CGRectMake(40 * scale, 8 * scale, 8 * scale, 8 * scale),
+        };
+        int regionCount = hasOverlay ? 2 : 1;
+        for (int i = 0; i < regionCount; i++) {
+            CGImageRef part = CGImageCreateWithImageInRect(skinCG, regions[i]);
+            if (!part) continue;
+            CGContextSaveGState(c);
+            CGContextTranslateCTM(c, 0, size);
+            CGContextScaleCTM(c, 1, -1);
+            CGContextDrawImage(c, CGRectMake(0, 0, size, size), part);
+            CGContextRestoreGState(c);
+            CGImageRelease(part);
+        }
+    }];
+}
+
 #pragma mark - Cache
 
 - (NSString *)cacheDirectory {
@@ -103,8 +157,8 @@ static NSString *const kLocalModelKeyPrefix = @"account.local_skin_model.";
 - (void)skinImageForAccount:(NSDictionary *)account completion:(void (^)(UIImage *))completion {
     if (!completion) return;
     BOOL isEly = [account[@"accountType"] isEqualToString:@"elyby"];
-    BOOL isPremium = [account[@"xboxGamertag"] length] > 0;
-    BOOL isDemo = isPremium && [account[@"profileId"] isEqualToString:@"00000000-0000-0000-0000-000000000000"];
+    BOOL isPremium = SkinAccountIsMicrosoft(account);
+    BOOL isDemo = isPremium && [account[@"profileId"] isEqualToString:kLocalProfileId];
 
     if (isDemo) {
         NSString *username = account[@"username"] ?: @"";
@@ -135,6 +189,16 @@ static NSString *const kLocalModelKeyPrefix = @"account.local_skin_model.";
         }
         // Last resort: Steve (better than a broken/blank preview).
         completion([SkinTextureManager bundledDefaultSkinSlim:NO]);
+    }];
+}
+
+- (void)headImageForAccount:(NSDictionary *)account
+                       size:(CGFloat)size
+                 completion:(void (^)(UIImage * _Nullable))completion {
+    if (!completion) return;
+    [self skinImageForAccount:account completion:^(UIImage *skin) {
+        UIImage *head = skin ? [SkinTextureManager headImageFromSkinImage:skin size:size] : nil;
+        completion(head);
     }];
 }
 

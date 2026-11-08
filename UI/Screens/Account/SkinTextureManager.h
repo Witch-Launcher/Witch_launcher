@@ -28,6 +28,17 @@ NS_ASSUME_NONNULL_BEGIN
 /// Falls back to the cached file, then to the bundled Steve skin.
 - (void)skinImageForAccount:(NSDictionary *)account completion:(void (^)(UIImage *))completion;
 
+/// Face crop (base + hat layer) rendered from a raw 64x64 skin texture.
+/// Returns a square image of `size` points, or nil when the texture is invalid.
++ (nullable UIImage *)headImageFromSkinImage:(UIImage *)skin size:(CGFloat)size;
+
+/// Resolves the account's real skin head. Always calls completion on the main
+/// queue. Uses the same disk cache as skinImageForAccount, so premium heads
+/// survive offline launches and refresh after a skin change.
+- (void)headImageForAccount:(NSDictionary *)account
+                       size:(CGFloat)size
+                 completion:(void (^)(UIImage * _Nullable head))completion;
+
 /// Removes the cached skin for the account (e.g. after deletion).
 - (void)evictCachedSkinForAccount:(NSDictionary *)account;
 

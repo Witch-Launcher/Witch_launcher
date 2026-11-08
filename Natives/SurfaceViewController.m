@@ -1,3 +1,4 @@
+#import "BackupManager.h"
 #import <AVFoundation/AVFoundation.h>
 #import <GameController/GameController.h>
 #import <objc/runtime.h>
@@ -46,6 +47,40 @@ static atomic_bool hardwareKeyboardSeen = false;
 // the game switches between gameplay and a GUI screen.
 static BOOL lastGrabStateInited = NO;
 static BOOL lastGrabState = NO;
+
+// libaudio_capture.dylib is a standalone JNI library that only gets loaded
+// when the game JVM starts (System.loadLibrary). The launcher needs its mic
+// helpers earlier, and must not reference them directly: an undefined symbol
+// in the executable aborts the whole app at launch ("missing symbol called").
+// Load it on demand and resolve the two entry points.
+static void *aac_library(void) {
+    static void *handle;
+    static BOOL tried = NO;
+    if (!tried) {
+        tried = YES;
+        NSString *path = [NSBundle.mainBundle.privateFrameworksPath
+            stringByAppendingPathComponent:@"libaudio_capture.dylib"];
+        handle = dlopen(path.UTF8String, RTLD_NOW | RTLD_GLOBAL);
+        if (!handle) {
+            NSLog(@"[AudioCapture] dlopen failed: %s", dlerror());
+        }
+    }
+    return handle;
+}
+
+void aac_requestMicrophonePermission(void) {
+    void *handle = aac_library();
+    void (*request)(void) = handle
+        ? (void (*)(void))dlsym(handle, "aac_requestMicrophonePermission") : NULL;
+    if (request) request();
+}
+
+BOOL aac_isCapturing(void) {
+    void *handle = aac_library();
+    BOOL (*capturing)(void) = handle
+        ? (BOOL (*)(void))dlsym(handle, "aac_isCapturing") : NULL;
+    return capturing ? capturing() : NO;
+}
 
 int memorystatus_control(uint32_t command, int32_t pid, uint32_t flags, void *buffer, size_t buffersize);
 #define MEMORYSTATUS_CMD_SET_JETSAM_TASK_LIMIT        6
@@ -428,6 +463,11 @@ static GameSurfaceView* pojavWindow;
 // safety net. Without this, block-based observers and the 0.25s sweep timer
 // retain the whole view controller after the game is gone.
 - (void)witch_teardownGameSession {
+    // Let UIKit restore the launcher root first; BackupManager refuses to run
+    // while SurfaceViewController is still the window root.
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        [[BackupManager shared] backupIfNeededForTrigger:@"exit" completion:nil];
+    });
     if (self.gamepadDisplayLink) {
         [self.gamepadDisplayLink invalidate];
         self.gamepadDisplayLink = nil;
@@ -493,11 +533,15 @@ static GameSurfaceView* pojavWindow;
     // Deactivate before changing category to avoid audio glitches
     [session setActive:NO error:nil];
 
+    // Keep recording available while a mod holds a capture line, otherwise
+    // this would drop the session back to Playback under its feet.
+    BOOL wantMic = getPrefBool(@"video.allow_microphone") || aac_isCapturing();
+
     AVAudioSessionCategory category;
     AVAudioSessionCategoryOptions options = 0;
-    if(getPrefBool(@"video.allow_microphone")) {
+    if(wantMic) {
         category = AVAudioSessionCategoryPlayAndRecord;
-        options |= AVAudioSessionCategoryOptionAllowAirPlay | AVAudioSessionCategoryOptionAllowBluetoothA2DP | AVAudioSessionCategoryOptionDefaultToSpeaker;
+        options |= AVAudioSessionCategoryOptionAllowAirPlay | AVAudioSessionCategoryOptionAllowBluetoothA2DP | AVAudioSessionCategoryOptionAllowBluetoothHFP | AVAudioSessionCategoryOptionDefaultToSpeaker;
     } else {
         category = AVAudioSessionCategoryPlayback;
     }
@@ -506,16 +550,21 @@ static GameSurfaceView* pojavWindow;
     }
     [session setCategory:category withOptions:options error:&sessionError];
 
-    if(getPrefBool(@"video.allow_microphone")) {
+    if(wantMic) {
         [session setPreferredSampleRate:48000.0 error:&sessionError];
         [session setPreferredIOBufferDuration:0.005 error:&sessionError];
     }
 
     [session setActive:YES error:&sessionError];
 
-    if(getPrefBool(@"video.allow_microphone")) {
+    if(wantMic) {
         [self selectMicrophoneSource];
     }
+
+    // Voice chat mods open a capture line whenever they like; resolve the
+    // permission now so the first attempt already sees a hardware format
+    // (AVAudioEngine terminates the process otherwise).
+    aac_requestMicrophonePermission();
 }
 
 - (void)selectMicrophoneSource {

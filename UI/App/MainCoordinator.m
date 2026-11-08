@@ -35,8 +35,11 @@
 #import "PLProfiles.h"
 #import "MinecraftResourceUtils.h"
 #import "ElySkinHead.h"
+#import "SkinTextureManager.h"
 #import "WitchJITCoordinator.h"
 #import "WitchJITSettingsViewController.h"
+#import "BackupManager.h"
+#import "BackupHistoryViewController.h"
 
 static const NSTimeInterval kLaunchAutoHideDelay = 3.0;
 
@@ -114,24 +117,41 @@ static const NSTimeInterval kLaunchAutoHideDelay = 3.0;
 }
 
 - (void)accountDidChange {
-    NSString *name = BaseAuthenticator.current.authData[@"username"] ?: nil;
-    UIImage *skin = nil;
-    NSString *profileId = BaseAuthenticator.current.authData[@"profileId"];
-    BOOL isEly = [BaseAuthenticator.current.authData[@"accountType"] isEqualToString:@"elyby"];
+    NSDictionary *authData = BaseAuthenticator.current.authData;
+    NSString *name = authData[@"username"];
+    BOOL isEly = [authData[@"accountType"] isEqualToString:@"elyby"];
+    RightPanelViewController *panel = self.rootVC.rightPanelVC;
+    if (!panel) return;
+
     if (isEly && name.length > 0) {
+        UIImage *cached = [ElySkinHead cachedHeadForUsername:name size:60];
+        [panel updateAccountWithName:name skin:cached];
         __weak typeof(self) weakSelf = self;
         [ElySkinHead headForUsername:name size:60 completion:^(UIImage *head) {
             if (!head) return;
             MainCoordinator *strongSelf = weakSelf;
             if (!strongSelf) return;
+            NSString *currentName = BaseAuthenticator.current.authData[@"username"];
+            if (![name isEqualToString:currentName]) return;
             [strongSelf.rootVC.rightPanelVC updateAccountWithName:name skin:head];
         }];
-    } else if (profileId && [profileId length] > 0 && ![profileId isEqualToString:@"00000000-0000-0000-0000-000000000000"]) {
-        NSString *skinURL = [NSString stringWithFormat:@"https://mc-heads.net/head/%@/60", profileId];
-        NSData *imgData = [NSData dataWithContentsOfURL:[NSURL URLWithString:skinURL]];
-        if (imgData) skin = [UIImage imageWithData:imgData];
+        return;
     }
-    [self.rootVC.rightPanelVC updateAccountWithName:name skin:skin];
+
+    // Local, demo and Microsoft accounts all use the same resolver. Microsoft
+    // goes through the official sessionserver + texture URL (cached on disk),
+    // so the real custom skin head is shown instead of Steve/Alex.
+    [panel updateAccountWithName:name skin:nil];
+    if (name.length == 0 || !authData) return;
+    __weak typeof(self) weakSelf = self;
+    [[SkinTextureManager shared] headImageForAccount:authData size:60 completion:^(UIImage *head) {
+        if (!head) return;
+        MainCoordinator *strongSelf = weakSelf;
+        if (!strongSelf) return;
+        NSString *currentName = BaseAuthenticator.current.authData[@"username"];
+        if (![name isEqualToString:currentName]) return;
+        [strongSelf.rootVC.rightPanelVC updateAccountWithName:name skin:head];
+    }];
 }
 
 - (void)switchToTab:(SidebarTab)tab {
@@ -206,6 +226,12 @@ static const NSTimeInterval kLaunchAutoHideDelay = 3.0;
 - (void)showSettings {
     SettingsViewController *vc = [[SettingsViewController alloc] init];
     vc.coordinator = self;
+    UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:vc];
+    [self.rootVC presentContentAsSheet:nav];
+}
+
+- (void)showBackupHistory {
+    BackupHistoryViewController *vc = [[BackupHistoryViewController alloc] init];
     UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:vc];
     [self.rootVC presentContentAsSheet:nav];
 }
@@ -348,9 +374,11 @@ static const NSTimeInterval kLaunchAutoHideDelay = 3.0;
         return;
     }
 
-    [self refreshCurrentAccountIfNeeded:^{
-        [self showProgressAlert:localize(@"launcher.checking", nil)];
-        [self downloadAndLaunchVersion:versionStr];
+    [self runPreLaunchBackupIfNeeded:^{
+        [self refreshCurrentAccountIfNeeded:^{
+            [self showProgressAlert:localize(@"launcher.checking", nil)];
+            [self downloadAndLaunchVersion:versionStr];
+        }];
     }];
 }
 
@@ -376,11 +404,48 @@ static const NSTimeInterval kLaunchAutoHideDelay = 3.0;
         [ErrorPresenter showMissingVersion];
         return;
     }
-    [self showProgressAlert:localize(@"launcher.checking", nil)];
-
     setPrefObject(@"internal.last_server", server);
 
-    [self downloadAndLaunchVersion:versionStr];
+    [self runPreLaunchBackupIfNeeded:^{
+        [self showProgressAlert:localize(@"launcher.checking", nil)];
+        [self downloadAndLaunchVersion:versionStr];
+    }];
+}
+
+- (void)runPreLaunchBackupIfNeeded:(void (^)(void))completion {
+    BackupManager *manager = [BackupManager shared];
+    if (!manager.isEnabled || ![manager isTriggerEnabled:@"launch"] || manager.isRunningGame) {
+        completion();
+        return;
+    }
+    DownloadProgressOverlay *overlay = [DownloadProgressOverlay showBlurredInView:self.rootVC.view title:localize(@"Backing up...", nil) blurred:YES];
+    [overlay updateProgress:0.15 message:localize(@"Preparing backup...", nil)];
+    [self waitForBackupIdleThen:^{
+        if ([BackupManager shared].busy) {
+            [overlay dismiss];
+            completion();
+            return;
+        }
+        [overlay updateProgress:0.35 message:localize(@"Compressing game data", nil)];
+        [[BackupManager shared] backupIfNeededForTrigger:@"launch" completion:^(BackupRecord *record, NSError *error) {
+            (void)record;
+            [overlay dismiss];
+            if (error) {
+                [ErrorPresenter showWarning:localize(@"Backup", nil) message:error.localizedDescription];
+            }
+            completion();
+        }];
+    } attempts:600];
+}
+
+- (void)waitForBackupIdleThen:(void (^)(void))block attempts:(NSInteger)attempts {
+    if (![BackupManager shared].busy || attempts <= 0) {
+        block();
+        return;
+    }
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        [self waitForBackupIdleThen:block attempts:attempts - 1];
+    });
 }
 
 - (void)refreshCurrentAccountIfNeeded:(void (^)(void))completion {

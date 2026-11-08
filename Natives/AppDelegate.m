@@ -8,6 +8,8 @@
 #import "WitchPluginManager.h"
 #import "WitchPluginRuntime.h"
 #import "WitchMemoryPressure.h"
+#import "WitchJITCoordinator.h"
+#import "BackupScheduler.h"
 
 // SurfaceViewController
 extern dispatch_group_t fatalExitGroup;
@@ -21,6 +23,7 @@ extern dispatch_group_t fatalExitGroup;
     // Install the custom-font swizzle before any UIKit view is constructed so
     // every UIFont created by the launcher respects the user font.
     [FontManager install];
+    [BackupScheduler registerTasks];
     [WitchPluginManager.shared reload];
     [WitchPluginRuntime.shared loadEnabledPlugins];
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
@@ -38,6 +41,9 @@ extern dispatch_group_t fatalExitGroup;
             }];
         }
     }
+    // A pairing file copied into Documents/Inbox never reaches openURL on a
+    // scene-based app; pick it up before the JIT settings are first read.
+    [[WitchJITCoordinator shared] importInboxPairingFileIfNeeded];
     // Tạo flag file để phát hiện crash ra màn hình chính (nếu app crash, file sẽ còn lại)
     const char *home = getenv("POJAV_HOME");
     if (home) {
@@ -62,6 +68,7 @@ extern dispatch_group_t fatalExitGroup;
 
 
 - (BOOL)application:(UIApplication *)application openURL:(NSURL *)url options:(NSDictionary<UIApplicationOpenURLOptionsKey, id> *)options {
+    if ([WitchJITCoordinator handleIncomingPairingURL:url]) return YES;
     return [PluginsViewController handleIncomingURL:url presenter:currentVC()];
 }
 

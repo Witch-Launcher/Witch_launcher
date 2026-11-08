@@ -298,6 +298,7 @@ native: dep_mg
 		..
 
 	cmake --build $(WORKINGDIR) --config $(CMAKE_BUILD_TYPE) -j$(JOBS)
+	python3 $(SOURCEDIR)/scripts/inject_oauth_schemes.py "$(WORKINGDIR)/Witch.app/Info.plist" "$(WITCH_GOOGLE_DRIVE_CLIENT_ID)" "$(WITCH_DROPBOX_APP_KEY)" || exit 1
 	#	--target awt_headless awt_xawt libOSMesaOverride.dylib tinygl4angle Witch
 	-rm -f $(WORKINGDIR)/libawt_headless.dylib
 	echo '[Witch v$(VERSION)] native - end'
@@ -516,13 +517,13 @@ dep_mobilegl:
 	fi
 	echo '[Witch v$(VERSION)] dep_mobilegl - end'
 
-TGLES_SRC ?= /Volumes/D/TGLES
-TGLMT_SRC ?= /Volumes/D/TGLMT
+TGLES_SRC ?= /Volumes/project/TGLES
+TGLMT_SRC ?= /Volumes/project/TGLMT
 dep_tglmt:
 	echo '[Witch v$(VERSION)] dep_tglmt - start'
 	mkdir -p "$(WORKINGDIR)"
 	if [ -d "$(TGLMT_SRC)" ]; then \
-		cmake -S "$(TGLMT_SRC)" -B "$(TGLMT_SRC)/build-ios-pkg" \
+		cmake --fresh -S "$(TGLMT_SRC)" -B "$(TGLMT_SRC)/build-ios-pkg" \
 			-DCMAKE_SYSTEM_NAME=iOS \
 			-DCMAKE_OSX_SYSROOT="$(SDKPATH)" \
 			-DCMAKE_OSX_ARCHITECTURES=arm64 \
@@ -549,7 +550,7 @@ dep_tglmt:
 # tessellation, fences, sparse, argument replay) for Metal mods ported from
 # macOS. Renderer "metal_macos" dlopens the framework at launch (JavaLauncher).
 # Vendored copy ships with the repo; METALBRIDGE_SRC rebuilds it fresh.
-METALBRIDGE_SRC ?= /Volumes/D/MetalBridgeA9
+METALBRIDGE_SRC ?= /Volumes/project/MetalBridgeA9
 dep_metalbridge:
 	echo '[Witch v$(VERSION)] dep_metalbridge - start'
 	if [ ! -d "$(METALBRIDGE_SRC)/MetalBridge.xcodeproj" ]; then \
@@ -577,7 +578,7 @@ dep_tgles:
 	echo '[Witch v$(VERSION)] dep_tgles - start'
 	mkdir -p "$(WORKINGDIR)"
 	if [ -d "$(TGLES_SRC)" ]; then \
-		cmake -S "$(TGLES_SRC)" -B "$(TGLES_SRC)/build-ios-dev" \
+		cmake --fresh -S "$(TGLES_SRC)" -B "$(TGLES_SRC)/build-ios-dev" \
 			-DCMAKE_SYSTEM_NAME=iOS \
 			-DCMAKE_OSX_SYSROOT="$(SDKPATH)" \
 			-DCMAKE_OSX_ARCHITECTURES=arm64 \
@@ -952,6 +953,7 @@ payload: native dep_mg spvc dep_mobilegl dep_tgles dep_tglmt dep_metalbridge lwg
 	if [ '$(SLIMMED_ONLY)' != '1' ]; then \
 		cp -R $(OUTPUTDIR)/java_runtimes $(OUTPUTDIR)/Payload/Witch.app; \
 	fi
+	python3 $(SOURCEDIR)/scripts/inject_oauth_schemes.py "$(OUTPUTDIR)/Payload/Witch.app/Info.plist" "$(WITCH_GOOGLE_DRIVE_CLIENT_ID)" "$(WITCH_DROPBOX_APP_KEY)" || exit 1
 	# Always run the platform retag FIRST before signing so CodeResources hashes stay intact.
 	$(call METHOD_MACHO_JRE,$(OUTPUTDIR)/Payload/Witch.app,$(call METHOD_CHANGE_PLAT,$(PLATFORM),$$file)); \
 	$(call METHOD_MACHO_JRE,$(OUTPUTDIR)/java_runtimes,$(call METHOD_CHANGE_PLAT,$(PLATFORM),$$file));

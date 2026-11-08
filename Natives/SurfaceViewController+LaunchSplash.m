@@ -60,10 +60,9 @@ static __weak LaunchSplashView *launchSplashView;
     LaunchSplashView *splash = launchSplashView;
     launchSplashView = nil;
     if (!splash) return;
-    [splash stopAnimating];
-    [UIView animateWithDuration:0.3 animations:^{
-        splash.alpha = 0.0;
-    } completion:^(BOOL finished) {
+    // The splash plays its own reversed choreography (cluster up, bar down,
+    // scrim dissolves) and hands itself back when it is safe to remove.
+    [splash playExitAnimationWithCompletion:^{
         [splash removeFromSuperview];
     }];
 }

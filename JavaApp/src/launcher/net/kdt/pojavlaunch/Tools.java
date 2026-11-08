@@ -9,6 +9,7 @@ import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import java.io.BufferedInputStream;
 import java.io.BufferedOutputStream;
+import java.io.ByteArrayOutputStream;
 import java.io.BufferedWriter;
 import java.io.File;
 import java.io.FileFilter;
@@ -151,6 +152,8 @@ public final class Tools {
 
         final String launchClassPath = generateLaunchClassPath(versionInfo);
         System.out.println("[DEBUG] Launch classpath: " + launchClassPath);
+        prepareJnaDispatch(launchClassPath);
+        disableForgeEarlyWindow(launchClassPath);
 
         System.out.println("Args init finished. Now starting game");
 
@@ -173,6 +176,119 @@ public final class Tools {
         Class<?> clazz = loader.loadClass(mainClass);
         Method method = clazz.getMethod("main", String[].class);
         method.invoke(null, new Object[]{launchArgs});
+    }
+
+    // Forge 1.18+ opens its own splash window (fmlearlydisplay) on a separate
+    // thread and calls GL.createCapabilities() from there. On iOS that thread
+    // never has a current GL context, so the game dies with "There is no
+    // OpenGL context current in the current thread" before Minecraft's own
+    // window exists. Forge falls back to its DummyProvider when
+    // earlyWindowControl is off, which is exactly what we need.
+    private static void disableForgeEarlyWindow(String launchClassPath) {
+        boolean forge = false;
+        for (String entry : launchClassPath.split(":")) {
+            String name = entry.substring(entry.lastIndexOf('/') + 1);
+            if (name.startsWith("fmlearlydisplay-") || name.contains("neoforge")) {
+                forge = true;
+                break;
+            }
+        }
+        if (!forge) return;
+        try {
+            File configDir = new File(DIR_GAME_PROFILE, "config");
+            if (!configDir.isDirectory() && !configDir.mkdirs()) return;
+            File fmlConfig = new File(configDir, "fml.toml");
+            String content = fmlConfig.isFile() ? read(fmlConfig.getAbsolutePath()) : "";
+            String patched = patchTomlBool(content, "earlyWindowControl", false);
+            if (!fmlConfig.isFile() || !patched.equals(content)) {
+                write(fmlConfig.getAbsolutePath(), patched);
+                System.out.println("[ForgeFix] earlyWindowControl = false -> " + fmlConfig);
+            }
+        } catch (Throwable t) {
+            System.err.println("[ForgeFix] failed to disable early window: " + t);
+        }
+    }
+
+    private static String patchTomlBool(String content, String key, boolean value) {
+        String wanted = key + " = " + value;
+        String[] lines = content.split("\n", -1);
+        boolean found = false;
+        for (int i = 0; i < lines.length; i++) {
+            String trimmed = lines[i].trim();
+            if (trimmed.startsWith(key) && trimmed.length() > key.length()) {
+                char next = trimmed.charAt(key.length());
+                if (next == '=' || next == ' ' || next == '\t') {
+                    lines[i] = wanted;
+                    found = true;
+                }
+            }
+        }
+        if (found) return String.join("\n", lines);
+        if (content.isEmpty()) return wanted + "\n";
+        return content.endsWith("\n") ? content + wanted + "\n" : content + "\n" + wanted + "\n";
+    }
+
+    // MC ships JNA 5.x, whose native dispatch reports version 6.1.6, while the
+    // launcher bundle carries a 7.0.4 build: JNA then refuses to initialise
+    // ("There is an incompatible JNA native library installed on this system /
+    // Expected: 6.1.6 / Found: 7.0.4") and every mod that touches oshi/JNA
+    // dies with ExceptionInInitializerError (e.g. wonderland on Forge).
+    // Extract the darwin-arm64 dispatch that ships inside the exact jna jar on
+    // the game classpath into a writable dir and point jna.boot.library.path
+    // at it. The extracted copy is a macOS dylib; the launcher's dyld bypass
+    // patches its platform on dlopen, same as any other mod native.
+    private static void prepareJnaDispatch(String launchClassPath) {
+        try {
+            for (String entry : launchClassPath.split(":")) {
+                if (entry.isEmpty() || !entry.endsWith(".jar")) continue;
+                File jar = new File(entry);
+                if (!jar.isFile()) continue;
+                byte[] dispatch = null;
+                try (ZipFile zip = new ZipFile(jar)) {
+                    for (String candidate : new String[] {
+                            "com/sun/jna/darwin-aarch64/libjnidispatch.jnilib",
+                            "com/sun/jna/darwin-aarch64/libjnidispatch.dylib"}) {
+                        ZipEntry nativeEntry = zip.getEntry(candidate);
+                        if (nativeEntry == null) continue;
+                        try (InputStream in = zip.getInputStream(nativeEntry)) {
+                            dispatch = readAllBytes(in);
+                        }
+                        break;
+                    }
+                } catch (Exception ignored) {
+                    continue;
+                }
+                if (dispatch == null) continue;
+
+                File dir = new File(System.getProperty("java.io.tmpdir"),
+                        "jna_dispatch/" + jar.getName().replaceAll("[^A-Za-z0-9._-]", "_"));
+                if (!dir.isDirectory() && !dir.mkdirs()) continue;
+                // JNA tries System.mapLibraryName("jnidispatch") and then the
+                // explicit suffixes; provide both spellings.
+                for (String name : new String[] {"libjnidispatch.dylib", "libjnidispatch.jnilib"}) {
+                    File out = new File(dir, name);
+                    if (!(out.isFile() && out.length() == dispatch.length)) {
+                        try (FileOutputStream fos = new FileOutputStream(out)) {
+                            fos.write(dispatch);
+                        }
+                    }
+                    out.setExecutable(true, false);
+                }
+                System.setProperty("jna.boot.library.path", dir.getAbsolutePath());
+                System.out.println("[JNAFix] dispatch from " + jar.getName() + " -> " + dir);
+                return;
+            }
+        } catch (Throwable t) {
+            System.err.println("[JNAFix] prepareJnaDispatch failed: " + t);
+        }
+    }
+
+    private static byte[] readAllBytes(InputStream in) throws IOException {
+        ByteArrayOutputStream out = new ByteArrayOutputStream();
+        byte[] buffer = new byte[8192];
+        int read;
+        while ((read = in.read(buffer)) > 0) out.write(buffer, 0, read);
+        return out.toByteArray();
     }
 
     // Fabric/Quilt instances load Mojang's original (unpatched) LWJGL jars from
@@ -644,8 +760,11 @@ createLibraryInfo(libItem);
         // classifier entry, so the jar never lands on the classpath and FML
         // aborts with "Failed to find system mod: forge". Append every
         // *-universal.jar shipped under libraries/net/minecraftforge/forge/.
+        // Only for Forge-family instances: doing this unconditionally put the
+        // 1.20.1 Forge universal jar on LabyMod 26.3's classpath and injected
+        // foreign net.minecraftforge/FML classes into it.
         File forgeLibRoot = new File(Tools.DIR_HOME_LIBRARY + "/net/minecraftforge/forge");
-        if (forgeLibRoot.isDirectory()) {
+        if (isForgeFamily(info) && forgeLibRoot.isDirectory()) {
             File[] forgeVersionDirs = forgeLibRoot.listFiles();
             if (forgeVersionDirs != null) {
                 for (File forgeVersionDir : forgeVersionDirs) {
@@ -662,6 +781,29 @@ createLibraryInfo(libItem);
             }
         }
         return libDir.toArray(new String[0]);
+    }
+
+    // True for Forge/NeoForge instances (whose launch needs the Forge
+    // *-universal.jar on the classpath). Deliberately ignores unrelated
+    // net.minecraftforge artifacts such as srgutils, which LabyMod ships too.
+    private static boolean isForgeFamily(JMinecraftVersionList.Version info) {
+        String id = info.id == null ? "" : info.id.toLowerCase(java.util.Locale.ROOT);
+        String mainClass = info.mainClass == null ? "" : info.mainClass.toLowerCase(java.util.Locale.ROOT);
+        if (id.contains("forge") || mainClass.contains("bootstraplauncher") || mainClass.contains("modlauncher")) {
+            return true;
+        }
+        if (info.libraries != null) {
+            for (DependentLibrary lib : info.libraries) {
+                String name = lib.name;
+                if (name == null) continue;
+                if (name.startsWith("net.minecraftforge:forge:")
+                        || name.startsWith("net.neoforged:neoforge:")
+                        || name.startsWith("net.neoforged:forge:")) {
+                    return true;
+                }
+            }
+        }
+        return false;
     }
 
     public static JMinecraftVersionList.Version getVersionInfo(String versionName) {

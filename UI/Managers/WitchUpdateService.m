@@ -343,6 +343,9 @@
 
 - (void)autoCheckFromViewController:(UIViewController *)vc {
     if (!vc) return;
+    // Users can opt out of background update checks entirely. Manual checks
+    // from the Update screen use checkForUpdateForce: and are unaffected.
+    if (!getPrefBool(@"witch.update_auto_check")) return;
     // Respect "Để sau": don't nag more than once per 3 days unless force.
     NSTimeInterval now = [[NSDate date] timeIntervalSince1970];
     NSTimeInterval lastPrompt = [getPrefObject(@"witch.update_last_prompt") doubleValue];

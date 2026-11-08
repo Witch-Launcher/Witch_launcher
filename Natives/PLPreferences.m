@@ -37,12 +37,26 @@
             @"widget_position": @"",
             @"mainsidebar_portrait": @"bottom",
             @"mainsidebar_landscape": @"left",
+            @"profile_tabbar_portrait": @"bottom",
+            @"profile_tabbar_landscape": @"left",
+            @"profile_tabbar": @"",
             @"orientation_lock": @"off",
             @"lock_landscape": @NO,
+            @"overlay_log_in_game": @NO,
+            // Slow auto-roll of the log text (splash panel + in-game overlay).
+            @"log_auto_scroll": @YES,
+            @"log_scroll_speed": @(1.0),
+        }.mutableCopy,
+        @"profile": @{
+            // Legacy tab-bar position. The live setting is the per-orientation
+            // general.profile_tabbar_portrait / _landscape pair; this key is
+            // kept so old configs migrate without missing-preference warnings.
+            @"tabbar_position": @""
         }.mutableCopy,
         @"video": @{ // Video & Audio
             @"renderer": @"auto",
             @"resolution": @(100),
+            @"graphics_backend_forcing": @"auto",
             @"performance_hud": @NO,
             @"fullscreen_airplay": @YES,
             @"silence_other_audio": @NO,
@@ -106,7 +120,7 @@
             @"cursortype_hidden_cursor": @"default"
         }.mutableCopy,
         @"appearance": @{
-            @"launch_splash": @YES,
+            @"launch_splash": @NO,
         }.mutableCopy,
         @"java": @{
             @"java_homes": @{
@@ -210,6 +224,25 @@
             @"ai_own_model": @"",
             @"ai_language": @"auto"
         }.mutableCopy,
+        @"backup": @{
+            @"enabled": @NO,
+            @"auto_interval_hours": @(24),
+            @"auto_launch": @YES,
+            @"auto_exit": @YES,
+            @"auto_open": @NO,
+            @"auto_schedule": @YES,
+            @"retention": @(10),
+            @"scope_paths": @[],
+            @"folder_bookmark": @"",
+            @"webdav_url": @"",
+            @"webdav_username": @"",
+            @"gdrive_folderID": @"",
+            @"dest_folder_enabled": @NO,
+            @"dest_webdav_enabled": @NO,
+            @"dest_gdrive_enabled": @NO,
+            @"dest_onedrive_enabled": @NO,
+            @"dest_dropbox_enabled": @NO
+        }.mutableCopy,
         @"internal": @{
             @"isolated": @NO,
             @"latest_version": [NSDictionary new]
@@ -265,8 +298,12 @@
         defaults[@"launcher"] = @{
             @"language": @"auto",
             @"theme": @"System",
-            @"logo_style": (CONFIG_RELEASE ? @"purple" : @"dev")
+            @"logo_style": (CONFIG_RELEASE ? @"purple" : @"dev"),
+            @"update_channel": @(0)
         }.mutableCopy;
+        defaults[@"witch"][@"update_last_prompt"] = @(0);
+        defaults[@"witch"][@"update_repo"] = @"";
+        defaults[@"witch"][@"update_auto_check"] = @YES;
         defaults[@"curseforge"] = @{
             @"api_key": @""
         }.mutableCopy;
@@ -276,6 +313,7 @@
         // TODO: isolate this or add account picker into profile editor(?)
         defaults[@"internal"][@"selected_account"] = @"";
         defaults[@"internal"][@"ely_client_token"] = @"";
+        defaults[@"internal"][@"mod_loader"] = @"Vanilla";
     }
 
     return defaults;

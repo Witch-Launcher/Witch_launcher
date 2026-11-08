@@ -675,6 +675,10 @@
     [self.coordinator showSettings];
 }
 
+- (void)rightPanelDidTapBackup {
+    [self.coordinator showBackupHistory];
+}
+
 - (void)rightPanelDidAddVersion {
     [self.coordinator showAddVersion];
 }

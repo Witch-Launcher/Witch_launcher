@@ -1510,23 +1510,24 @@ int launchJVMWithArgs(NSString *username, id launchTarget, int width, int height
     NSLog(@"[Init] Found JLI lib");
 
     NSString *lwjglDirPath;
-    NSString *lwjglJarPath;
     if (useExternalLwjgl) {
         lwjglDirPath = externalLwjglDir;
-        lwjglJarPath = externalLwjglJar;
     } else if ([lwjglVersion isEqualToString:@"3.4.1"]) {
         lwjglDirPath = [librariesPath stringByAppendingPathComponent:@"lwjgl41"];
-        lwjglJarPath = [lwjglDirPath stringByAppendingPathComponent:@"lwjgl.jar"];
     } else if ([lwjglVersion isEqualToString:@"3.3.6"]) {
         lwjglDirPath = [librariesPath stringByAppendingPathComponent:@"lwjgl36"];
-        lwjglJarPath = [lwjglDirPath stringByAppendingPathComponent:@"lwjgl.jar"];
     } else {
         lwjglDirPath = [librariesPath stringByAppendingPathComponent:@"lwjgl33"];
-        lwjglJarPath = [lwjglDirPath stringByAppendingPathComponent:@"lwjgl.jar"];
     }
     setenv("LWJGL_VERSION", lwjglVersion.UTF8String, 1);
 
-    NSString *classpath = [NSString stringWithFormat:@"%@/*:%@/*:%@", librariesPath, lwjglDirPath, lwjglJarPath];
+    // Do not append lwjglJarPath explicitly: lwjglDirPath/* already expands to
+    // every jar in that folder, so adding the same lwjgl.jar twice puts a
+    // duplicate entry in java.class.path. Forge's SecureJarHandler builds a
+    // union filesystem keyed by classpath entry and aborts the launch with
+    // "Duplicate key .../libs/lwjgl33/lwjgl.jar". Vanilla tolerated it, Forge
+    // did not.
+    NSString *classpath = [NSString stringWithFormat:@"%@/*:%@/*", librariesPath, lwjglDirPath];
     if (launchJar) {
         classpath = [classpath stringByAppendingFormat:@":%@", launchTarget];
         margv[++margc] = [NSString stringWithFormat:@"-Dpojav.runJar=%@", launchTarget].UTF8String;
@@ -1617,6 +1618,22 @@ int launchJVMWithArgs(NSString *username, id launchTarget, int width, int height
     // pools) with the same debug switch; this is what identifies whether the
     // 30-minute growth is heap, direct ByteBuffers, or native/GPU memory.
     setenv("WITCH_MEM_PROBE", memLogEnabled ? "1" : "0", 1);
+
+    // Desktop launchers run Minecraft with the game directory as the process
+    // working directory. Mods such as LabyMod open relative paths
+    // (labymod-neo/client-jars/<ver>/client-<ver>.jar) through plain
+    // FileInputStream/JarFile, which the JVM resolves against the real process
+    // CWD — NOT against the user.dir system property. iOS leaves the CWD at
+    // "/", so LabyMod's "Client jar prepared" write (resolved via user.dir)
+    // and the later open disagreed and it died with
+    // "Failed to open remapped client jar ... (No such file or directory)".
+    // chdir() once, before the JVM starts, so every relative path a mod uses
+    // behaves exactly like on desktop.
+    if (chdir(gameDir.fileSystemRepresentation) != 0) {
+        NSLog(@"[JavaLauncher] chdir(%@) failed: %s", gameDir, strerror(errno));
+    } else {
+        NSLog(@"[JavaLauncher] Working directory -> %@", gameDir);
+    }
 
     jint jliResult = pJLI_Launch(++margc, margv,
                    0, NULL, // sizeof(const_jargs) / sizeof(char *), const_jargs,

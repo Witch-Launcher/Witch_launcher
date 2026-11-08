@@ -48,6 +48,7 @@ include_directories(
    "../UI/Screens/Account"
    "../UI/Screens/Download"
    "../UI/Screens/FileBrowser"
+  "../UI/Screens/Backup"
    "../UI/Screens/Perf"
    "../UI/Screens/JITMemory"
    "../UI/Screens/ProfileSettings"
@@ -318,6 +319,7 @@ add_executable(Witch
   SurfaceViewController+LaunchSplash.m
   LaunchSplashView.m
   WitchLogOverlay.m
+  WitchScrollingLogView.m
   GameLaunchChecks.m
   SurfaceViewController+ExternalDisplay.m
   SurfaceViewController+LogView.m
@@ -446,6 +448,18 @@ egl_bridge.m
     ../UI/Screens/Download/MapListViewController.m
     ../UI/Screens/Download/ResourcePackListViewController.m
     ../UI/Screens/FileBrowser/FileBrowserViewController.m
+   ../UI/Screens/Backup/BackupConfig.m
+   ../UI/Screens/Backup/BackupRecord.m
+   ../UI/Screens/Backup/BackupStore.m
+   ../UI/Screens/Backup/BackupKeychain.m
+   ../UI/Screens/Backup/BackupOAuth.m
+   ../UI/Screens/Backup/BackupHTTP.m
+   ../UI/Screens/Backup/BackupDestinations.m
+   ../UI/Screens/Backup/BackupManager.m
+   ../UI/Screens/Backup/BackupScheduler.m
+   ../UI/Screens/Backup/BackupSettingsViewController.m
+   ../UI/Screens/Backup/BackupHistoryViewController.m
+   ../UI/Screens/Backup/BackupScopeViewController.m
 )
 
 if("${CMAKE_HOST_SYSTEM_NAME}" MATCHES "Linux|^GNU$|Android")

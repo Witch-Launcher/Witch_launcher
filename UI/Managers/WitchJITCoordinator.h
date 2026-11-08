@@ -29,6 +29,16 @@ extern NSString * const WitchJITStatusDidChangeNotification;
 - (BOOL)importPairingFileAtURL:(NSURL *)url error:(NSError **)error;
 - (BOOL)removePairingFile:(NSError **)error;
 
+/// Imports a pairing file another app opened "in Witch" (iLoader, SideInstall,
+/// StikDebug, Files). Returns YES when the URL was a pairing candidate, so the
+/// caller can stop looking at other document handlers.
++ (BOOL)handleIncomingPairingURL:(NSURL *)url;
+
+/// Imports a valid pairing file that iOS copied into Documents/Inbox without
+/// calling the open-URL path (Files "Copy to Witch", AirDrop). Returns YES if
+/// one was imported.
+- (BOOL)importInboxPairingFileIfNeeded;
+
 /// Downloads/mounts the DDI and checks LocalDevVPN without enabling JIT.
 - (void)prepareWithCompletion:(void (^)(NSDictionary * _Nullable response, NSError * _Nullable error))completion;
 

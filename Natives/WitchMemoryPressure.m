@@ -5,12 +5,29 @@
 #import "jni.h"
 
 #import <malloc/malloc.h>
+#import <dlfcn.h>
 
 // Set in input_bridge_v3.m's JNI_OnLoad and cleared after JLI_Launch returns.
 // Do not call into a VM that has already been destroyed.
 extern JavaVM* runtimeJavaVMPtr;
 
 static CFAbsoluteTime gLastJavaGC = 0;
+
+// TGLMT (MobileGL) giữ thêm shadow CPU/pool mà đọc lại được từ GPU. Gọi qua
+// dlsym để launcher không phụ thuộc cứng vào dylib; hàm tự defer về render
+// thread (chỉ ghi cờ, áp dụng ở SwapBuffers kế tiếp) nên gọi từ queue nào cũng an toàn.
+typedef size_t (*TGLMTTrimMemoryFn)(int);
+static TGLMTTrimMemoryFn gTGLMTTrimFn = NULL;
+static BOOL gTGLMTTrimLooked = NO;
+static void WitchMaybeTrimTGLMT(BOOL critical) {
+    if (!gTGLMTTrimLooked) {
+        gTGLMTTrimLooked = YES;
+        gTGLMTTrimFn = (TGLMTTrimMemoryFn)dlsym(RTLD_DEFAULT, "TGLMT_TrimMemory");
+    }
+    if (gTGLMTTrimFn) {
+        gTGLMTTrimFn(critical ? 2 : 1);
+    }
+}
 
 static void WitchRequestJavaGC(void) {
     JavaVM *vm = runtimeJavaVMPtr;
@@ -54,6 +71,7 @@ static void WitchRequestJavaGC(void) {
 
 void WitchMemoryPressureHandle(BOOL critical) {
     WitchMemSampleMark(critical ? "memory-critical" : "memory-warning");
+    WitchMaybeTrimTGLMT(critical);
 
     // UIKit/table/icon work must stay on the main thread; the sampler calls
     // this from its own serial queue.

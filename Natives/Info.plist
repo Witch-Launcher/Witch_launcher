@@ -7,6 +7,8 @@
 	<key>BGTaskSchedulerPermittedIdentifiers</key>
 	<array>
 		<string>com.witch.zad626.minecraft.gpu.*</string>
+		<string>com.witch.zad626.backup.refresh</string>
+		<string>com.witch.zad626.backup.processing</string>
 	</array>
 	<key>CADisableMinimumFrameDurationOnPhone</key>
 	<true/>
@@ -126,6 +128,22 @@
 				<string>ms-xal-00000000402b5328</string>
 			</array>
 		</dict>
+		<dict>
+			<key>CFBundleURLName</key>
+			<string>com.witch.zad626.msal.auth</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>msauth.com.witch.zad626</string>
+			</array>
+		</dict>
+		<dict>
+			<key>CFBundleURLName</key>
+			<string>com.witch.zad626.dropbox</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>db-v53kn147bp3zckq</string>
+			</array>
+		</dict>
 	</array>
 	<key>CFBundleDocumentTypes</key>
 	<array>
@@ -139,6 +157,19 @@
 			<key>LSItemContentTypes</key>
 			<array>
 				<string>com.witch.plugin-package</string>
+			</array>
+		</dict>
+		<dict>
+			<key>CFBundleTypeName</key>
+			<string>Remote Pairing File</string>
+			<key>CFBundleTypeRole</key>
+			<string>Viewer</string>
+			<key>LSHandlerRank</key>
+			<string>Alternate</string>
+			<key>LSItemContentTypes</key>
+			<array>
+				<string>com.apple.mobiledevice.pairing</string>
+				<string>public.property-list</string>
 			</array>
 		</dict>
 	</array>
@@ -164,6 +195,28 @@
 				</array>
 				<key>public.mime-type</key>
 				<string>application/x-witch-plugin</string>
+			</dict>
+		</dict>
+	</array>
+	<key>UTImportedTypeDeclarations</key>
+	<array>
+		<dict>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>public.data</string>
+				<string>public.property-list</string>
+			</array>
+			<key>UTTypeDescription</key>
+			<string>Remote Pairing File</string>
+			<key>UTTypeIdentifier</key>
+			<string>com.apple.mobiledevice.pairing</string>
+			<key>UTTypeTagSpecification</key>
+			<dict>
+				<key>public.filename-extension</key>
+				<array>
+					<string>mobiledevicepairing</string>
+					<string>pairing</string>
+				</array>
 			</dict>
 		</dict>
 	</array>
@@ -194,8 +247,6 @@
 		<string>localdevvpn</string>
 	</array>
 	<key>LSRequiresIPhoneOS</key>
-	<true/>
-	<key>LSSupportsOpeningDocumentsInPlace</key>
 	<true/>
 	<key>MinimumOSVersion</key>
 	<string>14.0</string>
@@ -239,6 +290,7 @@
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>fetch</string>
+		<string>processing</string>
 	</array>
 	<key>UIDeviceFamily</key>
 	<array>

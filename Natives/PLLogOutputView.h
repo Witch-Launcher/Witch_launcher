@@ -8,6 +8,8 @@ extern NSNotificationName const WitchLogLineDidAppendNotification;
 - (void)actionToggleLogOutput;
 + (void)appendToLog:(NSString *)line;
 + (void)trimLogToMaxLines:(NSUInteger)maxLines;
+/// Empties the whole in-memory log buffer (splash log panel / classic panel).
++ (void)clearLog;
 + (void)handleExitCode:(int)code;
 + (NSString *)fullLogText;
 /// Enables or pauses capture of game stdout/stderr into the in-memory log

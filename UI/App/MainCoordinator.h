@@ -14,6 +14,7 @@
 - (void)switchToTab:(SidebarTab)tab;
 - (void)showAccount;
 - (void)showSettings;
+- (void)showBackupHistory;
 - (void)showFileManager;
 - (void)showVersionPicker;
 - (void)showModLoaderPicker;

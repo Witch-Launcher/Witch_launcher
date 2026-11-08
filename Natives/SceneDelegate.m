@@ -13,6 +13,9 @@
 #import "AppSheet.h"
 #import "ErrorPresenter.h"
 #import "PluginsViewController.h"
+#import "WitchJITCoordinator.h"
+#import "BackupManager.h"
+#import "BackupScheduler.h"
 
 extern UIWindow *mainWindow;
 
@@ -77,13 +80,14 @@ static NSString *const kMinecraftGPUBackgroundTaskPrefix = @"com.witch.zad626.mi
     mainWindow = self.window;
     launchInitialViewController(self.window);
     [self.window makeKeyAndVisible];
-    if (connectionOptions.URLContexts.count > 0) {
-        NSURL *url = connectionOptions.URLContexts.allObjects.firstObject.URL;
-        if (url) {
-            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.4 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-                [PluginsViewController handleIncomingURL:url presenter:currentVC()];
-            });
-        }
+    for (UIOpenURLContext *context in connectionOptions.URLContexts) {
+        NSURL *url = context.URL;
+        if (!url) continue;
+        if ([WitchJITCoordinator handleIncomingPairingURL:url]) continue;
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.4 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            [PluginsViewController handleIncomingURL:url presenter:currentVC()];
+        });
+        break;
     }
     // Kiểm tra crash ra màn hình chính ở lần trước (flag còn lại + latestlog/.ips)
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
@@ -107,8 +111,13 @@ static NSString *const kMinecraftGPUBackgroundTaskPrefix = @"com.witch.zad626.mi
 
 
 - (void)scene:(UIScene *)scene openURLContexts:(NSSet<UIOpenURLContext *> *)URLContexts {
-    UIOpenURLContext *context = URLContexts.allObjects.firstObject;
-    if (context.URL) [PluginsViewController handleIncomingURL:context.URL presenter:currentVC()];
+    for (UIOpenURLContext *context in URLContexts) {
+        NSURL *url = context.URL;
+        if (!url) continue;
+        if ([WitchJITCoordinator handleIncomingPairingURL:url]) continue;
+        [PluginsViewController handleIncomingURL:url presenter:currentVC()];
+        break;
+    }
 }
 
 - (void)sceneDidDisconnect:(UIScene *)scene {
@@ -128,6 +137,8 @@ static NSString *const kMinecraftGPUBackgroundTaskPrefix = @"com.witch.zad626.mi
     // so input never stays "stuck" after returning to the game.
     CallbackBridge_nativeSetWindowFocused(YES, NO);
     touchcontroller_onTouchCancel();
+    [[BackupManager shared] backupIfNeededForTrigger:@"open" completion:nil];
+    [BackupScheduler scheduleNext];
 }
 
 

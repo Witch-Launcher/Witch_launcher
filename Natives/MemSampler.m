@@ -128,6 +128,13 @@ static void WitchLogMemSample(const char *tag) {
           available / 1048576,
           usedPct,
           (unsigned long long)(gMemPeakFootprint / 1048576));
+    // Hysteresis: sau một lần giải phóng (GC/trim/đóng world) mà footprint tụt
+    // về dưới 65% thì arm lại cảnh báo — nếu không, lần chạm trần thứ hai (tắt
+    // rồi bật lại Voxy) không trim gì và process chết vì per-process-limit.
+    if (usedPct < 65.0) {
+        gMemWarned75 = NO;
+        gMemWarned90 = NO;
+    }
     if (!gMemWarned75 && usedPct >= 75.0) {
         gMemWarned75 = YES;
         NSLog(@"[MemSample] WARNING: footprint at %.0f%% of Jetsam allowance — close other apps / lower view distance / reduce MobileGL frames-in-flight", usedPct);

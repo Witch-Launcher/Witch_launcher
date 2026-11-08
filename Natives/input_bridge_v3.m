@@ -993,6 +993,19 @@ void AASDL_NoteWindow(uint32_t windowID, int w, int h) {
     aasdl_winH = h;
     if (isUp && !wasUp) {
         NSLog(@"[SDLInject] SDL window up: id=%u %dx%d previous=%u", windowID, w, h, previousWindowID);
+        /* Pure-SDL sessions (MC 26.x / RenderPearl, no GLFW callbacks) never
+         * run glfwPollEvents(), the only caller of
+         * CallbackBridge.nativeSetInputReady(true), and the GL-only
+         * egl_bridge setter never runs under MoltenVK either - so
+         * isInputReady stayed 0 for the whole session and hardware-keyboard
+         * text (Telex gating) stayed disabled. The SDL game window being up
+         * means the game expects input, so flip the flag here like
+         * glfwPollEvents does for GLFW sessions. */
+        if (!GLFW_invoke_Char && !GLFW_invoke_Key && !GLFW_invoke_CursorPos &&
+            !isInputReady) {
+            CallbackBridge_nativeSetInputReady(YES);
+            NSLog(@"[SDLInject] SDL session input ready (no GLFW callbacks)");
+        }
         aasdl_perfProbeMaybeStart();
     } else if (!isUp && wasUp) {
         NSLog(@"[SDLInject] SDL window gone: previous=%u", previousWindowID);
@@ -1122,6 +1135,12 @@ static void aasdl_pushMouseButton(int button, bool down, float x, float y) {
     b->clicks = 1;
     b->x = x; b->y = y;
     aasdl_PushEvent(&ev);
+    /* Tap-driven diagnostics: one line per press/release, no per-frame spam.
+     * This is the only trace of the click path - motion already has the
+     * note-window InputDiag lines, but menu-click failures were invisible in
+     * user reports. */
+    NSLog(@"[InputDiag] button push b=%d down=%d at=(%.1f,%.1f) span=%ux%u win=%u grabbing=%d",
+          button, down, x, y, windowWidth, windowHeight, aasdl_windowID(), isGrabbing);
     if (down) {
         aasdl_buttons |= (1u << (button - 1));
     } else {
@@ -1508,7 +1527,10 @@ void CallbackBridge_nativeSendMouseButton(int button, int action, int mods) {
         if (button == -1) return;
         static const int glfwToSdl[3] = { 1, 3, 2 };
         int sdlButton = (button >= 0 && button < 3) ? glfwToSdl[button] : button + 1;
-        if (sdlButton < 1 || sdlButton > 8) return;
+        if (sdlButton < 1 || sdlButton > 8) {
+            NSLog(@"[InputDiag] button drop: glfw=%d -> out-of-range sdl=%d", button, sdlButton);
+            return;
+        }
         float mx, my;
         if (isGrabbing) {
             // In grab mode cursorX/cursorY accumulate relative deltas and can
@@ -1521,6 +1543,13 @@ void CallbackBridge_nativeSendMouseButton(int button, int action, int mods) {
             aasdl_pushMouseButton(sdlButton, action != 0, mx, my);
         } else if (aasdl_coords(cursorX, cursorY, &mx, &my)) {
             aasdl_pushMouseButton(sdlButton, action != 0, mx, my);
+        } else {
+            /* Click silently dropped because the framebuffer/window sizes are
+             * not reported yet (or the window is gone). Without this line a
+             * dead-click report had zero trace: taps fired but nothing was
+             * ever pushed. Keep it tap-driven so it cannot spam. */
+            NSLog(@"[InputDiag] button drop b=%d size=(%dx%d) sdl-win=%dx%d win=%u",
+                  button, windowWidth, windowHeight, aasdl_winW, aasdl_winH, aasdl_windowID());
         }
     }
 }

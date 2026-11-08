@@ -1,5 +1,14 @@
 #import "AFNetworking.h"
 #import "BaseAuthenticator.h"
+#if __has_include("Config/WitchConfig.h")
+#import "Config/WitchConfig.h"
+#else
+#ifndef WITCH_ELY_OAUTH_CLIENT_ID
+#define WITCH_ELY_OAUTH_CLIENT_ID @""
+#define WITCH_ELY_OAUTH_CLIENT_SECRET @""
+#define WITCH_ELY_OAUTH_REDIRECT_URI @""
+#endif
+#endif
 #import "../LauncherPreferences.h"
 #import "../ios_uikit_bridge.h"
 #import "../utils.h"
@@ -11,9 +20,17 @@ static NSString * const kElyOAuthUserinfoURL = @"https://account.ely.by/api/acco
 
 static NSString * const kElyOAuthScope = @"offline_access minecraft_server_session account_info";
 
-NSString *ELY_OAUTH_CLIENT_ID = @"";
-NSString *ELY_OAUTH_CLIENT_SECRET = @"";
-NSString *ELY_OAUTH_REDIRECT_URI = @"";
+#if !__has_include("Config/WitchConfig.h")
+#ifndef WITCH_ELY_OAUTH_CLIENT_ID
+#define WITCH_ELY_OAUTH_CLIENT_ID @""
+#define WITCH_ELY_OAUTH_CLIENT_SECRET @""
+#define WITCH_ELY_OAUTH_REDIRECT_URI @""
+#endif
+#endif
+
+NSString *ELY_OAUTH_CLIENT_ID = WITCH_ELY_OAUTH_CLIENT_ID;
+NSString *ELY_OAUTH_CLIENT_SECRET = WITCH_ELY_OAUTH_CLIENT_SECRET;
+NSString *ELY_OAUTH_REDIRECT_URI = WITCH_ELY_OAUTH_REDIRECT_URI;
 
 static NSString *dashedUUID(NSString *uuid) {
     if (uuid.length == 32) {

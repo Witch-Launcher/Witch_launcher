@@ -8,7 +8,6 @@
 #import "HapticManager.h"
 #import "DownloadProgressOverlay.h"
 #import <WebKit/WebKit.h>
-#import "UIImageView+AFNetworking.h"
 #import "AFNetworking.h"
 #import "ElySkinHead.h"
 #import "AmethystBlurView.h"
@@ -32,7 +31,16 @@ static BOOL AccountIsDemo(NSDictionary *account) {
 }
 
 static BOOL AccountIsPremium(NSDictionary *account) {
-    return [account[@"xboxGamertag"] length] > 0;
+    if (AccountIsEly(account)) return NO;
+    // Local accounts always store the zero UUID, so a real profile UUID is the
+    // most reliable premium marker — xboxGamertag is missing on accounts saved
+    // by older login flows. Demo accounts have the zero UUID plus a gamertag.
+    NSString *profileId = account[@"profileId"];
+    if (![profileId isKindOfClass:NSString.class] || profileId.length == 0) return NO;
+    if ([profileId isEqualToString:@"00000000-0000-0000-0000-000000000000"]) {
+        return [account[@"xboxGamertag"] length] > 0;
+    }
+    return YES;
 }
 
 static BOOL AccountIsLocal(NSDictionary *account) {
@@ -64,13 +72,13 @@ static NSString *AccountShortID(NSDictionary *account) {
 #pragma mark - Account cell
 
 @interface AccountCell : UITableViewCell
+@property (nonatomic) UIView *cardView;
 @property (nonatomic) UIImageView *avatarView;
 @property (nonatomic) UILabel *nameLabel;
 @property (nonatomic) UILabel *typeLabel;
 @property (nonatomic) UILabel *detailLabel;
 @property (nonatomic) UIButton *selectButton;
-@property (nonatomic) UIView *activeBar;
-@property (nonatomic) UIView *separator;
+@property (nonatomic) BOOL isSelectedAccount;
 @end
 
 @implementation AccountCell
@@ -82,20 +90,26 @@ static NSString *AccountShortID(NSDictionary *account) {
         self.backgroundColor = UIColor.clearColor;
         self.contentView.backgroundColor = UIColor.clearColor;
 
-        _activeBar = [[UIView alloc] init];
-        _activeBar.translatesAutoresizingMaskIntoConstraints = NO;
-        _activeBar.backgroundColor = ThemeManager.shared.accentColor;
-        _activeBar.layer.cornerRadius = 2.5;
-        _activeBar.hidden = YES;
-        [self.contentView addSubview:_activeBar];
+        // Inset card instead of a bare flat row: the list instantly reads as
+        // modern iOS, and the selection state (accent border + tint) is much
+        // clearer than a flat highlight.
+        _cardView = [[UIView alloc] init];
+        _cardView.translatesAutoresizingMaskIntoConstraints = NO;
+        _cardView.backgroundColor = ThemeManager.shared.cardBackgroundColor;
+        _cardView.layer.cornerRadius = 16;
+        _cardView.layer.borderWidth = 1;
+        _cardView.layer.borderColor = ThemeManager.shared.separatorColor.CGColor;
+        [self.contentView addSubview:_cardView];
 
         _avatarView = [[UIImageView alloc] init];
         _avatarView.translatesAutoresizingMaskIntoConstraints = NO;
         _avatarView.contentMode = UIViewContentModeScaleAspectFill;
         _avatarView.clipsToBounds = YES;
-        _avatarView.layer.cornerRadius = 13;
-        _avatarView.backgroundColor = [UIColor colorWithWhite:0.5 alpha:0.12];
-        _avatarView.tintColor = ThemeManager.shared.secondaryTextColor;
+        _avatarView.layer.cornerRadius = 14;
+        _avatarView.backgroundColor = [UIColor colorWithWhite:0.5 alpha:0.10];
+        // A ring tinted by the account kind is a cheap but effective way to
+        // tell Microsoft / Ely / local / demo apart before reading the badge.
+        _avatarView.layer.borderWidth = 1.5;
         [self.contentView addSubview:_avatarView];
 
         _nameLabel = [[UILabel alloc] init];
@@ -103,69 +117,58 @@ static NSString *AccountShortID(NSDictionary *account) {
         _nameLabel.font = [UIFont systemFontOfSize:15.5 weight:UIFontWeightSemibold];
         _nameLabel.textColor = ThemeManager.shared.primaryTextColor;
         _nameLabel.numberOfLines = 1;
-        [self.contentView addSubview:_nameLabel];
+        [_cardView addSubview:_nameLabel];
 
         _typeLabel = [[UILabel alloc] init];
         _typeLabel.translatesAutoresizingMaskIntoConstraints = NO;
-        _typeLabel.font = [UIFont systemFontOfSize:9.5 weight:UIFontWeightBold];
-        _typeLabel.textColor = UIColor.whiteColor;
+        _typeLabel.font = [UIFont systemFontOfSize:10 weight:UIFontWeightBold];
         _typeLabel.textAlignment = NSTextAlignmentCenter;
-        _typeLabel.layer.cornerRadius = 6;
+        _typeLabel.layer.cornerRadius = 9;
         _typeLabel.clipsToBounds = YES;
-        [self.contentView addSubview:_typeLabel];
+        [_cardView addSubview:_typeLabel];
 
         _detailLabel = [[UILabel alloc] init];
         _detailLabel.translatesAutoresizingMaskIntoConstraints = NO;
         _detailLabel.font = [UIFont monospacedSystemFontOfSize:10 weight:UIFontWeightMedium];
         _detailLabel.textColor = ThemeManager.shared.secondaryTextColor;
         _detailLabel.numberOfLines = 1;
-        [self.contentView addSubview:_detailLabel];
+        [_cardView addSubview:_detailLabel];
 
         _selectButton = [UIButton buttonWithType:UIButtonTypeSystem];
         _selectButton.translatesAutoresizingMaskIntoConstraints = NO;
         _selectButton.tintColor = ThemeManager.shared.secondaryTextColor;
         [_selectButton setImage:[UIImage systemImageNamed:@"circle"] forState:UIControlStateNormal];
         _selectButton.accessibilityLabel = localize(@"account.select", nil);
-        [self.contentView addSubview:_selectButton];
-
-        _separator = [[UIView alloc] init];
-        _separator.translatesAutoresizingMaskIntoConstraints = NO;
-        _separator.backgroundColor = ThemeManager.shared.separatorColor;
-        [self.contentView addSubview:_separator];
+        [_cardView addSubview:_selectButton];
 
         [NSLayoutConstraint activateConstraints:@[
-            [_activeBar.leadingAnchor constraintEqualToAnchor:self.contentView.leadingAnchor constant:6],
-            [_activeBar.centerYAnchor constraintEqualToAnchor:self.contentView.centerYAnchor],
-            [_activeBar.widthAnchor constraintEqualToConstant:5],
-            [_activeBar.heightAnchor constraintEqualToConstant:34],
+            [_cardView.topAnchor constraintEqualToAnchor:self.contentView.topAnchor constant:6],
+            [_cardView.bottomAnchor constraintEqualToAnchor:self.contentView.bottomAnchor constant:-6],
+            [_cardView.leadingAnchor constraintEqualToAnchor:self.contentView.leadingAnchor constant:16],
+            [_cardView.trailingAnchor constraintEqualToAnchor:self.contentView.trailingAnchor constant:-16],
 
-            [_avatarView.leadingAnchor constraintEqualToAnchor:self.contentView.leadingAnchor constant:20],
-            [_avatarView.centerYAnchor constraintEqualToAnchor:self.contentView.centerYAnchor],
-            [_avatarView.widthAnchor constraintEqualToConstant:48],
-            [_avatarView.heightAnchor constraintEqualToConstant:48],
+            [_avatarView.leadingAnchor constraintEqualToAnchor:_cardView.leadingAnchor constant:12],
+            [_avatarView.centerYAnchor constraintEqualToAnchor:_cardView.centerYAnchor],
+            [_avatarView.widthAnchor constraintEqualToConstant:44],
+            [_avatarView.heightAnchor constraintEqualToConstant:44],
 
-            [_selectButton.trailingAnchor constraintEqualToAnchor:self.contentView.trailingAnchor constant:-16],
-            [_selectButton.centerYAnchor constraintEqualToAnchor:self.contentView.centerYAnchor],
-            [_selectButton.widthAnchor constraintEqualToConstant:36],
-            [_selectButton.heightAnchor constraintEqualToConstant:36],
+            [_selectButton.trailingAnchor constraintEqualToAnchor:_cardView.trailingAnchor constant:-10],
+            [_selectButton.centerYAnchor constraintEqualToAnchor:_cardView.centerYAnchor],
+            [_selectButton.widthAnchor constraintEqualToConstant:34],
+            [_selectButton.heightAnchor constraintEqualToConstant:34],
 
-            [_nameLabel.leadingAnchor constraintEqualToAnchor:_avatarView.trailingAnchor constant:13],
-            [_nameLabel.topAnchor constraintEqualToAnchor:self.contentView.topAnchor constant:12],
-            [_nameLabel.trailingAnchor constraintEqualToAnchor:_selectButton.leadingAnchor constant:-8],
+            [_nameLabel.leadingAnchor constraintEqualToAnchor:_avatarView.trailingAnchor constant:12],
+            [_nameLabel.topAnchor constraintEqualToAnchor:_cardView.topAnchor constant:11],
+            [_nameLabel.trailingAnchor constraintLessThanOrEqualToAnchor:_selectButton.leadingAnchor constant:-8],
 
             [_typeLabel.leadingAnchor constraintEqualToAnchor:_nameLabel.leadingAnchor],
             [_typeLabel.topAnchor constraintEqualToAnchor:_nameLabel.bottomAnchor constant:4],
-            [_typeLabel.heightAnchor constraintEqualToConstant:17],
-            [_typeLabel.widthAnchor constraintGreaterThanOrEqualToConstant:52],
+            [_typeLabel.heightAnchor constraintEqualToConstant:18],
+            [_typeLabel.widthAnchor constraintGreaterThanOrEqualToConstant:48],
 
             [_detailLabel.leadingAnchor constraintEqualToAnchor:_typeLabel.trailingAnchor constant:8],
             [_detailLabel.centerYAnchor constraintEqualToAnchor:_typeLabel.centerYAnchor],
             [_detailLabel.trailingAnchor constraintLessThanOrEqualToAnchor:_selectButton.leadingAnchor constant:-8],
-
-            [_separator.leadingAnchor constraintEqualToAnchor:_avatarView.trailingAnchor constant:13],
-            [_separator.trailingAnchor constraintEqualToAnchor:self.contentView.trailingAnchor],
-            [_separator.bottomAnchor constraintEqualToAnchor:self.contentView.bottomAnchor],
-            [_separator.heightAnchor constraintEqualToConstant:1.0 / UIScreen.mainScreen.scale],
         ]];
 
         [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(updateTheme) name:ThemeDidChangeNotification object:nil];
@@ -174,28 +177,41 @@ static NSString *AccountShortID(NSDictionary *account) {
 }
 
 - (void)updateTheme {
-    self.nameLabel.textColor = ThemeManager.shared.primaryTextColor;
-    self.detailLabel.textColor = ThemeManager.shared.secondaryTextColor;
-    self.separator.backgroundColor = ThemeManager.shared.separatorColor;
-    self.activeBar.backgroundColor = ThemeManager.shared.accentColor;
+    ThemeManager *theme = ThemeManager.shared;
+    self.nameLabel.textColor = theme.primaryTextColor;
+    self.detailLabel.textColor = theme.secondaryTextColor;
+    if (self.isSelectedAccount) {
+        self.cardView.backgroundColor = [theme.accentColor colorWithAlphaComponent:0.10];
+        self.cardView.layer.borderColor = [theme.accentColor colorWithAlphaComponent:0.55].CGColor;
+    } else {
+        self.cardView.backgroundColor = theme.cardBackgroundColor;
+        self.cardView.layer.borderColor = theme.separatorColor.CGColor;
+    }
 }
 
 - (void)configureWithAccount:(NSDictionary *)account isSelected:(BOOL)isSelected {
+    ThemeManager *theme = ThemeManager.shared;
+    UIColor *kindColor = AccountKindColor(account);
+    self.isSelectedAccount = isSelected;
+
     _nameLabel.text = account[@"username"] ?: localize(@"Unknown", nil);
     _typeLabel.text = [NSString stringWithFormat:@" %@ ", AccountKindText(account)];
-    _typeLabel.backgroundColor = AccountKindColor(account);
+    _typeLabel.backgroundColor = [kindColor colorWithAlphaComponent:0.16];
+    _typeLabel.textColor = kindColor;
     _detailLabel.text = AccountShortID(account);
 
     if (isSelected) {
-        self.contentView.backgroundColor = [ThemeManager.shared.accentColor colorWithAlphaComponent:0.09];
-        _activeBar.hidden = NO;
+        _cardView.backgroundColor = [theme.accentColor colorWithAlphaComponent:0.10];
+        _cardView.layer.borderColor = [theme.accentColor colorWithAlphaComponent:0.55].CGColor;
+        _cardView.layer.borderWidth = 1.5;
         [_selectButton setImage:[UIImage systemImageNamed:@"checkmark.circle.fill"] forState:UIControlStateNormal];
-        _selectButton.tintColor = ThemeManager.shared.accentColor;
+        _selectButton.tintColor = theme.accentColor;
     } else {
-        self.contentView.backgroundColor = UIColor.clearColor;
-        _activeBar.hidden = YES;
+        _cardView.backgroundColor = theme.cardBackgroundColor;
+        _cardView.layer.borderColor = theme.separatorColor.CGColor;
+        _cardView.layer.borderWidth = 1;
         [_selectButton setImage:[UIImage systemImageNamed:@"circle"] forState:UIControlStateNormal];
-        _selectButton.tintColor = ThemeManager.shared.secondaryTextColor;
+        _selectButton.tintColor = theme.secondaryTextColor;
     }
 
     NSString *username = account[@"username"] ?: @"";
@@ -206,6 +222,7 @@ static NSString *AccountShortID(NSDictionary *account) {
     UIImage *placeholder = [UIImage systemImageNamed:isDemo ? @"exclamationmark.triangle.fill" : (isPremium ? @"person.fill.checkmark" : @"person.crop.circle")];
     _avatarView.image = placeholder;
     _avatarView.tintColor = ThemeManager.shared.secondaryTextColor;
+    _avatarView.layer.borderColor = [kindColor colorWithAlphaComponent:0.45].CGColor;
 
     if (AccountIsLocal(account)) {
         _avatarView.image = [SkinTextureManager localHeadForUsername:username size:48];
@@ -226,19 +243,14 @@ static NSString *AccountShortID(NSDictionary *account) {
             weakSelf.avatarView.tintColor = [UIColor clearColor];
         }];
     } else if (isPremium && !isDemo) {
-        NSString *profileId = account[@"profileId"];
-        if ([profileId isKindOfClass:[NSString class]] && profileId.length > 0) {
-            NSString *skinURL = [NSString stringWithFormat:@"https://mc-heads.net/head/%@/48", profileId];
-            __weak typeof(self) weakSelf = self;
-            [_avatarView setImageWithURLRequest:[NSURLRequest requestWithURL:[NSURL URLWithString:skinURL]]
-                               placeholderImage:placeholder
-                                           success:^(NSURLRequest *request, NSHTTPURLResponse *response, UIImage *image) {
-                                               if (weakSelf) {
-                                                   weakSelf.avatarView.image = image;
-                                                   weakSelf.avatarView.tintColor = [UIColor clearColor];
-                                               }
-                                           } failure:nil];
-        }
+        // Use the same cached skin resolver as the 3D preview so the list and
+        // the main-menu panel always show the real custom head.
+        __weak typeof(self) weakSelf = self;
+        [[SkinTextureManager shared] headImageForAccount:account size:48 completion:^(UIImage *head) {
+            if (!head || !weakSelf) return;
+            weakSelf.avatarView.image = head;
+            weakSelf.avatarView.tintColor = [UIColor clearColor];
+        }];
     }
 }
 
@@ -249,8 +261,11 @@ static NSString *AccountShortID(NSDictionary *account) {
     _nameLabel.text = nil;
     _typeLabel.text = nil;
     _detailLabel.text = nil;
-    self.contentView.backgroundColor = UIColor.clearColor;
-    _activeBar.hidden = YES;
+    ThemeManager *theme = ThemeManager.shared;
+    _cardView.backgroundColor = theme.cardBackgroundColor;
+    _cardView.layer.borderColor = theme.separatorColor.CGColor;
+    _cardView.layer.borderWidth = 1;
+    _typeLabel.textColor = UIColor.whiteColor;
 }
 
 - (void)dealloc {
@@ -387,8 +402,9 @@ static NSString *AccountShortID(NSDictionary *account) {
     _stageContainer = [[UIView alloc] init];
     _stageContainer.translatesAutoresizingMaskIntoConstraints = NO;
     _stageContainer.backgroundColor = ThemeManager.shared.cardBackgroundColor;
-    _stageContainer.layer.cornerRadius = 0;
-    _stageContainer.layer.borderWidth = 0;
+    _stageContainer.layer.cornerRadius = 18;
+    _stageContainer.layer.borderWidth = 1;
+    _stageContainer.layer.borderColor = ThemeManager.shared.separatorColor.CGColor;
     _stageContainer.clipsToBounds = YES;
 
     CAGradientLayer *tint = [CAGradientLayer layer];
@@ -580,9 +596,9 @@ static NSString *AccountShortID(NSDictionary *account) {
         [self actionItemWithButton:_deleteGridButton title:localize(@"Delete", nil)],
     ]];
     actions.axis = UILayoutConstraintAxisHorizontal;
-    actions.alignment = UIStackViewAlignmentTop;
-    actions.spacing = 14;
-    actions.distribution = UIStackViewDistributionFill;
+    actions.alignment = UIStackViewAlignmentCenter;
+    actions.distribution = UIStackViewDistributionEqualSpacing;
+    actions.spacing = 12;
 
     // Bottom bar: default-skin picker (local accounts) + auto-rotate pill.
     _localSkinRow = [[UIView alloc] init];
@@ -822,6 +838,7 @@ static NSString *AccountShortID(NSDictionary *account) {
     _scrollView.backgroundColor = theme.contentBackgroundColor;
     _contentView.backgroundColor = theme.contentBackgroundColor;
     _stageContainer.backgroundColor = theme.cardBackgroundColor;
+    _stageContainer.layer.borderColor = theme.separatorColor.CGColor;
     _nameLabel.textColor = theme.primaryTextColor;
     _uuidLabel.textColor = theme.secondaryTextColor;
     _uuidChip.backgroundColor = [UIColor colorWithWhite:0.5 alpha:0.10];
@@ -1068,6 +1085,7 @@ static NSString *AccountShortID(NSDictionary *account) {
                     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 1.5 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
                         [overlay dismiss];
                         showDialog(localize(@"Success", nil), localize(@"account.screen.skin_uploaded_desc", nil));
+                        [[NSNotificationCenter defaultCenter] postNotificationName:@"AccountDidChangeNotification" object:nil];
                         [weakSelf refreshSkinPreview];
                     });
                 } else {
@@ -1155,7 +1173,7 @@ static NSString *AccountShortID(NSDictionary *account) {
     _titleLabel = [[UILabel alloc] init];
     _titleLabel.translatesAutoresizingMaskIntoConstraints = NO;
     _titleLabel.text = localize(@"account.title", nil);
-    _titleLabel.font = [UIFont systemFontOfSize:28 weight:UIFontWeightBold];
+    _titleLabel.font = [UIFont systemFontOfSize:24 weight:UIFontWeightBold];
     _titleLabel.textColor = ThemeManager.shared.primaryTextColor;
     [_headerView addSubview:_titleLabel];
 
@@ -1171,7 +1189,7 @@ static NSString *AccountShortID(NSDictionary *account) {
     [_closeButton setImage:[UIImage systemImageNamed:@"xmark"] forState:UIControlStateNormal];
     _closeButton.tintColor = ThemeManager.shared.primaryTextColor;
     _closeButton.backgroundColor = [UIColor colorWithWhite:0.5 alpha:0.14];
-    _closeButton.layer.cornerRadius = 18;
+    _closeButton.layer.cornerRadius = 17;
     _closeButton.accessibilityLabel = localize(@"Close", nil);
     [_closeButton addTarget:self action:@selector(closeTapped) forControlEvents:UIControlEventTouchUpInside];
     [_headerView addSubview:_closeButton];
@@ -1182,7 +1200,7 @@ static NSString *AccountShortID(NSDictionary *account) {
     [_addButton setImage:[UIImage systemImageNamed:@"plus"] forState:UIControlStateNormal];
     _addButton.tintColor = ThemeManager.shared.buttonTextColor;
     _addButton.backgroundColor = ThemeManager.shared.accentColor;
-    _addButton.layer.cornerRadius = 27;
+    _addButton.layer.cornerRadius = 26;
     _addButton.layer.shadowColor = UIColor.blackColor.CGColor;
     _addButton.layer.shadowOpacity = 0.28;
     _addButton.layer.shadowRadius = 12;
@@ -1195,24 +1213,24 @@ static NSString *AccountShortID(NSDictionary *account) {
         [_headerView.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor],
         [_headerView.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor],
         [_headerView.topAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.topAnchor],
-        [_headerView.heightAnchor constraintEqualToConstant:82],
+        [_headerView.heightAnchor constraintEqualToConstant:72],
 
         [_titleLabel.leadingAnchor constraintEqualToAnchor:_headerView.leadingAnchor constant:20],
         [_titleLabel.topAnchor constraintEqualToAnchor:_headerView.topAnchor constant:10],
 
-        [_subtitleLabel.leadingAnchor constraintEqualToAnchor:_headerView.leadingAnchor constant:20],
+        [_subtitleLabel.leadingAnchor constraintEqualToAnchor:_headerView.leadingAnchor constant:21],
         [_subtitleLabel.topAnchor constraintEqualToAnchor:_titleLabel.bottomAnchor constant:2],
         [_subtitleLabel.trailingAnchor constraintLessThanOrEqualToAnchor:_closeButton.leadingAnchor constant:-12],
 
         [_closeButton.trailingAnchor constraintEqualToAnchor:_headerView.trailingAnchor constant:-20],
         [_closeButton.centerYAnchor constraintEqualToAnchor:_titleLabel.centerYAnchor],
-        [_closeButton.widthAnchor constraintEqualToConstant:36],
-        [_closeButton.heightAnchor constraintEqualToConstant:36],
+        [_closeButton.widthAnchor constraintEqualToConstant:34],
+        [_closeButton.heightAnchor constraintEqualToConstant:34],
 
         [_addButton.trailingAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.trailingAnchor constant:-22],
         [_addButton.bottomAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.bottomAnchor constant:-22],
-        [_addButton.widthAnchor constraintEqualToConstant:54],
-        [_addButton.heightAnchor constraintEqualToConstant:54],
+        [_addButton.widthAnchor constraintEqualToConstant:52],
+        [_addButton.heightAnchor constraintEqualToConstant:52],
     ]];
 }
 
@@ -1221,10 +1239,10 @@ static NSString *AccountShortID(NSDictionary *account) {
     _tableView.translatesAutoresizingMaskIntoConstraints = NO;
     _tableView.delegate = self;
     _tableView.dataSource = self;
-    _tableView.rowHeight = 76;
+    _tableView.rowHeight = 80;
     _tableView.backgroundColor = [UIColor clearColor];
     _tableView.separatorStyle = UITableViewCellSeparatorStyleNone;
-    _tableView.contentInset = UIEdgeInsetsMake(2, 0, 96, 0);
+    _tableView.contentInset = UIEdgeInsetsMake(6, 0, 96, 0);
     _tableView.keyboardDismissMode = UIScrollViewKeyboardDismissModeOnDrag;
     [_tableView registerClass:[AccountCell class] forCellReuseIdentifier:@"AccountCell"];
     [self.view addSubview:_tableView];
@@ -1245,9 +1263,14 @@ static NSString *AccountShortID(NSDictionary *account) {
 
     UIImageView *icon = [[UIImageView alloc] init];
     icon.translatesAutoresizingMaskIntoConstraints = NO;
-    icon.image = [UIImage systemImageNamed:@"person.crop.circle"];
-    icon.tintColor = [ThemeManager.shared.accentColor colorWithAlphaComponent:0.8];
-    icon.contentMode = UIViewContentModeScaleAspectFit;
+    UIImageSymbolConfiguration *iconCfg = [UIImageSymbolConfiguration configurationWithPointSize:36 weight:UIFontWeightMedium];
+    icon.image = [UIImage systemImageNamed:@"person.crop.circle" withConfiguration:iconCfg];
+    icon.tintColor = ThemeManager.shared.accentColor;
+    icon.contentMode = UIViewContentModeCenter;
+    icon.backgroundColor = [ThemeManager.shared.accentColor colorWithAlphaComponent:0.10];
+    icon.layer.cornerRadius = 28;
+    icon.layer.borderWidth = 1.5;
+    icon.layer.borderColor = [ThemeManager.shared.accentColor colorWithAlphaComponent:0.25].CGColor;
     [_emptyStateView addSubview:icon];
 
     UILabel *title = [[UILabel alloc] init];
@@ -1274,6 +1297,10 @@ static NSString *AccountShortID(NSDictionary *account) {
     addButton.tintColor = ThemeManager.shared.buttonTextColor;
     addButton.backgroundColor = ThemeManager.shared.accentColor;
     addButton.layer.cornerRadius = 23;
+    addButton.layer.shadowColor = ThemeManager.shared.accentColor.CGColor;
+    addButton.layer.shadowOpacity = 0.4;
+    addButton.layer.shadowRadius = 10;
+    addButton.layer.shadowOffset = CGSizeMake(0, 4);
     [addButton addTarget:self action:@selector(addButtonTapped) forControlEvents:UIControlEventTouchUpInside];
     [_emptyStateView addSubview:addButton];
 
@@ -1281,9 +1308,9 @@ static NSString *AccountShortID(NSDictionary *account) {
     stack.translatesAutoresizingMaskIntoConstraints = NO;
     stack.axis = UILayoutConstraintAxisVertical;
     stack.alignment = UIStackViewAlignmentCenter;
-    stack.spacing = 14;
-    [stack setCustomSpacing:4 afterView:icon];
-    [stack setCustomSpacing:2 afterView:title];
+    stack.spacing = 16;
+    [stack setCustomSpacing:8 afterView:icon];
+    [stack setCustomSpacing:3 afterView:title];
     [_emptyStateView addSubview:stack];
 
     [NSLayoutConstraint activateConstraints:@[
@@ -1318,13 +1345,13 @@ static NSString *AccountShortID(NSDictionary *account) {
     _addFormView = [[UIView alloc] init];
     _addFormView.translatesAutoresizingMaskIntoConstraints = NO;
     _addFormView.backgroundColor = ThemeManager.shared.cardBackgroundColor;
-    _addFormView.layer.cornerRadius = 20;
+    _addFormView.layer.cornerRadius = 22;
     _addFormView.layer.borderWidth = 1;
     _addFormView.layer.borderColor = ThemeManager.shared.separatorColor.CGColor;
     _addFormView.layer.shadowColor = UIColor.blackColor.CGColor;
-    _addFormView.layer.shadowOpacity = 0.35;
-    _addFormView.layer.shadowRadius = 20;
-    _addFormView.layer.shadowOffset = CGSizeMake(0, 10);
+    _addFormView.layer.shadowOpacity = 0.30;
+    _addFormView.layer.shadowRadius = 26;
+    _addFormView.layer.shadowOffset = CGSizeMake(0, 8);
     _addFormView.clipsToBounds = YES;
     _addFormView.alpha = 0;
     _addFormView.userInteractionEnabled = NO;
@@ -1540,6 +1567,19 @@ static NSString *AccountShortID(NSDictionary *account) {
     [ThemeManager.shared styleSegmentedControl:_addTypeControl];
     [_addActionBtn setTitleColor:theme.buttonTextColor forState:UIControlStateNormal];
     _addActionBtn.backgroundColor = theme.accentColor;
+    _usernameField.textColor = theme.primaryTextColor;
+    _usernameField.backgroundColor = [theme.primaryTextColor colorWithAlphaComponent:0.06];
+    _usernameField.attributedPlaceholder = [[NSAttributedString alloc]
+        initWithString:_usernameField.placeholder
+        attributes:@{NSForegroundColorAttributeName: theme.secondaryTextColor}];
+    _passwordField.textColor = theme.primaryTextColor;
+    _passwordField.backgroundColor = [theme.primaryTextColor colorWithAlphaComponent:0.06];
+    _passwordField.attributedPlaceholder = [[NSAttributedString alloc]
+        initWithString:_passwordField.placeholder
+        attributes:@{NSForegroundColorAttributeName: theme.secondaryTextColor}];
+    _closeFormButton.tintColor = theme.secondaryTextColor;
+    _closeFormButton.backgroundColor = [theme.primaryTextColor colorWithAlphaComponent:0.10];
+    [_oauthLinkBtn setTitleColor:theme.accentColor forState:UIControlStateNormal];
     _addTypeControl.selectedSegmentIndex = MAX(0, _addTypeControl.selectedSegmentIndex);
 }
 
@@ -1793,8 +1833,8 @@ static NSString *AccountShortID(NSDictionary *account) {
 - (void)addElyOAuthTapped {
     NSURL *url = [ElyAuthenticator oauthAuthorizeURL];
     if (!url) {
-        showDialog(@"OAuth2 Not Configured",
-            @"Register an application at https://account.ely.by/dev/applications/new (type: Website), then fill in ELY_OAUTH_CLIENT_ID, ELY_OAUTH_CLIENT_SECRET and ELY_OAUTH_REDIRECT_URI in Natives/authenticator/ElyAuthenticator.m.");
+        showDialog(@"Ely.by OAuth2 Not Configured",
+            @"Register an application at https://account.ely.by/dev/applications/new (type: Website), then set WITCH_ELY_OAUTH_CLIENT_ID and WITCH_ELY_OAUTH_CLIENT_SECRET in Natives/Config/WitchConfig.h (or via --ely-client-id / --ely-client-secret of scripts/encrypt_witch_config.py).");
         return;
     }
     self.elyOAuthFlowActive = YES;
@@ -1874,8 +1914,8 @@ static NSString *AccountShortID(NSDictionary *account) {
                         [self toggleAddForm:NO animated:YES];
                     });
                 }];
-            } else if (params[@"error_description"] || params[@"error"]) {
-                showDialog(localize(@"Error", nil), params[@"error_description"] ?: params[@"error"]);
+            } else if (params[@"error_message"] || params[@"error_description"] || params[@"error"]) {
+                showDialog(localize(@"Error", nil), params[@"error_message"] ?: params[@"error_description"] ?: params[@"error"]);
             }
         } else if (params[@"code"]) {
             MicrosoftAuthenticator *auth = [[MicrosoftAuthenticator alloc] initWithInput:params[@"code"]];

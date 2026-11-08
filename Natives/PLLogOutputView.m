@@ -74,10 +74,14 @@ static const NSUInteger kMaxLogLines = 2000;
     [container addSubview:self.logTableView];
     [container addSubview:self.navigationBar];
 
+    // Register the live view BEFORE toggling capture: setCaptureEnabled: looks
+    // up `current` to install the play/pause bar button, so calling it while
+    // `current` is still nil silently dropped that button from the log panel.
+    current = self;
+
     canAppendToLog = YES;
     [self actionStartStopLogOutput];
 
-    current = self;
     return self;
 }
 
@@ -123,6 +127,14 @@ static const NSUInteger kMaxLogLines = 2000;
 - (void)actionClearLogOutput {
     [logLines removeAllObjects];
     [self.logTableView reloadData];
+}
+
++ (void)clearLog {
+    if (!logLines) return;
+    [logLines removeAllObjects];
+    if (current) {
+        [current.logTableView reloadData];
+    }
 }
 
 + (void)trimLogToMaxLines:(NSUInteger)maxLines {

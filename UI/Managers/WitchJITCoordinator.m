@@ -1,10 +1,21 @@
 #import "WitchJITCoordinator.h"
+#import "ios_uikit_bridge.h"
 #import "LauncherPreferences.h"
 #import "WitchJITHelperClient.h"
 #import "utils.h"
 #include <stdlib.h>
 
 NSString * const WitchJITStatusDidChangeNotification = @"WitchJITStatusDidChangeNotification";
+
+/// Extensions iOS and the pairing-file guides actually use. A `.plist` is only
+/// a weak candidate: the plist is validated by -importPairingFileAtURL:.
+static BOOL WitchIsPairingFileName(NSString *name) {
+    NSString *extension = name.pathExtension.lowercaseString;
+    if (extension.length == 0) return YES;
+    return [extension isEqualToString:@"plist"] ||
+           [extension isEqualToString:@"mobiledevicepairing"] ||
+           [extension isEqualToString:@"pairing"];
+}
 
 static NSString *const kWitchJITMethodKey = @"jit.method";
 static NSString *const kWitchJITForceScriptKey = @"jit.force_script";
@@ -145,6 +156,64 @@ static NSString *const kWitchJITForceScriptKey = @"jit.force_script";
 
 - (NSData *)pairingDataWithError:(NSError **)error {
     return [NSData dataWithContentsOfURL:self.pairingFileURL options:0 error:error];
+}
+
+- (NSURL *)inboxURL {
+    NSURL *documents = [NSFileManager.defaultManager URLsForDirectory:NSDocumentDirectory
+                                                            inDomains:NSUserDomainMask].firstObject;
+    return [documents URLByAppendingPathComponent:@"Inbox" isDirectory:YES];
+}
+
++ (BOOL)handleIncomingPairingURL:(NSURL *)url {
+    if (!url.isFileURL || !WitchIsPairingFileName(url.lastPathComponent)) return NO;
+
+    BOOL strongCandidate = ![url.pathExtension.lowercaseString isEqualToString:@"plist"];
+    NSError *error = nil;
+    if ([[self shared] importPairingFileAtURL:url error:&error]) {
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.8 * NSEC_PER_SEC)),
+                       dispatch_get_main_queue(), ^{
+            showDialog(localize(@"jit.imported", nil), localize(@"jit.imported.message", nil));
+        });
+        return YES;
+    }
+    // A plain plist may belong to another feature: leave it alone silently.
+    if (!strongCandidate) return NO;
+
+    NSString *message = error.localizedDescription ?: @"Unknown error";
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.8 * NSEC_PER_SEC)),
+                   dispatch_get_main_queue(), ^{
+        showDialog(localize(@"jit.import_failed", nil), message);
+    });
+    return YES;
+}
+
+- (BOOL)importInboxPairingFileIfNeeded {
+    NSFileManager *manager = NSFileManager.defaultManager;
+    NSURL *inbox = self.inboxURL;
+    NSArray<NSURL *> *entries = [manager contentsOfDirectoryAtURL:inbox
+                                       includingPropertiesForKeys:@[NSURLContentModificationDateKey]
+                                                          options:NSDirectoryEnumerationSkipsHiddenFiles
+                                                            error:nil];
+    if (entries.count == 0) return NO;
+
+    entries = [entries sortedArrayUsingComparator:^NSComparisonResult(NSURL *a, NSURL *b) {
+        NSDate *da = [a resourceValuesForKeys:@[NSURLContentModificationDateKey] error:nil][NSURLContentModificationDateKey] ?: NSDate.distantPast;
+        NSDate *db = [b resourceValuesForKeys:@[NSURLContentModificationDateKey] error:nil][NSURLContentModificationDateKey] ?: NSDate.distantPast;
+        return [db compare:da];
+    }];
+
+    for (NSURL *url in entries) {
+        if (!WitchIsPairingFileName(url.lastPathComponent)) continue;
+        BOOL isDirectory = NO;
+        if (![manager fileExistsAtPath:url.path isDirectory:&isDirectory] || isDirectory) continue;
+        NSError *error = nil;
+        if ([self importPairingFileAtURL:url error:&error]) {
+            [manager removeItemAtURL:url error:nil];
+            NSLog(@"[WitchJIT] Imported pairing file from Documents/Inbox");
+            return YES;
+        }
+    }
+    return NO;
 }
 
 #pragma mark - Script

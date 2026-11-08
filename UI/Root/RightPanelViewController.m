@@ -21,6 +21,7 @@
 @property (nonatomic) UIStackView *versionsStack;
 @property (nonatomic) UIScrollView *versionsScroll;
 @property (nonatomic) UIButton *addVersionButton;
+@property (nonatomic) UIButton *backupButton;
 @property (nonatomic) NSArray *installedVersions;
 @end
 
@@ -112,6 +113,13 @@
     _versionsStack.spacing = 2;
     [_versionsScroll addSubview:_versionsStack];
 
+    _backupButton = [UIButton buttonWithType:UIButtonTypeSystem];
+    _backupButton.translatesAutoresizingMaskIntoConstraints = NO;
+    [_backupButton setImage:[UIImage systemImageNamed:@"icloud.and.arrow.up"] forState:UIControlStateNormal];
+    _backupButton.accessibilityLabel = localize(@"Backup & Restore", nil);
+    [_backupButton addTarget:self action:@selector(didTapBackup) forControlEvents:UIControlEventTouchUpInside];
+    [contentView addSubview:_backupButton];
+
     _addVersionButton = [UIButton buttonWithType:UIButtonTypeSystem];
     _addVersionButton.translatesAutoresizingMaskIntoConstraints = NO;
     _addVersionButton.titleLabel.font = [UIFont systemFontOfSize:12 weight:UIFontWeightSemibold];
@@ -144,6 +152,11 @@
         [_skinPreviewView.centerXAnchor constraintEqualToAnchor:contentView.centerXAnchor],
         [_skinPreviewView.widthAnchor constraintEqualToConstant:40],
         [_skinPreviewView.heightAnchor constraintEqualToConstant:40],
+
+        [_backupButton.topAnchor constraintEqualToAnchor:contentView.topAnchor constant:2],
+        [_backupButton.trailingAnchor constraintEqualToAnchor:contentView.trailingAnchor constant:-2],
+        [_backupButton.widthAnchor constraintEqualToConstant:28],
+        [_backupButton.heightAnchor constraintEqualToConstant:28],
 
         [_accountNameLabel.topAnchor constraintEqualToAnchor:_skinPreviewView.bottomAnchor constant:2],
         [_accountNameLabel.leadingAnchor constraintEqualToAnchor:contentView.leadingAnchor],
@@ -212,6 +225,7 @@
     _versionsLabel.textColor = theme.secondaryTextColor;
     _addVersionButton.tintColor = theme.accentColor;
     _addVersionButton.backgroundColor = [theme.accentColor colorWithAlphaComponent:0.12];
+    _backupButton.tintColor = theme.secondaryTextColor;
     _launchButton.backgroundColor = theme.accentColor;
     [_launchButton setTitleColor:theme.buttonTextColor forState:UIControlStateNormal];
 }
@@ -220,6 +234,12 @@
     _accountNameLabel.text = name ?: localize(@"account.no_account", nil);
     if (skin) {
         _skinPreviewView.image = skin;
+        _skinPreviewView.tintColor = [UIColor clearColor];
+    } else {
+        // Reset instead of keeping the previous account's head when the new
+        // account's skin is still loading (or has no skin).
+        _skinPreviewView.image = [UIImage systemImageNamed:@"person.circle"];
+        _skinPreviewView.tintColor = [UIColor lightGrayColor];
     }
 }
 
@@ -430,6 +450,11 @@
 - (void)didTapAccount {
     [HapticManager.shared play:HapticTypeLight];
     if (self.delegate) [self.delegate rightPanelDidTapAccount];
+}
+
+- (void)didTapBackup {
+    [HapticManager.shared play:HapticTypeLight];
+    if (self.delegate) [self.delegate rightPanelDidTapBackup];
 }
 
 - (void)didTapLaunch {

@@ -1,5 +1,6 @@
 #import "LauncherUpdateViewController.h"
 #import "WitchUpdateService.h"
+#import "LauncherPreferences.h"
 #import "ThemeManager.h"
 #import "AmethystBlurView.h"
 #import "HapticManager.h"
@@ -141,7 +142,7 @@ typedef NS_ENUM(NSInteger, UpdateSection) {
 
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section {
     if (section == UpdateSectionInfo) return 1;
-    if (section == UpdateSectionOptions) return 2;
+    if (section == UpdateSectionOptions) return 3;
     return _releases.count;
 }
 
@@ -185,6 +186,17 @@ typedef NS_ENUM(NSInteger, UpdateSection) {
             cell.textLabel.text = localize(@"launcher_update.channel.title", nil);
             cell.detailTextLabel.text = [WitchUpdateService.shared channelDisplayName:self.selectedChannel];
             cell.imageView.image = [UIImage systemImageNamed:@"antenna.radiowaves.left.and.right"];
+        } else if (indexPath.row == 1) {
+            cell.textLabel.text = localize(@"launcher_update.auto_check", nil);
+            cell.detailTextLabel.text = localize(@"launcher_update.auto_check_detail", nil);
+            cell.accessoryType = UITableViewCellAccessoryNone;
+            cell.selectionStyle = UITableViewCellSelectionStyleNone;
+            UISwitch *toggle = [UISwitch new];
+            toggle.onTintColor = ThemeManager.shared.accentColor;
+            toggle.on = getPrefBool(@"witch.update_auto_check");
+            [toggle addTarget:self action:@selector(autoCheckChanged:) forControlEvents:UIControlEventValueChanged];
+            cell.accessoryView = toggle;
+            cell.imageView.image = [UIImage systemImageNamed:@"arrow.triangle.2.circlepath"];
         } else {
             cell.textLabel.text = localize(@"launcher_update.variant.title", nil);
             cell.detailTextLabel.text = (self.selectedVariant == WitchAppVariantSlimmed) ? localize(@"launcher_update.variant.slim", nil) : localize(@"launcher_update.variant.full", nil);
@@ -232,12 +244,16 @@ typedef NS_ENUM(NSInteger, UpdateSection) {
     [tableView deselectRowAtIndexPath:indexPath animated:YES];
     if (indexPath.section == UpdateSectionOptions) {
         if (indexPath.row == 0) [self showChannelPicker];
-        else [self showVariantPicker];
+        else if (indexPath.row == 2) [self showVariantPicker];
         return;
     }
     if (indexPath.section == UpdateSectionReleases) {
         [self showReleaseAssets:_releases[indexPath.row]];
     }
+}
+
+- (void)autoCheckChanged:(UISwitch *)sender {
+    setPrefBool(@"witch.update_auto_check", sender.on);
 }
 
 #pragma mark - Pickers (custom sheets, no UIKit alerts)
