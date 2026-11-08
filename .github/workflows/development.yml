@@ -240,10 +240,27 @@ jobs:
 
           SIGN_FLAGS="CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY= APP_ICON=AppIcon-Development"
 
-          # WARNING MITIGATION: Filter runtime stderr streams to suppress repetitive upstream vtool signature warnings
-          gmake -j$(sysctl -n hw.ncpu) dsym package PLATFORM=2 $SIGN_FLAGS 2> >(grep -v "vtool warning: code signature will be invalid" >&2)
-          
-          gmake -j$(sysctl -n hw.ncpu) dsym package PLATFORM=2 TROLLSTORE_JIT_ENT=1 $SIGN_FLAGS 2> >(grep -v "vtool warning: code signature will be invalid" >&2)
+          # Keep the live log filtered (vtool signature warnings are noise) but
+          # also capture the raw stream, so a failure can print the unfiltered
+          # tail (make reports recipe errors on stderr, which a process
+          # substitution can swallow when the step is killed).
+          run_build() {
+            local log="$1"; shift
+            set -o pipefail
+            if ! "$@" 2>&1 | tee "$log" | { grep -v "vtool warning: code signature will be invalid" || true; }; then
+              echo "::error::command failed: $*"
+              echo "----- raw tail ($log) -----"
+              tail -n 200 "$log"
+              echo "--------------------------"
+              return 1
+            fi
+          }
+
+          run_build /tmp/witch-build-sideload.log \
+            gmake -j$(sysctl -n hw.ncpu) dsym package PLATFORM=2 $SIGN_FLAGS
+
+          run_build /tmp/witch-build-trollstore.log \
+            gmake -j$(sysctl -n hw.ncpu) dsym package PLATFORM=2 TROLLSTORE_JIT_ENT=1 $SIGN_FLAGS
 
       - name: List artifacts
         if: always()
