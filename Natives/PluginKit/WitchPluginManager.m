@@ -9,9 +9,15 @@
 
 #if __has_include("Config/WitchConfig.h")
 #import "Config/WitchConfig.h"
-#else
+#endif
+
+#ifndef WITCH_DEFAULT_BASE_URL
 #define WITCH_DEFAULT_BASE_URL @""
+#endif
+#ifndef WITCH_PLUGIN_OFFICIAL_KEY_ID
 #define WITCH_PLUGIN_OFFICIAL_KEY_ID @""
+#endif
+#ifndef WITCH_PLUGIN_OFFICIAL_PUBLIC_KEY
 #define WITCH_PLUGIN_OFFICIAL_PUBLIC_KEY @""
 #endif
 
