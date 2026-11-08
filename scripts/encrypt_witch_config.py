@@ -74,6 +74,8 @@ def main():
     parser.add_argument('--google-client-id', default=os.environ.get('WITCH_GOOGLE_DRIVE_CLIENT_ID', ''))
     parser.add_argument('--ms-client-id', default=os.environ.get('WITCH_MS_OAUTH_CLIENT_ID', ''))
     parser.add_argument('--dropbox-app-key', default=os.environ.get('WITCH_DROPBOX_APP_KEY', ''))
+    parser.add_argument('--plugin-key-id', default=os.environ.get('WITCH_PLUGIN_OFFICIAL_KEY_ID', ''))
+    parser.add_argument('--plugin-public-key', default=os.environ.get('WITCH_PLUGIN_OFFICIAL_PUBLIC_KEY', ''))
     parser.add_argument('--ely-client-id', default=os.environ.get('WITCH_ELY_OAUTH_CLIENT_ID', ''))
     parser.add_argument('--ely-client-secret', default=os.environ.get('WITCH_ELY_OAUTH_CLIENT_SECRET', ''))
     parser.add_argument('--ely-redirect-uri', default=os.environ.get('WITCH_ELY_OAUTH_REDIRECT_URI', ''))
@@ -102,6 +104,8 @@ def main():
 #define WITCH_GOOGLE_DRIVE_CLIENT_ID @"{args.google_client_id}"
 #define WITCH_MS_OAUTH_CLIENT_ID @"{args.ms_client_id}"
 #define WITCH_DROPBOX_APP_KEY @"{args.dropbox_app_key}"
+#define WITCH_PLUGIN_OFFICIAL_KEY_ID @"{args.plugin_key_id}"
+#define WITCH_PLUGIN_OFFICIAL_PUBLIC_KEY @"{args.plugin_public_key}"
 #define WITCH_ELY_OAUTH_CLIENT_ID @"{args.ely_client_id}"
 #define WITCH_ELY_OAUTH_CLIENT_SECRET @"{args.ely_client_secret}"
 #define WITCH_ELY_OAUTH_REDIRECT_URI @"{args.ely_redirect_uri}"
@@ -159,6 +163,8 @@ def main():
 #define WITCH_GOOGLE_DRIVE_CLIENT_ID @"{args.google_client_id}"
 #define WITCH_MS_OAUTH_CLIENT_ID @"{args.ms_client_id}"
 #define WITCH_DROPBOX_APP_KEY @"{args.dropbox_app_key}"
+#define WITCH_PLUGIN_OFFICIAL_KEY_ID @"{args.plugin_key_id}"
+#define WITCH_PLUGIN_OFFICIAL_PUBLIC_KEY @"{args.plugin_public_key}"
 #define WITCH_ELY_OAUTH_CLIENT_ID @"{args.ely_client_id}"
 #define WITCH_ELY_OAUTH_CLIENT_SECRET @"{args.ely_client_secret}"
 #define WITCH_ELY_OAUTH_REDIRECT_URI @"{args.ely_redirect_uri}"
@@ -178,6 +184,8 @@ def main():
 #define WITCH_GOOGLE_DRIVE_CLIENT_ID @"{args.google_client_id}"
 #define WITCH_MS_OAUTH_CLIENT_ID @"{args.ms_client_id}"
 #define WITCH_DROPBOX_APP_KEY @"{args.dropbox_app_key}"
+#define WITCH_PLUGIN_OFFICIAL_KEY_ID @"{args.plugin_key_id}"
+#define WITCH_PLUGIN_OFFICIAL_PUBLIC_KEY @"{args.plugin_public_key}"
 #define WITCH_ELY_OAUTH_CLIENT_ID @"{args.ely_client_id}"
 #define WITCH_ELY_OAUTH_CLIENT_SECRET @"{args.ely_client_secret}"
 #define WITCH_ELY_OAUTH_REDIRECT_URI @"{args.ely_redirect_uri}"

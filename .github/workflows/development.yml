@@ -145,6 +145,8 @@ jobs:
           WITCH_GOOGLE_DRIVE_CLIENT_ID: ${{ secrets.WITCH_GOOGLE_DRIVE_CLIENT_ID }}
           WITCH_MS_OAUTH_CLIENT_ID: ${{ secrets.WITCH_MS_OAUTH_CLIENT_ID }}
           WITCH_DROPBOX_APP_KEY: ${{ secrets.WITCH_DROPBOX_APP_KEY }}
+          WITCH_PLUGIN_OFFICIAL_KEY_ID: ${{ secrets.WITCH_PLUGIN_OFFICIAL_KEY_ID }}
+          WITCH_PLUGIN_OFFICIAL_PUBLIC_KEY: ${{ secrets.WITCH_PLUGIN_OFFICIAL_PUBLIC_KEY }}
         run: |
           mkdir -p Natives/Config
           if [ -n "$WITCH_ENCRYPTION_KEY" ]; then
@@ -183,6 +185,8 @@ jobs:
         env:
           WITCH_GOOGLE_DRIVE_CLIENT_ID: ${{ secrets.WITCH_GOOGLE_DRIVE_CLIENT_ID }}
           WITCH_DROPBOX_APP_KEY: ${{ secrets.WITCH_DROPBOX_APP_KEY }}
+          WITCH_PLUGIN_OFFICIAL_KEY_ID: ${{ secrets.WITCH_PLUGIN_OFFICIAL_KEY_ID }}
+          WITCH_PLUGIN_OFFICIAL_PUBLIC_KEY: ${{ secrets.WITCH_PLUGIN_OFFICIAL_PUBLIC_KEY }}
         run: |
           JDK_BASE_PATH="${{ steps.setup-java.outputs.path }}"
           export PATH="$JDK_BASE_PATH/bin:/opt/homebrew/bin:$PATH"
