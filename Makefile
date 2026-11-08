@@ -320,7 +320,6 @@ jre: native
 	mkdir -p $(SOURCEDIR)/depends
 	@if [ '$(JRE_BUILD_MODE)' = 'download' ]; then \
 		echo '[Witch] JRE_BUILD_MODE=download: fetching prebuilt packages'; \
-		rm -f $(SOURCEDIR)/depends/jre*.tar.xz; \
 	else \
 		echo '[Witch] JRE_BUILD_MODE=build: building from source'; \
 		for ver in $(JRE_VERSIONS); do \
