@@ -551,25 +551,26 @@ dep_tglmt:
 METALBRIDGE_SRC ?= /Volumes/project/MetalBridgeA9
 dep_metalbridge:
 	echo '[Witch v$(VERSION)] dep_metalbridge - start'
-	if [ ! -d "$(METALBRIDGE_SRC)/MetalBridge.xcodeproj" ]; then \
-		echo 'ERROR: MetalBridge.xcodeproj not found at $(METALBRIDGE_SRC)'; exit 1; \
+	if [ -d "$(METALBRIDGE_SRC)/MetalBridge.xcodeproj" ]; then \
+		if ! command -v xcodebuild >/dev/null 2>&1; then \
+			echo 'ERROR: xcodebuild not found. Install Xcode command line tools.'; exit 1; \
+		fi; \
+		echo '[Witch] Installing/updating Metal Toolchain...'; \
+		xcodebuild -downloadComponent MetalToolchain || { echo 'ERROR: Failed to install Metal Toolchain (run: sudo xcodebuild -downloadComponent MetalToolchain)'; exit 1; }; \
+		(cd "$(METALBRIDGE_SRC)" && xcodegen generate >/dev/null 2>&1 || true); \
+		(cd "$(METALBRIDGE_SRC)" && xcodebuild -project MetalBridge.xcodeproj \
+			-target MetalBridgeKit -configuration Release -sdk iphoneos \
+			-arch arm64 CODE_SIGNING_ALLOWED=NO build) || { echo 'ERROR: MetalBridgeKit build failed'; exit 1; }; \
+		rm -rf "$(SOURCEDIR)/Natives/resources/Frameworks/MetalBridgeKit.framework"; \
+		cp -pR "$(METALBRIDGE_SRC)/build/Release-iphoneos/MetalBridgeKit.framework" \
+			"$(SOURCEDIR)/Natives/resources/Frameworks/MetalBridgeKit.framework"; \
+	else \
+		echo '[Witch] METALBRIDGE_SRC not found at $(METALBRIDGE_SRC), keeping vendored MetalBridgeKit.framework'; \
 	fi
-	if ! command -v xcodebuild >/dev/null 2>&1; then \
-		echo 'ERROR: xcodebuild not found. Install Xcode command line tools.'; exit 1; \
-	fi
-	echo '[Witch] Installing/updating Metal Toolchain...'
-	xcodebuild -downloadComponent MetalToolchain || { echo 'ERROR: Failed to install Metal Toolchain (run: sudo xcodebuild -downloadComponent MetalToolchain)'; exit 1; }
-	(cd "$(METALBRIDGE_SRC)" && xcodegen generate >/dev/null 2>&1 || true)
-	(cd "$(METALBRIDGE_SRC)" && xcodebuild -project MetalBridge.xcodeproj \
-		-target MetalBridgeKit -configuration Release -sdk iphoneos \
-		-arch arm64 CODE_SIGNING_ALLOWED=NO build) || { echo 'ERROR: MetalBridgeKit build failed'; exit 1; }
-	rm -rf "$(SOURCEDIR)/Natives/resources/Frameworks/MetalBridgeKit.framework"
-	cp -pR "$(METALBRIDGE_SRC)/build/Release-iphoneos/MetalBridgeKit.framework" \
-		"$(SOURCEDIR)/Natives/resources/Frameworks/MetalBridgeKit.framework"
 	test -d "$(SOURCEDIR)/Natives/resources/Frameworks/MetalBridgeKit.framework" && \
 		test -f "$(SOURCEDIR)/Natives/resources/Frameworks/MetalBridgeKit.framework/MetalBridgeKit" && \
 		test -f "$(SOURCEDIR)/Natives/resources/Frameworks/MetalBridgeKit.framework/default.metallib" || \
-		{ echo 'ERROR: MetalBridgeKit.framework missing or incomplete'; exit 1; }
+		{ echo 'ERROR: MetalBridgeKit.framework missing or incomplete (set METALBRIDGE_SRC or vendor the framework)'; exit 1; }
 	echo '[Witch v$(VERSION)] dep_metalbridge - end'
 
 dep_tgles:
