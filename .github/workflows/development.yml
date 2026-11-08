@@ -56,14 +56,31 @@ jobs:
       - name: Set up Xcode Version
         run: |
           ls -d /Applications/Xcode*.app || true
-          # Prefer the newest installed Xcode (iOS 26 SDK is required for the
-          # BGContinuedProcessingTask APIs in SceneDelegate.m).
-          LATEST_XCODE=$(ls -d /Applications/Xcode*.app 2>/dev/null | sort -V | tail -1)
-          if [ -n "$LATEST_XCODE" ]; then
-            echo "Selected $LATEST_XCODE"
-            sudo xcode-select -s "$LATEST_XCODE"
+          # The prebuilt StikJIT.xcframework carries a serialized swiftinterface
+          # from a specific toolchain; Swift refuses it from a newer compiler
+          # ("SDK is not supported by the compiler"). Pick the Xcode whose
+          # swiftc version matches the interface, else the newest one (iOS 26
+          # SDK is required for BGContinuedProcessingTask in SceneDelegate.m).
+          IFACE=$(find third_party/stikjit/StikJIT.xcframework -name '*.private.swiftinterface' | head -1)
+          REQ_SWIFT=$(sed -n 's/.*swift-compiler-version: Apple Swift version \([0-9.]*\).*/\1/p' "$IFACE" | head -1)
+          echo "StikJIT interface built with Swift ${REQ_SWIFT:-unknown}"
+          SELECTED=""
+          for X in $(ls -d /Applications/Xcode*.app 2>/dev/null | sort -V -r); do
+            V=$("$X/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc" --version 2>/dev/null | sed -n 's/.*Apple Swift version \([0-9.]*\).*/\1/p' | head -1)
+            echo "  $X -> Swift ${V:-?}"
+            if [ -n "$REQ_SWIFT" ] && [ "$V" = "$REQ_SWIFT" ]; then
+              SELECTED="$X"; break
+            fi
+          done
+          if [ -z "$SELECTED" ]; then
+            SELECTED=$(ls -d /Applications/Xcode*.app 2>/dev/null | sort -V | tail -1)
+          fi
+          if [ -n "$SELECTED" ]; then
+            echo "Selected $SELECTED"
+            sudo xcode-select -s "$SELECTED"
           fi
           xcodebuild -version
+          swiftc --version
           xcrun --sdk iphoneos --show-sdk-version
 
       # provision the stable zulu jdk 8 runtime environment as structured in the upstream core
