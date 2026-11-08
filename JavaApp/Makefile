@@ -52,16 +52,16 @@ $(CLASSES): $(OUTPUTDIR)/%.class: $(SOURCEDIR)/%.java
 	base="$$(basename "$$src" .java)"; \
 	echo "Compiling $$src"; \
 	mkdir -p "$$out"; \
-	find "$$out" -maxdepth 1 -name "$$base*.class" -delete; \
+	find "$$out" -maxdepth 1 \( -name "$$base.class" -o -name "$$base\$$*.class" \) -delete; \
 	staging="$$(mktemp -d)"; \
 	trap 'rm -rf "$$staging"' EXIT; \
 	"$(BOOTJDK)/javac" $(JCFLAGS) -d "$$staging" "$$src"; \
-	count=$$(find "$$staging" -name "$$base*.class" | wc -l | tr -d ' '); \
+	count=$$(find "$$staging" \( -name "$$base.class" -o -name "$$base\$$*.class" \) | wc -l | tr -d ' '); \
 	if [ "$$count" -eq 0 ]; then \
 		echo "Error: javac produced no class files for $$src"; \
 		exit 1; \
 	fi; \
-	find "$$staging" -name "$$base*.class" -exec cp {} "$$out" \;
+	find "$$staging" \( -name "$$base.class" -o -name "$$base\$$*.class" \) -exec cp {} "$$out" \;
 
 # The iOS shims (MacosUtil, GLFWNativeCocoa) are embedded into launcher.jar
 # (/macosfix/) so patchMacPlatformShims() can overwrite mod-bundled REAL copies
