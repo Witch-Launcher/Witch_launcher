@@ -51,6 +51,15 @@ MMAP_FALLBACK_OFF = 0x54  # patch_off + 0x54: mov x0, #0 — mmap() fallback ent
 CBZ_X0_ERR_INSN = 0xB4000400  # cbz x0, <+0x80> at VMREMAP_PATH_OFF (0x897d2c)
 MOV_W21_2_INSN = 0x52800055  # mov w21, #2 at VMREMAP_PATH_OFF + 4
 MOV_X0_0_INSN = 0xD2800000  # mov x0, #0 at MMAP_FALLBACK_OFF
+CMN_X21_1_INSN = 0xB10006BF  # cmn x21, #1 (Java 8 mapping guard)
+MOV_X20_X0_INSN = 0xAA0003F4  # mov x20, x0 (JDK 17/21/25: x20 holds the RX base)
+MOV_X21_X0_INSN = 0xAA0003F5  # mov x21, x0 (JDK 8: x21 holds the RX base)
+
+# JDK 17/21/25 layout: mmap fallback at +0x54, vm_remap tail at +0x74.
+# JDK 8 (1.8.0_4xx): shorter function, fallback at +0x24 and the cmn x21 guard
+# at +0x44; the debugger-allocated region lives in x21, not x20.
+LAYOUT_NEW = (MMAP_FALLBACK_OFF, VMREMAP_PATH_OFF, MOV_X20_X0_INSN, 11)
+LAYOUT_JDK8 = (0x24, 0x44, MOV_X21_X0_INSN, 9)  # 36-byte window: the mmap fallback starts at +0x24
 
 
 def decode_adrp_add(data: bytes, pc: int) -> int | None:
@@ -92,37 +101,36 @@ def find_patch_offset(data: bytes) -> int | None:
     return None
 
 
-def success_branch_insn(patch_off: int) -> int:
+def detect_layout(data: bytes, patch_off: int):
+    if patch_off + MMAP_FALLBACK_OFF + 8 <= len(data):
+        if (struct.unpack_from("<I", data, patch_off + MMAP_FALLBACK_OFF)[0] == MOV_X0_0_INSN
+                and struct.unpack_from("<I", data, patch_off + VMREMAP_PATH_OFF)[0] == CBZ_X0_ERR_INSN
+                and struct.unpack_from("<I", data, patch_off + VMREMAP_PATH_OFF + 4)[0] == MOV_W21_2_INSN):
+            return LAYOUT_NEW
+    fallback_off, success_off, _, _ = LAYOUT_JDK8
+    if patch_off + success_off + 8 <= len(data):
+        guard = struct.unpack_from("<I", data, patch_off + success_off)[0]
+        branch = struct.unpack_from("<I", data, patch_off + success_off + 4)[0]
+        if (struct.unpack_from("<I", data, patch_off + fallback_off)[0] == MOV_X0_0_INSN
+                and guard == CMN_X21_1_INSN
+                and (branch & 0xFF00001F) == 0x54000000):
+            return LAYOUT_JDK8
+    return None
+
+
+def success_branch_insn(patch_off: int, target_off: int) -> int:
     b_pc = patch_off + SUCCESS_BRANCH_OFF
-    b_target = patch_off + VMREMAP_PATH_OFF
+    b_target = patch_off + target_off
     b_imm = (b_target - b_pc) // 4
     if b_imm <= 0 or b_imm >= 0x4000000:
         raise ValueError(f"b offset out of range ({b_imm})")
     return 0x14000000 | (b_imm & 0x03FFFFFF)
 
 
-def verify_tail_layout(data: bytes, patch_off: int) -> bool:
-    """Confirm the code after the patch window matches the expected libjvm layout.
-
-    Guarantees the success/failure branch targets point at real instructions:
-      +0x54 mov x0, #0   (mmap fallback entry)
-      +0x74 cbz x0, err  (guard before the vm_remap tail)
-      +0x78 mov w21, #2  (vm_remap inheritance arg setup)
-    """
-    if patch_off + VMREMAP_PATH_OFF + 8 > len(data):
-        return False
-    if struct.unpack_from("<I", data, patch_off + MMAP_FALLBACK_OFF)[0] != MOV_X0_0_INSN:
-        return False
-    if struct.unpack_from("<I", data, patch_off + VMREMAP_PATH_OFF)[0] != CBZ_X0_ERR_INSN:
-        return False
-    if struct.unpack_from("<I", data, patch_off + VMREMAP_PATH_OFF + 4)[0] != MOV_W21_2_INSN:
-        return False
-    return True
-
-
-def patch_brk_sequence(data: bytearray, patch_off: int) -> None:
+def patch_brk_sequence(data: bytearray, patch_off: int, layout) -> None:
+    fallback_off, success_off, reg_move, window = layout
     cbz_pc = patch_off + 16
-    mmap_target = patch_off + MMAP_FALLBACK_OFF
+    mmap_target = patch_off + fallback_off
     cbz_imm = (mmap_target - cbz_pc) // 4
     if cbz_imm <= 0 or cbz_imm >= 0x40000:
         raise ValueError(f"cbz offset out of range ({cbz_imm})")
@@ -133,14 +141,15 @@ def patch_brk_sequence(data: bytearray, patch_off: int) -> None:
         MOV_X16_1,
         BRK_F00D,
         0xB4000000 | ((cbz_imm & 0x7FFFF) << 5),
-        0xAA0003F4,
+        reg_move,
         0xF90003E0,
-        success_branch_insn(patch_off),
+        success_branch_insn(patch_off, success_off),
         NOP,
         NOP,
         NOP,
     ]
-    data[patch_off : patch_off + PATCH_WINDOW] = struct.pack(f"<{len(patch_words)}I", *patch_words)
+    patch_words = patch_words[:window]
+    data[patch_off : patch_off + 4 * len(patch_words)] = struct.pack(f"<{len(patch_words)}I", *patch_words)
 
 
 def patch(path: Path) -> str:
@@ -149,9 +158,11 @@ def patch(path: Path) -> str:
     if patch_off is None:
         return "skip: get_debug_jit_mapping call site not found"
 
-    if not verify_tail_layout(data, patch_off):
+    layout = detect_layout(data, patch_off)
+    if layout is None:
         return (f"warn: unexpected tail layout after {patch_off:#x}; branch targets "
-                f"(+{MMAP_FALLBACK_OFF:#x}/+{VMREMAP_PATH_OFF:#x}) unverified, not patching")
+                f"unverified, not patching")
+    fallback_off, success_off, reg_move, _ = layout
 
     size_store_off = patch_off - 0x10
     if size_store_off < 0:
@@ -171,8 +182,8 @@ def patch(path: Path) -> str:
     cbz_insn = struct.unpack_from("<I", data, patch_off + 16)[0]
     branch_insn = struct.unpack_from("<I", data, patch_off + SUCCESS_BRANCH_OFF)[0]
     tail_insn = struct.unpack_from("<I", data, patch_off + 32)[0]
-    expected_cbz = 0xB4000000 | ((((patch_off + MMAP_FALLBACK_OFF) - (patch_off + 16)) // 4) << 5)
-    expected_branch = success_branch_insn(patch_off)
+    expected_cbz = 0xB4000000 | ((((patch_off + fallback_off) - (patch_off + 16)) // 4) << 5)
+    expected_branch = success_branch_insn(patch_off, success_off)
     already_ok = (
         first == LDR_X1_SP8
         and third == MOV_X16_1
@@ -181,12 +192,13 @@ def patch(path: Path) -> str:
         and branch_insn == expected_branch
         and tail_insn == NOP
         and size_insn == STP_X8_X19_SP
+        and struct.unpack_from("<I", data, patch_off + 20)[0] == reg_move
     )
     if already_ok:
         return f"skip: already patched @ {patch_off:#x}"
 
     if first == LDR_X1_SP8 and brk_insn == BRK_F00D:
-        patch_brk_sequence(data, patch_off)
+        patch_brk_sequence(data, patch_off, layout)
         notes.append(f"refreshed brk sequence @ {patch_off:#x}")
         path.write_bytes(data)
         return "ok: " + "; ".join(notes)
@@ -194,10 +206,10 @@ def patch(path: Path) -> str:
     original = bytes(data[patch_off : patch_off + PATCH_WINDOW])
     mov_insn, brk_call = struct.unpack_from("<II", original, 0)
     if mov_insn == 0xAA1303E0 and (brk_call & 0xFC000000) == 0x94000000:
-        patch_brk_sequence(data, patch_off)
+        patch_brk_sequence(data, patch_off, layout)
         notes.append(f"brk #0xf00d @ {patch_off:#x}")
-    elif mov_insn in (0xAA1303E1, LDR_X1_SP8) and struct.unpack_from("<I", original, 8)[0] in (MOV_X16_1, 0xD2800200):
-        patch_brk_sequence(data, patch_off)
+    elif mov_insn in (0xAA1303E1, LDR_X1_SP8, 0xAA1303E0) and struct.unpack_from("<I", original, 8)[0] in (MOV_X16_1, 0xD2800200):
+        patch_brk_sequence(data, patch_off, layout)
         notes.append(f"updated brk sequence @ {patch_off:#x}")
     else:
         return f"warn: unexpected prologue at {patch_off:#x}: {original[:8].hex()}"

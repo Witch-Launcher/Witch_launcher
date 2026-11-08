@@ -339,16 +339,15 @@ jre: native
 			echo "[Witch] extracting jre$${ver}-*.tar.xz"; \
 			mkdir -p "java-$${ver}-openjdk"; tar xf jre$${ver}-*.tar.xz -C "java-$${ver}-openjdk"; return 0; \
 		fi; \
-		if ! ls jre$${ver}-*.zip jre$${ver}-ios-aarch64.zip >/dev/null 2>&1; then \
+		if ! ls jre$${ver}-*.tar.xz >/dev/null 2>&1; then \
 			echo "[Witch] downloading jre$${ver} ..."; \
-			wget -q --show-progress "$$url"; \
+			wget -q --show-progress -O "jre$${ver}-ios-aarch64.tar.xz" "$$url"; \
 		fi; \
-		unzip jre$${ver}-ios-aarch64.zip && rm jre$${ver}-ios-aarch64.zip; \
 		mkdir -p "java-$${ver}-openjdk"; \
-		tar xf jre$${ver}-*.tar.xz -C "java-$${ver}-openjdk"; \
+		tar xf "jre$${ver}-ios-aarch64.tar.xz" -C "java-$${ver}-openjdk"; \
 	}; \
 	for ver in $(JRE_VERSIONS); do \
-		unpack_jre "$$ver" "https://assets.angelauramc.dev/openjdk/ios-arm64/jre$${ver}-ios-aarch64.zip"; \
+		unpack_jre "$$ver" "https://github.com/Witch-Launcher/JDK-Java_iOS/releases/download/jre-runtimes-20261108/jre$${ver}-ios-aarch64.tar.xz"; \
 	done; \
 	if ls jre*.tar.xz >/dev/null 2>&1; then rm -f jre*.tar.xz; fi; \
 	rm -rf $(SOURCEDIR)/depends/java-{8,17,21,25}-openjdk/{ASSEMBLY_EXCEPTION,bin,include,jre,legal,LICENSE,man,THIRD_PARTY_README,lib/{ct.sym,jspawnhelper,libjsig.dylib,src.zip,tools.jar}}; \

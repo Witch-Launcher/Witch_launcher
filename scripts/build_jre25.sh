@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
-# Downloads the iOS-built OpenJDK 25 from assets.angelauramc.dev
+# Downloads the iOS-built OpenJDK 25 (patched mirror-JIT runtime) from the
+# JDK-Java_iOS GitHub release.
 #
-# The release is a .zip containing a .tar.xz with the JRE contents.
+# The release asset is a .tar.xz with the JRE contents.
 
 set -euo pipefail
 
-JRE_URL="${JRE_URL:-https://assets.angelauramc.dev/openjdk/ios-arm64/jre25-ios-aarch64.zip}"
+JRE_URL="${JRE_URL:-https://github.com/Witch-Launcher/JDK-Java_iOS/releases/download/jre-runtimes-20261108/jre25-ios-aarch64.tar.xz}"
 DEST_DIR="${DEST_DIR:-$(cd "$(dirname "$0")/.." && pwd)/depends/java-25-openjdk}"
 WORK_DIR="${WORK_DIR:-$(mktemp -d -t jre25-XXXXXX)}"
 
@@ -16,24 +17,12 @@ fi
 
 echo "[jre25] downloading iOS-built OpenJDK 25..."
 echo "[jre25]   $JRE_URL"
-curl -L --fail -o "$WORK_DIR/jre25.zip" "$JRE_URL"
-
-echo "[jre25] extracting zip..."
-cd "$WORK_DIR"
-unzip -o jre25.zip
-rm -f jre25.zip
-
-# The zip should contain a .tar.xz file
-TARBALL=(jre25-*.tar.xz)
-if [ ! -f "${TARBALL[0]}" ]; then
-    echo "[jre25] ERROR: no jre25-*.tar.xz found inside the zip"
-    ls -la "$WORK_DIR"
-    exit 1
-fi
+TARBALL="$WORK_DIR/jre25-ios-aarch64.tar.xz"
+curl -L --fail -o "$TARBALL" "$JRE_URL"
 
 mkdir -p "$DEST_DIR"
-echo "[jre25] extracting ${TARBALL[0]} to $DEST_DIR..."
-tar xf "${TARBALL[0]}" -C "$DEST_DIR"
+echo "[jre25] extracting $TARBALL to $DEST_DIR..."
+tar xf "$TARBALL" -C "$DEST_DIR"
 
 # Sanity check: libjvm.dylib must exist and be tagged iOS.
 JVM="$DEST_DIR/lib/server/libjvm.dylib"
