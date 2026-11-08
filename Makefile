@@ -341,7 +341,7 @@ jre: native
 		fi; \
 		if ! ls jre$${ver}-*.tar.xz >/dev/null 2>&1; then \
 			echo "[Witch] downloading jre$${ver} ..."; \
-			wget -q --show-progress -O "jre$${ver}-ios-aarch64.tar.xz" "$$url"; \
+			wget -q --tries=4 --waitretry=5 -O "jre$${ver}-ios-aarch64.tar.xz" "$$url"; \
 		fi; \
 		mkdir -p "java-$${ver}-openjdk"; \
 		tar xf "jre$${ver}-ios-aarch64.tar.xz" -C "java-$${ver}-openjdk"; \
