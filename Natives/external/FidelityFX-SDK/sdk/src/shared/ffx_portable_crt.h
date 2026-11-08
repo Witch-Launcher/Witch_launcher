@@ -31,6 +31,8 @@
 #include <cstddef>
 #include <cstdint>
 #include <cerrno>
+// Xcode 26 SDK no longer exposes errno_t through <cerrno>.
+#include <sys/types.h>
 
 #ifndef _countof
 #define _countof(arr) (sizeof(arr) / sizeof((arr)[0]))

@@ -468,7 +468,13 @@ endif()
 
 # FidelityFX SDK (FSR1 / FSR2 / FSR3Upscaler / FrameInterpolation), Vulkan backend.
 # Bridge code lives in Natives/upscaler/ and talks to the SDK through the public host API.
-set(FFX_VULKAN_HEADERS_INCLUDE ${CMAKE_CURRENT_LIST_DIR}/external/MoltenVK/External/Vulkan-Headers/include)
+# Prefer the MoltenVK copy of Vulkan-Headers, fall back to the vendored
+# compat copy so CI does not need the (large) MoltenVK submodule checked out.
+if(EXISTS "${CMAKE_CURRENT_LIST_DIR}/external/MoltenVK/External/Vulkan-Headers/include/vulkan/vulkan.h")
+  set(FFX_VULKAN_HEADERS_INCLUDE "${CMAKE_CURRENT_LIST_DIR}/external/MoltenVK/External/Vulkan-Headers/include")
+else()
+  set(FFX_VULKAN_HEADERS_INCLUDE "${CMAKE_CURRENT_LIST_DIR}/external/vulkan-headers-compat/include")
+endif()
 add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/external/FidelityFX-SDK/ios ffx_fsr3)
 target_sources(Witch PRIVATE upscaler/ffx_bridge.cpp)
 target_include_directories(Witch PRIVATE
@@ -476,7 +482,7 @@ target_include_directories(Witch PRIVATE
   ${CMAKE_CURRENT_LIST_DIR}/external/FidelityFX-SDK/sdk/include
   ${CMAKE_CURRENT_LIST_DIR}/external/FidelityFX-SDK/sdk/src/components/fsr3upscaler
   ${CMAKE_CURRENT_LIST_DIR}/external/FidelityFX-SDK/sdk/src/components/opticalflow
-  ${CMAKE_CURRENT_LIST_DIR}/external/MoltenVK/External/Vulkan-Headers/include
+  ${FFX_VULKAN_HEADERS_INCLUDE}
 )
 
 target_link_libraries(Witch
