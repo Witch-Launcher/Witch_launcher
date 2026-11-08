@@ -85,7 +85,7 @@ jobs:
           echo "--- checksums.txt ---"
           cat ../checksums.txt
 
-      - name: "Generate release notes (verbose EN - what fixed + who fixed)"
+      - name: "Generate release notes (concise EN)"
         env:
           GITHUB_EVENT_BEFORE: ${{ github.event.before }}
         shell: bash
@@ -95,18 +95,10 @@ jobs:
             --sha "${{ github.sha }}" \
             --branch "${{ github.ref_name }}" \
             --repo "$GITHUB_REPOSITORY" \
-            --run-url "https://github.com/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" \
             --version "${{ steps.version.outputs.APP_VERSION }}" \
-            --pusher "${{ github.event.pusher.name }}" \
-            --runner "promote-from-pre-release" \
-            --artifacts-dir ./promoted \
+            --base-version "${{ steps.version.outputs.BASE_VERSION }}" \
             --out RELEASE_NOTES.md
-          {
-            echo ""
-            echo "> Promoted from rolling pre-release (reuse development build, no rebuild)."
-            echo "> Source pre-release tag sha: $(cat promoted/.source_tag_sha.txt 2>/dev/null || echo unknown)"
-          } >> RELEASE_NOTES.md
-          head -n 60 RELEASE_NOTES.md
+          cat RELEASE_NOTES.md
 
       - name: Reset rolling release
         env:
@@ -119,7 +111,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: release
-          name: Witch v${{ steps.version.outputs.APP_VERSION }} — Release (stable)
+          name: ${{ steps.version.outputs.BASE_VERSION }}
           body_path: RELEASE_NOTES.md
           prerelease: false
           draft: false
@@ -130,7 +122,7 @@ jobs:
             checksums.txt
             RELEASE_NOTES.md
 
-      - name: Notify Discord (English, no mentions, verbose summary)
+      - name: Notify Discord (compact summary, no mentions)
         if: always()
         env:
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
@@ -141,10 +133,8 @@ jobs:
             --sha "${{ github.sha }}" \
             --before "${{ github.event.before }}" \
             --pusher "${{ github.event.pusher.name }}" \
-            --version "${{ steps.version.outputs.APP_VERSION }}" \
+            --version "${{ steps.version.outputs.BASE_VERSION }}" \
             --channel "release" \
             --status "${{ job.status }}" \
             --run-url "https://github.com/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" \
-            --release-url "https://github.com/$GITHUB_REPOSITORY/releases/tag/release" \
-            --notes-file RELEASE_NOTES.md \
-            --artifacts-dir ./promoted || true
+            --release-url "https://github.com/$GITHUB_REPOSITORY/releases/tag/release" || true
