@@ -1,20 +1,21 @@
 {
   "project": "Witch Launcher",
   "repository": "https://github.com/Witch-Launcher/Witch_launcher",
+  "branch": "beta",
   "webSection": "Launcher",
   "languages": ["en"],
+  "bases": { "en": "" },
   "order": [
     { "group": "Overview", "file": "README.md" },
     { "group": "Overview", "file": "builtin-jit.md" },
-    { "group": "Overview", "file": "jdk-runtime-release.md" },
     { "group": "Plugins", "file": "plugins/README.md" },
     { "group": "Plugins", "file": "plugins/manifest.md" },
     { "group": "Plugins", "file": "plugins/api.md" },
     { "group": "Plugins", "file": "plugins/security.md" },
     { "group": "Plugins", "file": "plugins/server.md" },
     { "group": "Plugins", "file": "plugins/publishing.md" },
+    { "group": "Runtime", "file": "jdk-runtime-release.md" },
     { "group": "Legal", "file": "privacy.md" },
-    { "group": "Legal", "file": "terms.md" },
-    { "group": "JDK", "file": "jdk-runtime-release.md" }
+    { "group": "Legal", "file": "terms.md" }
   ]
 }
