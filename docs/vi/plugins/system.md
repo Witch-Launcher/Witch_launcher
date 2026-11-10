@@ -8,7 +8,7 @@ Một plugin là một archive có chữ ký với phần mở rộng `.plgw`. N
 | --- | --- |
 | Cài đặt khai báo | Switches, trường văn bản, slider và picker render từ manifest. Giá trị nằm trong `state.json` của plugin |
 | Màu theme | Một `theme.json` với cặp light / dark cho từng màu, phủ lên palette của launcher |
-| JavaScript (`js`) | Được hỗ trợ. Cầu JavaScriptCore giới hạn với đối tượng `Witch` nhỏ — xem [Phát triển plugin](plugins-development.md) |
+| JavaScript (`js`) | Được hỗ trợ. Cầu JavaScriptCore giới hạn với đối tượng `Witch` nhỏ — xem [Phát triển plugin](plugins/development.md) |
 | Native (`native`) | Được hỗ trợ ở nơi launcher có thể nạp dylib chưa ký hoặc ký developer. ABI 2 có thể đăng ký một root view tùy chỉnh |
 | UI (`ui`) | Để dành. Tệp theme được áp dụng; tiêm layout chưa triển khai |
 | Java (`java`) | Chỉ đăng ký và ghi log — entrypoint được ghi ra log nhưng không chạy trong bản này |
