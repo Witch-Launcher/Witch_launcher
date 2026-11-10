@@ -1,0 +1,14 @@
+{
+  "project": "Witch Launcher",
+  "repository": "https://github.com/Witch-Launcher/Witch_launcher",
+  "webSection": "Plugins",
+  "languages": ["en"],
+  "order": [
+    { "group": "Overview", "file": "README.md" },
+    { "group": "Manifest", "file": "manifest.md" },
+    { "group": "API", "file": "api.md" },
+    { "group": "Security", "file": "security.md" },
+    { "group": "Registry", "file": "server.md" },
+    { "group": "Publishing", "file": "publishing.md" }
+  ]
+}
