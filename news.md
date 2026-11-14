@@ -1,3 +1,47 @@
+# Witch Launcher 0.0.5
+
+## Added:
+* FSR 1, 2, and 3 (FSR 4 not supported) - beta
+* Frame generation
+* Plugins
+* Modpack creation
+* JVM initialization splash screen
+* Metal rendering
+* Docs & Web: https://witch-launcher-web.pages.dev
+* File backup
+* Built-in StikJIT (Experimental)
+* Option to change the graphics API backend in the launcher menu
+* Controls directory
+* Privacy policy
+* Terms of service
+
+## UI Fixes:
+* Fixed an issue where setting a small UI scale prevented file selection (buttons could not be clicked)
+* Redesigned the account panel
+* Fixed skin head rendering issues (Steve/Alex models)
+* Error reporting panel
+* Fixed missing UI elements when running .jar files
+## Core Fixes:
+* Modpack installation from CurseForge
+* Optimizations to prevent the app from being terminated by iOS
+* Fixed mouse interaction issues with Minecraft 26.2/26.3
+* Fixed issues with custom control button saving/disappearing
+* Built-in StikJIT
+* Correct visual rendering when entering Multiplayer
+* Frame generation
+## Mod Fixes:
+* Voicechat mod
+* LabyMod
+* Distant Horizons (iOS 26+)
+* Embeddium (LTW only; Oculus mod is functional)
+* ModernFix mod
+* Forge [Modloader]
+* Older versions of NeoForge [Modloader]
+* Wonderland .jar
+* Voxy mod (TGLMT only)
+* ModernFix mod
+* And various other bug fixes
+
 # Witch launcher update 0.0.4
 
 ## Added:

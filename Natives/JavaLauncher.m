@@ -1984,27 +1984,18 @@ static BOOL instanceHasTouchControllerMod(NSString *gameDir) {
 }
 
 // ==================== Distant Horizons Native Library Fix ====================
-// On iOS, DH mod extracts libzstd-jni_dh-1.5.7-6.dylib to a temp directory,
-// but the relocation process invalidates the code signature, causing crash.
-// Fix: Pre-extract the library from DH jar, sign it with ad-hoc signature,
-// and add its directory to java.library.path
-
-// This function checks if the library exists and is signed; if not, it will
-// be handled by the Java side (Tools.java) via extractDhNativeLibraries()
-// We just check here and add the path if available.
+// Distant Horizons ships its zstd native inside its own jar
+// (darwin/aarch64/libzstd-jni_dh-<version>.dylib). On iOS that library is a
+// macOS binary, so the launcher patches its platform and rebuilds the ad-hoc
+// signature when the library is loaded (see dyld_patch_platform.m). The Java
+// side (Tools.prepareDistantHorizonsNativeLib) extracts the library into the
+// hidden app data directory; that directory is added to java.library.path so
+// zstd-jni finds the library with System.loadLibrary() instead of unpacking
+// an unsigned copy into the temp directory.
 static void checkAndAddDhNativeLibPath(NSString *versionId) {
     if (!versionId) return;
-    
+
     NSString *extractDir = amethyst_hidden_path(@"dh_natives");
-    NSString *targetLibPath = [extractDir stringByAppendingPathComponent:@"libzstd-jni_dh-1.5.7-6.dylib"];
-    
-    NSFileManager *fileManager = [NSFileManager defaultManager];
-    if ([fileManager fileExistsAtPath:targetLibPath]) {
-        dhNativeLibPath = extractDir;
-        NSLog(@"[DH Fix] Adding native library path: %@", dhNativeLibPath);
-    } else {
-        // Will be extracted by Java side before JVM launch
-        dhNativeLibPath = extractDir;
-        NSLog(@"[DH Fix] Will use native library path: %@ (extraction by Java)", dhNativeLibPath);
-    }
+    dhNativeLibPath = extractDir;
+    NSLog(@"[DH Fix] Using native library path: %@", dhNativeLibPath);
 }

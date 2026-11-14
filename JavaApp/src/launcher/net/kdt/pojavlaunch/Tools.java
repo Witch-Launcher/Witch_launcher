@@ -1053,13 +1053,20 @@ createLibraryInfo(libItem);
     }
 
     // ==================== Distant Horizons Fix ====================
-    // On iOS, DH mod extracts libzstd-jni_dh-1.5.7-6.dylib to a temp directory,
-    // but the relocation process invalidates the code signature, causing crash.
-    // Fix: Pre-extract the library, sign it with ad-hoc signature, and add to java.library.path
+    // Distant Horizons ships its zstd native inside its own jar
+    // (darwin/aarch64/libzstd-jni_dh-<version>.dylib). On iOS that library is
+    // a macOS binary, so the launcher has to patch its platform and re-sign it
+    // before dyld accepts it - that happens natively in the dlopen hook
+    // (PLPatchMachOPlatformForFile) whenever the library is loaded.
+    //
+    // The launcher pre-extracts the native into a persistent directory that is
+    // part of java.library.path, so zstd-jni finds it with System.loadLibrary()
+    // instead of unpacking an unsigned copy into the temp directory first.
+    // The file name has to match the one the jar ships, otherwise the lookup
+    // fails and zstd-jni falls back to the temp directory copy.
 
     private static final String DH_MOD_ID = "distanthorizons";
-    private static final String ZSTD_LIB_NAME = "libzstd-jni_dh-1.5.7-6.dylib";
-    private static final String ZSTD_LIB_NAME_ALT = "libzstd-jni_dh.dylib"; // fallback
+    private static final String ZSTD_LIB_KEYWORD = "zstd-jni";
 
     /**
      * Detect if a mod with the given keyword is in the library list.
@@ -1119,8 +1126,12 @@ createLibraryInfo(libItem);
     }
 
     /**
-     * Extract and sign zstd-jni native library for Distant Horizons.
-     * Returns the directory containing the signed library, or null if failed.
+     * Extract the zstd-jni native library of Distant Horizons.
+     * Returns the directory containing the library, or null if failed.
+     *
+     * The library is not signed here: the launcher patches the platform and
+     * rebuilds the ad-hoc signature natively when the library is loaded, so
+     * the copy that ships in the jar stays the single source of truth.
      */
     public static String prepareDistantHorizonsNativeLib(JMinecraftVersionList.Version versionInfo) {
         if (!hasDistantHorizonsMod(versionInfo)) {
@@ -1137,7 +1148,8 @@ createLibraryInfo(libItem);
             return null;
         }
 
-        // Extract library to the hidden app data directory (persistent, signable)
+        // Extract library to the hidden app data directory (persistent, so the
+        // patched + re-signed copy survives the next launch)
         String hiddenHome = System.getenv("POJAV_HIDDEN_HOME");
         if (hiddenHome == null || hiddenHome.isEmpty()) {
             hiddenHome = DIR_APP_DATA + "/.amethyst";
@@ -1147,7 +1159,26 @@ createLibraryInfo(libItem);
             extractDir.mkdirs();
         }
 
-        File targetLib = new File(extractDir, ZSTD_LIB_NAME);
+        // The jar ships libzstd-jni_dh-<version>.dylib; zstd-jni looks the
+        // library up by that exact name, so it has to be kept.
+        String libName;
+        try (JarFile jar = new JarFile(dhJarPath)) {
+            ZipEntry entry = findLibEntry(jar, ZSTD_LIB_KEYWORD);
+            if (entry == null) {
+                System.err.println("[DH Fix] No zstd-jni library found in DH jar");
+                return null;
+            }
+            libName = entry.getName();
+            int slash = libName.lastIndexOf('/');
+            if (slash >= 0) {
+                libName = libName.substring(slash + 1);
+            }
+        } catch (IOException e) {
+            System.err.println("[DH Fix] Could not read DH jar: " + e.getMessage());
+            return null;
+        }
+
+        File targetLib = new File(extractDir, libName);
         if (targetLib.exists()) {
             System.out.println("[DH Fix] Library already exists at: " + targetLib.getAbsolutePath());
         } else {
@@ -1157,13 +1188,7 @@ createLibraryInfo(libItem);
             }
         }
 
-        // Sign the library with ad-hoc signature (required for iOS)
-        if (!signLibrary(targetLib)) {
-            System.err.println("[DH Fix] Failed to sign library");
-            return null;
-        }
-
-        System.out.println("[DH Fix] Successfully prepared DH native library at: " + extractDir.getAbsolutePath());
+        System.out.println("[DH Fix] DH native library ready at: " + targetLib.getAbsolutePath());
         return extractDir.getAbsolutePath();
     }
 
@@ -1198,16 +1223,7 @@ createLibraryInfo(libItem);
 
     private static boolean extractNativeLibFromJar(String jarPath, File targetLib) {
         try (JarFile jar = new JarFile(jarPath)) {
-            // Try primary name first
-            ZipEntry entry = jar.getEntry(ZSTD_LIB_NAME);
-            if (entry == null) {
-                // Try alternative name (maybe in different path)
-                entry = findLibEntry(jar, ZSTD_LIB_NAME_ALT);
-            }
-            if (entry == null) {
-                // Search for any zstd-jni library
-                entry = findLibEntry(jar, "zstd-jni");
-            }
+            ZipEntry entry = findLibEntry(jar, ZSTD_LIB_KEYWORD);
             if (entry == null) {
                 System.err.println("[DH Fix] No zstd-jni library found in DH jar");
                 return false;
@@ -1243,56 +1259,5 @@ createLibraryInfo(libItem);
             }
         }
         return fallback;
-    }
-
-    private static boolean signLibrary(File libFile) {
-        // iOS has no /usr/bin/codesign. The app bundles an arm64 iOS ldid
-        // at <bundle>/ldid (signed ad-hoc at package time), which we fall
-        // back to. On TXM devices (A12+) an UNSIGNED dylib will not dlopen
-        // ("code signature invalid") even inside the app container, so
-        // signing is mandatory, not optional.
-        String ldidPath = null;
-        if (DIR_BUNDLE != null) {
-            File bundledLdid = new File(DIR_BUNDLE, "ldid");
-            if (bundledLdid.isFile()) {
-                ldidPath = bundledLdid.getAbsolutePath();
-            }
-        }
-
-        if (ldidPath == null) {
-            if (runSignTool(new String[]{"codesign", "--force", "--sign", "-", libFile.getAbsolutePath()},
-                    "codesign", libFile.getName())) {
-                return true;
-            }
-            System.err.println("[DH Fix] codesign unavailable and no bundled ldid at " + DIR_BUNDLE + "/ldid");
-            return false;
-        }
-        return runSignTool(new String[]{ldidPath, "-S", libFile.getAbsolutePath()}, "ldid", libFile.getName());
-    }
-
-    private static boolean runSignTool(String[] command, String toolName, String libName) {
-        try {
-            ProcessBuilder pb = new ProcessBuilder(command);
-            pb.redirectErrorStream(true);
-            Process process = pb.start();
-            int exitCode = process.waitFor();
-            if (exitCode == 0) {
-                System.out.println("[DH Fix] Successfully signed library (" + toolName + "): " + libName);
-                return true;
-            }
-            StringBuilder output = new StringBuilder();
-            try (InputStream is = process.getInputStream()) {
-                byte[] buffer = new byte[1024];
-                int len;
-                while ((len = is.read(buffer)) > 0) {
-                    output.append(new String(buffer, 0, len));
-                }
-            }
-            System.err.println("[DH Fix] " + toolName + " failed (exit " + exitCode + "): " + output);
-            return false;
-        } catch (Exception e) {
-            System.err.println("[DH Fix] " + toolName + " unavailable (" + e.getMessage() + ")");
-            return false;
-        }
     }
 }

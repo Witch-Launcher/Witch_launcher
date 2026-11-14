@@ -165,7 +165,13 @@ NSString* WitchChipName(void);
 extern int g_dyldMmapMatches, g_dyldFcntlMatches;
 extern BOOL g_dyldMmapOK, g_dyldFcntlOK;
 
+// Patches the platform of a macOS dylib to the one of the running system and
+// rebuilds its ad-hoc code signature, so the kernel accepts the executable
+// mapping of the file (see dyld_patch_platform.m).
 BOOL PLPatchMachOPlatformForFile(const char *path);
+// Same, but only for dylibs inside the app container (HOME/TMP): the app's
+// own libraries keep the signature they were signed with.
+void PLPrepareContainerDylib(const char *path);
 
 UIViewController* currentVC();
 void openLink(UIViewController* sender, NSURL* link);

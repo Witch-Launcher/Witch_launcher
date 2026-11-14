@@ -197,6 +197,27 @@ static BOOL pathIsUnderRoot(const char *path, const char *root) {
     return strncmp(path, root, rootLen) == 0 && (path[rootLen] == '/' || path[rootLen] == '\0');
 }
 
+// Makes sure a dylib that lives in the app container can be loaded by dyld.
+// Mods extract macOS binaries (Distant Horizons' zstd/lz4/sqlite natives,
+// for example) into the container; dyld does not load those, and the kernel
+// refuses the executable mapping of the untouched file. The launcher patches
+// the platform and rebuilds the ad-hoc signature instead (see
+// dyld_patch_platform.m).
+//
+// Only files inside HOME/TMP are touched - the app's own libraries keep the
+// signature they were signed with.
+void PLPrepareContainerDylib(const char *path) {
+    if (!path) return;
+    const char *home = getenv("HOME");
+    const char *tmp = getenv("TMPDIR");
+    char homeReal[PATH_MAX], tmpReal[PATH_MAX], fullpath[PATH_MAX];
+    if (!realpath(path, fullpath)) return;
+    BOOL underHome = home && realpath(home, homeReal) && pathIsUnderRoot(fullpath, homeReal);
+    BOOL underTmp = tmp && realpath(tmp, tmpReal) && pathIsUnderRoot(fullpath, tmpReal);
+    if (!underHome && !underTmp) return;
+    PLPatchMachOPlatformForFile(path);
+}
+
 // LabyMod's voice chat downloads macos-aarch64-librnnoise.dylib, built for
 // Apple silicon macOS (ARMv8.3+). On A11 and older the first call dies with
 // SIGILL and takes the whole JVM down. Refuse the load there so the addon
@@ -250,7 +271,7 @@ void* hooked_dlopen(const char* path, int mode) {
     BOOL shouldUseDyldBypass = haveFullPath && (underHome || underTmp);
     shouldUseDyldBypass26PPL &= shouldUseDyldBypass;
     if (shouldUseDyldBypass) {
-        PLPatchMachOPlatformForFile(path);
+        PLPrepareContainerDylib(path);
     }
     if (shouldUseDyldBypass26PPL) {
         __attribute__((musttail)) return hooked_dlopen_26_ppl(path, mode);

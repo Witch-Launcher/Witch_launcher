@@ -241,8 +241,17 @@ void* hooked_mmap(void *addr, size_t len, int prot, int flags, int fd, off_t off
     }
     
     char mmapPath[4096] = {0};
-    if (fd >= 0 && (prot & PROT_EXEC) && fcntl(fd, F_GETPATH, mmapPath) == 0) {
-        NSLog(@"[DyldLVBypass] exec map %s (addr=%p len=%zu prot=0x%x flags=0x%x offset=%lld)", mmapPath, addr, len, prot, flags, (long long)offset);
+    if (fd >= 0 && fcntl(fd, F_GETPATH, mmapPath) == 0) {
+        if (prot & PROT_EXEC) {
+            NSLog(@"[DyldLVBypass] exec map %s (addr=%p len=%zu prot=0x%x flags=0x%x offset=%lld)", mmapPath, addr, len, prot, flags, (long long)offset);
+        }
+        // A dylib that a mod extracted into the app container is a macOS
+        // binary: dyld does not load those and the kernel refuses the
+        // executable mapping of the untouched file. Patch the platform and
+        // rebuild the ad-hoc signature right here - this is the last moment
+        // before dyld reads the header and the kernel validates the
+        // signature, and the dlopen hook never sees the loads the JVM does.
+        PLPrepareContainerDylib(mmapPath);
     }
     
     void *map = __mmap(addr, len, prot, flags, fd, offset);
@@ -309,6 +318,13 @@ void* hooked_mmap(void *addr, size_t len, int prot, int flags, int fd, off_t off
                 if (mret == KERN_SUCCESS) {
                     memcpy((void*)mirrored, memoryLoadedFile, len);
                     copied = YES;
+                    // The mirror shares its pages with `map`, so the RW
+                    // protection we just asked for also applies to `map`.
+                    // Give the original mapping its executable protection
+                    // back - without it dyld gets an image it cannot run.
+                    if (mprotect(map, len, prot) == -1) {
+                        NSLog(@"[DyldLVBypass] hooked_mmap: mprotect(0x%x) on the fallback image failed: %s", prot, strerror(errno));
+                    }
                 } else {
                     NSLog(@"[DyldLVBypass] hooked_mmap: vm_protect(RW) fails on mirror: 0x%x", mret);
                 }
