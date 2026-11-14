@@ -211,6 +211,11 @@ static BOOL isPercentPrefKey(NSString *key) {
             @{@"type": @"switch", @"label": localize(@"preference.title.disable_haptics", nil), @"key": @"control.disable_haptics"},
             header(@"settings.group.keyboard"),
             @{@"type": @"switch", @"label": localize(@"preference.title.keyboard_editing_toolbar", nil), @"key": @"control.keyboard_editing_toolbar"},
+            @{@"type": @"picker", @"label": localize(@"preference.title.keyboard_input_mode", nil), @"key": @"control.keyboard_input_mode", @"options": @[
+                @{@"key": @"auto", @"name": localize(@"preference.keyboard_input_mode.auto", nil)},
+                @{@"key": @"vi", @"name": localize(@"preference.keyboard_input_mode.vi", nil)},
+                @{@"key": @"en", @"name": localize(@"preference.keyboard_input_mode.en", nil)},
+            ], @"default": @"auto"},
             header(@"settings.group.gyro"),
             @{@"type": @"switch", @"label": localize(@"preference.title.gyroscope_enable", nil), @"key": @"control.gyroscope_enable"},
             @{@"type": @"switch", @"label": localize(@"preference.title.gyroscope_invert_x_axis", nil), @"key": @"control.gyroscope_invert_x_axis"},

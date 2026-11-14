@@ -86,6 +86,10 @@
             @"gesture_hold": @YES,
             @"doubletap_offhand": @YES,
             @"keyboard_editing_toolbar": @NO,
+            // Language of the hardware keyboard: "auto" follows the layout the
+            // system reports, "vi" always applies the Vietnamese (Telex) rules
+            // and "en" never does.
+            @"keyboard_input_mode": @"auto",
             @"disable_haptics": @NO,
             @"slideable_hotbar": @YES,
             @"press_duration": @(400),

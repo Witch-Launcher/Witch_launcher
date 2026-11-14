@@ -292,6 +292,7 @@ add_executable(Witch
   input/ControllerInput.m
   input/GyroInput.m
   input/KeyboardInput.m
+  input/TelexComposer.m
   input/TelexInput.m
 
   AccountListViewController.m

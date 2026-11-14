@@ -1,6 +1,7 @@
 #import "TrackedTextField.h"
 #import "ios_uikit_bridge.h"
 #import "utils.h"
+#import "input/TelexInput.h"
 #include "glfw_keycodes.h"
 
 extern bool isUseStackQueueCall;
@@ -26,10 +27,10 @@ extern bool isUseStackQueueCall;
 }
 
 - (BOOL)becomeFirstResponder {
-    // A stale skipNextTextInsertion (set by hardware keypresses while the
+    // A stale ignoreNextTextChange (set by hardware keypresses while the
     // field was NOT focused) must not eat the first keystroke of a new
     // typing session (e.g. when chat opens and the game shows the keyboard).
-    self.skipNextTextInsertion = NO;
+    self.ignoreNextTextChange = NO;
     return [super becomeFirstResponder];
 }
 
@@ -42,6 +43,10 @@ extern bool isUseStackQueueCall;
 }
 
 - (void)sendMultiBackspaces:(int)times {
+    if (times <= 0) return;
+    // The game side text field is about to change without the Telex engine:
+    // drop its mirror so it does not rewrite text that is not there anymore.
+    [TelexInput reset];
     for (int i = 0; i < times; i++) {
         self.sendKey(GLFW_KEY_BACKSPACE, 0, 1, 0);
         self.sendKey(GLFW_KEY_BACKSPACE, 0, 0, 0);
@@ -54,6 +59,10 @@ extern bool isUseStackQueueCall;
 }
 
 - (void)sendText:(NSString *)text {
+    if (text.length == 0) return;
+    // The text comes from the on-screen keyboard: the Telex engine does not
+    // know about it, so it must forget its own mirror.
+    [TelexInput reset];
     for (int i = 0; i < text.length; i++) {
         unichar theChar = [text characterAtIndex:i];
 
@@ -117,6 +126,12 @@ extern bool isUseStackQueueCall;
     }
     self.lastTextPos = [super offsetFromPosition:self.beginningOfDocument toPosition:self.selectedTextRange.start];
 
+    if (self.ignoreNextTextChange) {
+        // The hardware key was already handled by the Telex engine, which
+        // deleted the character in the game: do not delete it twice.
+        self.ignoreNextTextChange = NO;
+        return;
+    }
     [self sendMultiBackspaces:1];
 }
 
@@ -126,8 +141,8 @@ extern bool isUseStackQueueCall;
 }
 
 - (NSRange)insertFilteredText:(NSString *)text {
-    if (self.skipNextTextInsertion) {
-        self.skipNextTextInsertion = NO;
+    if (self.ignoreNextTextChange) {
+        self.ignoreNextTextChange = NO;
         return [super insertFilteredText:text];
     }
 

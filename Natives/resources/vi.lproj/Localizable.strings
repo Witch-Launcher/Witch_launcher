@@ -298,6 +298,10 @@
 "preference.title.gesture_hold" = "Chạm để đặt, giữ để đập khối";
 "preference.title.doubletap_offhand" = "Nhấn đôi hotbar để đổi tay trái (F)";
 "preference.title.keyboard_editing_toolbar" = "Thanh tiện ích bàn phím Apple";
+"preference.title.keyboard_input_mode" = "Ngôn ngữ bàn phím ngoài";
+"preference.keyboard_input_mode.auto" = "Theo bố cục bàn phím";
+"preference.keyboard_input_mode.vi" = "Tiếng Việt (Telex)";
+"preference.keyboard_input_mode.en" = "Tiếng Anh";
 "preference.detail.gesture_hotbar" = "Cho phép các cử chỉ, chẳng hạn như chạm vào khe thanh nóng, trao đổi vật phẩm giữa các tay, ném vật phẩm";
 "preference.title.press_duration" = "Độ dài nhấn giữ (ms)";
 "preference.detail.press_duration" = "Khoảng thời gian chạm giữ để phá khối và ném đồ vật.";

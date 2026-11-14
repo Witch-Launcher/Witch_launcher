@@ -1230,18 +1230,29 @@ static GameSurfaceView* pojavWindow;
         [self.inputTextField resignFirstResponder];
         self.inputTextField.text = @" ";
     }
+    // When a GUI screen is open (mouse grab released) text-producing keys go
+    // through the Telex engine, which composes Vietnamese and sends
+    // chars/backspaces to the game. During gameplay only keycodes are sent
+    // (movement, menus), as before.
+    BOOL telexActive = (isInputReady && isGrabbing != JNI_TRUE);
     for (UIPress *press in presses) {
         if (press.key != nil) {
             // A physical key press proves a hardware keyboard is attached.
             if (!hardwareKeyboardSeen) {
                 hardwareKeyboardSeen = true;
             }
-            // When a GUI screen is open (mouse grab released) text-producing
-            // keys go through the Telex engine, which composes Vietnamese and
-            // sends chars/backspaces to the game. During gameplay only
-            // keycodes are sent (movement, menus), as before.
-            if (isInputReady && isGrabbing != JNI_TRUE) {
-                [TelexInput handleKey:press.key];
+            if (telexActive) {
+                BOOL consumed = [TelexInput handleKey:press.key
+                                        inputLanguage:self.textInputMode.primaryLanguage];
+                if (consumed) {
+                    // The engine already sent the delete events to the game.
+                    // Forwarding the raw key event would delete a second
+                    // character, and UIKit may still deliver the same key to
+                    // the tracked field: tell it to ignore that change.
+                    self.inputTextField.ignoreNextTextChange = YES;
+                    handled = YES;
+                    continue;
+                }
             }
             if ([KeyboardInput sendKeyEvent:press.key down:YES sendChars:NO]) {
                 handled = YES;
@@ -1255,8 +1266,15 @@ static GameSurfaceView* pojavWindow;
 
 - (void)pressesEnded:(NSSet<UIPress *> *)presses withEvent:(UIPressesEvent *)event {
     BOOL handled = NO;
+    BOOL telexActive = (isInputReady && isGrabbing != JNI_TRUE);
     for (UIPress *press in presses) {
-        if (press.key != nil && [KeyboardInput sendKeyEvent:press.key down:NO sendChars:NO]) {
+        if (press.key == nil) continue;
+        // The press was consumed by the Telex engine (and never forwarded),
+        // so the release must not be sent either.
+        if (telexActive && [TelexInput consumesKey:press.key]) {
+            continue;
+        }
+        if ([KeyboardInput sendKeyEvent:press.key down:NO sendChars:NO]) {
             handled = YES;
         }
     }

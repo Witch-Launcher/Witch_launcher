@@ -428,6 +428,10 @@
 "preference.title.gesture_hold" = "Tap to place, hold to break blocks";
 "preference.title.doubletap_offhand" = "Double-tap hotbar to swap offhand (F)";
 "preference.title.keyboard_editing_toolbar" = "Apple keyboard editing toolbar";
+"preference.title.keyboard_input_mode" = "Hardware keyboard language";
+"preference.keyboard_input_mode.auto" = "Follow keyboard layout";
+"preference.keyboard_input_mode.vi" = "Vietnamese (Telex)";
+"preference.keyboard_input_mode.en" = "English";
 "preference.detail.gesture_hotbar" = "Enables gestures, such as touch the hotbar slot, swap items between hand, throw items";
 "preference.title.disable_haptics" = "Disable on-screen haptics";
 "preference.title.press_duration" = "Long-press duration (ms)";
