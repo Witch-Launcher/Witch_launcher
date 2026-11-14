@@ -13,8 +13,10 @@
 #include <sys/stat.h>
 #include <sys/sysctl.h>
 #include <sys/proc.h>
+#include <sys/ucontext.h>
 #include <signal.h>
 #include <setjmp.h>
+#include <pthread.h>
 #include <unistd.h>
 
 #include "utils.h"
@@ -97,6 +99,12 @@ static int maxDirectMemoryMB(int heapMB) {
     return direct;
 }
 
+// ParallelGC (see the -XX:+UseParallelGC flag below) reports
+// Runtime.maxMemory() as ~89% of -Xmx: the rest is kept back for the card
+// table and heap alignment. Size -Xmx up so the usable heap matches the
+// budget instead of silently losing 11% of it.
+static const double kHeapEffectiveRatio = 0.89;
+
 // Caps the requested heap so Java heap + direct buffers + JVM native/GPU
 // overhead fit under the real Jetsam kill allowance. Physical RAM alone is a
 // bad basis: 6 GB devices were still killed after ~30 minutes with 1.5-1.8 GB
@@ -104,20 +112,29 @@ static int maxDirectMemoryMB(int heapMB) {
 static int capAllocationToJetsamAllowance(int allocmem) {
     double physicalMB = (double)NSProcessInfo.processInfo.physicalMemory / 1048576.0;
     size_t availableMem = availableMemoryMB();
+    // With the increased-memory-limit entitlement iOS raises this process's
+    // Jetsam allowance (~2 GB on a 3 GB device) and os_proc_available_memory()
+    // reports it, so trust that number. The old hard "50% of physical RAM"
+    // ceiling ignored the entitlement and left a 1.20.1 + Embeddium world load
+    // stuck in a Full-GC loop at 0-1 fps ("Preparing start region").
+    BOOL extended = getEntitlementValue(@"com.apple.developer.kernel.increased-memory-limit") ||
+                    getEntitlementValue(@"com.apple.private.memorystatus");
     double budget;
     if (availableMem > 0) {
-        budget = MIN((double)availableMem * 0.85, physicalMB * 0.5);
+        double physShare = extended ? 0.68 : 0.50;
+        budget = MIN((double)availableMem * 0.88, physicalMB * physShare);
     } else {
         // Unknown Jetsam allowance: fall back to a conservative share of RAM.
-        budget = physicalMB * 0.35;
+        budget = physicalMB * (extended ? 0.45 : 0.35);
     }
-    int maxHeap = (int)budget - kDirectMemoryReserveMB - kNativeReserveMB;
-    if (maxHeap < 384) maxHeap = 384;
+    int effectiveHeap = (int)budget - kDirectMemoryReserveMB - kNativeReserveMB;
+    if (effectiveHeap < 384) effectiveHeap = 384;
+    int maxHeap = (int)((double)effectiveHeap / kHeapEffectiveRatio);
     if (maxHeap > 1536) maxHeap = 1536;
     if (allocmem > maxHeap) {
-        NSLog(@"[JavaLauncher] RAM capped: %d MB -> %d MB (budget=%.0f MB, available=%zu MB, physical=%.0f MB; direct/native reservation=%d MB)",
-              allocmem, maxHeap, budget, availableMem, physicalMB,
-              kDirectMemoryReserveMB + kNativeReserveMB);
+        NSLog(@"[JavaLauncher] RAM capped: %d MB -> %d MB (usable heap %.0f MB, budget=%.0f MB, available=%zu MB, physical=%.0f MB, extended=%d; direct/native reservation=%d MB)",
+              allocmem, maxHeap, maxHeap * kHeapEffectiveRatio, budget, availableMem, physicalMB,
+              extended, kDirectMemoryReserveMB + kNativeReserveMB);
         return maxHeap;
     }
     return allocmem;
@@ -199,6 +216,30 @@ void init_loadDefaultEnv() {
 }
 
 void init_loadCustomEnv() {
+    // Launcher-managed frame-pacing knobs, exported before the user's custom
+    // env block so an explicit AMETHYST_* line in java.env_variables wins.
+    // The JVM snapshots the environment at boot, so this must run before
+    // JLI_Launch (it does: called from the pre-JVM init path).
+    BOOL vsyncOn = getPrefBool(@"video.vsync");
+    setenv("AMETHYST_VSYNC", vsyncOn ? "1" : "0", 1);
+    NSString *maxFps = getPrefObject(@"video.max_framerate");
+    if (![maxFps isKindOfClass:[NSString class]] || maxFps.length == 0) maxFps = @"0";
+    setenv("AMETHYST_MAX_FPS", maxFps.UTF8String, 1);
+    NSLog(@"[JavaLauncher] Frame pacing: vsync=%@ maxFps=%@",
+          vsyncOn ? @"on" : @"off", maxFps);
+
+    // Uncapped present. MoltenVK normally blocks the render thread inside
+    // -[CAMetalLayer nextDrawable] until the display releases a drawable, and
+    // iOS releases them at the panel refresh rate - that block is what pins
+    // the game to 60 FPS on a 60 Hz screen. With this flag the layer stops
+    // blocking and frames that find no drawable are dropped instead, so the
+    // render loop runs at the speed the device can actually sustain.
+    // Only MoltenVK reads this, so the OpenGL/ANGLE path is unaffected.
+    BOOL uncapped = getPrefBool(@"video.uncapped");
+    setenv("WITCH_UNCAPPED_PRESENT", uncapped ? "1" : "0", 1);
+    setenv("AMETHYST_UNCAPPED", uncapped ? "1" : "0", 1);
+    NSLog(@"[JavaLauncher] Uncapped present: %@", uncapped ? @"on" : @"off");
+
     NSString *envvars = getPrefObject(@"java.env_variables");
     if (envvars == nil) return;
     NSLog(@"[JavaLauncher] Reading custom environment variables");
@@ -408,20 +449,127 @@ static BOOL processIsDebugged(void) {
     return processIsCurrentlyDebugged();
 }
 
-// The JIT26 / mirror brk stubs (#0xf00d, #0x6a) are serviced by StikDebug's
-// exception server. When nothing services them the kernel raises SIGTRAP and
-// the default action kills the app (crash straight back to the home screen).
-// During the handshake window we catch SIGTRAP instead, ARMED as a bail-out:
-// a synchronous brk trap resumes AT the faulting instruction, so returning
-// from an empty handler would re-trap forever (black-screen spin, no dialog,
-// no further log). siglongjmp lands back at the armed setjmp point with the
-// call skipped, turning every unserviced brk into the diagnostic dialogs below.
+// The JIT26 / mirror brk stubs (#0xf00d, #0x6a) are serviced by the JIT
+// debugger's exception server (StikDebug, or the built-in StikJIT helper that
+// runs in its own extension process). When nothing services them the kernel
+// raises SIGTRAP and the default action kills the app: the process vanishes
+// and iOS drops the user back on the home screen with no crash log. That is
+// the "Built-in StikJIT kicks the app to the home screen" report.
+//
+// The guard therefore has to do three things:
+//
+//   (a) stay installed for the WHOLE launch, not only for the handshake
+//       window: the JVM keeps raising brks while it allocates its code cache,
+//       and the debugger can disappear mid-session (the built-in helper lives
+//       in a separate extension process, so the system killing that extension
+//       detaches the debugger and every later brk is unserviced);
+//   (b) CONSUME the trap instead of returning to the faulting instruction: a
+//       synchronous brk trap resumes AT the brk, so an empty handler re-traps
+//       forever (black screen, no dialog, no further log);
+//   (c) only longjmp on the thread that armed the guard: a trap raised on
+//       another thread must not unwind the arming thread's stack.
+//
+// Inside an armed call the guard longjmps back to the setjmp point, so the
+// call is skipped and the caller reports the failure (see the dialogs below).
+// Outside an armed call the brk instruction itself is skipped in place, so a
+// debugger that stopped servicing breakpoints cannot kill the process.
 static sigjmp_buf g_jitTrapJmp;
 static volatile sig_atomic_t g_jitTrapArmed = 0;
-static void onUnservicedBrk(int sig) {
-    (void)sig;
-    if (g_jitTrapArmed) {
+// The thread that armed the guard. A trap raised on a different thread must
+// not longjmp into the arming thread's stack.
+static pthread_t g_jitTrapOwner;
+static volatile sig_atomic_t g_jitTrapOwnerValid = 0;
+
+// arm64 `brk #imm` encoding: 1101 0100 001 imm16.
+#define WITCH_JIT_BRK_MASK 0xFFE0001Fu
+#define WITCH_JIT_BRK_OP 0xD4200000u
+
+// The interrupted PC is read and written through the public thread-state
+// accessors, so the code works on both the plain arm64 layout (where __pc is a
+// plain integer) and the opaque arm64e one (where the field is a signed
+// pointer). They need the full C level, which the project build provides.
+#if defined(__arm64__) && defined(__DARWIN_C_LEVEL) && (__DARWIN_C_LEVEL >= __DARWIN_C_FULL)
+#include <mach/arm/thread_status.h>
+#define WITCH_JIT_CAN_SKIP_TRAP 1
+#endif
+
+// Arms the guard for the calling thread: a trap raised on that thread inside
+// the guarded call longjmps back to the setjmp point, so the call is skipped.
+static void armJITTrap(void) {
+    g_jitTrapOwner = pthread_self();
+    g_jitTrapOwnerValid = 1;
+    g_jitTrapArmed = 1;
+}
+
+static void disarmJITTrap(void) {
+    g_jitTrapArmed = 0;
+    g_jitTrapOwnerValid = 0;
+}
+
+static void onUnservicedBrk(int sig, siginfo_t *info, void *ucontext) {
+    (void)info;
+    // Only the arming thread may longjmp out of the trap: unwinding a foreign
+    // stack would take the process down even harder than the trap it replaces.
+    if (g_jitTrapArmed && g_jitTrapOwnerValid &&
+        pthread_equal(pthread_self(), g_jitTrapOwner)) {
         siglongjmp(g_jitTrapJmp, 1);
+        return;
+    }
+#ifdef WITCH_JIT_CAN_SKIP_TRAP
+    // Not inside a guarded call (or the trap came from another thread). When
+    // this is one of the launcher's own brk instructions, consume it: skip the
+    // faulting instruction so the process neither re-executes it forever nor
+    // dies with the default SIGTRAP action (which is what kicks the app back
+    // to the home screen).
+    ucontext_t *context = (ucontext_t *)ucontext;
+    if (context && context->uc_mcontext) {
+        uint64_t pc = (uint64_t)arm_thread_state64_get_pc(context->uc_mcontext->__ss);
+        uint32_t instruction = 0;
+        if (pc != 0 && memcpy(&instruction, (const void *)pc, sizeof(instruction)) == 0 &&
+            (instruction & WITCH_JIT_BRK_MASK) == WITCH_JIT_BRK_OP) {
+            arm_thread_state64_set_pc_fptr(context->uc_mcontext->__ss,
+                                            (int (*)(void))(uintptr_t)(pc + 4));
+            NSLog(@"[JavaLauncher] Consumed an unserviced JIT brk at %p (no script attached)", (void *)pc);
+            return;
+        }
+    }
+#endif
+    // Not one of ours: restore the default disposition so a real trap still
+    // terminates the process the way it normally would.
+    struct sigaction dfl = {0};
+    dfl.sa_handler = SIG_DFL;
+    sigemptyset(&dfl.sa_mask);
+    sigaction(sig, &dfl, NULL);
+}
+
+// Installs the JIT trap guard. The previous disposition is restored by
+// restoreJITTrapGuard, which the launch path registers as a scope cleanup so
+// every early return puts it back.
+static void installJITTrapGuard(void) {
+    struct sigaction sa = {0};
+    sa.sa_sigaction = onUnservicedBrk;
+    sigemptyset(&sa.sa_mask);
+    sa.sa_flags = SA_SIGINFO;
+    sigaction(SIGTRAP, &sa, NULL);
+}
+
+// Scope cleanup for the SIGTRAP disposition captured before the guard was
+// installed.
+static void restoreJITTrapGuard(struct sigaction *saved) {
+    if (!saved) return;
+    sigaction(SIGTRAP, saved, NULL);
+}
+
+// Without a debugger the JIT breakpoints must resolve to the default handler,
+// so an unserviced brk becomes a SIGTRAP the guard can consume. While a
+// debugger is attached the breakpoint port belongs to it and must not be
+// touched.
+static void resetJITBreakpointExceptionPort(void) {
+    if (processIsCurrentlyDebugged()) return;
+    kern_return_t result = task_set_exception_ports(mach_task_self(), EXC_MASK_BREAKPOINT, 0,
+                                                     EXCEPTION_DEFAULT, MACHINE_THREAD_STATE);
+    if (result != KERN_SUCCESS) {
+        NSLog(@"[JavaLauncher] Could not reset the breakpoint exception port (kern=%d)", (int)result);
     }
 }
 
@@ -434,11 +582,11 @@ static void onUnservicedBrk(int sig) {
 static void JIT26SetDetachAfterFirstBrGuarded(BOOL value) {
     struct sigaction sa = {0};
     struct sigaction oldSa;
-    sa.sa_handler = onUnservicedBrk;
+    sa.sa_sigaction = onUnservicedBrk;
     sigemptyset(&sa.sa_mask);
-    sa.sa_flags = 0;
+    sa.sa_flags = SA_SIGINFO;
     sigaction(SIGTRAP, &sa, &oldSa);
-    g_jitTrapArmed = 1;
+    armJITTrap();
     if (sigsetjmp(g_jitTrapJmp, 1) == 0) {
         JIT26SetDetachAfterFirstBr(value);
     } else {
@@ -446,8 +594,50 @@ static void JIT26SetDetachAfterFirstBrGuarded(BOOL value) {
               @"(script lacks command 3); continuing with the script's own detach policy",
               value);
     }
-    g_jitTrapArmed = 0;
+    disarmJITTrap();
     sigaction(SIGTRAP, &oldSa, NULL);
+}
+
+// Faults that reach the launcher before the JVM installs its own handlers
+// (HotSpot does that in os::signal_init, i.e. inside JLI_Launch) used to be
+// fatal with no trace at all: the process vanished and iOS dropped the user
+// back on the home screen. The handler logs the faulting address and the
+// interrupted PC, then restores the default disposition and returns, so the
+// faulting instruction runs again and the process dies exactly as before - but
+// the log now says what happened instead of leaving no trace at all.
+static void onFatalSignal(int sig, siginfo_t *info, void *ucontext) {
+    uintptr_t pc = 0;
+#ifdef WITCH_JIT_CAN_SKIP_TRAP
+    ucontext_t *context = (ucontext_t *)ucontext;
+    if (context && context->uc_mcontext) {
+        pc = (uintptr_t)arm_thread_state64_get_pc(context->uc_mcontext->__ss);
+    }
+#else
+    (void)ucontext;
+#endif
+    NSLog(@"[JavaLauncher] Fatal signal %d (code %d) pc=%p addr=%p - the JIT memory was not executable or the runtime faulted",
+          sig, info ? info->si_code : 0, (void *)pc, info ? info->si_addr : NULL);
+    struct sigaction dfl = {0};
+    dfl.sa_handler = SIG_DFL;
+    sigemptyset(&dfl.sa_mask);
+    sigaction(sig, &dfl, NULL);
+}
+
+// Cr4shed known issue: the crash reporter's handler exits after writing the
+// dump, so the JVM never sees the signal. Reset the fault dispositions to the
+// default before JLI_Launch so HotSpot can install its own handlers - but
+// through the diagnostic handler above, so a fault that happens before the
+// JVM is up still leaves a trace instead of a silent death.
+static void installFatalSignalDiagnostics(void) {
+    int fatalSignals[] = {SIGSEGV, SIGBUS, SIGILL, SIGFPE};
+    for (size_t i = 0; i < sizeof(fatalSignals) / sizeof(fatalSignals[0]); i++) {
+        struct sigaction sa = {0};
+        sa.sa_sigaction = onFatalSignal;
+        sigemptyset(&sa.sa_mask);
+        sa.sa_flags = SA_SIGINFO;
+        sigaction(fatalSignals[i], &sa, NULL);
+    }
+    signal(SIGPIPE, SIG_DFL);
 }
 
 static BOOL JIT26ProbeLooksValid(void *result) {
@@ -519,7 +709,23 @@ int launchJVMWithArgs(NSString *username, id launchTarget, int width, int height
     // enforcement happens at the mirror decision (classic path needs an attached
     // debugger, not a script — so script failures must NOT abort a classic launch).
     BOOL jitScriptAlive = YES;
+    // Whether the JIT script answered the probe brk at all. A brk that nobody
+    // services means no script is attached: the runtime's own code-cache brks
+    // would then be fatal (SIGTRAP with the default disposition kills the app),
+    // so the launch is refused with an actionable error instead.
+    BOOL jitScriptServiced = NO;
     BOOL preflightOK = NO;
+    // The JIT trap guard covers the WHOLE launch, on every iOS version: the
+    // patched runtime routes code-cache allocation through brk #0xf00d /
+    // #0x6a, and the debugger can disappear mid-session (the built-in
+    // StikJIT helper runs in its own extension process, so the system killing
+    // that extension detaches it). An unserviced brk then hits the default
+    // SIGTRAP action, which kills the app and drops the user back on the home
+    // screen with no crash log. The cleanup attribute restores the previous
+    // disposition on every exit path, including the early error returns.
+    struct sigaction jitTrapOriginalSa __attribute__((cleanup(restoreJITTrapGuard)));
+    sigaction(SIGTRAP, NULL, &jitTrapOriginalSa);
+    installJITTrapGuard();
     if (jit26Handshake) {
         // Ensure UniversalJIT26.js is synced to Documents, LCAppInfo.plist, and Clipboard
         init_setupUniversalJITScript(YES);
@@ -547,12 +753,6 @@ int launchJVMWithArgs(NSString *username, id launchTarget, int width, int height
             [PLLogOutputView handleExitCode:1];
             return 1;
         }
-        struct sigaction jitTrapSa = {0};
-        struct sigaction oldTrapSa;
-        jitTrapSa.sa_handler = onUnservicedBrk;
-        sigemptyset(&jitTrapSa.sa_mask);
-        jitTrapSa.sa_flags = 0;
-        sigaction(SIGTRAP, &jitTrapSa, &oldTrapSa);
         // The FIRST brk must be the base-script probe: StikDebug attaches and
         // starts the assigned Universal JIT script while servicing that brk,
         // and a stale assigned script (from an older launcher) only knows the
@@ -563,17 +763,30 @@ int launchJVMWithArgs(NSString *username, id launchTarget, int width, int height
         // commands 3/4 (see JIT26SetDetachAfterFirstBrGuarded callers).
         // Use the same brk #0xf00d path as patched libjvm (not legacy brk #0x69).
         void *volatile probeMapping = NULL;
-        g_jitTrapArmed = 1;
-        if (sigsetjmp(g_jitTrapJmp, 1) == 0) {
-            probeMapping = JIT26PrepareRegion(NULL, getpagesize());
-        } else {
-            NSLog(@"[JavaLauncher] JIT26 probe brk was NOT serviced on this thread "
-                  @"(debugger detached or has no script). Failing loudly instead of spinning.");
+        volatile int probeServiced = 0;
+        // The script may still be starting up when the game launches, so give
+        // it a couple of chances: an unserviced probe is fatal further down
+        // (the runtime's own code-cache brk would be unserviced too).
+        for (volatile int attempt = 0; attempt < 3 && !probeServiced; attempt++) {
+            if (attempt > 0) {
+                usleep(200 * 1000);
+            }
+            armJITTrap();
+            if (sigsetjmp(g_jitTrapJmp, 1) == 0) {
+                probeMapping = JIT26PrepareRegion(NULL, getpagesize());
+                probeServiced = 1;
+            } else {
+                NSLog(@"[JavaLauncher] JIT26 probe brk was NOT serviced on this thread "
+                      @"(debugger detached or has no script), attempt %d. Failing loudly instead of spinning.",
+                      attempt + 1);
+            }
+            disarmJITTrap();
         }
-        g_jitTrapArmed = 0;
+        jitScriptServiced = probeServiced ? YES : NO;
         NSLog(@"[JavaLauncher] JIT26 probe returned %p (txm=%d, flags=0x%X)", probeMapping,
             DeviceHasTXM(), (unsigned)DeviceGetJITFlags(NO));
-        JITReportLine(@"probe=%p valid=%d", probeMapping, JIT26ProbeLooksValid(probeMapping));
+        JITReportLine(@"probe=%p serviced=%d valid=%d", probeMapping, probeServiced,
+            JIT26ProbeLooksValid(probeMapping));
         // Soft-fail: a dead script only matters for the mirror path (enforced at
         // the mirror decision). The classic path needs attach, not a script.
         BOOL probeValid = JIT26ProbeLooksValid(probeMapping);
@@ -588,7 +801,7 @@ int launchJVMWithArgs(NSString *username, id launchTarget, int width, int height
         if (extensionScript.length > 0) {
             NSLog(@"[JavaLauncher] Loading UniversalJIT26Extension.js (%lu bytes)", (unsigned long)extensionScript.length);
             BOOL extensionDelivered = YES;
-            g_jitTrapArmed = 1;
+            armJITTrap();
             if (sigsetjmp(g_jitTrapJmp, 1) == 0) {
                 JIT26SendJITScript(extensionScript);
             } else {
@@ -596,7 +809,7 @@ int launchJVMWithArgs(NSString *username, id launchTarget, int width, int height
                 NSLog(@"[JavaLauncher] Extension brk was NOT serviced — the StikDebug script "
                       @"does not implement command 2 (0x68). Assign UniversalJIT26.js in StikDebug.");
             }
-            g_jitTrapArmed = 0;
+            disarmJITTrap();
             if (!extensionDelivered) {
                 init_setupUniversalJITScript(YES);
                 JITReportLine(@"extension=UNSERVICED");
@@ -612,8 +825,9 @@ int launchJVMWithArgs(NSString *username, id launchTarget, int width, int height
             NSLog(@"[JavaLauncher] UniversalJIT26Extension.js is missing or empty; using assigned base JIT script only");
         }
         } // end extension attempt (skipped entirely when probe already failed)
-        // ALWAYS restore the pre-handshake SIGTRAP disposition before continuing.
-        sigaction(SIGTRAP, &oldTrapSa, NULL);
+        // The trap guard stays installed from here on: the runtime keeps
+        // raising brks while it allocates its code cache, and an unserviced
+        // one must not kill the app (the handler consumes it instead).
         if (jitScriptAlive) {
         // Install the dyld LV bypass WHILE StikDebug is still attached. If we wait
         // until after detach-after-first-br, processIsCurrentlyDebugged() is false
@@ -626,20 +840,58 @@ int launchJVMWithArgs(NSString *username, id launchTarget, int width, int height
         // extension just re-registered command 3 even for stale base scripts.
         JIT26SetDetachAfterFirstBrGuarded(!jit26AlwaysAttached);
         init_jit_vm_remap_hook();
-        // make sure we don't get stuck in EXC_BAD_ACCESS
+        // Make sure we don't get stuck in EXC_BAD_ACCESS. The mask deliberately
+        // does NOT include EXC_MASK_BREAKPOINT: the JIT breakpoints are
+        // serviced by the debugger's exception server, and taking the
+        // breakpoint port away from it would turn every brk into a SIGTRAP
+        // that the guard above has to fake.
         task_set_exception_ports(mach_task_self(), EXC_MASK_BAD_ACCESS, 0, EXCEPTION_DEFAULT, MACHINE_THREAD_STATE);
         // Pre-flight: prove debugger-blessed memory is really executable. A failure
         // is RECORDED, not fatal here: the mirror decision below is the single
         // enforcement point (classic path may still work via native MAP_JIT bless).
-        preflightOK = JIT26ExecPreflight();
+        // Guarded: the preflight raises a brk, and a script that died in the
+        // meantime must not kill the launch (same reason as the mirror preflight).
+        armJITTrap();
+        if (sigsetjmp(g_jitTrapJmp, 1) == 0) {
+            preflightOK = JIT26ExecPreflight();
+        } else {
+            NSLog(@"[JavaLauncher] exec preflight brk was NOT serviced (script died mid-launch)");
+        }
+        disarmJITTrap();
         JITReportLine(@"preflight=%d", preflightOK);
         if (!preflightOK) {
             NSLog(@"[JavaLauncher] preflight failed — recording; mirror gate decides");
             jitScriptAlive = NO;
         }
         } // end script-dependent section (dyld bypass + preflight need a live script)
-        JITReportLine(@"script_alive=%d", jitScriptAlive);
+        JITReportLine(@"script_alive=%d serviced=%d", jitScriptAlive, jitScriptServiced);
+        // A brk that nobody serviced means the JIT script is not attached. The
+        // patched runtime routes its code-cache allocation through brk
+        // #0xf00d, so the JVM's first trap would be unserviced too and the
+        // kernel's default SIGTRAP action would kill the app - the user is
+        // kicked back to the home screen with no explanation. Refuse the
+        // launch with an actionable message instead.
+        if (!jitScriptServiced) {
+            UIKit_returnToSplitView();
+            showDialog(localize(@"Error", nil),
+                @"No JIT script serviced Witch's breakpoints, so the game cannot start.\n\n"
+                 @"1. Check that the debugger that provides JIT for Witch is still attached\n"
+                 @"2. With StikDebug, assign \"Universal JIT 26\" (UniversalJIT26.js) to Witch\n"
+                 @"3. Re-enable JIT for Witch, close and reopen Witch, then try again\n\n"
+                 "(Or pick another JIT method in Settings → Game → JIT.)\n\n"
+                 "Please send Documents/JITReport-latest.txt with your report.");
+            [PLLogOutputView handleExitCode:1];
+            return 1;
+        }
     }
+    // Without a debugger the JIT breakpoints have to resolve to the default
+    // handler, so a brk becomes a SIGTRAP that the guard consumes instead of
+    // hitting the default action. A port left behind by a debugger that died
+    // (the built-in helper lives in its own extension process, so the system
+    // killing it leaves the task with a dead exception port) would swallow
+    // the breakpoint - or kill the task with EXC_CRASH, which is another way
+    // to end up on the home screen with no log.
+    resetJITBreakpointExceptionPort();
     // iOS 26/27 still needs the LV bypass for JNA, renderer dylibs, and mods
     // extracted to Documents. StikDebug keeps us CS_DEBUGGED so the mirrored
     // dyld patches are legal — do not leave this off just because
@@ -982,6 +1234,19 @@ int launchJVMWithArgs(NSString *username, id launchTarget, int width, int height
     margv[++margc] = "-Dorg.lwjgl.system.allocator=system";
     //margv[++margc] = "-Dorg.lwjgl.util.NoChecks=true";
     margv[++margc] = "-Dlog4j2.formatMsgNoLookups=true";
+    // Netty's native transport (kqueue on Apple platforms) ships as an unsigned
+    // dylib inside the game jars. Opening the Multiplayer screen makes the
+    // server list pinger ask netty for an event loop group, which touches
+    // io.netty.channel.kqueue.KQueue -> the class initializer extracts
+    // libnetty_transport_native_kqueue_*.dylib into tmp/ and System.load()s it.
+    // That dylib is unsigned, so dyld cannot map it executable; the
+    // DyldLVBypass fallback then hands dyld a mapping without the file's
+    // bytes, and the first native call into the "loaded" library faults and
+    // kills the game (the launcher log ends right at the exec map of
+    // libnetty_transport_native_kqueue). Netty's documented switch keeps the
+    // native transport off, so it falls back to plain NIO - which is what
+    // Minecraft uses on every non-Linux platform anyway.
+    margv[++margc] = "-Dio.netty.transport.noNative=true";
     // Voxy sizes its geometry SSBO from GL_MAX_SHADER_STORAGE_BLOCK_SIZE by
     // rounding up to the next power of two and then doubling it. MobileGL
     // advertises at most 512MB, so Voxy asks for 1GB even though Metal's
@@ -1192,11 +1457,17 @@ int launchJVMWithArgs(NSString *username, id launchTarget, int width, int height
             fsr3FgMultiplier != 4 && fsr3FgMultiplier != 6) {
             fsr3FgMultiplier = 2;
         }
+        // Sub-pixel TAA jitter: the FidelityFX temporal accumulation can
+        // only resolve the aliasing when the scene is rendered at a different
+        // sub-pixel position every frame. The agent skews the game's
+        // projection matrix accordingly. Only useful for the modes with a
+        // temporal accumulation (FSR2 / FSR3 upscaler).
+        BOOL fsr3Jitter = getPrefBool(@"fsr3.jitter");
         margv[++margc] = [NSString stringWithFormat:
-            @"-javaagent:%@/fsr3-agent.jar=mode=%ld&fg=%d&fgx=%ld&scale=%.3f&sharp=%.3f&probe=%ld",
+            @"-javaagent:%@/fsr3-agent.jar=mode=%ld&fg=%d&fgx=%ld&scale=%.3f&sharp=%.3f&probe=%ld&jitter=%d",
             librariesPath, (long)fsr3Upscaler, fsr3Framegen ? 1 : 0,
             (long)fsr3FgMultiplier, fsr3Scale, fsr3Sharpness,
-            (long)getPrefInt(@"fsr3.probe")].UTF8String;
+            (long)getPrefInt(@"fsr3.probe"), fsr3Jitter ? 1 : 0].UTF8String;
     }
 
     // F3 debug overlay metadata. The agent patches the game's debug screen at
@@ -1333,19 +1604,19 @@ int launchJVMWithArgs(NSString *username, id launchTarget, int width, int height
         {
             struct sigaction bigSa = {0};
             struct sigaction bigOldSa;
-            bigSa.sa_handler = onUnservicedBrk;
+            bigSa.sa_sigaction = onUnservicedBrk;
             sigemptyset(&bigSa.sa_mask);
-            bigSa.sa_flags = 0;
+            bigSa.sa_flags = SA_SIGINFO;
             sigaction(SIGTRAP, &bigSa, &bigOldSa);
             void *mirrorRegion = NULL;
             CFAbsoluteTime bigStart = CFAbsoluteTimeGetCurrent();
-            g_jitTrapArmed = 1;
+            armJITTrap();
             if (sigsetjmp(g_jitTrapJmp, 1) == 0) {
                 JIT26MirrorRegionPreflight((size_t)JIT26_MIRROR_REGION_SIZE, &mirrorRegion);
             } else {
                 NSLog(@"[JavaLauncher] mirror preflight brk was NOT serviced (script died mid-launch)");
             }
-            g_jitTrapArmed = 0;
+            disarmJITTrap();
             sigaction(SIGTRAP, &bigOldSa, NULL);
             NSLog(@"[JavaLauncher] mirror preflight done in %.2fs: region=%p",
                   CFAbsoluteTimeGetCurrent() - bigStart, mirrorRegion);
@@ -1587,13 +1858,12 @@ int launchJVMWithArgs(NSString *username, id launchTarget, int width, int height
         NSLog(@"[JavaLauncher] Mirror JIT prepare: debugger kept attached, brk 0x6a handler active");
     }
 
-    // Cr4shed known issue: exit after crash dump,
-    // reset signal handler so that JVM can catch them
-    signal(SIGSEGV, SIG_DFL);
-    signal(SIGPIPE, SIG_DFL);
-    signal(SIGBUS, SIG_DFL);
-    signal(SIGILL, SIG_DFL);
-    signal(SIGFPE, SIG_DFL);
+    // Cr4shed known issue: exit after crash dump, reset signal handler so that
+    // JVM can catch them. The reset goes through the diagnostic handler, so a
+    // fault that happens before HotSpot installs its own handlers still leaves
+    // a trace (the old plain SIG_DFL killed the process with no log at all:
+    // the app vanished and iOS dropped the user back on the home screen).
+    installFatalSignalDiagnostics();
 
     // Free split VC
     tmpRootVC = nil;
@@ -1648,6 +1918,8 @@ int launchJVMWithArgs(NSString *username, id launchTarget, int width, int height
     // The JVM is gone once JLI_Launch returns. A later memory warning must not
     // dial the old JavaVM pointer in WitchMemoryPressure's System.gc() path.
     runtimeJavaVMPtr = NULL;
+    // The JIT trap guard guarded the whole launch; its scope cleanup restores
+    // the disposition the process had before it.
     return jliResult;
 }
 

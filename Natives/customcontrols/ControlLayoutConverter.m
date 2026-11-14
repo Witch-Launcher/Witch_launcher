@@ -10,6 +10,8 @@
 + (NSString *)styleKeyFromProps:(NSMutableDictionary *)props;
 + (NSDictionary *)buttonSizeFromFrames:(CGFloat)width height:(CGFloat)height screen:(CGSize)screen;
 + (NSDictionary *)positionFromFrame:(CGRect)frame screen:(CGSize)screen;
++ (NSArray *)drawerDataListFromInternal:(NSDictionary *)internal;
++ (NSMutableArray *)drawerDataListFromZalith:(NSDictionary *)zalith;
 @end
 
 static NSDictionary<NSNumber *, NSString *> *sCodeToName;
@@ -63,18 +65,28 @@ static NSString *ZalithKeyNameForCode(NSNumber *code) {
 static NSString *LauncherEventForSpecialCode(int code) {
     switch (code) {
         case SPECIALBTN_KEYBOARD: return @"launcher.event.switch_ime";
+        case SPECIALBTN_TOGGLECTRL: return @"launcher.event.toggle_ctrl";
         case SPECIALBTN_MOUSEPRI: return @"GLFW_MOUSE_BUTTON_LEFT";
         case SPECIALBTN_MOUSESEC: return @"GLFW_MOUSE_BUTTON_RIGHT";
+        case SPECIALBTN_VIRTUALMOUSE: return @"launcher.event.virtual_mouse";
         case SPECIALBTN_MOUSEMID: return @"GLFW_MOUSE_BUTTON_MIDDLE";
+        case SPECIALBTN_SCROLLUP: return @"launcher.event.scroll_up.single";
+        case SPECIALBTN_SCROLLDOWN: return @"launcher.event.scroll_down.single";
+        case SPECIALBTN_MENU: return @"launcher.event.switch_menu";
     }
     return nil;
 }
 
 static NSNumber *SpecialCodeForLauncherEvent(NSString *event) {
     if ([event isEqualToString:@"launcher.event.switch_ime"]) return @(SPECIALBTN_KEYBOARD);
+    if ([event isEqualToString:@"launcher.event.toggle_ctrl"]) return @(SPECIALBTN_TOGGLECTRL);
     if ([event isEqualToString:@"GLFW_MOUSE_BUTTON_LEFT"]) return @(SPECIALBTN_MOUSEPRI);
     if ([event isEqualToString:@"GLFW_MOUSE_BUTTON_RIGHT"]) return @(SPECIALBTN_MOUSESEC);
+    if ([event isEqualToString:@"launcher.event.virtual_mouse"]) return @(SPECIALBTN_VIRTUALMOUSE);
     if ([event isEqualToString:@"GLFW_MOUSE_BUTTON_MIDDLE"]) return @(SPECIALBTN_MOUSEMID);
+    if ([event isEqualToString:@"launcher.event.scroll_up.single"] || [event isEqualToString:@"launcher.event.scroll_up"]) return @(SPECIALBTN_SCROLLUP);
+    if ([event isEqualToString:@"launcher.event.scroll_down.single"] || [event isEqualToString:@"launcher.event.scroll_down"]) return @(SPECIALBTN_SCROLLDOWN);
+    if ([event isEqualToString:@"launcher.event.switch_menu"]) return @(SPECIALBTN_MENU);
     return nil;
 }
 
@@ -127,10 +139,14 @@ static NSArray<NSNumber *> *KeycodesFromZalithEvents(id events) {
         if (![key isKindOfClass:NSString.class]) continue;
         if ([type isEqualToString:@"key"]) {
             NSNumber *code = CodeForZalithKeyName(key);
-            if (code) codes[index++] = code;
+            // An unknown key keeps its slot empty instead of shifting the
+            // following entries to the previous slot.
+            codes[index] = code ?: @0;
+            index++;
         } else if ([type isEqualToString:@"launcher_event"]) {
             NSNumber *code = SpecialCodeForLauncherEvent(key);
-            if (code) codes[index++] = code;
+            codes[index] = code ?: @0;
+            index++;
         }
     }
     return codes;
@@ -299,6 +315,27 @@ static CGFloat ResolveZalithSize(NSDictionary *size, NSString *dimension, CGSize
     return joystick;
 }
 
+// A drawer is a group of buttons shown together, which the Zalith format has
+// no equivalent for. They are kept in their own list so that a round trip
+// does not lose them.
++ (NSArray *)drawerDataListFromInternal:(NSDictionary *)internal {
+    NSMutableArray *drawers = [NSMutableArray array];
+    for (NSDictionary *drawer in ArrayOrEmpty(internal[@"mDrawerDataList"])) {
+        if (![drawer isKindOfClass:NSDictionary.class]) continue;
+        [drawers addObject:DeepMutableCopy(drawer)];
+    }
+    return drawers;
+}
+
++ (NSMutableArray *)drawerDataListFromZalith:(NSDictionary *)zalith {
+    NSMutableArray *drawers = [NSMutableArray array];
+    for (NSDictionary *drawer in ArrayOrEmpty(zalith[@"mDrawerDataList"])) {
+        if (![drawer isKindOfClass:NSDictionary.class]) continue;
+        [drawers addObject:DeepMutableCopy(drawer)];
+    }
+    return drawers;
+}
+
 + (NSMutableDictionary *)internalLayoutFromZalith:(NSDictionary *)zalith {
     CGSize screen = [self landscapeScreenSize];
 
@@ -327,7 +364,7 @@ static CGFloat ResolveZalithSize(NSDictionary *size, NSString *dimension, CGSize
     internal[@"version"] = @7;
     internal[@"scaledAt"] = @(getPrefFloat(@"control.button_scale"));
     internal[@"mControlDataList"] = buttons;
-    internal[@"mDrawerDataList"] = [NSMutableArray array];
+    internal[@"mDrawerDataList"] = [self drawerDataListFromZalith:zalith];
     internal[@"mJoystickDataList"] = joysticks;
     if ([zalith[@"info"] isKindOfClass:NSDictionary.class]) {
         internal[@"info"] = DeepMutableCopy(zalith[@"info"]);
@@ -422,18 +459,27 @@ static CGFloat ResolveZalithSize(NSDictionary *size, NSString *dimension, CGSize
 }
 
 + (NSDictionary *)zalithLayoutFromInternal:(NSDictionary *)internal
-                              buttonFrames:(NSDictionary<NSDictionary *, NSValue *> *)buttonFrames
-                            joystickFrames:(NSDictionary<NSDictionary *, NSValue *> *)joystickFrames
+                              buttonFrames:(NSDictionary *)buttonFrames
+                            joystickFrames:(NSDictionary *)joystickFrames
                                 screenSize:(CGSize)screenSize {
     CGSize screen = CGSizeMake(MAX(screenSize.width, 1.0), MAX(screenSize.height, 1.0));
+
+    // The frame maps are keyed by a stable identifier instead of the button
+    // dictionary itself, whose hash changes as soon as it is edited.
+    NSDictionary<NSString *, NSValue *> *buttonFramesById = buttonFrames;
+    NSDictionary<NSString *, NSValue *> *joystickFramesById = joystickFrames;
 
     NSMutableArray *buttons = [NSMutableArray array];
     NSMutableArray *styles = [NSMutableArray array];
     NSMutableDictionary *styleIds = [NSMutableDictionary dictionary];
 
-    for (NSMutableDictionary *props in ArrayOrEmpty(internal[@"mControlDataList"])) {
+    NSArray *controlList = ArrayOrEmpty(internal[@"mControlDataList"]);
+    for (NSUInteger index = 0; index < controlList.count; index++) {
+        NSMutableDictionary *props = controlList[index];
         if (![props isKindOfClass:NSDictionary.class]) continue;
-        CGRect frame = buttonFrames[props] ? [buttonFrames[props] CGRectValue] : CGRectZero;
+        NSString *frameId = [NSString stringWithFormat:@"button:%lu", (unsigned long)index];
+        NSValue *frameValue = buttonFramesById[frameId];
+        CGRect frame = frameValue ? [frameValue CGRectValue] : CGRectZero;
 
         NSString *styleKey = [self styleKeyFromProps:props];
         NSString *styleId = styleIds[styleKey];
@@ -466,9 +512,13 @@ static CGFloat ResolveZalithSize(NSDictionary *size, NSString *dimension, CGSize
     }
 
     NSMutableArray *joysticks = [NSMutableArray array];
-    for (NSMutableDictionary *props in ArrayOrEmpty(internal[@"mJoystickDataList"])) {
+    NSArray *joystickList = ArrayOrEmpty(internal[@"mJoystickDataList"]);
+    for (NSUInteger index = 0; index < joystickList.count; index++) {
+        NSMutableDictionary *props = joystickList[index];
         if (![props isKindOfClass:NSDictionary.class]) continue;
-        CGRect frame = joystickFrames[props] ? [joystickFrames[props] CGRectValue] : CGRectZero;
+        NSString *frameId = [NSString stringWithFormat:@"joystick:%lu", (unsigned long)index];
+        NSValue *frameValue = joystickFramesById[frameId];
+        CGRect frame = frameValue ? [frameValue CGRectValue] : CGRectZero;
         CGFloat size = MAX(20.0, frame.size.width);
         int sizePercentage = ClampInt((int)lround(size / screen.height * 10000.0), 2000, 10000);
         [joysticks addObject:@{
@@ -499,6 +549,7 @@ static CGFloat ResolveZalithSize(NSDictionary *size, NSString *dimension, CGSize
         @"styles": styles,
         @"joystickStyles": @[],
         @"editorVersion": @12,
+        @"mDrawerDataList": [self drawerDataListFromInternal:internal],
     };
 }
 

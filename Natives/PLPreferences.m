@@ -64,7 +64,15 @@
             @"allow_microphone": @NO,
             @"microphone_source": @"auto",
             @"moltenvk_version": @"1.4",
-            @"ltw_angle_backend": @"vulkan"
+            @"ltw_angle_backend": @"vulkan",
+            // Frame pacing. Both default OFF = no launcher-side lock, so the
+            // game is free to run up to the hardware/display ceiling.
+            @"vsync": @NO,
+            @"max_framerate": @"0",
+            // Uncapped present: lets the render loop run faster than the panel
+            // refresh (the extra frames are dropped at present time). Default
+            // OFF so the stock behaviour stays display-paced.
+            @"uncapped": @NO
         }.mutableCopy,
         @"control": @{
             @"default_ctrl": @"default.json",
@@ -177,7 +185,12 @@
             // Perf measurement probe bitmask for the FidelityFX bridge
             // (1=skip OF, 2=OF every frame, 4=skip interpolation,
             // 8=skip gen present, 12=FG GPU bypass). 0 = production.
-            @"probe": @(0)
+            @"probe": @(0),
+            // Sub-pixel TAA jitter for the FidelityFX temporal accumulation:
+            // the scene is rendered at a different sub-pixel position every
+            // frame so the accumulation can resolve the aliasing instead of
+            // blurring it. Only used by FSR2 / FSR3 Upscaler.
+            @"jitter": @YES
         }.mutableCopy,
         @"zink": @{
             @"optimization_level": @(-1),

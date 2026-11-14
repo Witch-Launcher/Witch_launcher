@@ -328,15 +328,19 @@
         if (![view isKindOfClass:ControlButton.class]) continue;
         ControlButton *button = (ControlButton *)view;
 
+        // The frames are keyed by the position of the button in the layout,
+        // as the button dictionary itself changes while it is edited.
         if ([button isKindOfClass:ControlJoystick.class]) {
-            if ([joystickList indexOfObjectIdenticalTo:button.properties] != NSNotFound) {
-                joystickFrames[button.properties] = [NSValue valueWithCGRect:button.frame];
+            NSUInteger index = [joystickList indexOfObjectIdenticalTo:button.properties];
+            if (index != NSNotFound) {
+                joystickFrames[[NSString stringWithFormat:@"joystick:%lu", (unsigned long)index]] = [NSValue valueWithCGRect:button.frame];
             }
             continue;
         }
         if ([button isKindOfClass:ControlSubButton.class] || [button isKindOfClass:ControlDrawer.class]) continue;
-        if ([controlList indexOfObjectIdenticalTo:button.properties] != NSNotFound) {
-            buttonFrames[button.properties] = [NSValue valueWithCGRect:button.frame];
+        NSUInteger index = [controlList indexOfObjectIdenticalTo:button.properties];
+        if (index != NSNotFound) {
+            buttonFrames[[NSString stringWithFormat:@"button:%lu", (unsigned long)index]] = [NSValue valueWithCGRect:button.frame];
         }
     }
 
@@ -353,7 +357,7 @@
     }
     NSData *jsonData = [NSJSONSerialization dataWithJSONObject:payload options:NSJSONWritingPrettyPrinted error:error];
     if (jsonData == nil) return NO;
-    return [jsonData writeToFile:amethyst_hidden_path([NSString stringWithFormat:@"controlmap/%@.json", name]) options:NSDataWritingAtomic error:error];
+    return [jsonData writeToFile:amethyst_control_path([NSString stringWithFormat:@"%@.json", name]) options:NSDataWritingAtomic error:error];
 }
 
 - (void)promptSaveNameWithExit:(BOOL)exit {
@@ -384,6 +388,12 @@
         }
 
         self.currentFileName = name;
+        // Saving under a new name must also make that layout the active one,
+        // otherwise the launcher keeps using the previous map and the edits
+        // appear to be lost on the next start.
+        if (self.setDefaultCtrl) {
+            self.setDefaultCtrl([NSString stringWithFormat:@"%@.json", name]);
+        }
         [self.undoManager removeAllActions];
     }];
 }
@@ -394,7 +404,7 @@
 
 - (void)actionOpenFilePicker:(void (^)(NSString *name))handler {
     FileListViewController *vc = [[FileListViewController alloc] init];
-    vc.listPath = amethyst_hidden_dir(@"controlmap");
+    vc.listPath = amethyst_control_dir(nil);
     vc.whenItemSelected = handler;
     vc.confirmDeleteBeforeRemoving = YES;
     vc.whenDelete = ^(NSString *path) {
@@ -404,7 +414,7 @@
             self.setDefaultCtrl(@"default.json");
         }
         if ([deletedName isEqualToString:self.currentFileName]) {
-            if (![[NSFileManager defaultManager] fileExistsAtPath:amethyst_hidden_path(@"controlmap/default.json")]) {
+            if (![[NSFileManager defaultManager] fileExistsAtPath:amethyst_control_path(@"default.json")]) {
                 generateAndSaveDefaultControl();
             }
             self.currentFileName = @"default";
@@ -437,7 +447,7 @@
     NSFileManager *fm = [NSFileManager defaultManager];
     NSString *name = base;
     int i = 2;
-    while ([fm fileExistsAtPath:amethyst_hidden_path([NSString stringWithFormat:@"controlmap/%@.json", name])]) {
+    while ([fm fileExistsAtPath:amethyst_control_path([NSString stringWithFormat:@"%@.json", name])]) {
         name = [NSString stringWithFormat:@"%@ %d", base, i++];
     }
     return name;
@@ -510,7 +520,7 @@
             name = infoName;
         }
         name = [self uniqueControlNameFrom:name];
-        [data writeToFile:amethyst_hidden_path([NSString stringWithFormat:@"controlmap/%@.json", name]) options:NSDataWritingAtomic error:nil];
+        [data writeToFile:amethyst_control_path([NSString stringWithFormat:@"%@.json", name]) options:NSDataWritingAtomic error:nil];
         [self finishImportWithName:name upgradeToZalith:NO];
         return;
     }
@@ -522,7 +532,7 @@
         @{@"title": localize(@"custom_controls.import.prompt.upgrade", nil), @"icon": @"arrow.up.doc"},
         @{@"title": localize(@"custom_controls.import.prompt.keep", nil), @"icon": @"doc"},
     ] selectedIndex:NSNotFound selection:^(NSInteger idx) {
-        [data writeToFile:amethyst_hidden_path([NSString stringWithFormat:@"controlmap/%@.json", name]) options:NSDataWritingAtomic error:nil];
+        [data writeToFile:amethyst_control_path([NSString stringWithFormat:@"%@.json", name]) options:NSDataWritingAtomic error:nil];
         [self finishImportWithName:name upgradeToZalith:(idx == 0)];
     }];
 }
@@ -849,6 +859,35 @@ CGFloat currentY;
 
 @implementation CCMenuViewController
 
+// Takes a snapshot of the properties to be able to restore them on cancel.
+// The keycodes are copied deeply, as they are edited in place.
+- (NSMutableDictionary *)snapshotOfProperties:(NSMutableDictionary *)properties {
+    NSMutableDictionary *snapshot = [properties mutableCopy];
+    NSArray *keycodes = properties[@"keycodes"];
+    if ([keycodes isKindOfClass:NSArray.class]) {
+        NSMutableArray *copiedKeycodes = [NSMutableArray arrayWithCapacity:keycodes.count];
+        for (id keycode in keycodes) {
+            [copiedKeycodes addObject:[keycode copy]];
+        }
+        snapshot[@"keycodes"] = copiedKeycodes;
+    }
+    return snapshot;
+}
+
+// The keycodes are always indexed from 0 to 3, so the array must hold at
+// least 4 entries.
+- (NSMutableArray *)targetKeycodes {
+    NSMutableArray *keycodes = self.targetButton.properties[@"keycodes"];
+    if (![keycodes isKindOfClass:NSMutableArray.class]) {
+        keycodes = [[keycodes isKindOfClass:NSArray.class] ? keycodes : @[] mutableCopy];
+        self.targetButton.properties[@"keycodes"] = keycodes;
+    }
+    while (keycodes.count < 4) {
+        [keycodes addObject:@0];
+    }
+    return keycodes;
+}
+
 - (UILabel*)addLabel:(NSString *)name {
     UILabel *label = [[UILabel alloc] initWithFrame:CGRectMake(0.0, currentY, 0.0, 0.0)];
     label.text = name;
@@ -865,7 +904,7 @@ CGFloat currentY;
     self.keyValueMap = [[NSMutableArray alloc] init];
     initKeycodeTable(self.keyCodeMap, self.keyValueMap);
 
-    self.oldProperties = self.targetButton.properties.mutableCopy;
+    self.oldProperties = [self snapshotOfProperties:self.targetButton.properties];
     currentY = 6.0;
 
     CGFloat shortest = MIN(self.view.frame.size.width, self.view.frame.size.height);
@@ -986,8 +1025,12 @@ CGFloat currentY;
         self.pickerMapping.delegate = self;
         self.pickerMapping.dataSource = self;
         [self.pickerMapping reloadAllComponents];
+        NSArray *keycodes = [self targetKeycodes];
         for (int i = 0; i < 4; i++) {
-            [self.pickerMapping selectRow:[self.keyValueMap indexOfObject:self.targetButton.properties[@"keycodes"][i]] inComponent:i animated:NO];
+            NSUInteger row = [self.keyValueMap indexOfObject:keycodes[i]];
+            if (row != NSNotFound) {
+                [self.pickerMapping selectRow:row inComponent:i animated:NO];
+            }
         }
         [self pickerView:self.pickerMapping didSelectRow:0 inComponent:0];
 
@@ -1129,7 +1172,15 @@ CGFloat currentY;
 
 #pragma mark - Control editor
 - (void)actionEditCancel {
-    self.targetButton.properties = self.oldProperties;
+    // The properties dictionary is the one stored in the layout, so its
+    // content is restored in place instead of replacing the dictionary.
+    NSMutableDictionary *properties = self.targetButton.properties;
+    if (self.oldProperties && properties) {
+        [properties removeAllObjects];
+        for (NSString *key in self.oldProperties) {
+            properties[key] = self.oldProperties[key];
+        }
+    }
     [self.targetButton update];
     [self dismissViewControllerAnimated:YES completion:nil];
 }
@@ -1195,16 +1246,24 @@ CGFloat currentY;
 }
 
 - (void)pickerView:(UIPickerView *)pickerView didSelectRow:(NSInteger)row inComponent:(NSInteger)component {
-    self.editMapping.text = [NSString stringWithFormat:@"1: %@\n2: %@\n3: %@\n4: %@",
-        self.keyCodeMap[[pickerView selectedRowInComponent:0]],
-        self.keyCodeMap[[pickerView selectedRowInComponent:1]],
-        self.keyCodeMap[[pickerView selectedRowInComponent:2]],
-        self.keyCodeMap[[pickerView selectedRowInComponent:3]]
-    ];
-
+    NSMutableArray *keycodes = [self targetKeycodes];
+    NSMutableArray *names = [NSMutableArray array];
     for (int i = 0; i < 4; i++) {
-        self.targetButton.properties[@"keycodes"][i] = self.keyValueMap[[self.pickerMapping selectedRowInComponent:i]];
+        NSInteger selectedRow = [self.pickerMapping selectedRowInComponent:i];
+        if (selectedRow < 0 || selectedRow >= (NSInteger)self.keyValueMap.count) {
+            [names addObject:@""];
+            continue;
+        }
+        [names addObject:self.keyCodeMap[selectedRow]];
+        keycodes[i] = self.keyValueMap[selectedRow];
     }
+
+    self.editMapping.text = [NSString stringWithFormat:@"1: %@\n2: %@\n3: %@\n4: %@",
+        names[0],
+        names[1],
+        names[2],
+        names[3]
+    ];
 }
 
 - (NSInteger)numberOfComponentsInPickerView:(UIPickerView *)thePickerView {

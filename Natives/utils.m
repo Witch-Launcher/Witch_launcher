@@ -692,6 +692,32 @@ NSString *amethyst_hidden_dir(NSString *subpath) {
     return path;
 }
 
+#pragma mark - Control maps (visible folder)
+
+// Control maps are user content, not launcher support files: they stay in a
+// visible POJAV_HOME/controlmap folder so the Files app can reach them and
+// the user can copy their own layouts in without a hidden-folder dance.
+static NSString *amethyst_control_root(void) {
+    const char *home = getenv("POJAV_HOME");
+    if (!home) return nil;
+    return [@(home) stringByAppendingPathComponent:@"controlmap"];
+}
+
+NSString *amethyst_control_path(NSString *subpath) {
+    NSString *root = amethyst_control_root();
+    if (!root) return nil;
+    if (subpath.length == 0) return root;
+    return [root stringByAppendingPathComponent:subpath];
+}
+
+NSString *amethyst_control_dir(NSString *subpath) {
+    NSString *path = amethyst_control_path(subpath);
+    if (path.length > 0) {
+        [[NSFileManager defaultManager] createDirectoryAtPath:path withIntermediateDirectories:YES attributes:nil error:nil];
+    }
+    return path;
+}
+
 static void amethyst_move_legacy_item(NSString *root, NSString *hidden, NSString *name) {
     NSFileManager *fm = [NSFileManager defaultManager];
     NSString *from = [root stringByAppendingPathComponent:name];
@@ -715,7 +741,7 @@ void amethyst_migrate_legacy_home(void) {
     NSFileManager *fm = [NSFileManager defaultManager];
 
     NSArray<NSString *> *items = @[
-        @"accounts", @"controlmap", @"cursors", @"cursor_types",
+        @"accounts", @"cursors", @"cursor_types",
         @"fontconfig", @"MG", @"dh_natives",
         @"credits_cache.md", @"servers.json",
         @"amethyst_bg.png", @"amethyst_bg.mp4",
@@ -723,6 +749,45 @@ void amethyst_migrate_legacy_home(void) {
     ];
     for (NSString *name in items) {
         amethyst_move_legacy_item(root, hidden, name);
+    }
+
+    // Control maps belong to the user, not the launcher: they live in the
+    // VISIBLE POJAV_HOME/controlmap folder. Older builds parked them in the
+    // hidden .amethyst folder, so move them back out (and pick up the
+    // pre-.amethyst root-level folder too). Existing files win over the
+    // migrated ones so a user's edits are never overwritten.
+    NSString *controlRoot = amethyst_control_root();
+    if (controlRoot) {
+        NSArray<NSString *> *controlSources = @[
+            [hidden stringByAppendingPathComponent:@"controlmap"],
+            [root stringByAppendingPathComponent:@"controlmap"],
+        ];
+        for (NSString *source in controlSources) {
+            if (![fm fileExistsAtPath:source]) continue;
+            if ([source isEqualToString:controlRoot]) continue;
+            if ([fm fileExistsAtPath:controlRoot]) {
+                // Target already exists: merge the source files in without
+                // clobbering anything the user already has.
+                NSArray<NSString *> *entries = [fm contentsOfDirectoryAtPath:source error:nil];
+                for (NSString *entry in entries) {
+                    NSString *from = [source stringByAppendingPathComponent:entry];
+                    NSString *to = [controlRoot stringByAppendingPathComponent:entry];
+                    if ([fm fileExistsAtPath:to]) continue;
+                    NSError *error = nil;
+                    if ([fm moveItemAtPath:from toPath:to error:&error]) {
+                        NSLog(@"[AmethystHome] migrated controlmap/%@ -> controlmap/%@", entry, entry);
+                    }
+                }
+                [fm removeItemAtPath:source error:nil];
+            } else {
+                NSError *error = nil;
+                if ([fm moveItemAtPath:source toPath:controlRoot error:&error]) {
+                    NSLog(@"[AmethystHome] migrated %@ -> controlmap", source.lastPathComponent);
+                } else {
+                    NSLog(@"[AmethystHome] migrate controlmap failed: %@", error);
+                }
+            }
+        }
     }
 
     // The background image preference stores an absolute path; repoint it at
@@ -740,4 +805,15 @@ void amethyst_migrate_legacy_home(void) {
     for (NSString *name in @[@"runtimes", @"jna_tmp"]) {
         [fm removeItemAtPath:[root stringByAppendingPathComponent:name] error:nil];
     }
+}
+
+/*
+ * True when the FidelityFX upscaler is enabled (the launcher's setting).
+ *
+ * The values are the ones the settings screen writes: 0 = off, 1 = FSR1,
+ * 2 = FSR2, 3 = FSR3. The frame generation switch is independent of them.
+ */
+BOOL fsrUpscalerActive(void) {
+    NSInteger upscaler = getPrefInt(@"fsr3.upscaler");
+    return (upscaler >= 1 && upscaler <= 3) ? YES : NO;
 }

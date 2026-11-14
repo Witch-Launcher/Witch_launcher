@@ -32,7 +32,7 @@ BOOL leftShiftHeld;
     }
     
     NSString *controlFile = [PLProfiles resolveKeyForCurrentProfile:@"defaultGamepadCtrl"];
-    NSString *gamepadPath = amethyst_hidden_path([NSString stringWithFormat:@"controlmap/gamepads/%@", controlFile]);
+    NSString *gamepadPath = amethyst_control_path([NSString stringWithFormat:@"gamepads/%@", controlFile]);
     NSMutableDictionary *gamepadJSON = parseJSONFromFile(gamepadPath);
     
     gameMap = gamepadJSON[@"mGameMappingList"];

@@ -222,7 +222,9 @@ static GameSurfaceView* pojavWindow;
                                                       valueOptions:NSPointerFunctionsStrongMemory | NSPointerFunctionsObjectPersonality];
     
     self.surfaceView = [[GameSurfaceView alloc] initWithFrame:self.view.frame];
-    self.surfaceView.layer.contentsScale = screenScale * resolutionScale;
+    // Witch patch: see updateSavedResolution - the FidelityFX upscaler needs
+    // a drawable at the physical size (the agent forces the swapchain to it).
+    self.surfaceView.layer.contentsScale = screenScale * (fsrUpscalerActive() ? 1.0f : resolutionScale);
     self.surfaceView.layer.magnificationFilter = self.surfaceView.layer.minificationFilter = kCAFilterNearest;
     self.surfaceView.multipleTouchEnabled = YES;
     pojavWindow = self.surfaceView;
@@ -820,7 +822,17 @@ static GameSurfaceView* pojavWindow;
         self.surfaceView.frame = self.surfaceView.superview.frame;
     }
 
-    self.surfaceView.layer.contentsScale = self.screenScale * resolutionScale;
+    // Witch patch: with the FidelityFX upscaler the swapchain has to be as
+    // big as the drawable (the physical screen), because the game renders
+    // into its own smaller render target and the upscaler writes the
+    // upscaled frame into the swapchain. With the drawable at the
+    // resolution scale instead, iOS would magnify the whole frame with a
+    // nearest filter (blocky) and the HUD would be blown up with it.
+    // The agent forces VulkanGpuSurface.configure() to the drawable size,
+    // so the drawable and the swapchain always match.
+    CGFloat surfaceScale = fsrUpscalerActive() ? 1.0f : resolutionScale;
+
+    self.surfaceView.layer.contentsScale = self.screenScale * surfaceScale;
 
     physicalWidth = roundf(self.surfaceView.frame.size.width * self.screenScale);
     physicalHeight = roundf(self.surfaceView.frame.size.height * self.screenScale);

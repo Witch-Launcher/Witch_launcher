@@ -164,8 +164,11 @@ static CGPoint lastCenterPoint;
     vc.modalPresentationStyle = UIModalPresentationOverFullScreen;
     vc.setDefaultCtrl = ^(NSString *name){
         if (PLProfiles.current.selectedProfile[@"defaultTouchCtrl"]) {
-            // Save default to current profile
+            // Save default to current profile. The profile dictionary is only
+            // written to disk by -save, so without this call the new default
+            // control map is lost on the next launcher start.
             PLProfiles.current.selectedProfile[@"defaultTouchCtrl"] = name;
+            [PLProfiles.current save];
         } else {
             // Save default to preferences
             setPrefObject(@"control.default_ctrl", name);

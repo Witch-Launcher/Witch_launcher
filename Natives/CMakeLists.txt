@@ -262,6 +262,7 @@ add_executable(Witch
   authenticator/ElyAuthenticator.m
 
   ctxbridges/gl_bridge.m
+  ctxbridges/gl_sync_shim.m
   ctxbridges/osm_bridge.m
   ctxbridges/vk_bridge.m
   ctxbridges/mesa_egl_bridge.m

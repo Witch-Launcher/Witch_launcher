@@ -74,6 +74,21 @@ public final class Fsr3Native {
      */
     public static native void swapchainDestroyed(long vkSwapchain);
 
+    /**
+     * The drawable size of the surface (the physical screen size when the
+     * launcher renders the game at a lower resolution).
+     *
+     * The swapchain has to match the drawable, but the game only asks for
+     * its (smaller) framebuffer size - so the agent can force the swapchain
+     * to the drawable size and let the upscaler write a full resolution
+     * frame into it. Returns 0 on success (out[0]/out[1] = width/height),
+     * -1 when the query failed (the caller then keeps the game's own
+     * configuration).
+     */
+    public static native int surfaceExtent(long vkInstance,
+                                           long vkPhysicalDevice,
+                                           long vkSurface, int[] out);
+
     public static native long getOutputImage(int slot);
 
     /** The VkImage of an interpolated-output slot (double buffered). */

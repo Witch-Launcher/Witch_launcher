@@ -74,10 +74,26 @@ void *glMapBuffer(GLenum target, GLenum access) {
         case GL_READ_WRITE:
             access_range = GL_MAP_READ_BIT | GL_MAP_WRITE_BIT;
             break;
+
+        default:
+            // Desktop GL callers (Minecraft's AutoStorageIndexBuffer) sometimes
+            // pass a usage enum here. Map as read/write instead of using an
+            // uninitialised flag word, which made the mapping fail.
+            access_range = GL_MAP_READ_BIT | GL_MAP_WRITE_BIT;
+            break;
     }
 
+    length = 0;
     es3_functions.glGetBufferParameteriv(target, GL_BUFFER_SIZE, &length);
-    return es3_functions.glMapBufferRange(target, 0, length, access_range);
+    void* ret = length > 0 ? es3_functions.glMapBufferRange(target, 0, length, access_range) : NULL;
+    if(!ret) {
+        static int maplog = 0;
+        if(maplog++ < 40) {
+            printf("LTWMB: map FAILED target=0x%x access=0x%x size=%d flags=0x%x err=0x%x\n",
+                   target, access, (int)length, access_range, es3_functions.glGetError());
+        }
+    }
+    return ret;
 }
 
 INTERNAL int isProxyTexture(GLenum target) {
@@ -175,6 +191,22 @@ void glGetTexLevelParameteriv(GLenum target, GLint level, GLenum pname, GLint *p
 
 }
 
+// Texture bring-up tracing (same bounded budget as the framebuffer trace).
+static int ltwtx_budget = 400;
+#define LTWTX_LOG(...) do { if(ltwtx_budget > 0) { ltwtx_budget--; printf(__VA_ARGS__); } } while(0)
+
+void glGenTextures(GLsizei n, GLuint* textures) {
+    if(!current_context) { LTWTX_LOG("LTWTX: genTextures NOCTX n=%d\n", (int)n); return; }
+    es3_functions.glGenTextures(n, textures);
+    LTWTX_LOG("LTWTX: genTextures n=%d -> %u\n", (int)n, n > 0 ? textures[0] : 0);
+}
+
+void glBindTexture(GLenum target, GLuint texture) {
+    if(!current_context) { LTWTX_LOG("LTWTX: bindTexture NOCTX target=0x%x tex=%u\n", target, texture); return; }
+    LTWTX_LOG("LTWTX: bindTexture target=0x%x tex=%u\n", target, texture);
+    es3_functions.glBindTexture(target, texture);
+}
+
 void glTexImage2D(GLenum target, GLint level, GLint internalformat, GLsizei width, GLsizei height, GLint border, GLenum format, GLenum type, const GLvoid *data) {
     if(!current_context) return;
     if (isProxyTexture(target)) {
@@ -184,6 +216,8 @@ void glTexImage2D(GLenum target, GLint level, GLint internalformat, GLsizei widt
     } else {
         if(data != NULL) swizzle_process_upload(target, &format, &type);
         pick_internalformat(&internalformat, &type, &format, &data);
+        LTWTX_LOG("LTWTX: texImage2D target=0x%x level=%d internal=0x%x %dx%d format=0x%x type=0x%x data=%p\n",
+               target, level, (unsigned)internalformat, (int)width, (int)height, format, type, data);
         es3_functions.glTexImage2D(target, level, internalformat, width, height, border, format, type, data);
     }
 }

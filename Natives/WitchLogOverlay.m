@@ -3,6 +3,7 @@
 #import "WitchScrollingLogView.h"
 #import "HapticManager.h"
 #import "LauncherPreferences.h"
+#import "ErrorPresenter.h"
 #import "utils.h"
 
 static const CGFloat kLogHeightRatio = 0.55;
@@ -16,6 +17,7 @@ static const CGFloat kLogHeightMax  = 560.0;
 @property (nonatomic, strong) UIView *statusDot;
 @property (nonatomic, strong) UILabel *statusLabel;
 @property (nonatomic, strong) UIButton *captureButton;
+@property (nonatomic, strong) UIButton *clearButton;
 // Set when the user explicitly pauses capture with the in-log button; an
 // automatic resume must never override that choice.
 @property (nonatomic, assign) BOOL userPausedCapture;
@@ -91,6 +93,19 @@ static const CGFloat kLogHeightMax  = 560.0;
     _captureButton.titleEdgeInsets = UIEdgeInsetsMake(0, 6, 0, -2);
     [_captureButton addTarget:self action:@selector(captureButtonTapped) forControlEvents:UIControlEventTouchUpInside];
     [_content addSubview:_captureButton];
+
+    // Clear-log disc: same frosted style as the pause button, right of it.
+    _clearButton = [UIButton buttonWithType:UIButtonTypeCustom];
+    _clearButton.layer.cornerRadius = 13;
+    _clearButton.layer.borderWidth = 1;
+    _clearButton.layer.borderColor = [UIColor colorWithWhite:1 alpha:0.22].CGColor;
+    _clearButton.backgroundColor = [UIColor colorWithWhite:1 alpha:0.10];
+    _clearButton.contentMode = UIViewContentModeCenter;
+    _clearButton.tintColor = [UIColor colorWithWhite:1 alpha:0.92];
+    [_clearButton setImage:[UIImage systemImageNamed:@"trash"] forState:UIControlStateNormal];
+    _clearButton.accessibilityLabel = localize(@"witch.log_clear", nil);
+    [_clearButton addTarget:self action:@selector(clearButtonTapped) forControlEvents:UIControlEventTouchUpInside];
+    [_content addSubview:_clearButton];
     return self;
 }
 
@@ -120,7 +135,8 @@ static const CGFloat kLogHeightMax  = 560.0;
     CGFloat rowTop = 12.0;
     self.statusDot.frame = CGRectMake(14.0, rowTop + 5.0, 7.0, 7.0);
     self.statusLabel.frame = CGRectMake(26.0, rowTop, 140.0, 17.0);
-    self.captureButton.frame = CGRectMake(width - 14.0 - 104.0, rowTop - 2.0, 104.0, 26.0);
+    self.clearButton.frame = CGRectMake(width - 14.0 - 26.0, rowTop - 2.0, 26.0, 26.0);
+    self.captureButton.frame = CGRectMake(width - 14.0 - 26.0 - 8.0 - 104.0, rowTop - 2.0, 104.0, 26.0);
     self.logView.frame = CGRectMake(0, 34.0, width, logH - 34.0);
 }
 
@@ -225,6 +241,13 @@ static const CGFloat kLogHeightMax  = 560.0;
     [HapticManager.shared play:HapticTypeSelection];
     [self refreshCaptureUI];
     [self.logView reloadFromLogBuffer];
+}
+
+- (void)clearButtonTapped {
+    [PLLogOutputView clearLog];
+    [self.logView clearDisplay];
+    [HapticManager.shared play:HapticTypeMedium];
+    [ErrorPresenter showToast:localize(@"witch.log_clear_done", nil) success:YES];
 }
 
 - (void)refreshCaptureUI {

@@ -129,6 +129,50 @@ static void* resolve_gl(const char* name) {
     return handle.eglGetProcAddress ? handle.eglGetProcAddress(name) : NULL;
 }
 
+// Exported for the GL sync shim (ctxbridges/gl_sync_shim.m). Resolves a GL
+// entry point only through the active EGL implementation (no dlsym fallback
+// onto a sibling GLES image), so callers always get the instance that owns
+// the current context.
+void* PLResolveGLEntryPreferred(const char* name) {
+    if (!name) return NULL;
+    if (g_mgl_handle) {
+        void* fn = dlsym(g_mgl_handle, name);
+        if (fn) return fn;
+    }
+    return handle.eglGetProcAddress ? handle.eglGetProcAddress(name) : NULL;
+}
+
+// Exported for the GL sync shim (ctxbridges/gl_sync_shim.m). LWJGL resolves
+// GL entry points with dlsym() on the renderer handle, which finds whatever
+// copy of the function the dynamic linker happens to see — not necessarily
+// the EGL/GLES instance that created the current context (fence calls then
+// fail with "no context"). eglGetProcAddress() of the active EGL always
+// returns the entry point of the instance that owns the context.
+void* PLResolveGLEntry(const char* name) {
+    if (!name) return NULL;
+    void* fn = resolve_gl(name);
+    if (fn) return fn;
+
+    // Fallback: the renderer's own GLES library exports entry points (fences
+    // included) directly, even when the eglGetProcAddress chain does not
+    // surface them. dlopen returns the already-loaded image.
+    static void* gles = NULL;
+    static BOOL tried = NO;
+    if (!tried) {
+        tried = YES;
+        NSString* fw = NSBundle.mainBundle.privateFrameworksPath;
+        gles = dlopen([fw stringByAppendingPathComponent:@"libGLESv2.framework/libGLESv2"].UTF8String,
+                      RTLD_LAZY | RTLD_GLOBAL);
+        if (!gles) {
+            gles = dlopen([fw stringByAppendingPathComponent:@"libGLESv2_angle_vulkan"].UTF8String,
+                          RTLD_LAZY | RTLD_GLOBAL);
+        }
+        NSLog(@"[GLSync] GLES fallback handle = %p", gles);
+    }
+    if (gles) fn = dlsym(gles, name);
+    return fn;
+}
+
 void dlsym_EGL() {
     NSString *renderer = NSProcessInfo.processInfo.environment[@"AMETHYST_RENDERER"];
     BOOL useLTW = [@ RENDERER_NAME_LTW isEqualToString: renderer];
@@ -1334,6 +1378,14 @@ void gl_swap_buffers() {
     if (!currentBundle) return;
     static int swapCount = 0;
     swapCount++;
+    // Runs on the render thread with the GL context current: keep the fence
+    // entry points in LWJGL's capability table pointing at our shim (the
+    // renderer does not export them, so LWJGL installs a "missing function"
+    // stub that makes glFenceSync return 0 and Embeddium abort).
+    {
+        extern void PLPatchGLSyncTable(void);
+        PLPatchGLSyncTable();
+    }
     tgles_watchdog_note_swap(swapCount);
     // TGLES: re-attach if the surface layer was recreated since the attach
     // (rotation / external display / re-parenting). Pointer compare per swap

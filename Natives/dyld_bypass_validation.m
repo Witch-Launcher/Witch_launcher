@@ -257,35 +257,83 @@ void* hooked_mmap(void *addr, size_t len, int prot, int flags, int fd, off_t off
     }
     if (map == MAP_FAILED) {
         NSLog(@"[DyldLVBypass] mmap exec failed for %s, using fallback (addr=%p len=%zu prot=0x%x flags=0x%x)", mmapPath, addr, len, prot, flags);
+        // The X has to be in the mmap prot: on iOS 26+/27 a later mprotect
+        // that ADDS exec is stripped by the kernel, so an anonymous mapping
+        // that is not born executable can never run (same rule as the
+        // launcher's own mirror preflight, see jit_vm_remap_hook.m).
         map = __mmap(addr, len, prot, flags | MAP_PRIVATE | MAP_ANON, 0, 0);
+        if (map == MAP_FAILED) {
+            NSLog(@"[DyldLVBypass] fallback anon mmap failed for %s: %s", mmapPath, strerror(errno));
+            return MAP_FAILED;
+        }
         if (DeviceHasJITFlags(JIT_FLAG_FORCE_MIRRORED | JIT_FLAG_HAS_TXM)) {
+            // Bless the region for execution BEFORE anything is written into
+            // it - the same order the JVM's own mirror flow uses.
             JIT26PrepareRegion(map, len);
         }
         
         void *memoryLoadedFile = __mmap(NULL, len, PROT_READ, MAP_PRIVATE, fd, offset);
+        if (memoryLoadedFile == MAP_FAILED) {
+            NSLog(@"[DyldLVBypass] fallback file mmap failed for %s: %s", mmapPath, strerror(errno));
+            munmap(map, len);
+            return MAP_FAILED;
+        }
+        BOOL copied = NO;
         if (redirectFunction == redirectFunctionDirect) {
             if (mprotect(map, len, PROT_READ | PROT_WRITE) == -1) {
                 NSLog(@"[DyldLVBypass] fallback mprotect(RW) failed for %s: %s", mmapPath, strerror(errno));
-            }
-            memcpy(map, memoryLoadedFile, len);
-            if (mprotect(map, len, prot) == -1) {
-                NSLog(@"[DyldLVBypass] fallback mprotect(0x%x) failed for %s: %s", prot, mmapPath, strerror(errno));
+            } else {
+                memcpy(map, memoryLoadedFile, len);
+                copied = YES;
+                if (mprotect(map, len, prot) == -1) {
+                    NSLog(@"[DyldLVBypass] fallback mprotect(0x%x) failed for %s: %s", prot, mmapPath, strerror(errno));
+                }
             }
         } else {
-            // mirror `addr` (rx, JIT applied) to `mirrored` (rw)
+            // Write the file through an RW alias that shares the pages with
+            // `map` - the same mechanism as jit_write_stub_via_alias(), proven
+            // on every TXM device we ship to.
+            //
+            // NO VM_PROT_COPY here. Copy-on-write routes the write into a
+            // PRIVATE copy, so the bytes never reach `map`: dyld then loads a
+            // ZEROED image, the library looks loaded, and the first native
+            // call into it faults and kills the process. That is exactly how
+            // the game died when the Multiplayer screen made netty load its
+            // unsigned kqueue transport (libnetty_transport_native_kqueue).
             vm_address_t mirrored = 0;
             vm_prot_t cur_prot, max_prot;
             kern_return_t ret = vm_remap(mach_task_self(), &mirrored, len, 0, VM_FLAGS_ANYWHERE, mach_task_self(), (vm_address_t)map, false, &cur_prot, &max_prot, VM_INHERIT_SHARE);
             if(ret == KERN_SUCCESS) {
                 kern_return_t mret = vm_protect(mach_task_self(), mirrored, len, NO,
-                           VM_PROT_READ | VM_PROT_WRITE | VM_PROT_COPY);
+                           VM_PROT_READ | VM_PROT_WRITE);
                 if (mret == KERN_SUCCESS) {
                     memcpy((void*)mirrored, memoryLoadedFile, len);
+                    copied = YES;
                 } else {
                     NSLog(@"[DyldLVBypass] hooked_mmap: vm_protect(RW) fails on mirror: 0x%x", mret);
                 }
                 vm_deallocate(mach_task_self(), mirrored, len);
+            } else {
+                NSLog(@"[DyldLVBypass] hooked_mmap: vm_remap fails for %s: 0x%x", mmapPath, ret);
             }
+        }
+        if (copied) {
+            // The bytes we just wrote are code: the CPU has to fetch them.
+            sys_icache_invalidate(map, len);
+            // Never hand dyld an image that is not the file. A zeroed (or
+            // 0x69-filled) mapping loads as a library and then faults on its
+            // first call - fail the load instead of planting that trap.
+            if (memcmp(map, memoryLoadedFile, len) != 0) {
+                NSLog(@"[DyldLVBypass] fallback image for %s does not carry the file content - failing the load", mmapPath);
+                munmap(map, len);
+                munmap(memoryLoadedFile, len);
+                return MAP_FAILED;
+            }
+        } else {
+            NSLog(@"[DyldLVBypass] fallback could not place the file content for %s - failing the load", mmapPath);
+            munmap(map, len);
+            munmap(memoryLoadedFile, len);
+            return MAP_FAILED;
         }
         munmap(memoryLoadedFile, len);
     }

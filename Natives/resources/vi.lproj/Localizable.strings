@@ -271,6 +271,8 @@
 "preference.detail.vsync" = "Khi tắt, mọi renderer xuất khung hình không chờ tần số quét màn hình. Bật để giới hạn FPS theo màn hình.";
 "preference.title.max_framerate" = "Tốc độ Khung Hình tối đa";
 "preference.detail.max_framerate" = "Cho phép bạn giới hạn tốc độ khung hình của trò chơi ở mức 60FPS trên màn hình ProMotion.";
+"preference.title.uncapped" = "FPS không giới hạn (vượt tần số màn hình)";
+"preference.detail.uncapped" = "Cho phép vòng lặp render chạy nhanh hơn tần số quét màn hình. Các khung hình dư bị loại bỏ khi hiển thị, nên FPS hiển thị có thể vượt tần số màn hình.";
 
 "preference.title.fullscreen_airplay" = "AirPlay toàn màn hình";
 "preference.detail.fullscreen_airplay" = "Cho phép chiếu toàn màn hình cửa sổ game thay vì chiếu mọi thứ trên màn hình ngoài.";
@@ -785,6 +787,7 @@
 "preference.title.fsr3_upscaler.fsr3" = "FSR 3 Upscaler";
 "preference.title.fsr3_resolution_scale" = "Tỉ lệ độ phân giải render";
 "preference.title.fsr3_sharpness" = "Làm nét (RCAS)";
+"preference.title.fsr3_jitter" = "Jitter TAA dưới pixel";
 "preference.title.fsr3_probe" = "Thử nghiệm đo hiệu năng (probe)";
 "preference.title.fsr3_probe.ref" = "Tham chiếu (OF 1/2 nhịp)";
 "preference.title.fsr3_probe.of_every_frame" = "Probe: OF chạy mỗi khung";
@@ -792,6 +795,7 @@
 "preference.title.fsr3_probe.no_fi" = "Probe: không nội suy (gen=0)";
 "preference.title.fsr3_probe.no_present" = "Probe: bỏ present của FG";
 "preference.title.fsr3_probe.bypass" = "Probe: tắt toàn bộ GPU của FG";
+"preference.title.fsr3_probe.of_only" = "Probe: FG chỉ dùng Optical Flow";
 "settings.group.fsr_hint" = "Nâng khung hình render ở độ phân giải thấp lên kích thước màn hình gốc để tăng FPS. FSR 1 là upscaler không gian nhanh; FSR 2 và FSR 3 dùng lịch sử khung hình cho kết quả sắc nét hơn. Giảm tỉ lệ độ phân giải render để được nhiều FPS hơn, hoặc tăng làm nét nếu hình mờ. Yêu cầu renderer MoltenVK (Vulkan).";
 "settings.group.fg" = "Frame Generation (FSR 3 FG)";
 "preference.title.fsr3_framegen" = "Bật Frame Generation";
@@ -1548,6 +1552,8 @@
 "init.env.message" = "Hiện đang trong quá trình khởi tạo môi trường, quá trình này sẽ mất một khoảng thời gian, vui lòng đợi đến khi frame đầu tiên được render.";
 "linear.progress.loading" = "Đang tải...";
 "splash.three_finger_log_hint" = "Dùng ba ngón chạm vào màn hình để bật/tắt log";
+"splash.close_confirm" = "Bạn có chắc chắn muốn đóng chương trình không?";
+"splash.close_confirm_yes" = "Đóng";
 "witch.log_caption" = "Giữ để copy · Chạm 3 ngón để ẩn";
 "witch.log_copied" = "Đã copy log vào bảng nhớ tạm";
 "witch.log_empty" = "Chưa có log để copy";

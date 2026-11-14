@@ -62,7 +62,7 @@ typedef void(^CreateView)(UITableViewCell *, NSString *, NSDictionary *);
 }
 
 - (void)loadGamepadConfigurationFile {
-    NSString *gamepadPath = amethyst_hidden_path([NSString stringWithFormat:@"controlmap/gamepads/%@", getPrefObject(@"control.default_gamepad_ctrl")]);
+    NSString *gamepadPath = amethyst_control_path([NSString stringWithFormat:@"gamepads/%@", getPrefObject(@"control.default_gamepad_ctrl")]);
     self.currentMappings = parseJSONFromFile(gamepadPath);
     self.currentFileName = [getPrefObject(@"control.default_gamepad_ctrl") stringByDeletingPathExtension];
     NSPredicate *filterPredicate = [NSPredicate predicateWithBlock:^BOOL(id obj, NSDictionary *dict) {
@@ -358,7 +358,7 @@ typedef void(^CreateView)(UITableViewCell *, NSString *, NSDictionary *);
 
 - (void)actionOpenFilePicker:(void (^)(NSString *name))handler {
     FileListViewController *vc = [[FileListViewController alloc] init];
-    vc.listPath = amethyst_hidden_dir(@"controlmap/gamepads");
+    vc.listPath = amethyst_control_dir(@"gamepads");
     
     vc.whenItemSelected = handler;
     vc.modalPresentationStyle = UIModalPresentationPopover;
@@ -410,7 +410,7 @@ typedef void(^CreateView)(UITableViewCell *, NSString *, NSDictionary *);
             showDialog(localize(@"custom_controls.control_menu.save.error.json", nil), error.localizedDescription);
             return;
         }
-        BOOL success = [jsonData writeToFile:amethyst_hidden_path([NSString stringWithFormat:@"controlmap/gamepads/%@.json", name]) options:NSDataWritingAtomic error:&error];
+        BOOL success = [jsonData writeToFile:amethyst_control_path([NSString stringWithFormat:@"gamepads/%@.json", name]) options:NSDataWritingAtomic error:&error];
         if (!success) {
             showDialog(localize(@"custom_controls.control_menu.save.error.write", nil), error.localizedDescription);
             return;
@@ -429,7 +429,7 @@ typedef void(^CreateView)(UITableViewCell *, NSString *, NSDictionary *);
 }
 
 - (void)exitButtonSelector {
-    NSString *gamepadPath = amethyst_hidden_path([NSString stringWithFormat:@"controlmap/gamepads/%@", getPrefObject(@"control.default_gamepad_ctrl")]);
+    NSString *gamepadPath = amethyst_control_path([NSString stringWithFormat:@"gamepads/%@", getPrefObject(@"control.default_gamepad_ctrl")]);
     if([self.currentMappings isEqualToDictionary:parseJSONFromFile(gamepadPath)]) {
         [self dismissModalViewController];
     } else {

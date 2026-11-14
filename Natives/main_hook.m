@@ -354,6 +354,8 @@ int hooked_open(const char *path, int oflag, ...) {
 }
 
 void init_hookFunctions() {
+    extern void PLInstallGLSyncShim(void);
+    PLInstallGLSyncShim();
     struct rebinding rebindings[] = (struct rebinding[]){
         {"abort", hooked_abort, (void *)&orig_abort},
         {"__assert_rtn", hooked___assert_rtn, NULL},

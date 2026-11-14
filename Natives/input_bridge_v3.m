@@ -29,6 +29,7 @@
 #include "glfw_keycodes.h"
 #include "ios_uikit_bridge.h"
 #include "utils.h"
+#import "LauncherPreferences.h"
 
 #include "JavaLauncher.h"
 #include "touchcontroller_jni_bridge.h"
@@ -538,15 +539,46 @@ const int hotbarKeys[9] = {
     GLFW_KEY_7, GLFW_KEY_8, GLFW_KEY_9
 };
 int guiScale = 1;
+
+/* The SDL window size in points (the game is full screen, so this is also
+ * the size of the view the game is rendered into). Declared here because the
+ * GUI helpers below need it. */
+static int aasdl_winW = 0;
+static int aasdl_winH = 0;
+
+/* The size of the GUI space the game lays its HUD out in.
+ *
+ * MC 26.3's Window.setGuiScale: guiScaled = ceil(framebufferWidth /
+ * guiScale). The FidelityFX agent reports the game's own values, so the
+ * FidelityFX features never change the HUD's size and this formula stays
+ * correct in every mode. */
+static int aasdl_guiWidth(int framebufferWidth) {
+    return (int)ceilf((CGFloat)framebufferWidth / (CGFloat)guiScale);
+}
+
+/* Convert a length in GUI units (gui scaled pixels) into view points.
+ *
+ * One GUI unit is guiScale framebuffer pixels and the framebuffer
+ * (windowWidth pixels) is stretched over the SDL window (aasdl_winW
+ * points), so the factor is guiScale * aasdl_winW / windowWidth.
+ *
+ * The old formula divided by the resolution scale only and was therefore
+ * off by the screen scale (3x on this device): the hotbar's touch region
+ * was 910 points wide on a 736 point wide screen and started 650 points
+ * from the left instead of 217 - the hotbar taps landed in the wrong
+ * place entirely. */
 int mcscale(CGFloat input) {
-    return (int)((guiScale * input)/resolutionScale);
+    if (windowWidth <= 0 || aasdl_winW <= 0) {
+        return (int)(guiScale * input);
+    }
+    return (int)lroundf(input * (CGFloat)guiScale * (CGFloat)aasdl_winW / (CGFloat)windowWidth);
 }
 int callback_SurfaceViewController_touchHotbar(CGFloat x, CGFloat y) {
     if (isGrabbing == JNI_FALSE) {
         return -1;
     }
 
-    if (guiScale <= 0 || resolutionScale <= 0.0f) return -1;
+    if (guiScale <= 0) return -1;
     int barHeight = mcscale(22);
     int barWidth = mcscale(182);
 
@@ -558,11 +590,13 @@ int callback_SurfaceViewController_touchHotbar(CGFloat x, CGFloat y) {
     int framebufferHeight = windowHeight > 0 ? windowHeight : (int)lroundf(physicalHeight * resolutionScale);
     /* Match MC 26.3's Window.setGuiScale: guiScaled = ceil(fb / scale). Integer
      * division truncates and shifts the whole bar left by up to 1 gui pixel
-     * (5 fb px at scale 5) when fb/scale is fractional, e.g. 2208/5 = 441.6. */
-    int guiWidth = (int)ceilf((CGFloat)framebufferWidth / (CGFloat)guiScale);
-    int guiHeight = (int)ceilf((CGFloat)framebufferHeight / (CGFloat)guiScale);
-    int barX = (int)lroundf((guiWidth / 2 - 91) * (CGFloat)guiScale / resolutionScale);
-    int barY = (int)lroundf((guiHeight - 22) * (CGFloat)guiScale / resolutionScale);
+     * (5 fb px at scale 5) when fb/scale is fractional, e.g. 2208/5 = 441.6.
+     * With the FidelityFX render scale active the game lays the HUD out for
+     * the (smaller) render target, so the same factor has to be used here. */
+    int guiWidth = aasdl_guiWidth(framebufferWidth);
+    int guiHeight = aasdl_guiWidth(framebufferHeight);
+    int barX = (int)lroundf((guiWidth / 2 - 91) * (CGFloat)mcscale(1));
+    int barY = (int)lroundf((guiHeight - 22) * (CGFloat)mcscale(1));
     if (y < barY) return -1;
     if (x < barX || x >= barX + barWidth) return -1;
 
@@ -715,8 +749,6 @@ static uint32_t aasdl_buttons;
  * which walk the window list without locking and crash when the game thread
  * mutates it concurrently. */
 static uint32_t aasdl_winID;
-static int aasdl_winW;
-static int aasdl_winH;
 
 static int aasdl_guiScaleFromOptions(void) {
     const char *gameDir = getenv("POJAV_GAME_DIR_PROFILE");

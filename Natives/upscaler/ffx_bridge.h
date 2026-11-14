@@ -72,13 +72,19 @@ void ffxfg_destroy(void);
 int ffxfg_isSupported(void);
 
 // Frame generation path. Records one real frame's interpolation work into the
-// game's transient command buffer. camData is 16 floats:
+// game's transient command buffer. camData is 19 floats:
 //   [0..2)  camera position (world)
 //   [3..6)  camera right (normalized)
 //   [6..9)  camera up (normalized)
 //   [9..12) camera forward (normalized)
 //   [12]    near plane, [13] far plane, [14] fovY radians,
 //   [15]    frameTimeDelta ms
+//   [16]    sub-pixel jitter x (render pixels), [17] jitter y
+//   [18]    height of the eye above the ground the player stands on
+//           (0 = unknown -> the constant reference depth is used). With it
+//           the motion vectors follow the ground plane instead of a single
+//           constant distance, which cuts the parallax error of a walking
+//           camera by 3-7x.
 // Returns:
 //   >= 0  the output slot whose VkImage holds the interpolated frame, or
 //   -1    disabled/not initialized/error - caller must present the real frame.
@@ -98,6 +104,24 @@ int ffxfg_record_frame(long long vkCommandBuffer,
 // whole swapchain image, then the interpolation dispatch into a separate
 // bridge output. swapchainImage must currently be in PRESENT_SRC layout; it is
 // left in PRESENT_SRC. camData has the same layout as above.
+//
+// The synthetic motion vectors follow the FidelityFX convention: the texture
+// holds the NDC displacement (current position - previous position, y up) and
+// the SDK turns it into a UV delta with motionVectorScale = (-0.5*w, +0.5*h),
+// i.e. prevUv = curUv + mv * motionVectorScale / targetSize. The field is the
+// backward mapping of the current pixel's content into the previous camera.
+//
+// The constant depth that is fed to the upscaler stays at the far plane on
+// purpose: FidelityFX's accumulate pass uses it for the distance factor
+// (fDistanceFactor = saturate(0.75 - depth/20)), which would cut the history
+// contribution if the depth were near.
+//
+// The synthetic motion vectors follow the FidelityFX convention: the texture
+// holds the NDC displacement (current position - previous position, y up) and
+// the SDK turns it into a UV delta with motionVectorScale = (-0.5*w, +0.5*h),
+// i.e. prevUv = curUv + mv * motionVectorScale / targetSize. The field is the
+// backward mapping of the current pixel's content into the previous camera.
+//
 // Returns the bridge-owned VkCommandBuffer handle (submitted by the Java
 // bridge through VulkanCommandEncoder.execute), or 0 on failure. The upscale
 // result lives in ffxfg_get_output_image(ffxfg_last_upscale_slot()); the
@@ -156,6 +180,20 @@ int ffxfg_present_interpolated(long long vkSwapchain, int slot);
 // on the render thread): drop every cached image and rebuild the present sync
 // objects on the next present. Pass 0 when the handle is unknown.
 void ffxfg_swapchain_destroyed(long long vkSwapchain);
+
+// Witch patch: the extent of the surface's current drawable.
+//
+// The swapchain has to match the CAMetalLayer's drawable, but the swapchain
+// can be larger than the framebuffer the game renders into: the FidelityFX
+// upscaler then writes its upscale straight into the (physical sized)
+// swapchain. The launcher reads the same number through the surface
+// capabilities, so the agent can force the swapchain to that size.
+// Returns 0 on success, -1 when the query failed (the caller then keeps
+// the game's own configuration).
+int ffxfg_query_surface_extent(long long vkInstanceHandle,
+                               long long vkPhysicalDeviceHandle,
+                               long long vkSurfaceHandle,
+                               int* outWidth, int* outHeight);
 
 // The VkImage of an output slot (double buffered).
 long long ffxfg_get_output_image(int slot);

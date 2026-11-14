@@ -60,6 +60,16 @@ static NSString *WitchSplashBundleMediaKind(void) {
     return nil;
 }
 
+// Preferences whose slider is shown in percent while the preference itself
+// holds a factor (0.25..1.0 etc). Without the conversion the slider wrote
+// e.g. 70 into the preference and the launcher clamped it back to the
+// default - the FidelityFX render scale could never be changed.
+static BOOL isPercentPrefKey(NSString *key) {
+    if (!key) return NO;
+    return [key isEqualToString:@"fsr3.resolution_scale"]
+        || [key isEqualToString:@"fsr3.sharpness"];
+}
+
 @interface SettingsViewController () <UITableViewDelegate, UITableViewDataSource, UIScrollViewDelegate, UIColorPickerViewControllerDelegate, UINavigationControllerDelegate, UIImagePickerControllerDelegate, PHPickerViewControllerDelegate, UIDocumentPickerDelegate, UISearchBarDelegate>
 @property (nonatomic) BOOL importingFont;
 @property (nonatomic) BOOL splashPicking;
@@ -158,6 +168,18 @@ static NSString *WitchSplashBundleMediaKind(void) {
                 @{@"key": @"none", @"name": localize(@"preference.gbf.none", nil)},
             ], @"default": @"auto"},
             @{@"type": @"slider", @"label": localize(@"preference.title.resolution", nil), @"key": @"video.resolution", @"min": @25, @"max": @150, @"suffix": @"%"},
+            @{@"type": @"switch", @"label": localize(@"preference.title.vsync", nil), @"key": @"video.vsync"},
+            @{@"type": @"picker", @"label": localize(@"preference.title.max_framerate", nil), @"key": @"video.max_framerate", @"default": @"0", @"options": @[
+                @{@"key": @"0", @"name": localize(@"orientation.off", nil)},
+                @{@"key": @"30", @"name": @"30"},
+                @{@"key": @"60", @"name": @"60"},
+                @{@"key": @"90", @"name": @"90"},
+                @{@"key": @"120", @"name": @"120"},
+                @{@"key": @"144", @"name": @"144"},
+                @{@"key": @"240", @"name": @"240"},
+                @{@"key": @"260", @"name": @"260"},
+            ]},
+            @{@"type": @"switch", @"label": localize(@"preference.title.uncapped", nil), @"key": @"video.uncapped"},
             @{@"type": @"switch", @"label": localize(@"preference.title.performance_hud", nil), @"key": @"video.performance_hud"},
             @{@"type": @"switch", @"label": localize(@"preference.title.fullscreen_airplay", nil), @"key": @"video.fullscreen_airplay"},
             @{@"type": @"navigate", @"label": localize(@"jit.title", nil), @"vc": @"WitchJITSettingsViewController"},
@@ -258,6 +280,7 @@ static NSString *WitchSplashBundleMediaKind(void) {
             ]},
             @{@"type": @"slider", @"label": localize(@"preference.title.fsr3_resolution_scale", nil), @"key": @"fsr3.resolution_scale", @"min": @25, @"max": @100, @"suffix": @"%"},
             @{@"type": @"slider", @"label": localize(@"preference.title.fsr3_sharpness", nil), @"key": @"fsr3.sharpness", @"min": @0, @"max": @100, @"suffix": @"%"},
+            @{@"type": @"switch", @"label": localize(@"preference.title.fsr3_jitter", nil), @"key": @"fsr3.jitter"},
             header(@"settings.group.fsr_hint"),
             header(@"settings.group.fg"),
             @{@"type": @"switch", @"label": localize(@"preference.title.fsr3_framegen", nil), @"key": @"fsr3.framegen"},
@@ -274,6 +297,7 @@ static NSString *WitchSplashBundleMediaKind(void) {
                 @{@"key": @"4", @"name": localize(@"preference.title.fsr3_probe.no_fi", nil)},
                 @{@"key": @"8", @"name": localize(@"preference.title.fsr3_probe.no_present", nil)},
                 @{@"key": @"12", @"name": localize(@"preference.title.fsr3_probe.bypass", nil)},
+                @{@"key": @"16", @"name": localize(@"preference.title.fsr3_probe.of_only", nil)},
             ]},
             header(@"settings.group.fg_hint"),
             header(@"settings.group.ltw"),
@@ -1332,9 +1356,16 @@ static NSString *WitchSplashBundleMediaKind(void) {
                 val = roundf((NSProcessInfo.processInfo.physicalMemory / 1048576) * autoRatio);
                 setPrefFloat(@"java.allocated_memory", val);
             }
+            // The FidelityFX sliders are shown in percent but the preference
+            // holds a factor (0.25..1.0 etc.). Without the conversion the
+            // slider wrote e.g. 70 into the preference, the launcher clamped
+            // it back to 1.0 and the render scale never changed.
+            if (isPercentPrefKey(item[@"key"])) {
+                val = val * 100.0f;
+            }
         }
         if (val == 0 && [item[@"key"] isEqualToString:@"control.camera_sensitivity"]) val = 100;
-        if (val == 0 && ![item[@"key"] isEqualToString:@"amethyst_bg_blur"] && ![item[@"key"] isEqualToString:@"amethyst_ui_opacity"] && !([item[@"key"] hasPrefix:@"amethyst_"] && [item[@"key"] hasSuffix:@"_blur"]) && ![item[@"key"] isEqualToString:@"general.widget_bg_opacity"] && ![item[@"key"] isEqualToString:@"amethyst_ui_border_radius"] && ![item[@"key"] isEqualToString:@"amethyst_shell_gap"] && ![item[@"key"] isEqualToString:@"amethyst_shell_inner_gap"] && ![item[@"key"] isEqualToString:@"amethyst_ui_border_width"] && ![item[@"key"] isEqualToString:@"amethyst_ui_border_enabled"] && ![item[@"key"] isEqualToString:@"appearance.splash_blur"] && !disabled) val = [item[@"min"] floatValue] + ([item[@"max"] floatValue] - [item[@"min"] floatValue]) / 2;
+        if (val == 0 && ![item[@"key"] isEqualToString:@"amethyst_bg_blur"] && ![item[@"key"] isEqualToString:@"amethyst_ui_opacity"] && !([item[@"key"] hasPrefix:@"amethyst_"] && [item[@"key"] hasSuffix:@"_blur"]) && ![item[@"key"] isEqualToString:@"general.widget_bg_opacity"] && ![item[@"key"] isEqualToString:@"amethyst_ui_border_radius"] && ![item[@"key"] isEqualToString:@"amethyst_shell_gap"] && ![item[@"key"] isEqualToString:@"amethyst_shell_inner_gap"] && ![item[@"key"] isEqualToString:@"amethyst_ui_border_width"] && ![item[@"key"] isEqualToString:@"amethyst_ui_border_enabled"] && ![item[@"key"] isEqualToString:@"appearance.splash_blur"] && !isPercentPrefKey(item[@"key"]) && !disabled) val = [item[@"min"] floatValue] + ([item[@"max"] floatValue] - [item[@"min"] floatValue]) / 2;
         sl.minimumValue = [item[@"min"] floatValue];
         sl.maximumValue = [item[@"max"] floatValue];
         sl.value = val;
@@ -1669,7 +1700,12 @@ static NSString *WitchSplashBundleMediaKind(void) {
         [self refreshTableBackdrops];
         [[NSNotificationCenter defaultCenter] postNotificationName:AmethystBlurIntensityDidChangeNotification object:nil];
     } else {
-        setPrefFloat(item[@"key"], val);
+        if (isPercentPrefKey(item[@"key"])) {
+            // Percent slider, factor preference (see isPercentPrefKey).
+            setPrefFloat(item[@"key"], val / 100.0f);
+        } else {
+            setPrefFloat(item[@"key"], val);
+        }
         if ([item[@"key"] isEqualToString:@"video.resolution"]) {
             [[NSNotificationCenter defaultCenter] postNotificationName:@"ResolutionDidChangeNotification" object:nil];
         } else if ([item[@"key"] isEqualToString:@"control.mouse_scale"] || [item[@"key"] isEqualToString:@"control.button_scale"] || [item[@"key"] isEqualToString:@"control.mouse_speed"] || [item[@"key"] isEqualToString:@"control.camera_sensitivity"]) {

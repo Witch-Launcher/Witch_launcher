@@ -243,7 +243,7 @@ void init_setupAccounts() {
 }
 
 void init_setupCustomControls() {
-    NSString *controlPath = amethyst_hidden_dir(@"controlmap");
+    NSString *controlPath = amethyst_control_dir(nil);
     generateAndSaveDefaultControl();
     NSString *gamepadControlPath = [controlPath stringByAppendingPathComponent:@"gamepads"];
     [fm createDirectoryAtPath:gamepadControlPath withIntermediateDirectories:NO attributes:nil error:nil];

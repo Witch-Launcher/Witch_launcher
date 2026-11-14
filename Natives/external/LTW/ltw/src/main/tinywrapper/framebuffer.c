@@ -8,13 +8,39 @@
 #include "egl.h"
 #include <string.h>
 #include <stdio.h>
+#include <stdlib.h>
+
+// Framebuffer bring-up tracing. Emits a bounded number of lines to stderr
+// (default 250) so a fresh launch log always contains the first FBO setup
+// sequence; set LTW_FB_TRACE=0 to silence, or a larger number to keep more.
+static int fb_trace_budget = -1;
+static int fb_trace_enabled(void) {
+    if(fb_trace_budget < 0) {
+        const char* e = getenv("LTW_FB_TRACE");
+        fb_trace_budget = e ? atoi(e) : 250;
+    }
+    return fb_trace_budget > 0;
+}
+#define FBTRACE(...) do { \
+    if(fb_trace_enabled()) { \
+        fb_trace_budget--; \
+        fprintf(stderr, "LTWFB: " __VA_ARGS__); \
+        fprintf(stderr, "\n"); \
+        fflush(stderr); \
+    } \
+} while(0)
+
+static GLuint current_draw_fb(void) {
+    return current_context ? current_context->draw_framebuffer : 0xFFFFFFFFu;
+}
 
 static framebuffer_t* get_framebuffer(GLenum target) {
-    GLuint fb;
+    GLuint fb = 0;
     switch (target) {
         case GL_FRAMEBUFFER:
         case GL_DRAW_FRAMEBUFFER: fb = current_context->draw_framebuffer; break;
         case GL_READ_FRAMEBUFFER: fb = current_context->read_framebuffer; break;
+        default: return NULL;
     }
     return unordered_map_get(current_context->framebuffer_map, (void*)fb);
 }
@@ -42,7 +68,12 @@ void rebind_framebuffer(GLenum target, framebuffer_t *framebuffer, GLenum virt_a
     GLuint virt_index = get_attachment_idx(virt_attachment);
     if(virt_index == -1) return;
     GLenum phys_attachment = map_attachment(framebuffer, virt_attachment);
-    if(phys_attachment == GL_NONE) return;
+    if(phys_attachment == GL_NONE) {
+        // The attachment was never listed by glDrawBuffers (or the draw buffer
+        // list changed): keep the virtual index as the physical index instead
+        // of silently dropping the attachment, which left FBOs unattached.
+        phys_attachment = GL_COLOR_ATTACHMENT0 + virt_index;
+    }
     switch (framebuffer->color_targets[virt_index]) {
         case GL_NONE:
             es3_functions.glFramebufferRenderbuffer(target, phys_attachment, GL_RENDERBUFFER, 0);
@@ -105,6 +136,7 @@ void glDrawBuffers(GLsizei n, const GLenum* buffers) {
         es3_functions.glDrawBuffers(n, buffers);
         return;
     }
+    FBTRACE("drawbuffers n=%d b0=0x%x track=%p", (int)n, n > 0 ? buffers[0] : 0, (void*)framebuffer);
     framebuffer->nbuffers = n;
     memcpy(framebuffer->virt_drawbuffers, buffers, n * sizeof(GLenum));
     GLenum phys_drawbuffers[n];
@@ -124,12 +156,43 @@ void glDrawBuffer(GLenum buffer) {
 GLenum glCheckFramebufferStatus( 	GLenum target) {
     if(!current_context) return GL_FRAMEBUFFER_UNDEFINED;
     GLenum framebuffer_status = es3_functions.glCheckFramebufferStatus(target);
+    framebuffer_t *framebuffer = get_framebuffer(target);
+    GLint phys_bound = -1, phys_att_type = -1, phys_att_name = -1;
+    es3_functions.glGetIntegerv(GL_FRAMEBUFFER_BINDING, &phys_bound);
+    es3_functions.glGetFramebufferAttachmentParameteriv(target, GL_COLOR_ATTACHMENT0,
+            GL_FRAMEBUFFER_ATTACHMENT_OBJECT_TYPE, &phys_att_type);
+    es3_functions.glGetFramebufferAttachmentParameteriv(target, GL_COLOR_ATTACHMENT0,
+            GL_FRAMEBUFFER_ATTACHMENT_OBJECT_NAME, &phys_att_name);
+    FBTRACE("check target=0x%x phys=0x%x virt_fb=%u gl_bound=%d track=%p c0={t=0x%x,o=%u,l=%d} nb=%d err=0x%x",
+            target, framebuffer_status, current_draw_fb(), phys_bound, (void*)framebuffer,
+            framebuffer ? framebuffer->color_targets[0] : 0,
+            framebuffer ? framebuffer->color_objects[0] : 0,
+            framebuffer ? (int)framebuffer->color_levels[0] : -1,
+            framebuffer ? framebuffer->nbuffers : -1,
+            es3_functions.glGetError());
+    FBTRACE("check phys_att0 type=0x%x name=%d", phys_att_type, phys_att_name);
     if(framebuffer_status == GL_FRAMEBUFFER_INCOMPLETE_MISSING_ATTACHMENT) {
-        framebuffer_t *framebuffer = get_framebuffer(target);
-        for(GLint i = 0; i < MAX_FBTARGETS; i++) {
-            // At least one color target found, means we just optimized out all color targets on the physical device
-            // This will come back to normal after a call to `glDrawBuffers` if only the secondary buffers are in use.
-            if(framebuffer->color_targets[i] != GL_NONE || framebuffer->color_objects[i] != 0) return GL_FRAMEBUFFER_COMPLETE;
+        // At least one color target found, means we just optimized out all color targets on the physical device
+        // This will come back to normal after a call to `glDrawBuffers` if only the secondary buffers are in use.
+        if(framebuffer) {
+            bool tracked = false;
+            for(GLint i = 0; i < MAX_FBTARGETS; i++) {
+                if(framebuffer->color_targets[i] != GL_NONE || framebuffer->color_objects[i] != 0) {
+                    tracked = true;
+                    break;
+                }
+            }
+            if(tracked) {
+                // Re-issue the physical attachments: the driver may have lost
+                // them if the FBO was bound on another context/thread.
+                for(GLsizei i = 0; i < framebuffer->nbuffers; i++) {
+                    if(framebuffer->virt_drawbuffers[i] != GL_NONE)
+                        rebind_framebuffer(target, framebuffer, framebuffer->virt_drawbuffers[i]);
+                }
+                GLenum retry = es3_functions.glCheckFramebufferStatus(target);
+                FBTRACE("check retry phys=0x%x", retry);
+                return GL_FRAMEBUFFER_COMPLETE;
+            }
         }
         return GL_FRAMEBUFFER_INCOMPLETE_MISSING_ATTACHMENT;
     }
@@ -141,9 +204,11 @@ void glFramebufferTexture2D( 	GLenum target,
                                 GLenum textarget,
                                 GLuint texture,
                                 GLint level) {
-    if(!current_context) return;
+    if(!current_context) { FBTRACE("tex2d NOCTX att=0x%x tex=%u", attachment, texture); return; }
     framebuffer_t *framebuffer = get_framebuffer(target);
     GLuint attachment_idx = get_attachment_idx(attachment);
+    FBTRACE("tex2d target=0x%x att=0x%x idx=%d track=%p tex=%u textarget=0x%x level=%d virt_fb=%u",
+            target, attachment, (int)attachment_idx, (void*)framebuffer, texture, textarget, level, current_draw_fb());
     if(!framebuffer || attachment_idx == -1) {
         es3_functions.glFramebufferTexture2D(target, attachment, textarget, texture, level);
         return;
@@ -187,9 +252,11 @@ void glFramebufferRenderbuffer( 	GLenum target,
                                    GLenum attachment,
                                    GLenum renderbuffertarget,
                                    GLuint renderbuffer) {
-    if(!current_context) return;
+    if(!current_context) { FBTRACE("rb NOCTX att=0x%x rb=%u", attachment, renderbuffer); return; }
     framebuffer_t *framebuffer = get_framebuffer(target);
     GLuint attachment_idx = get_attachment_idx(attachment);
+    FBTRACE("rb target=0x%x att=0x%x idx=%d track=%p rb=%u virt_fb=%u",
+            target, attachment, (int)attachment_idx, (void*)framebuffer, renderbuffer, current_draw_fb());
     if(!framebuffer || attachment_idx == -1) {
         es3_functions.glFramebufferRenderbuffer(target, attachment, renderbuffertarget, renderbuffer);
         return;
@@ -262,9 +329,10 @@ void glGetFramebufferAttachmentParameteriv(GLenum target,
 }
 
 void glGenFramebuffers(GLsizei n, GLuint* framebuffers) {
-    if(!current_context) return;
+    if(!current_context) { FBTRACE("genfb NOCTX n=%d", (int)n); return; }
     es3_functions.glGenFramebuffers(n, framebuffers);
     framebuffer_t* fb;
+    for(GLsizei i = 0; i < n; i++) FBTRACE("genfb id=%u", framebuffers[i]);
     for(GLsizei i = 0; i < n; i++) {
         fb = calloc(1, sizeof(framebuffer_t));
         fb->nbuffers = 1;
@@ -285,7 +353,9 @@ void glDeleteFramebuffers(GLsizei n, const GLuint* framebuffers) {
 }
 
 void glBindFramebuffer(GLenum target, GLuint framebuffer) {
-    if(!current_context) return;
+    if(!current_context) { FBTRACE("bind NOCTX target=0x%x fb=%u", target, framebuffer); return; }
+    FBTRACE("bind target=0x%x fb=%u (was draw=%u read=%u)", target, framebuffer,
+            current_context->draw_framebuffer, current_context->read_framebuffer);
     es3_functions.glBindFramebuffer(target, framebuffer);
     switch (target) {
         case GL_FRAMEBUFFER:

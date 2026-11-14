@@ -12,7 +12,49 @@
 
 @interface MinecraftResourceDownloadTask ()
 @property AFURLSessionManager* manager;
+// Witch patch: bounded download queue. The Minecraft installer queues
+// thousands of files (every sound, every language file, every library) at
+// once; resuming all of them immediately keeps thousands of sockets and
+// task objects alive and makes the connection drops more likely. The queue
+// keeps a small number of transfers in flight and starts the next one as
+// soon as a slot frees up.
+@property NSMutableArray<NSURLSessionDownloadTask*>* pendingDownloads;
+@property NSUInteger activeDownloads;
 @end
+
+// Transfers that may run at the same time. The per-host limit of
+// NSURLSession is 6, so this only caps the total number of open transfers.
+static const NSUInteger kMaxParallelDownloads = 12;
+
+// Witch patch: extra attempts for a download that failed with a transient
+// network error. Installing Minecraft queues thousands of small files at
+// once; a single dropped connection (NSURLErrorNetworkConnectionLost) used
+// to abort the whole installation with an error dialog.
+static const NSInteger kMaxDownloadRetries = 3;
+
+// Network hiccups worth retrying: the connection was dropped, the host was
+// unreachable, the DNS lookup failed or the request timed out. A wrong URL
+// or a 404 is not retried.
+static BOOL isRetryableDownloadError(NSError *error) {
+    if (!error) {
+        return NO;
+    }
+    switch (error.code) {
+        case NSURLErrorTimedOut:
+        case NSURLErrorCannotFindHost:
+        case NSURLErrorCannotConnectToHost:
+        case NSURLErrorNetworkConnectionLost:
+        case NSURLErrorDNSLookupFailed:
+        case NSURLErrorNotConnectedToInternet:
+        case NSURLErrorInternationalRoamingOff:
+        case NSURLErrorCallIsActive:
+        case NSURLErrorDataNotAllowed:
+        case NSURLErrorResourceUnavailable:
+            return YES;
+        default:
+            return NO;
+    }
+}
 
 @implementation MinecraftResourceDownloadTask
 
@@ -20,9 +62,19 @@
     self = [super init];
     // TODO: implement background download
     NSURLSessionConfiguration *configuration = [NSURLSessionConfiguration defaultSessionConfiguration];
-    configuration.timeoutIntervalForRequest = 86400;
+    // Witch patch: idle timeout. 24 hours meant a connection that died
+    // silently kept the task hanging until the whole system gave up; two
+    // minutes without a single byte is a dead transfer and the retry takes
+    // over from there.
+    configuration.timeoutIntervalForRequest = 120;
+    // Witch patch: wait for the network instead of failing immediately when
+    // the device is offline or the connection is being re-established (a
+    // mobile switch between wifi and cellular dropped the whole install).
+    configuration.waitsForConnectivity = YES;
     //backgroundSessionConfigurationWithIdentifier:@"net.kdt.pojavlauncher.downloadtask"];
     self.manager = [[AFURLSessionManager alloc] initWithSessionConfiguration:configuration];
+    self.pendingDownloads = [NSMutableArray new];
+    self.activeDownloads = 0;
     self.fileList = [NSMutableArray new];
     self.progressList = [NSMutableArray new];
     self.progress = [NSProgress new];
@@ -39,6 +91,36 @@
     [self.manager invalidateSessionCancelingTasks:YES resetSession:YES];
 }
 
+// Witch patch: start a transfer through the bounded queue. The slot is
+// released when the transfer finishes (success or failure).
+- (void)resumeDownloadTask:(NSURLSessionDownloadTask *)task {
+    if (!task) {
+        return;
+    }
+    @synchronized (self) {
+        [self.pendingDownloads addObject:task];
+        [self pumpPendingDownloads];
+    }
+}
+
+- (void)pumpPendingDownloads {
+    while (self.activeDownloads < kMaxParallelDownloads && self.pendingDownloads.count > 0) {
+        NSURLSessionDownloadTask *task = self.pendingDownloads.firstObject;
+        [self.pendingDownloads removeObjectAtIndex:0];
+        self.activeDownloads++;
+        [task resume];
+    }
+}
+
+- (void)releaseDownloadSlot {
+    @synchronized (self) {
+        if (self.activeDownloads > 0) {
+            self.activeDownloads--;
+        }
+        [self pumpPendingDownloads];
+    }
+}
+
 // Add file to the queue
 - (NSURLSessionDownloadTask *)createDownloadTask:(NSString *)url size:(NSUInteger)size sha:(NSString *)sha altName:(NSString *)altName toPath:(NSString *)path success:(void (^)())success {
     BOOL fileExists = [NSFileManager.defaultManager fileExistsAtPath:path];
@@ -50,6 +132,23 @@
         return nil;
     }
 
+    // Witch patch: the first attempt counts the file size in the progress
+    // total; a retry re-uses the same slot.
+    NSURLSessionDownloadTask *task = [self startDownloadAttempt:url size:size sha:sha altName:altName
+                                                       toPath:path success:success attempt:0];
+    NSUInteger effectiveSize = size > 0 ? size : 1;
+    [self addDownloadTaskToProgress:task size:effectiveSize countInTotal:YES];
+    [self.manager downloadProgressForTask:task].localizedDescription = altName ?: path.lastPathComponent;
+    [self.fileList addObject:(altName ?: path.lastPathComponent)];
+
+    return task;
+}
+
+// Witch patch: run one download attempt. A transient network failure is
+// retried (with a short backoff) instead of aborting the installation.
+- (NSURLSessionDownloadTask *)startDownloadAttempt:(NSString *)url size:(NSUInteger)size sha:(NSString *)sha
+                                            altName:(NSString *)altName toPath:(NSString *)path
+                                            success:(void (^)())success attempt:(NSInteger)attempt {
     NSString *name = altName ?: path.lastPathComponent;
     NSURLRequest *request = [NSURLRequest requestWithURL:[NSURL URLWithString:url]];
     __block NSProgress *progress;
@@ -67,20 +166,41 @@
     } completionHandler:^(NSURLResponse * _Nonnull response, NSURL * _Nullable filePath, NSError * _Nullable error) {
         if (self.progress.cancelled) {
             // Ignore any further errors
-        } else if (error != nil) {
+            [self releaseDownloadSlot];
+            return;
+        }
+        if (error != nil) {
+            if (isRetryableDownloadError(error) && attempt < kMaxDownloadRetries) {
+                const NSTimeInterval delay = 1.0 + 2.0 * (double)attempt;
+                NSLog(@"[MCDL] Retry %ld/%ld for %@ (%@)", (long)(attempt + 1), (long)kMaxDownloadRetries,
+                      name, error.localizedDescription);
+                dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(delay * NSEC_PER_SEC)),
+                               dispatch_get_main_queue(), ^{
+                    NSURLSessionDownloadTask *retryTask = [self startDownloadAttempt:url size:size sha:sha
+                                                                          altName:altName toPath:path
+                                                                          success:success attempt:attempt + 1];
+                    // The file size is already part of the progress total -
+                    // the retry only adds the (still running) task.
+                    NSUInteger effectiveSize = size > 0 ? size : 1;
+                    [self addDownloadTaskToProgress:retryTask size:effectiveSize countInTotal:NO];
+                    // The failed attempt gives its slot back before the
+                    // retry takes a new one.
+                    [self releaseDownloadSlot];
+                    [self resumeDownloadTask:retryTask];
+                });
+                return;
+            }
+            [self releaseDownloadSlot];
             [self finishDownloadWithError:error file:name];
         } else if (![self checkSHA:sha forFile:path altName:altName]) {
+            [self releaseDownloadSlot];
             [self finishDownloadWithErrorString:[NSString stringWithFormat:@"Failed to verify file %@: SHA1 mismatch", path.lastPathComponent]];
         } else {
             progress.totalUnitCount = progress.completedUnitCount;
+            [self releaseDownloadSlot];
             if (success) success();
         }
     }];
-
-    NSUInteger effectiveSize = size > 0 ? size : 1;
-    [self addDownloadTaskToProgress:task size:effectiveSize];
-    [self.manager downloadProgressForTask:task].localizedDescription = name;
-    [self.fileList addObject:name];
 
     return task;
 }
@@ -89,15 +209,22 @@
     return [self createDownloadTask:url size:size sha:sha altName:altName toPath:path success:nil];
 }
 
-- (void)addDownloadTaskToProgress:(NSURLSessionDownloadTask *)task size:(NSInteger)size {
+- (void)addDownloadTaskToProgress:(NSURLSessionDownloadTask *)task size:(NSInteger)size countInTotal:(BOOL)countInTotal {
     NSProgress *progress = [self.manager downloadProgressForTask:task];
     NSUInteger fileSize = size > 0 ? (NSUInteger)size : 1;
     progress.kind = NSProgressKindFile;
     progress.totalUnitCount = fileSize;
     [self.progressList addObject:progress];
-    [self.progress addChild:progress withPendingUnitCount:fileSize];
-    self.progress.totalUnitCount += fileSize;
+    [self.progress addChild:progress withPendingUnitCount:(countInTotal ? fileSize : 0)];
+    if (countInTotal) {
+        self.progress.totalUnitCount += fileSize;
+    }
     self.textProgress.totalUnitCount = self.progress.totalUnitCount;
+    // A retry adds its own (partial) progress on top of the failed attempt:
+    // keep the reported completion inside the total.
+    if (self.progress.completedUnitCount > self.progress.totalUnitCount) {
+        self.progress.completedUnitCount = self.progress.totalUnitCount;
+    }
 }
 
 - (void)resolveFullInheritsChain {
@@ -149,7 +276,7 @@
                 completion();
             }
         }];
-        [task resume];
+        [self resumeDownloadTask:task];
     } else {
         // Parent not in remote manifest (e.g., mod loader profile like fabric-loader).
         // Read from disk if it exists, otherwise just proceed.
@@ -215,7 +342,7 @@
     NSUInteger size = [version[@"size"] unsignedLongLongValue];
 
     NSURLSessionDownloadTask *task = [self createDownloadTask:url size:size sha:sha altName:nil toPath:path success:completionBlock];
-    [task resume];
+    [self resumeDownloadTask:task];
 }
 
 #pragma mark - Minecraft installation
@@ -235,7 +362,7 @@
         self.metadata[@"assetIndexObj"] = parseJSONFromFile(path);
         success();
     }];
-    [task resume];
+    [self resumeDownloadTask:task];
 }
 
 - (NSArray *)downloadClientLibraries {
@@ -331,8 +458,12 @@
                 self.textProgress.totalUnitCount = 1;
                 self.textProgress.completedUnitCount = 1;
             }
-            [libTasks makeObjectsPerformSelector:@selector(resume)];
-            [assetTasks makeObjectsPerformSelector:@selector(resume)];
+            for (NSURLSessionDownloadTask *task in libTasks) {
+                [self resumeDownloadTask:task];
+            }
+            for (NSURLSessionDownloadTask *task in assetTasks) {
+                [self resumeDownloadTask:task];
+            }
             [self.metadata removeObjectForKey:@"assetIndexObj"];
         }];
     }];
@@ -354,7 +485,7 @@
         NSString *path = [NSString stringWithFormat:@"%s/custom_gamedir/%@", getenv("POJAV_GAME_DIR"), name];
         [api downloader:self submitDownloadTasksFromPackage:packagePath toPath:path];
     }];
-    [task resume];
+    [self resumeDownloadTask:task];
 }
 
 #pragma mark - Utilities

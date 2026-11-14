@@ -5,6 +5,7 @@
 #import "PLLogOutputView.h"
 #import "HapticManager.h"
 #import "ErrorPresenter.h"
+#import "AppSheet.h"
 #import <AVFoundation/AVFoundation.h>
 
 NS_ASSUME_NONNULL_BEGIN
@@ -83,9 +84,8 @@ static const CFTimeInterval kWordmarkRevealDuration = 0.5;
 @property (nonatomic, strong) UILabel *versionLabel;
 @property (nonatomic, strong) UILabel *waitingLabel;
 @property (nonatomic, strong) UIView *barTrack;
-@property (nonatomic, strong) CALayer *barOne;
-@property (nonatomic, strong) CALayer *barTwo;
-@property (nonatomic, strong) CAGradientLayer *fadeLayer;
+@property (nonatomic, strong) CAGradientLayer *barOne;
+@property (nonatomic) CGFloat animatedTrackWidth;
 
 // Constraints, normal <-> log mode
 @property (nonatomic, strong) NSLayoutConstraint *brandBottomConstraint;
@@ -97,6 +97,7 @@ static const CFTimeInterval kWordmarkRevealDuration = 0.5;
 @property (nonatomic, strong) UIView *logCard;
 @property (nonatomic, strong) UIButton *captureButton;
 @property (nonatomic, strong) UIButton *clearButton;
+@property (nonatomic, strong) UIButton *closeButton;
 @property (nonatomic, strong) WitchScrollingLogView *logTextView;
 
 @property (nonatomic) BOOL mediaActive;
@@ -147,7 +148,14 @@ static const CFTimeInterval kWordmarkRevealDuration = 0.5;
     // zero frame — the splash appeared black even with media loaded.
     self.imageView.frame = bounds;
     self.playerLayer.frame = bounds;
-    self.fadeLayer.frame = bounds;
+
+    // Track width can only be measured after Auto Layout runs; restart the
+    // sweep so its geometry matches the real bar (and on rotation).
+    CGFloat trackWidth = CGRectGetWidth(self.barTrack.bounds);
+    if (self.entrancePlayed && trackWidth > 1.0 &&
+        fabs(trackWidth - self.animatedTrackWidth) > 0.5) {
+        [self animateBarsIfPossible];
+    }
 }
 
 #pragma mark - Background (video / image / blur + base scrim)
@@ -220,22 +228,6 @@ static const CFTimeInterval kWordmarkRevealDuration = 0.5;
         [scrim.bottomAnchor constraintEqualToAnchor:self.bottomAnchor],
     ]];
     self.scrim = scrim;
-
-    // Soft gradient behind the bottom cluster: strong at the very bottom
-    // edge, dissolving upwards — same treatment as the new log sheet.
-    // Falls back to the user's background color so custom palettes never
-    // break readability.
-    UIColor *tone = [UIColor.blackColor colorWithAlphaComponent:0.92];
-    CAGradientLayer *fade = [CAGradientLayer layer];
-    fade.colors = @[
-        (id)tone.CGColor,
-        (id)[tone colorWithAlphaComponent:0.70].CGColor,
-        (id)[tone colorWithAlphaComponent:0.32].CGColor,
-        (id)[tone colorWithAlphaComponent:0.0].CGColor,
-    ];
-    fade.locations = @[@0.0, @0.42, @0.78, @1.0];
-    [self.layer addSublayer:fade];
-    self.fadeLayer = fade;
 }
 
 #pragma mark - Bottom cluster (brand -> waiting -> bar)
@@ -308,27 +300,29 @@ static const CFTimeInterval kWordmarkRevealDuration = 0.5;
     self.waitingLabel.preferredMaxLayoutWidth = 260.0;
 
     // Full-width indeterminate progress bar pinned to the very bottom edge
-    // (square cut, no rounding). It always runs the classic two-bar
-    // accent sweep — no percentage figure is shown.
+    // (square cut, no rounding). A single gradient comet sweeps across it —
+    // one bar only, so nothing can ever overlap itself.
     UIView *track = [[UIView alloc] init];
     track.translatesAutoresizingMaskIntoConstraints = NO;
     track.backgroundColor = [self.inkColor colorWithAlphaComponent:0.14];
     track.layer.cornerRadius = 0;
     track.layer.masksToBounds = YES;
     self.barTrack = track;
-    for (NSInteger i = 0; i < 2; i++) {
-        CAGradientLayer *bar = [CAGradientLayer layer];
-        UIColor *opaque = ThemeManager.shared.accentColor;
-        UIColor *tail = [opaque colorWithAlphaComponent:0.55];
-        bar.colors = @[(__bridge id)tail.CGColor, (__bridge id)opaque.CGColor];
-        bar.locations = @[@0.0, @1.0];
-        bar.startPoint = CGPointMake(0.0, 0.5);
-        bar.endPoint = CGPointMake(1.0, 0.5);
-        bar.frame = CGRectMake(0, 0, 120.0, 6.0);
-        bar.cornerRadius = 0;
-        [track.layer addSublayer:bar];
-        if (i == 0) self.barOne = bar; else self.barTwo = bar;
-    }
+
+    CAGradientLayer *bar = [CAGradientLayer layer];
+    UIColor *opaque = ThemeManager.shared.accentColor;
+    bar.colors = @[
+        (__bridge id)[opaque colorWithAlphaComponent:0.0].CGColor,
+        (__bridge id)[opaque colorWithAlphaComponent:0.45].CGColor,
+        (__bridge id)opaque.CGColor,
+    ];
+    bar.locations = @[@0.0, @0.45, @1.0];
+    bar.startPoint = CGPointMake(0.0, 0.5);
+    bar.endPoint = CGPointMake(1.0, 0.5);
+    bar.frame = CGRectMake(0, 0, 140.0, 6.0);
+    bar.cornerRadius = 0;
+    [track.layer addSublayer:bar];
+    self.barOne = bar;
     track.isAccessibilityElement = YES;
     track.accessibilityLabel = localize(@"splash.starting_jvm", nil);
     track.accessibilityTraits = UIAccessibilityTraitUpdatesFrequently;
@@ -355,7 +349,6 @@ static const CFTimeInterval kWordmarkRevealDuration = 0.5;
     [self applyThemeColors];
 
     // Parked: nothing on screen yet. `startAnimating` choreographs it in.
-    self.fadeLayer.opacity = 0.0;
     self.brandRow.alpha = 0.0;
     self.wordmarkMask = [CALayer layer];
     self.wordmarkMask.backgroundColor = UIColor.blackColor.CGColor;
@@ -404,6 +397,20 @@ static const CFTimeInterval kWordmarkRevealDuration = 0.5;
     [self addSubview:clear];
     self.clearButton = clear;
 
+    // Quit: same ink disc as the log/clear buttons but a red X glyph.
+    UIButton *close = [UIButton buttonWithType:UIButtonTypeCustom];
+    close.translatesAutoresizingMaskIntoConstraints = NO;
+    close.layer.cornerRadius = 17;
+    close.contentEdgeInsets = UIEdgeInsetsZero;
+    close.imageView.contentMode = UIViewContentModeCenter;
+    close.backgroundColor = ink;
+    close.tintColor = [UIColor systemRedColor];
+    [close setImage:[UIImage systemImageNamed:@"xmark"] forState:UIControlStateNormal];
+    close.accessibilityLabel = localize(@"splash.close_confirm_yes", nil);
+    [close addTarget:self action:@selector(closeButtonTapped) forControlEvents:UIControlEventTouchUpInside];
+    [self addSubview:close];
+    self.closeButton = close;
+
     WitchScrollingLogView *log = [[WitchScrollingLogView alloc] initWithFrame:CGRectZero];
     log.translatesAutoresizingMaskIntoConstraints = NO;
     [card addSubview:log];
@@ -416,15 +423,21 @@ static const CFTimeInterval kWordmarkRevealDuration = 0.5;
         [card.topAnchor constraintEqualToAnchor:self.brandRow.bottomAnchor constant:14.0],
         [card.bottomAnchor constraintEqualToAnchor:self.waitingLabel.topAnchor constant:-12.0],
 
-        [clear.trailingAnchor constraintEqualToAnchor:safe.trailingAnchor constant:-14.0],
+        [close.trailingAnchor constraintEqualToAnchor:safe.trailingAnchor constant:-14.0],
+        [close.heightAnchor constraintEqualToConstant:34.0],
+        [close.widthAnchor constraintEqualToConstant:34.0],
+
+        [clear.trailingAnchor constraintEqualToAnchor:close.leadingAnchor constant:-8.0],
         [clear.heightAnchor constraintEqualToConstant:34.0],
         [clear.widthAnchor constraintEqualToConstant:34.0],
+
         [capture.trailingAnchor constraintEqualToAnchor:clear.leadingAnchor constant:-8.0],
         [capture.centerYAnchor constraintEqualToAnchor:clear.centerYAnchor],
         [capture.heightAnchor constraintEqualToConstant:34.0],
         [capture.widthAnchor constraintEqualToConstant:34.0],
         [capture.topAnchor constraintEqualToAnchor:safe.topAnchor constant:6.0],
         [clear.centerYAnchor constraintEqualToAnchor:capture.centerYAnchor],
+        [close.centerYAnchor constraintEqualToAnchor:capture.centerYAnchor],
 
         [log.leadingAnchor constraintEqualToAnchor:card.leadingAnchor],
         [log.trailingAnchor constraintEqualToAnchor:card.trailingAnchor],
@@ -447,14 +460,18 @@ static const CFTimeInterval kWordmarkRevealDuration = 0.5;
     self.versionLabel.textColor = [ink colorWithAlphaComponent:0.55];
     self.waitingLabel.textColor = [ink colorWithAlphaComponent:0.95];
     self.barTrack.backgroundColor = [ink colorWithAlphaComponent:0.14];
-    self.barOne.backgroundColor = accent.CGColor;
-    self.barTwo.backgroundColor = accent.CGColor;
+    self.barOne.colors = @[
+        (__bridge id)[accent colorWithAlphaComponent:0.0].CGColor,
+        (__bridge id)[accent colorWithAlphaComponent:0.45].CGColor,
+        (__bridge id)accent.CGColor,
+    ];
     self.logCard.layer.borderColor = (ThemeManager.shared.uiBorderColor ?: [ink colorWithAlphaComponent:0.85]).CGColor;
     self.logTextView.inkColor = [ink colorWithAlphaComponent:0.92];
     self.captureButton.backgroundColor = ink;
     self.captureButton.tintColor = self.backgroundColor ?: [UIColor colorWithWhite:0.05 alpha:1.0];
     self.clearButton.backgroundColor = ink;
     self.clearButton.tintColor = self.backgroundColor ?: [UIColor colorWithWhite:0.05 alpha:1.0];
+    self.closeButton.backgroundColor = ink;
 }
 
 - (UILabel *)makeLabelWithFont:(UIFont *)font {
@@ -488,10 +505,6 @@ static const CFTimeInterval kWordmarkRevealDuration = 0.5;
     }
     self.entrancePlayed = YES;
     NSUInteger token = ++self.choreographyToken;
-
-    [UIView animateWithDuration:0.6 delay:0 options:(UIViewAnimationOptionCurveEaseOut | UIViewAnimationOptionBeginFromCurrentState) animations:^{
-        self.fadeLayer.opacity = 1.0;
-    } completion:nil];
 
     [UIView animateWithDuration:0.55
                           delay:0.12
@@ -558,9 +571,6 @@ static const CFTimeInterval kWordmarkRevealDuration = 0.5;
         self.logCard.alpha = 0.0;
         self.logCard.transform = CGAffineTransformMakeTranslation(0, 12);
     } completion:^(BOOL finished) {
-        [UIView animateWithDuration:0.22 delay:0 options:(UIViewAnimationOptionCurveEaseIn | UIViewAnimationOptionBeginFromCurrentState) animations:^{
-            self.fadeLayer.opacity = 0.0;
-        } completion:nil];
         if (completion) completion();
     }];
 }
@@ -570,28 +580,32 @@ static const CFTimeInterval kWordmarkRevealDuration = 0.5;
 }
 
 - (void)animateBarsIfPossible {
-    CGFloat trackWidth = self.barTrack.bounds.size.width;
-    if (trackWidth < 60.0) trackWidth = 190.0;
-    CGFloat barWidth = 120.0;
-    CAMediaTimingFunction *easing = [CAMediaTimingFunction functionWithControlPoints:0.45 :0.0 :0.2 :1.0];
-    NSArray *bars = @[self.barOne, self.barTwo];
-    for (NSInteger i = 0; i < bars.count; i++) {
-        CALayer *bar = bars[i];
-        [bar removeAnimationForKey:@"position.x"];
-        CABasicAnimation *anim = [CABasicAnimation animationWithKeyPath:@"position.x"];
-        anim.fromValue = @(-barWidth);
-        anim.toValue = @(trackWidth + barWidth / 2);
-        anim.duration = 1.15;
-        anim.timingFunction = easing;
-        anim.repeatCount = HUGE_VALF;
-        anim.beginTime = CACurrentMediaTime() + (double)i * 0.575;
-        [bar addAnimation:anim forKey:@"position.x"];
-    }
+    CGFloat trackWidth = CGRectGetWidth(self.barTrack.bounds);
+    if (trackWidth < 1.0) return;
+    self.animatedTrackWidth = trackWidth;
+
+    // Comet width scales with the screen; travel speed stays constant so the
+    // motion feels identical in portrait and landscape.
+    CGFloat barWidth = MIN(MAX(trackWidth * 0.30, 96.0), 200.0);
+    CGFloat distance = trackWidth + barWidth * 2.0;
+    CFTimeInterval duration = MIN(MAX(distance / 340.0, 1.0), 2.4);
+
+    CALayer *bar = self.barOne;
+    bar.bounds = CGRectMake(0, 0, barWidth, 6.0);
+    bar.position = CGPointMake(-barWidth / 2.0, 3.0);
+    [bar removeAnimationForKey:@"position.x"];
+
+    CABasicAnimation *anim = [CABasicAnimation animationWithKeyPath:@"position.x"];
+    anim.fromValue = @(-barWidth / 2.0);
+    anim.toValue = @(trackWidth + barWidth / 2.0);
+    anim.duration = duration;
+    anim.timingFunction = [CAMediaTimingFunction functionWithControlPoints:0.4 :0.0 :0.25 :1.0];
+    anim.repeatCount = HUGE_VALF;
+    [bar addAnimation:anim forKey:@"position.x"];
 }
 
 - (void)stopAnimating {
     [self.barOne removeAnimationForKey:@"position.x"];
-    [self.barTwo removeAnimationForKey:@"position.x"];
 }
 
 #pragma mark - Log panel
@@ -623,7 +637,6 @@ static const CFTimeInterval kWordmarkRevealDuration = 0.5;
                         options:(UIViewAnimationOptionCurveEaseOut | UIViewAnimationOptionBeginFromCurrentState)
                      animations:^{
         [self layoutIfNeeded];
-        self.fadeLayer.opacity = on ? 0.0 : 1.0;
     } completion:nil];
 
     if (on) {
@@ -651,6 +664,17 @@ static const CFTimeInterval kWordmarkRevealDuration = 0.5;
     [self.logTextView clearDisplay];
     [HapticManager.shared play:HapticTypeMedium];
     [ErrorPresenter showToast:localize(@"witch.log_clear_done", nil) success:YES];
+}
+
+- (void)closeButtonTapped {
+    [HapticManager.shared play:HapticTypeSelection];
+    [AppSheet showConfirmWithTitle:nil
+                           message:localize(@"splash.close_confirm", nil)
+                      confirmTitle:localize(@"splash.close_confirm_yes", nil)
+                       destructive:YES
+                         onConfirm:^{
+        exit(0);
+    }];
 }
 
 - (void)refreshCaptureUI {

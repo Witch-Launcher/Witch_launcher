@@ -188,7 +188,8 @@ public final class Tools {
         boolean forge = false;
         for (String entry : launchClassPath.split(":")) {
             String name = entry.substring(entry.lastIndexOf('/') + 1);
-            if (name.startsWith("fmlearlydisplay-") || name.contains("neoforge")) {
+            if (name.startsWith("fmlearlydisplay-") || name.startsWith("earlydisplay-")
+                    || name.startsWith("fmlearlywindow-") || name.contains("neoforge")) {
                 forge = true;
                 break;
             }
@@ -578,8 +579,20 @@ public final class Tools {
             library.downloads.artifact != null &&
             library.downloads.artifact.path != null)
             return library.downloads.artifact.path;
-        String[] libInfos = library.name.split(":");
-        return libInfos[0].replaceAll("\\.", "/") + "/" + libInfos[1] + "/" + libInfos[2] + "/" + libInfos[1] + "-" + libInfos[2] + ".jar";
+        // Handle Maven coordinates with an explicit extension and/or
+        // classifier ("net.neoforged:mergetool:1.1.5:api@jar"), which some
+        // NeoForge/Forge version JSONs use and which would otherwise produce
+        // a path containing the raw "@jar" token.
+        String name = library.name;
+        String extension = "jar";
+        int extAt = name.indexOf('@');
+        if (extAt >= 0) {
+            extension = name.substring(extAt + 1);
+            name = name.substring(0, extAt);
+        }
+        String[] libInfos = name.split(":");
+        String classifier = libInfos.length > 3 && !libInfos[3].isEmpty() ? "-" + libInfos[3] : "";
+        return libInfos[0].replaceAll("\\.", "/") + "/" + libInfos[1] + "/" + libInfos[2] + "/" + libInfos[1] + "-" + libInfos[2] + classifier + "." + extension;
     }
 
 /*
@@ -667,6 +680,8 @@ public final class Tools {
 
     public static void preProcessLibraries(DependentLibrary[] libraries) {
         if (libraries == null) return;
+        // ASM 9.9.1 is only required to read Java 25 class files (major 69).
+        boolean asmBumpAllowed = javaFeatureVersion() >= 25;
         // Ignore some libraries since they are unsupported (jinput, text2speech) or unused (LWJGL)
         // Support for text2speech is not planned, so skip it for now.
         for (int i = 0; i < libraries.length; i++) {
@@ -686,11 +701,17 @@ public final class Tools {
                 libItem._skip = true;
                 continue;
             }
-            String[] version = libParts[2].split("\\.");
+            // NeoForge/Forge version JSONs may pin a Maven extension on the
+            // version token ("org.ow2.asm:asm-commons:9.8@jar"), so strip
+            // "@ext" before splitting or parseInt throws on "8@jar".
+            String versionToken = libParts[2];
+            int extAt = versionToken.indexOf('@');
+            if (extAt >= 0) versionToken = versionToken.substring(0, extAt);
+            String[] version = versionToken.split("\\.");
             if (libItem.name.startsWith("net.java.dev.jna:jna:")) {
                 // Special handling for LabyMod 1.8.9 and Forge 1.12.2(?)
                 // we have libjnidispatch 5.13.0 in Frameworks directory
-                if (Integer.parseInt(version[0]) >= 5 && Integer.parseInt(version[1]) >= 13) continue;
+                if (parseLeadingInt(version, 0, -1) >= 5 && parseLeadingInt(version, 1, -1) >= 13) continue;
                 //System.out.println("Library " + libItem.name + " has been changed to version 5.13.0");
                 
 createLibraryInfo(libItem);
@@ -698,7 +719,7 @@ createLibraryInfo(libItem);
                 libItem.downloads.artifact.path = "net/java/dev/jna/jna/5.13.0/jna-5.13.0.jar";
                 libItem.downloads.artifact.url = "https://libraries.minecraft.net/net/java/dev/jna/jna/5.13.0/jna-5.13.0.jar";
             } else if (libItem.name.startsWith("org.ow2.asm:asm-all:")) {
-                if(Integer.parseInt(version[0]) >= 5) continue;
+                if(parseLeadingInt(version, 0, -1) >= 5) continue;
                 //System.out.println("Library " + libItem.name + " has been changed to version 5.0.4");
                 createLibraryInfo(libItem);
                 libItem.name = "org.ow2.asm:asm-all:5.0.4";
@@ -706,17 +727,21 @@ createLibraryInfo(libItem);
                 libItem.downloads.artifact.path = "org/ow2/asm/asm-all/5.0.4/asm-all-5.0.4.jar";
                 libItem.downloads.artifact.sha1 = "e6244859997b3d4237a552669279780876228909";
                 libItem.downloads.artifact.url = "https://repo1.maven.org/maven2/org/ow2/asm/asm-all/5.0.4/asm-all-5.0.4.jar";
-            } else if (libItem.name.startsWith("org.ow2.asm:asm:") ||
+            } else if (asmBumpAllowed && (libItem.name.startsWith("org.ow2.asm:asm:") ||
                        libItem.name.startsWith("org.ow2.asm:asm-analysis:") ||
                        libItem.name.startsWith("org.ow2.asm:asm-commons:") ||
                        libItem.name.startsWith("org.ow2.asm:asm-tree:") ||
-                       libItem.name.startsWith("org.ow2.asm:asm-util:")) {
+                       libItem.name.startsWith("org.ow2.asm:asm-util:"))) {
                 // Replace ASM < 9.9.1 with 9.9.1 for Java 25 class file support (major version 69).
                 // 9.7.1 (used by Quilt meta and NeoForge < 26.2) cannot read Java 25 class files.
+                // Only do this on a Java 25+ runtime: NeoForge 20.4 puts the original ASM
+                // jars on its -p module path, so bumping only the classpath copy creates a
+                // second module named org.objectweb.asm.tree.analysis and bootstraplauncher
+                // dies with "reads more than one module named ...".
                 if (version.length >= 2) {
-                    int major = Integer.parseInt(version[0]);
-                    int minor = Integer.parseInt(version[1]);
-                    int patch = version.length > 2 ? Integer.parseInt(version[2]) : 0;
+                    int major = parseLeadingInt(version, 0, -1);
+                    int minor = parseLeadingInt(version, 1, -1);
+                    int patch = parseLeadingInt(version, 2, 0);
                     if (major > 9 || (major == 9 && minor > 9) || (major == 9 && minor == 9 && patch >= 1)) {
                         continue;
                     }
@@ -728,6 +753,33 @@ createLibraryInfo(libItem);
                 libItem.downloads.artifact.path = "org/ow2/asm/" + asmArtifact + "/9.9.1/" + asmArtifact + "-9.9.1.jar";
                 libItem.downloads.artifact.url = "https://repo1.maven.org/maven2/org/ow2/asm/" + asmArtifact + "/9.9.1/" + asmArtifact + "-9.9.1.jar";
             }
+        }
+    }
+
+    // java.specification.version without Runtime.version() (Java 8 target).
+    private static int javaFeatureVersion() {
+        String version = System.getProperty("java.specification.version", "8");
+        try {
+            if (version.startsWith("1.")) version = version.substring(2);
+            int dot = version.indexOf('.');
+            return Integer.parseInt(dot >= 0 ? version.substring(0, dot) : version);
+        } catch (Throwable t) {
+            return 8;
+        }
+    }
+
+    // Reads the leading integer of version[index] ("8@jar" -> 8, "9-beta"
+    // -> 9) and returns fallback when there is no numeric prefix at all.
+    private static int parseLeadingInt(String[] version, int index, int fallback) {
+        if (version == null || index < 0 || index >= version.length) return fallback;
+        String token = version[index];
+        int end = 0;
+        while (end < token.length() && Character.isDigit(token.charAt(end))) end++;
+        if (end == 0) return fallback;
+        try {
+            return Integer.parseInt(token.substring(0, end));
+        } catch (NumberFormatException e) {
+            return fallback;
         }
     }
 

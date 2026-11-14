@@ -653,9 +653,9 @@ typedef NS_ENUM(NSInteger, ProfileContentFilter) {
 - (void)loadSettingLists {
     _rendererKeys = getRendererKeys(YES);
     _rendererNames = getRendererNames(YES);
-    NSString *ctrlPath = [NSString stringWithFormat:@"%s/controlmap", getenv("POJAV_HOME")];
+    NSString *ctrlPath = amethyst_control_path(nil);
     _touchControlList = [self listFilesAtPath:ctrlPath];
-    NSString *gamepadPath = [NSString stringWithFormat:@"%s/controlmap/gamepads", getenv("POJAV_HOME")];
+    NSString *gamepadPath = amethyst_control_path(@"gamepads");
     _gamepadControlList = [self listFilesAtPath:gamepadPath];
     _lwjglList = getLwjglVersions(YES);
     NSMutableArray *java = [getPrefObject(@"java.java_homes") allKeys].mutableCopy ?: [NSMutableArray array];

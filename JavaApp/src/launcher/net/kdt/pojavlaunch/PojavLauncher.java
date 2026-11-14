@@ -828,6 +828,27 @@ public class PojavLauncher {
         MCOptionUtils.set("fullscreen", "false");
         MCOptionUtils.set("overrideWidth", size[0]);
         MCOptionUtils.set("overrideHeight", size[1]);
+        // Frame pacing (launcher Settings > Game). Defaults are off, which
+        // means no lock: VSync disabled and maxFps raised to Minecraft's
+        // unlimited value so nothing throttles the render loop below the
+        // hardware/display ceiling. Exported by init_loadCustomEnv().
+        String vsyncPref = System.getenv("AMETHYST_VSYNC");
+        if (vsyncPref != null) {
+            MCOptionUtils.set("enableVsync", "1".equals(vsyncPref) ? "true" : "false");
+        }
+        String maxFpsPref = System.getenv("AMETHYST_MAX_FPS");
+        if (maxFpsPref != null && maxFpsPref.matches("\\d+")) {
+            int fps = Integer.parseInt(maxFpsPref);
+            // 0 = Off = unlimited; Minecraft's own cap for "unlimited" is 260.
+            MCOptionUtils.set("maxFps", String.valueOf(fps > 0 ? Math.min(fps, 260) : 260));
+        }
+        // Uncapped present: the render loop is allowed to run faster than the
+        // panel refresh. VSync has to be off for that, whatever the setting
+        // above says.
+        String uncappedPref = System.getenv("AMETHYST_UNCAPPED");
+        if ("1".equals(uncappedPref)) {
+            MCOptionUtils.set("enableVsync", "false");
+        }
         // Default settings for performance
         MCOptionUtils.setDefault("mipmapLevels", "0");
         MCOptionUtils.setDefault("particles", "1");

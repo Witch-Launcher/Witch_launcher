@@ -388,6 +388,8 @@
 "preference.detail.vsync" = "When off, every renderer presents frames without waiting for the display refresh. Turn on to cap FPS to the screen refresh rate.";
 "preference.title.max_framerate" = "Maximum framerate";
 "preference.detail.max_framerate" = "Allows you to limit the game framerate to 60FPS on ProMotion displays.";
+"preference.title.uncapped" = "Uncapped FPS (render above display refresh)";
+"preference.detail.uncapped" = "Lets the render loop run faster than the screen refresh rate. Extra frames are dropped at present time, so the reported FPS can exceed the display refresh.";
 
 "preference.title.performance_hud" = "Show Performance HUD";
 "preference.detail.performance_hud" = "When available, show the performance monitoring overlay.";
@@ -942,6 +944,7 @@
 "preference.title.fsr3_upscaler.fsr3" = "FSR 3 Upscaler";
 "preference.title.fsr3_resolution_scale" = "Render Resolution Scale";
 "preference.title.fsr3_sharpness" = "Sharpening (RCAS)";
+"preference.title.fsr3_jitter" = "Sub-pixel TAA Jitter";
 "preference.title.fsr3_probe" = "Perf measurement probe";
 "preference.title.fsr3_probe.ref" = "Reference (OF half rate)";
 "preference.title.fsr3_probe.of_every_frame" = "Probe: OF every frame";
@@ -949,6 +952,7 @@
 "preference.title.fsr3_probe.no_fi" = "Probe: no interpolation (gen=0)";
 "preference.title.fsr3_probe.no_present" = "Probe: skip FG present";
 "preference.title.fsr3_probe.bypass" = "Probe: FG GPU bypass";
+"preference.title.fsr3_probe.of_only" = "Probe: FG optical flow only";
 "settings.group.fsr_hint" = "Upscales a lower-resolution render to native display size to gain FPS. FSR 1 is a fast spatial upscaler; FSR 2 and FSR 3 use temporal history for sharper results. Lower the render resolution scale for more FPS, or raise sharpening if the image looks soft. Requires the MoltenVK (Vulkan) renderer.";
 "settings.group.fg" = "Frame Generation (FSR 3 FG)";
 "preference.title.fsr3_framegen" = "Enable Frame Generation";
@@ -1553,6 +1557,8 @@
 "init.env.message" = "The environment is initializing. This may take a while — please wait until the first frame is rendered.";
 "linear.progress.loading" = "Loading...";
 "splash.three_finger_log_hint" = "Three-finger tap to toggle the log";
+"splash.close_confirm" = "Are you sure you want to close the app?";
+"splash.close_confirm_yes" = "Close";
 "witch.log_caption" = "Hold to copy · Three-finger tap to hide";
 "witch.log_copied" = "Log copied to clipboard";
 "witch.log_empty" = "Nothing to copy yet";
@@ -1601,6 +1607,34 @@
 "jit.method.stikdebug" = "StikDebug";
 "jit.method.wait" = "Wait for Debugger";
 "jit.method.trollstore" = "TrollStore";
+"jit.method.sidestore" = "SideStore";
+"jit.method.livecontainer" = "LiveContainer";
+"jit.method.trollstore.hint" = "TrollStore needs the .tipa build and its URL Scheme enabled for Witch. Install it through TrollStore, then launch the game again.";
+"jit.method.sidestore.hint" = "SideStore enables JIT from its own app. Install SideStore, keep its VPN connected, then launch the game again.";
+"jit.method.sidestore.hint.installed" = "SideStore is installed. Open it, enable JIT for Witch, then launch the game again.";
+"jit.method.livecontainer.hint" = "LiveContainer provides the debugger and the JIT script. Open Witch from LiveContainer to use this method.";
+"jit.method.auto.hint" = "Picks the best method this device supports.";
+"jit.method.builtin.ready" = "Ready";
+"jit.method.builtin.pairing" = "Needs a pairing file";
+"jit.method.builtin.unavailable" = "Not available on this device";
+"jit.method.stikdebug.hint" = "Opens StikDebug to enable JIT.";
+"jit.method.wait.hint" = "Waits for a debugger to attach.";
+"jit.method.trollstore.ready" = "TrollStore JIT entitlement found";
+"jit.method.trollstore.missing" = "Needs the TrollStore JIT entitlement";
+"jit.method.sidestore.ready" = "SideStore is installed";
+"jit.method.sidestore.missing" = "SideStore is not installed";
+"jit.method.livecontainer.ready" = "LiveContainer is running Witch";
+"jit.method.livecontainer.missing" = "LiveContainer is not running Witch";
+"jit.method.trollstore.unavailable.title" = "TrollStore Not Detected";
+"jit.method.trollstore.unavailable.message" = "This installation has no TrollStore JIT entitlement. Install the .tipa build through TrollStore, or pick another JIT method.";
+"jit.method.sidestore.unavailable.title" = "SideStore Not Available";
+"jit.method.sidestore.unavailable.message" = "Witch could not hand the JIT request to SideStore. Install SideStore, connect its VPN, then try again.";
+"jit.method.livecontainer.unavailable.title" = "LiveContainer Not Detected";
+"jit.method.livecontainer.unavailable.message" = "This method needs LiveContainer to provide the debugger. Open Witch from LiveContainer, or pick another JIT method.";
+"jit.method.livecontainer.no_script.message" = "LiveContainer started Witch without a JIT script. Enable JIT for Witch in LiveContainer (it injects UniversalJIT26.js into LCAppInfo.plist), then start the game again.";
+"jit.method.builtin.unavailable.message" = "Built-in StikJIT is not available on this device or installation. It needs iOS 17.4 or newer, an installation with get-task-allow (SideStore, AltStore or Xcode), and the built-in JIT helper extension. Pick another JIT method.";
+"jit.method.builtin.unavailable.livecontainer" = "Built-in StikJIT cannot run inside LiveContainer because it needs its own helper extension. Use StikDebug or the LiveContainer method instead.";
+"jit.method.builtin.unavailable.pairing" = "Import a remote pairing file (StikDebug pairing guide) before using Built-in StikJIT.";
 "jit.force_script" = "Force JIT Script";
 "jit.status" = "Status";
 "jit.status.ready" = "Ready";
@@ -1640,7 +1674,7 @@
 "jit.pairing_required" = "Pairing File Required";
 "jit.starting.title" = "Starting Built-in StikJIT";
 "jit.starting.message" = "Attaching the debugger and preparing JIT. This can take a minute while the Developer Disk Image downloads.";
-"jit.failed.title" = "Built-in StikJIT Failed";
+"jit.failed.title" = "JIT Setup Failed";
 "jit.failed.message" = "The JIT helper could not attach. Check LocalDevVPN and the pairing file, then try again.";
 "jit.open_settings" = "Open JIT Settings";
 "jit.use_stikdebug" = "Use StikDebug";

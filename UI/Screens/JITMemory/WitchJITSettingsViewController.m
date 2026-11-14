@@ -12,6 +12,12 @@
 
 #if TARGET_OS_IOS
 
+@interface WitchJITCoordinator (MethodList)
+/// Every method id the picker offers. Declared here so the picker and the
+/// resolver (WitchJITCoordinator) can never drift apart.
++ (NSArray<NSString *> *)supportedMethods;
+@end
+
 @interface WitchJITSettingsViewController () <UITableViewDelegate, UITableViewDataSource, UIDocumentPickerDelegate>
 @property (nonatomic) UITableView *tableView;
 @property (nonatomic, copy) NSString *vpnStatus;
@@ -101,6 +107,9 @@
 }
 
 - (NSString *)tableView:(UITableView *)tableView titleForFooterInSection:(NSInteger)section {
+    if (section == 0) {
+        return [self methodRequirementText:[WitchJITCoordinator shared].selectedMethod];
+    }
     if (section == 3) {
         return localize(@"jit.help.footer", nil);
     }
@@ -241,21 +250,108 @@
 #pragma mark - Actions
 
 - (NSString *)methodDisplayName:(NSString *)method {
-    if ([method isEqualToString:@"builtin"]) return localize(@"jit.method.builtin", nil);
-    if ([method isEqualToString:@"stikdebug"]) return localize(@"jit.method.stikdebug", nil);
-    if ([method isEqualToString:@"wait"]) return localize(@"jit.method.wait", nil);
-    if ([method isEqualToString:@"trollstore"]) return localize(@"jit.method.trollstore", nil);
-    return localize(@"jit.method.auto", nil);
+    if ([method isEqualToString:@"builtin"]) return [self localizedMethodName:@"jit.method.builtin" fallback:@"Built-in StikJIT"];
+    if ([method isEqualToString:@"stikdebug"]) return [self localizedMethodName:@"jit.method.stikdebug" fallback:@"StikDebug"];
+    if ([method isEqualToString:@"wait"]) return [self localizedMethodName:@"jit.method.wait" fallback:@"Wait for Debugger"];
+    if ([method isEqualToString:@"trollstore"]) return [self localizedMethodName:@"jit.method.trollstore" fallback:@"TrollStore"];
+    if ([method isEqualToString:@"sidestore"]) return [self localizedMethodName:@"jit.method.sidestore" fallback:@"SideStore"];
+    if ([method isEqualToString:@"livecontainer"]) return [self localizedMethodName:@"jit.method.livecontainer" fallback:@"LiveContainer"];
+    return [self localizedMethodName:@"jit.method.auto" fallback:@"Auto"];
+}
+
+// localize() returns the key itself when a translation is missing, so the
+// picker shows an English name instead of a raw key in untranslated locales.
+- (NSString *)localizedMethodName:(NSString *)key fallback:(NSString *)fallback {
+    NSString *name = localize(key, nil);
+    if ([name hasPrefix:@"jit.method."]) return fallback;
+    return name;
+}
+
+// One line under every method in the picker: what the method does here and
+// whether this device can run it. The user picks a method before the game is
+// launched, so the state has to be visible at that point.
+- (NSString *)methodSubtitle:(NSString *)method {
+    WitchJITCoordinator *coordinator = WitchJITCoordinator.shared;
+    if ([method isEqualToString:@"auto"]) {
+        return [self localizedMethodName:@"jit.method.auto.hint" fallback:@"Picks the best method this device supports."];
+    }
+    if ([method isEqualToString:@"builtin"]) {
+        if (!coordinator.isBuiltInAvailable) {
+            return [self localizedMethodName:@"jit.method.builtin.unavailable" fallback:@"Not available on this device"];
+        }
+        if (!coordinator.hasPairingFile) {
+            return [self localizedMethodName:@"jit.method.builtin.pairing" fallback:@"Needs a pairing file"];
+        }
+        return [self localizedMethodName:@"jit.method.builtin.ready" fallback:@"Ready"];
+    }
+    if ([method isEqualToString:@"stikdebug"]) {
+        return [self localizedMethodName:@"jit.method.stikdebug.hint" fallback:@"Opens StikDebug to enable JIT."];
+    }
+    if ([method isEqualToString:@"wait"]) {
+        return [self localizedMethodName:@"jit.method.wait.hint" fallback:@"Waits for a debugger to attach."];
+    }
+    if ([method isEqualToString:@"trollstore"]) {
+        BOOL ready = getEntitlementValue(@"com.apple.private.local.sandboxed-jit");
+        return ready ? [self localizedMethodName:@"jit.method.trollstore.ready" fallback:@"TrollStore JIT entitlement found"]
+                     : [self localizedMethodName:@"jit.method.trollstore.missing" fallback:@"Needs the TrollStore JIT entitlement"];
+    }
+    if ([method isEqualToString:@"sidestore"]) {
+        BOOL ready = [self sideStoreInstalled];
+        return ready ? [self localizedMethodName:@"jit.method.sidestore.ready" fallback:@"SideStore is installed"]
+                     : [self localizedMethodName:@"jit.method.sidestore.missing" fallback:@"SideStore is not installed"];
+    }
+    if ([method isEqualToString:@"livecontainer"]) {
+        BOOL ready = coordinator.isLiveContainer;
+        return ready ? [self localizedMethodName:@"jit.method.livecontainer.ready" fallback:@"LiveContainer is running Witch"]
+                     : [self localizedMethodName:@"jit.method.livecontainer.missing" fallback:@"LiveContainer is not running Witch"];
+    }
+    return nil;
+}
+
+// What the selected method still needs from the device, shown under the
+// method row so the user knows what to prepare before the next launch.
+- (NSString *)methodRequirementText:(NSString *)method {
+    WitchJITCoordinator *coordinator = [WitchJITCoordinator shared];
+    if ([method isEqualToString:@"trollstore"] && !getEntitlementValue(@"com.apple.private.local.sandboxed-jit")) {
+        return localize(@"jit.method.trollstore.hint", nil);
+    }
+    if ([method isEqualToString:@"sidestore"]) {
+        // The install hint only matters while SideStore is missing. Once it is
+        // there the user only has to hand the request over to it.
+        return [self sideStoreInstalled] ? localize(@"jit.method.sidestore.hint.installed", nil)
+                                         : localize(@"jit.method.sidestore.hint", nil);
+    }
+    if ([method isEqualToString:@"livecontainer"] && !coordinator.isLiveContainer) {
+        return localize(@"jit.method.livecontainer.hint", nil);
+    }
+    if ([method isEqualToString:@"builtin"] && !coordinator.isBuiltInAvailable) {
+        return coordinator.isLiveContainer ? localize(@"jit.help.livecontainer", nil) : localize(@"jit.help.unavailable", nil);
+    }
+    if ([method isEqualToString:@"builtin"] && !coordinator.hasPairingFile) {
+        // The helper cannot attach without a remote pairing file, so say that
+        // before the user launches with a method that cannot work yet.
+        return localize(@"jit.help.pairing_required", nil);
+    }
+    return nil;
+}
+
+// SideStore registers its own URL scheme, so the scheme being handled means
+// the app is installed and can take the JIT request.
+- (BOOL)sideStoreInstalled {
+    NSURL *url = [NSURL URLWithString:@"sidestore://"];
+    if (!url) return NO;
+    return [UIApplication.sharedApplication canOpenURL:url];
 }
 
 - (void)showMethodPicker {
     NSMutableArray *options = [NSMutableArray array];
-    NSArray *methods = @[@"auto", @"builtin", @"stikdebug", @"wait"];
+    NSArray *methods = [WitchJITCoordinator supportedMethods];
     NSString *current = WitchJITCoordinator.shared.selectedMethod;
     NSInteger selected = 0;
     for (NSUInteger i = 0; i < methods.count; i++) {
         NSString *method = methods[i];
-        [options addObject:@{@"title": [self methodDisplayName:method]}];
+        [options addObject:@{@"title": [self methodDisplayName:method],
+                             @"subtitle": [self methodSubtitle:method] ?: @""}];
         if ([method isEqualToString:current]) selected = (NSInteger)i;
     }
     [AppSheet showOptionsWithTitle:localize(@"jit.method", nil)

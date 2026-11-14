@@ -181,9 +181,17 @@ void customNSLog(const char *file, int lineNumber, const char *functionName, NSS
 // demand. Use the dir variant when subpath is a folder.
 NSString* amethyst_hidden_path(NSString* subpath);
 NSString* amethyst_hidden_dir(NSString* subpath);
-// One-time migration of legacy root-level items (accounts, controlmap,
-// cursors, caches, background media, prefs) into .amethyst, plus cleanup of
-// obsolete staging folders. Idempotent; call once before loadPreferences().
+// Control maps live in the VISIBLE POJAV_HOME/controlmap folder (not inside
+// the hidden .amethyst folder) so users can browse to it with the Files app
+// and copy their own control layouts in. Returns
+// POJAV_HOME/controlmap[/subpath]; use the dir variant when subpath is a
+// folder (it creates the directory on demand).
+NSString* amethyst_control_path(NSString* subpath);
+NSString* amethyst_control_dir(NSString* subpath);
+// One-time migration of legacy root-level items (accounts, cursors, caches,
+// background media, prefs) into .amethyst, plus cleanup of obsolete staging
+// folders. Control maps are migrated OUT of .amethyst into the visible
+// controlmap folder instead. Idempotent; call once before loadPreferences().
 void amethyst_migrate_legacy_home(void);
 
 static inline CGFloat clamp(CGFloat x, CGFloat lower, CGFloat upper) {
@@ -208,6 +216,13 @@ void closeGLFWWindow();
 void callback_LauncherViewController_installMinecraft();
 void callback_SurfaceViewController_launchMinecraft(int width, int height);
 int callback_SurfaceViewController_touchHotbar(CGFloat x, CGFloat y);
+
+// True when the FidelityFX upscaler is enabled. The launcher then renders the
+// game into a drawable with the physical screen size: the game draws into its
+// own (smaller) render target and the FidelityFX agent forces the swapchain
+// to the drawable size, so the upscaled frame reaches the screen at the
+// native resolution instead of being magnified by iOS.
+BOOL fsrUpscalerActive(void);
 
 void CallbackBridge_nativeSetInputReady(BOOL inputReady);
 BOOL CallbackBridge_nativeSendChar(jchar codepoint /* jint codepoint */);

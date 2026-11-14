@@ -617,5 +617,14 @@ void* pojavCreateContext(basic_render_window_t* contextSrc) {
 
 void pojavSwapInterval(int interval) {
     if (!br_swap_interval) return;
-    br_swap_interval(interval);
+    // The launcher's VSync switch is authoritative (Settings > Game). Off by
+    // default: never ask the driver to wait for vblank, so the render loop is
+    // paced only by the presentation engine instead of a software sleep.
+    int forced = getPrefBool(@"video.vsync") ? 1 : 0;
+    static int lastForced = -1;
+    if (forced != lastForced) {
+        NSLog(@"[Vsync] swap interval %d -> %d (requested %d)", lastForced, forced, interval);
+        lastForced = forced;
+    }
+    br_swap_interval(forced);
 }
