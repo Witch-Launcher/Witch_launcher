@@ -1161,9 +1161,8 @@ static GameSurfaceView* pojavWindow;
 
         if (touchEvent == self.hotbarTouch && self.slideableHotbar && ![self isTouchInactive:self.hotbarTouch]) {
             CGPoint hotbarPoint = [touchEvent locationInView:self.surfaceView];
-            CGFloat screenScale = self.screenScale;
             int slot = self.enableHotbarGestures ?
-            callback_SurfaceViewController_touchHotbar(hotbarPoint.x * screenScale, hotbarPoint.y * screenScale) : -1;
+            callback_SurfaceViewController_touchHotbar(hotbarPoint.x, hotbarPoint.y) : -1;
             /* Select on the initial press too. Previously currentHotbarSlot
              * was set in touchesBegan, so this condition was false for the
              * first slot and a drag that never crossed a slot boundary (most
@@ -1359,10 +1358,9 @@ static GameSurfaceView* pojavWindow;
     }
     
     if (sender.state == UIGestureRecognizerStateRecognized && isGrabbing) {
-        CGFloat screenScale = self.screenScale;
         CGPoint point = [sender locationInView:self.surfaceView];
         int hotbarSlot = self.enableHotbarGestures ?
-            callback_SurfaceViewController_touchHotbar(point.x * screenScale, point.y * screenScale) : -1;
+            callback_SurfaceViewController_touchHotbar(point.x, point.y) : -1;
         if (self.enableDoubleTapOffhand && hotbarSlot != -1 && currentHotbarSlot == hotbarSlot) {
             CallbackBridge_nativeSendKey(GLFW_KEY_F, 0, 1, 0);
             CallbackBridge_nativeSendKey(GLFW_KEY_F, 0, 0, 0);
@@ -1425,9 +1423,8 @@ static GameSurfaceView* pojavWindow;
     
     if (!self.slideableHotbar) {
         CGPoint location = [sender locationInView:self.surfaceView];
-        CGFloat screenScale = self.screenScale;
         currentHotbarSlot = self.enableHotbarGestures ?
-            callback_SurfaceViewController_touchHotbar(location.x * screenScale, location.y * screenScale) : -1;
+            callback_SurfaceViewController_touchHotbar(location.x, location.y) : -1;
     }
     if (sender.state == UIGestureRecognizerStateBegan) {
         self.shouldTriggerClick = NO;
@@ -1691,9 +1688,8 @@ static NSTimer* staleTouchSweepTimer = nil;
             continue; // handle this in a different place
         }
         CGPoint locationInView = [touch locationInView:self.surfaceView];
-        CGFloat screenScale = self.screenScale;
         currentHotbarSlot = self.enableHotbarGestures ?
-            callback_SurfaceViewController_touchHotbar(locationInView.x * screenScale, locationInView.y * screenScale) : -1;
+            callback_SurfaceViewController_touchHotbar(locationInView.x, locationInView.y) : -1;
         if ([self isTouchInactive:self.hotbarTouch] && currentHotbarSlot != -1) {
             self.hotbarTouch = touch;
         }

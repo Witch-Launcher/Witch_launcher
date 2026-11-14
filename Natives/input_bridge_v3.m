@@ -556,38 +556,39 @@ static int aasdl_guiWidth(int framebufferWidth) {
     return (int)ceilf((CGFloat)framebufferWidth / (CGFloat)guiScale);
 }
 
-/* Convert a length in GUI units (gui scaled pixels) into view points.
+/* Hit test for the vanilla hotbar.
  *
- * One GUI unit is guiScale framebuffer pixels and the framebuffer
- * (windowWidth pixels) is stretched over the SDL window (aasdl_winW
- * points), so the factor is guiScale * aasdl_winW / windowWidth.
+ * x/y are the touch position in view points - the coordinate space the
+ * touch gestures report (the game surface's bounds).
  *
- * The old formula divided by the resolution scale only and was therefore
- * off by the screen scale (3x on this device): the hotbar's touch region
- * was 910 points wide on a 736 point wide screen and started 650 points
- * from the left instead of 217 - the hotbar taps landed in the wrong
- * place entirely. */
-int mcscale(CGFloat input) {
-    if (windowWidth <= 0 || aasdl_winW <= 0) {
-        return (int)(guiScale * input);
-    }
-    return (int)lroundf(input * (CGFloat)guiScale * (CGFloat)aasdl_winW / (CGFloat)windowWidth);
-}
+ * The game lays the hotbar out in GUI units: 182x22 units at
+ * (guiWidth / 2 - 91, guiHeight - 22) with nine 20 unit slots and a 1 unit
+ * border (Gui.extractItemHotbar). One GUI unit is guiScale framebuffer
+ * pixels and the framebuffer (windowWidth pixels) is stretched over the game
+ * surface (aasdl_winW points), so a touch in points converts to GUI units
+ * with
+ *
+ *     gui = points * framebuffer / (guiScale * surfacePoints)
+ *
+ * The old code mixed the two spaces: the bar was computed in points while
+ * the callers passed device pixels (points * screenScale), so the hit test
+ * matched a bar that was three times too small and shifted to the left.
+ * Every hotbar tap therefore missed the bar, the touch fell through to the
+ * look/primary gesture and the camera rotated instead of the slot changing.
+ */
 int callback_SurfaceViewController_touchHotbar(CGFloat x, CGFloat y) {
     if (isGrabbing == JNI_FALSE) {
         return -1;
     }
 
     if (guiScale <= 0) return -1;
-    int barHeight = mcscale(22);
-    int barWidth = mcscale(182);
+    if (aasdl_winW <= 0 || aasdl_winH <= 0) return -1;
 
-    /* Match vanilla's integer GUI coordinates: guiWidth = framebufferWidth /
-     * guiScale, and the hotbar starts at guiWidth / 2 - 91. Using
-     * physicalWidth / 2 - barWidth / 2 leaves a few pixels of drift on the
-     * left edge, enough to miss slot 1 on a Retina display. */
+    /* The framebuffer the game renders (and lays its HUD out) into. */
     int framebufferWidth = windowWidth > 0 ? windowWidth : (int)lroundf(physicalWidth * resolutionScale);
     int framebufferHeight = windowHeight > 0 ? windowHeight : (int)lroundf(physicalHeight * resolutionScale);
+    if (framebufferWidth <= 0 || framebufferHeight <= 0) return -1;
+
     /* Match MC 26.3's Window.setGuiScale: guiScaled = ceil(fb / scale). Integer
      * division truncates and shifts the whole bar left by up to 1 gui pixel
      * (5 fb px at scale 5) when fb/scale is fractional, e.g. 2208/5 = 441.6.
@@ -595,15 +596,22 @@ int callback_SurfaceViewController_touchHotbar(CGFloat x, CGFloat y) {
      * the (smaller) render target, so the same factor has to be used here. */
     int guiWidth = aasdl_guiWidth(framebufferWidth);
     int guiHeight = aasdl_guiWidth(framebufferHeight);
-    int barX = (int)lroundf((guiWidth / 2 - 91) * (CGFloat)mcscale(1));
-    int barY = (int)lroundf((guiHeight - 22) * (CGFloat)mcscale(1));
-    if (y < barY) return -1;
-    if (x < barX || x >= barX + barWidth) return -1;
+
+    /* Touch position -> GUI units. */
+    CGFloat guiX = x * ((CGFloat)framebufferWidth / ((CGFloat)guiScale * (CGFloat)aasdl_winW));
+    CGFloat guiY = y * ((CGFloat)framebufferHeight / ((CGFloat)guiScale * (CGFloat)aasdl_winH));
+
+    /* Vanilla's integer GUI coordinates: the hotbar starts at guiWidth / 2 -
+     * 91 and sits on the bottom edge. */
+    int barX = guiWidth / 2 - 91;
+    int barY = guiHeight - 22;
+    if (guiY < barY) return -1;
+    if (guiX < barX || guiX >= barX + 182) return -1;
 
     /* The vanilla hotbar is 182x22 logical pixels with nine 20px slots and a
      * 1px border. Mapping 182/9 shifts the right-hand slots; use the real
      * 20px pitch and clamp the border pixels. */
-    int index = (int) ((x - barX - mcscale(1)) / (CGFloat) mcscale(20));
+    int index = (int)floorf((guiX - barX - 1) / 20.0f);
     if (index < 0) index = 0;
     if (index > 8) index = 8;
     int slot = hotbarKeys[index];
