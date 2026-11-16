@@ -98,6 +98,43 @@ Before verification, confirm:
 - `artifactSha256`, `checksumsSha256`, `publicKey`, and `publisherKeyId` match the package.
 - No native plugin permissions or behavior are undocumented.
 
+## 6. Publish to a GitHub catalog
+
+A repository with a catalog file lets users install and update the plugin without copying a file to the device. Create a public repository, copy the `.plgw` file into it and add an entry to `witch-plugins.json`:
+
+```json
+{
+  "version": 1,
+  "plugins": [
+    {
+      "id": "com.witch.example.hello",
+      "name": "Hello Witch",
+      "version": "1.0.0",
+      "description": "Example plugin",
+      "author": "Witch Examples",
+      "license": "MIT",
+      "source": "https://github.com/example/witch-hello-plugin",
+      "package": "packages/hello-1.0.0.plgw",
+      "sha256": "b536...",
+      "channel": "stable",
+      "notes": "First release"
+    }
+  ]
+}
+```
+
+`package` is the path of the `.plgw` file inside the repository. `sha256` is the `artifact_sha256` the packer printed — the launcher rejects a download whose hash does not match.
+
+The catalog only distributes packages. A build still needs to be submitted to the registry and verified before the launcher will install it, and the launcher grades the package before it runs. See [Plugin catalog](catalog.md).
+
+Two rules matter for updates:
+
+- **Keep the publisher key.** The launcher pins the key of an installed plugin and refuses a
+  build that was signed with a different key. CI must not generate a fresh key per run.
+- **Pin the file you release.** The ECDSA signature is randomized, so every packed package
+  differs byte for byte. Copy the SHA-256 of the exact file attached to the release.
+
+
 ## Deployment
 
 Apply `worker/supabase/migrations/007_plugin_registry.sql` to the Supabase project. Set `PLUGIN_ADMIN_KEY` with `wrangler secret put` or the hosting dashboard. Deploy both entry points if both are used:

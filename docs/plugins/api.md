@@ -24,6 +24,20 @@ Witch.log(greeting);
 Witch.setThemeColor("amethyst_accent_color", "#7c5cff");
 ```
 
+### Sandboxed plugins
+
+A plugin that the launcher grades Warning or Dangerous runs inside the sandbox. The rules that change the API are:
+
+| Rule | Effect on the API |
+| --- | --- |
+| Own `JSVirtualMachine` | The script cannot reach another plugin's objects |
+| `eval`, `Function`, `WebKit`, `ObjC`, `PHP` and `importScripts` removed | Those globals are `undefined` inside the script |
+| `Witch.setThemeColor` and `Witch.reloadTheme` refused | Theme changes are logged and ignored |
+| `Witch.setSetting` still works | The write is serialized onto the main thread, so read it back later rather than immediately |
+| Script runs off the main thread | The script must not assume it runs on the main thread, and it cannot block the launcher |
+
+A sandboxed plugin with a `native` entrypoint never loads that entrypoint. The sandbox is described in [Risk analysis and sandbox](risk.md).
+
 ## Native
 
 Native entrypoints are `.dylib` files with a `witch_plugin_init` symbol:

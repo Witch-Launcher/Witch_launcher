@@ -1,5 +1,6 @@
 #import "WitchPluginManager.h"
 #import "WitchPluginTheme.h"
+#import "WitchPluginRisk.h"
 #import "WitchCrypto.h"
 #import "LauncherPreferences.h"
 #import "UnzipKit.h"
@@ -448,7 +449,12 @@ static BOOL WPVerifySignature(NSData *message, NSData *signature, NSData *public
         @"verificationMessage": @"Signature is valid but this build is not verified by the registry",
         @"installedAt": WPDefaultState(),
         @"crashCount": @0,
-        @"settings": @{}
+        @"settings": @{},
+        @"riskLevel": @(WitchPluginRiskLevelSafe),
+        @"riskFindings": @[],
+        @"riskSummary": @[],
+        @"sandboxRequired": @NO,
+        @"sandboxed": @NO
     };
 }
 
@@ -755,15 +761,24 @@ static BOOL WPVerifySignature(NSData *message, NSData *signature, NSData *public
     NSString *artifactHash = WPSHA256File(path, error);
     if (!artifactHash) return nil;
     BOOL trusted = WPTrustedKey(keyID, WPString(signature[@"publicKey"]));
-    NSDictionary *state = @{
+    WitchPluginRiskReport *risk = [WitchPluginRiskReport analyzeManifest:manifest directory:destination];
+    NSMutableArray *riskFindings = [NSMutableArray array];
+    for (WitchPluginRiskFinding *finding in risk.findings) {
+        [riskFindings addObject:[finding dictionaryRepresentation]];
+    }
+    NSMutableDictionary *state = [@{
         @"trusted": @(trusted),
         @"developerSigned": @(!trusted),
         @"keyId": keyID,
         @"publicKey": WPString(signature[@"publicKey"]),
         @"checksumsSha256": WPSHA256Data(checksumsData),
-        @"artifactSha256": artifactHash
-    };
-    return @{@"manifest": manifest, @"signature": signature, @"state": state};
+        @"artifactSha256": artifactHash,
+        @"riskLevel": @(risk.level),
+        @"riskFindings": riskFindings,
+        @"riskSummary": risk.executionSummary ?: @[],
+        @"sandboxRequired": @(risk.sandboxRequired)
+    } mutableCopy];
+    return @{@"manifest": manifest, @"signature": signature, @"state": state, @"risk": risk};
 }
 
 - (BOOL)verifyIntegrityForPlugin:(WitchPlugin *)plugin error:(NSError **)error {
@@ -885,6 +900,14 @@ static BOOL WPVerifySignature(NSData *message, NSData *signature, NSData *public
 }
 
 - (BOOL)installPackageAtURL:(NSURL *)url expectedInfo:(NSDictionary *)expectedInfo error:(NSError **)error {
+    return [self installPackageAtURL:url expectedInfo:expectedInfo sandboxPolicy:WitchPluginSandboxPolicyAuto allowReplace:NO error:error];
+}
+
+- (BOOL)installPackageAtURL:(NSURL *)url
+                expectedInfo:(NSDictionary *)expectedInfo
+             sandboxPolicy:(WitchPluginSandboxPolicy)sandboxPolicy
+               allowReplace:(BOOL)allowReplace
+                       error:(NSError **)error {
     NSString *temp = [NSTemporaryDirectory() stringByAppendingPathComponent:[NSString stringWithFormat:@"witch-plugin-install-%@", NSUUID.UUID.UUIDString]];
     NSDictionary *info = [self inspectPackageAtURL:url extractTo:temp error:error];
     if (!info) {
@@ -909,12 +932,26 @@ static BOOL WPVerifySignature(NSData *message, NSData *signature, NSData *public
     NSDictionary *manifest = info[@"manifest"];
     NSString *pluginID = WPString(manifest[@"id"]);
     NSString *destination = [amethyst_hidden_dir(@"plugins") stringByAppendingPathComponent:pluginID];
+    NSString *backup = nil;
     if (WPFileExists(destination)) {
-        if (error) *error = WPError(60, [NSString stringWithFormat:@"Plugin %@ is already installed", pluginID]);
-        [[NSFileManager defaultManager] removeItemAtPath:temp error:nil];
-        return NO;
+        if (!allowReplace) {
+            if (error) *error = WPError(60, [NSString stringWithFormat:@"Plugin %@ is already installed", pluginID]);
+            [[NSFileManager defaultManager] removeItemAtPath:temp error:nil];
+            return NO;
+        }
+        // Keep the previous install aside so a failed replacement can be rolled back.
+        backup = [NSTemporaryDirectory() stringByAppendingPathComponent:[NSString stringWithFormat:@"witch-plugin-backup-%@", NSUUID.UUID.UUIDString]];
+        NSError *backupError = nil;
+        if (![[NSFileManager defaultManager] moveItemAtPath:destination toPath:backup error:&backupError]) {
+            if (error) *error = backupError ?: WPError(93, @"Cannot replace the installed plugin");
+            [[NSFileManager defaultManager] removeItemAtPath:temp error:nil];
+            return NO;
+        }
     }
-    if (![[NSFileManager defaultManager] moveItemAtPath:temp toPath:destination error:error]) {
+    NSError *moveError = nil;
+    if (![[NSFileManager defaultManager] moveItemAtPath:temp toPath:destination error:&moveError]) {
+        if (error) *error = moveError ?: WPError(60, @"Cannot install plugin");
+        if (backup) [[NSFileManager defaultManager] moveItemAtPath:backup toPath:destination error:nil];
         [[NSFileManager defaultManager] removeItemAtPath:temp error:nil];
         return NO;
     }
@@ -922,13 +959,46 @@ static BOOL WPVerifySignature(NSData *message, NSData *signature, NSData *public
     NSMutableDictionary *state = [[self defaultStateForPlugin:pluginID] mutableCopy];
     NSDictionary *signatureState = info[@"state"];
     for (NSString *key in signatureState) state[key] = signatureState[key];
-    state[@"enabled"] = @YES;
+
+    // An update keeps the user facing configuration of the previous build.
+    NSDictionary *previousState = nil;
+    if (backup) {
+        NSData *previousData = [NSData dataWithContentsOfFile:[backup stringByAppendingPathComponent:WPStateName]];
+        previousState = previousData ? [NSJSONSerialization JSONObjectWithData:previousData options:0 error:nil] : nil;
+        if (![previousState isKindOfClass:[NSDictionary class]]) previousState = nil;
+    }
+    BOOL previousEnabled = YES;
+    if (previousState) {
+        if ([previousState[@"settings"] isKindOfClass:[NSDictionary class]]) state[@"settings"] = previousState[@"settings"];
+        if ([previousState[@"enabled"] isKindOfClass:[NSNumber class]]) {
+            previousEnabled = [previousState[@"enabled"] boolValue];
+            state[@"enabled"] = @(previousEnabled);
+        }
+    } else {
+        state[@"enabled"] = @YES;
+    }
+
+    // A plugin that is not safe runs inside the sandbox unless the user
+    // explicitly accepted the risk at install time. The user can change it
+    // later from the plugin screen, but never silently.
+    WitchPluginRiskReport *risk = [info[@"risk"] isKindOfClass:[WitchPluginRiskReport class]] ? info[@"risk"] : nil;
+    BOOL required = (risk != nil && risk.sandboxRequired);
+    BOOL effectiveSandbox = required;
+    if (sandboxPolicy == WitchPluginSandboxPolicyAlways) effectiveSandbox = YES;
+    if (sandboxPolicy == WitchPluginSandboxPolicyNever) effectiveSandbox = NO;
+    state[@"sandboxed"] = @(effectiveSandbox);
+    if (risk) state[@"sandboxRequired"] = @(required);
+
     NSDictionary *signature = info[@"signature"];
     NSString *keyID = WPString(signature[@"keyId"]);
     NSString *publicKey = WPString(signature[@"publicKey"]);
     if (state[@"trusted"] && [state[@"trusted"] boolValue]) WPPinKey(keyID, publicKey);
     [self writeState:state pluginID:pluginID directory:destination error:nil];
     [self addConfigurationForPluginID:pluginID version:WPString(manifest[@"version"])];
+    // addConfigurationForPluginID enables the plugin, so a plugin the user
+    // switched off stays switched off across an update.
+    if (!previousEnabled) [self updateConfigurationForPluginID:pluginID enabled:NO];
+    if (backup) [[NSFileManager defaultManager] removeItemAtPath:backup error:nil];
     [self reload];
     [WitchPluginTheme reload];
     [[NSNotificationCenter defaultCenter] postNotificationName:WitchPluginsDidChangeNotification object:self];
@@ -980,6 +1050,36 @@ static BOOL WPVerifySignature(NSData *message, NSData *signature, NSData *public
     [WitchPluginTheme reload];
     [[NSNotificationCenter defaultCenter] postNotificationName:WitchPluginsDidChangeNotification object:self];
     return YES;
+}
+
+- (BOOL)setPluginID:(NSString *)pluginID sandboxed:(BOOL)sandboxed error:(NSError **)error {
+    WitchPlugin *plugin = [self pluginWithID:pluginID];
+    if (!plugin) {
+        if (error) *error = WPError(62, @"Plugin is not installed");
+        return NO;
+    }
+    NSMutableDictionary *state = [plugin.state mutableCopy];
+    state[@"sandboxed"] = @(sandboxed);
+    if (![self writeState:state pluginID:pluginID directory:plugin.installPath error:error]) return NO;
+    [plugin updateState:state];
+    [[NSNotificationCenter defaultCenter] postNotificationName:WitchPluginsDidChangeNotification object:self];
+    return YES;
+}
+
+- (BOOL)sandboxEnabledForPluginID:(NSString *)pluginID {
+    WitchPlugin *plugin = [self pluginWithID:pluginID];
+    return plugin ? plugin.sandboxed : NO;
+}
+
+- (nullable WitchPluginRiskReport *)riskReportForPluginID:(NSString *)pluginID {
+    WitchPlugin *plugin = [self pluginWithID:pluginID];
+    if (!plugin) return nil;
+    return [WitchPluginRiskReport reportFromDictionary:@{
+        @"level": @(plugin.riskLevel),
+        @"findings": plugin.riskFindings ?: @[],
+        @"executionSummary": plugin.riskSummary ?: @[],
+        @"sandboxRequired": @(plugin.sandboxRequired)
+    }];
 }
 
 - (BOOL)setSafeMode:(BOOL)safeMode error:(NSError **)error {

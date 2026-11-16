@@ -134,6 +134,18 @@ Witch.setThemeColor("amethyst_accent_color", "#7c5cff");
 
 JavaScript chạy đồng bộ trong lúc launcher khởi động và phải trả lời nhanh; không có watchdog về thời gian thực thi, và không có quyền truy cập trực tiếp vào các view controller của launcher.
 
+### Hành vi mà launcher gắn cờ
+
+Trước khi cài, launcher đọc manifest và payload của plugin rồi chấm điểm những gì plugin sắp làm. Bộ quy tắc nằm trong [Phân tích rủi ro và sandbox](plugins/risk.md). Tóm tắt:
+
+| Mẫu trong plugin của bạn | Kết quả |
+| --- | --- |
+| Chỉ cài đặt khai báo và theme | An toàn — cài không cần hỏi lại |
+| Entrypoint `java`, quyền lạ, `eval(`, API mạng trong script | Cảnh báo — người dùng xem các phát hiện trước khi cài |
+| Entrypoint `native`, binary đã biên dịch trong gói, `ObjC` hoặc `WebKit` trong script, quyền như `filesystem` hay `shell` | Nguy hiểm — người dùng phải xác nhận bằng **Cài đặt dù cảnh báo** |
+
+Một plugin không An toàn sẽ chạy trong sandbox: mã native bị chặn, `eval` và `Function` bị gỡ, thay đổi theme bị từ chối và script chạy ngoài luồng chính. Hãy tránh `eval`, `Function` và các lệnh gọi mạng để plugin ở lại mức An toàn và cài không bị vướng.
+
 ### Phản chiếu giá trị cài đặt
 
 Cài đặt plugin nằm trong `state.json` của plugin và được phản chiếu tới `plugins.json` trong thư mục ứng dụng của launcher. Launcher trộn cấu hình tổng thể lúc khởi động, nên người dùng có thể tắt plugin hoặc đè thủ công từng cài đặt. Khóa dưới `features` được phơi ra thành cài đặt `feature.<name>` đọc qua `Witch.getSetting` hoặc native `get_setting`; giá trị có thể là chuỗi, số, boolean hoặc đối tượng JSON. Mảng `settings` trong manifest khai báo mặc định và các điều khiển UI, trong khi `plugins.json` giữ phần đè của người dùng.

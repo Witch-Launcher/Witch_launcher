@@ -8,6 +8,8 @@
     { "group": "Manifest", "file": "manifest.md" },
     { "group": "API", "file": "api.md" },
     { "group": "Security", "file": "security.md" },
+    { "group": "Risk", "file": "risk.md" },
+    { "group": "Catalog", "file": "catalog.md" },
     { "group": "Registry", "file": "server.md" },
     { "group": "Publishing", "file": "publishing.md" }
   ]

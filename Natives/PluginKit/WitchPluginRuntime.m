@@ -91,6 +91,7 @@ JSExportAs(setThemeColor, - (void)setThemeColor:(NSString *)key hex:(NSString *)
 @interface WitchJSBridge : NSObject <WitchJSBridgeExport>
 @property (nonatomic) NSString *pluginID;
 @property (nonatomic) NSString *version;
+@property (nonatomic) BOOL sandboxed;
 @end
 
 @implementation WitchJSBridge
@@ -106,17 +107,33 @@ JSExportAs(setThemeColor, - (void)setThemeColor:(NSString *)key hex:(NSString *)
 
 - (void)setSetting:(NSString *)key value:(id)value {
     if (!key) return;
+    if (self.sandboxed) {
+        // The sandboxed script runs on its own queue, so every host mutation
+        // is serialized back onto the main thread.
+        dispatch_async(dispatch_get_main_queue(), ^{
+            [WitchPluginManager.shared setSettingValue:value forKey:key pluginID:self.pluginID error:nil];
+        });
+        return;
+    }
     [WitchPluginManager.shared setSettingValue:value forKey:key pluginID:self.pluginID error:nil];
 }
 
 - (void)setThemeColor:(NSString *)key hex:(NSString *)hex {
     if (!key || !hex) return;
+    if (self.sandboxed) {
+        NSLog(@"[Plugin:%@] Theme change refused: the plugin runs inside the sandbox", self.pluginID);
+        return;
+    }
     [WitchPluginManager.shared setThemeColors:@{key: hex} pluginID:self.pluginID error:nil];
     [WitchPluginTheme reload];
     [ThemeManager.shared broadcastThemeChange];
 }
 
 - (void)reloadTheme {
+    if (self.sandboxed) {
+        NSLog(@"[Plugin:%@] Theme reload refused: the plugin runs inside the sandbox", self.pluginID);
+        return;
+    }
     [WitchPluginTheme reload];
     [ThemeManager.shared broadcastThemeChange];
 }
@@ -125,11 +142,13 @@ JSExportAs(setThemeColor, - (void)setThemeColor:(NSString *)key hex:(NSString *)
 
 @interface WitchPluginRuntime ()
 @property (nonatomic) NSMutableDictionary<NSString *, JSContext *> *contexts;
+@property (nonatomic) NSMutableDictionary<NSString *, JSVirtualMachine *> *virtualMachines;
 @property (nonatomic) NSMutableDictionary<NSString *, NSValue *> *nativeHandles;
 @property (nonatomic) NSMutableDictionary<NSString *, NSValue *> *hostContexts;
 @property (nonatomic) WitchPluginRootViewFactory rootViewFactory;
 @property (nonatomic) void *rootViewFactoryUserdata;
 @property (nonatomic) NSString *rootViewFactoryPluginID;
+@property (nonatomic, strong) dispatch_queue_t sandboxQueue;
 - (void)registerRootViewFactory:(WitchPluginRootViewFactory)factory userdata:(void *)userdata pluginID:(NSString *)pluginID;
 @end
 
@@ -163,8 +182,10 @@ static NSString *WPVerificationLabel(WitchPluginVerificationState state) {
     self = [super init];
     if (self) {
         _contexts = [NSMutableDictionary dictionary];
+        _virtualMachines = [NSMutableDictionary dictionary];
         _nativeHandles = [NSMutableDictionary dictionary];
         _hostContexts = [NSMutableDictionary dictionary];
+        _sandboxQueue = dispatch_queue_create("witch.plugin.sandbox", DISPATCH_QUEUE_SERIAL);
     }
     return self;
 }
@@ -239,7 +260,103 @@ static NSString *WPVerificationLabel(WitchPluginVerificationState state) {
     return [plugin.installPath stringByAppendingPathComponent:relative];
 }
 
+#pragma mark - Sandbox
+
+// Removes the escape hatches that would let a script reach the host runtime.
+// JavaScriptCore exposes them on the global object, so deleting the property
+// is enough to make them unavailable to the plugin.
+- (void)hardenContext:(JSContext *)context {
+    for (NSString *name in @[@"eval", @"Function", @"WebKit", @"ObjC", @"PHP", @"importScripts"]) {
+        context[name] = nil;
+    }
+}
+
+// A sandboxed plugin never runs native code, never mutates the theme and runs
+// its script on a private JavaScriptCore virtual machine on a dedicated queue.
+// That keeps a broken script from freezing the launcher at startup.
+- (BOOL)loadSandboxedPlugin:(WitchPlugin *)plugin {
+    NSString *pluginID = plugin.pluginID;
+    NSString *marker = [WitchPluginManager.shared markerPathForPluginID:pluginID];
+    [[NSFileManager defaultManager] createFileAtPath:marker contents:[NSData data] attributes:nil];
+    NSDictionary *entrypoints = plugin.entrypoints;
+    NSString *jsEntry = entrypoints[@"js"];
+    NSString *nativeEntry = entrypoints[@"native"];
+    NSString *javaEntry = entrypoints[@"java"];
+    __weak typeof(self) weakSelf = self;
+    dispatch_async(self.sandboxQueue, ^{
+        WitchPluginRuntime *strongSelf = weakSelf;
+        if (!strongSelf) return;
+        JSContext *context = nil;
+        NSString *failure = nil;
+        if ([jsEntry isKindOfClass:[NSString class]] && jsEntry.length > 0) {
+            NSString *path = [strongSelf fullPathForEntrypoint:jsEntry plugin:plugin];
+            NSString *script = path ? [NSString stringWithContentsOfFile:path encoding:NSUTF8StringEncoding error:nil] : nil;
+            if (!script) {
+                failure = [NSString stringWithFormat:@"JavaScript entrypoint not found: %@", jsEntry];
+            } else {
+                JSVirtualMachine *machine = [[JSVirtualMachine alloc] init];
+                context = [[JSContext alloc] initWithVirtualMachine:machine];
+                [strongSelf hardenContext:context];
+                context.exceptionHandler = ^(JSContext *ctx, JSValue *exception) {
+                    NSLog(@"[Plugin:%@] JavaScript error: %@", pluginID, exception);
+                };
+                WitchJSBridge *bridge = [[WitchJSBridge alloc] init];
+                bridge.pluginID = pluginID;
+                bridge.version = plugin.version;
+                bridge.sandboxed = YES;
+                context[@"Witch"] = bridge;
+                [context evaluateScript:script withSourceURL:[NSURL fileURLWithPath:path]];
+                if (context.exception) {
+                    failure = [NSString stringWithFormat:@"JavaScript error: %@", context.exception];
+                }
+            }
+        }
+        if ([javaEntry isKindOfClass:[NSString class]] && javaEntry.length > 0) {
+            NSLog(@"[Plugin:%@] Java entrypoint %@ is registered; the Java agent is not loaded in this build", pluginID, javaEntry);
+        }
+        BOOL nativeBlocked = [nativeEntry isKindOfClass:[NSString class]] && nativeEntry.length > 0;
+        if (nativeBlocked) {
+            NSLog(@"[Plugin:%@] Native entrypoint %@ is blocked by the sandbox", pluginID, nativeEntry);
+        }
+        BOOL loaded = (context != nil) || nativeBlocked;
+        if (!loaded) {
+            // A theme only plugin has nothing to execute, but it is still valid.
+            id ui = plugin.manifest[@"ui"];
+            NSString *themeRelative = [ui isKindOfClass:[NSString class]] ? ui : ([ui isKindOfClass:[NSDictionary class]] ? [ui[@"theme"] isKindOfClass:[NSString class]] ? ui[@"theme"] : nil : nil);
+            NSString *themePath = [themeRelative isKindOfClass:[NSString class]] ? [plugin.installPath stringByAppendingPathComponent:themeRelative] : [plugin.installPath stringByAppendingPathComponent:@"theme.json"];
+            BOOL isDirectory = NO;
+            if ([[NSFileManager defaultManager] fileExistsAtPath:themePath isDirectory:&isDirectory] && !isDirectory) loaded = YES;
+        }
+        dispatch_async(dispatch_get_main_queue(), ^{
+            if (failure) {
+                NSLog(@"[Plugin:%@] %@", pluginID, failure);
+                [strongSelf.contexts removeObjectForKey:pluginID];
+                [strongSelf.virtualMachines removeObjectForKey:pluginID];
+                [[NSFileManager defaultManager] removeItemAtPath:marker error:nil];
+                [WitchPluginManager.shared noteRuntimeFailureForPluginID:pluginID];
+                return;
+            }
+            if (!loaded) {
+                NSLog(@"[Plugin:%@] No supported entrypoint; marking inactive", pluginID);
+                [WitchPluginManager.shared setPluginID:pluginID enabled:NO error:nil];
+                [[NSFileManager defaultManager] removeItemAtPath:marker error:nil];
+                return;
+            }
+            if (context) {
+                strongSelf.contexts[pluginID] = context;
+                strongSelf.virtualMachines[pluginID] = context.virtualMachine;
+            }
+            [WitchPluginManager.shared noteRuntimeSuccessForPluginID:pluginID];
+            NSLog(@"[Plugin:%@] Loaded %@ v%@ inside the sandbox", pluginID, plugin.name, plugin.version);
+            [WitchPluginTheme reload];
+            [[NSNotificationCenter defaultCenter] postNotificationName:WitchPluginsDidChangeNotification object:strongSelf];
+        });
+    });
+    return YES;
+}
+
 - (BOOL)loadPlugin:(WitchPlugin *)plugin {
+    if (plugin.sandboxed) return [self loadSandboxedPlugin:plugin];
     NSString *marker = [WitchPluginManager.shared markerPathForPluginID:plugin.pluginID];
     [[NSFileManager defaultManager] createFileAtPath:marker contents:[NSData data] attributes:nil];
     BOOL loadedSomething = NO;

@@ -1459,6 +1459,10 @@
 
 "Enabled" = "Bật";
 
+"The behaviour of this plugin could not be analysed" = "Không phân tích được hành vi của plugin này";
+
+"Review the package before you install it." = "Hãy xem lại gói trước khi cài.";
+
 "Trust this developer key" = "Tin cậy khóa nhà phát triển";
 
 "Publisher key trusted" = "Khóa nhà phát hành đã tin cậy";
@@ -1485,6 +1489,76 @@
 "Registry verification failed." = "Witch registry không thể xác minh plugin này.";
 "Verified by the Witch plugin registry. Signature and checksums are valid." = "Đã được Witch plugin registry xác minh. Chữ ký và mã kiểm tra đều hợp lệ.";
 "Advanced: edit %@ in the app folder to disable a plugin manually." = "Nâng cao: sửa %@ trong thư mục ứng dụng để tắt thủ công nếu plugin gặp lỗi.";
+
+"Available Plugins" = "Plugin có sẵn";
+
+"Loading the plugin catalog..." = "Đang tải danh mục plugin...";
+
+"No plugin catalog is available." = "Không có danh mục plugin nào khả dụng.";
+
+"The plugin catalog could not be loaded: %@" = "Không tải được danh mục plugin: %@";
+
+"Plugins come from %@. Every package is pinned by hash and verified before it is installed." = "Plugin đến từ %@. Mọi gói đều được ghim bằng mã băm và xác minh trước khi cài.";
+
+"Installed" = "Đã cài";
+
+"Sandboxed" = "Đã cô lập";
+
+"Force Install" = "Cài đặt dù cảnh báo";
+
+"Install inside the sandbox" = "Cài đặt trong sandbox";
+
+"Native code stays blocked. The plugin can only use its settings and theme." = "Mã native vẫn bị chặn. Plugin chỉ dùng được cài đặt và theme của nó.";
+
+"Install and allow native code" = "Cài đặt và cho chạy mã native";
+
+"The plugin runs its binary inside the launcher process." = "Plugin chạy binary của nó ngay trong tiến trình launcher.";
+
+"Update Plugin" = "Cập nhật plugin";
+
+"Plugin Updated" = "Đã cập nhật plugin";
+
+"%@ was updated. Restart the launcher to load it." = "Đã cập nhật %@. Khởi động lại launcher để nạp plugin.";
+
+"This plugin is dangerous. It asks for access the launcher sandbox cannot protect." = "Plugin này nguy hiểm. Nó yêu cầu quyền mà sandbox của launcher không thể bảo vệ.";
+
+"This plugin needs attention before you trust it." = "Plugin này cần được xem xét kỹ trước khi bạn tin tưởng.";
+
+"What the launcher will run:" = "Những gì launcher sẽ chạy:";
+
+"The plugin runs inside the launcher sandbox. Native code stays blocked until you turn the sandbox off on the plugin screen." = "Plugin chạy trong sandbox của launcher. Mã native vẫn bị chặn cho đến khi bạn tắt sandbox ở màn hình plugin.";
+
+"Analysis" = "Phân tích";
+
+"Risk level" = "Mức rủi ro";
+
+"What the launcher runs" = "Launcher sẽ chạy gì";
+
+"Nothing" = "Không có";
+
+"Safe" = "An toàn";
+
+"Dangerous" = "Nguy hiểm";
+
+"Sandbox" = "Sandbox";
+
+"Native code is blocked and the script runs isolated." = "Mã native bị chặn và script chạy trong môi trường cách ly.";
+
+"Native code is blocked. Turn the sandbox off to let the plugin run." = "Mã native bị chặn. Tắt sandbox để plugin chạy được.";
+
+"The plugin runs with the full launcher permissions." = "Plugin chạy với đầy đủ quyền của launcher.";
+
+"Disable Sandbox" = "Tắt sandbox";
+
+"Turning the sandbox off lets the plugin run native code inside the launcher process again." = "Tắt sandbox cho phép plugin chạy mã native trong tiến trình launcher.";
+
+"This plugin is marked as dangerous. Only continue if you built it yourself or you fully trust its source." = "Plugin này được đánh dấu nguy hiểm. Chỉ tiếp tục nếu bạn tự build hoặc hoàn toàn tin tưởng mã nguồn.";
+
+"Version %@ is available" = "Đã có phiên bản %@";
+
+"No finding. The plugin only declares settings and theme data." = "Không có cảnh báo. Plugin chỉ khai báo cài đặt và dữ liệu giao diện.";
+
+"The analysis is computed from the manifest and from the files the launcher would execute." = "Phân tích được tính từ manifest và từ các tệp mà launcher sẽ thực thi.";
 
 "modpack.export_title" = "Xuất modpack";
 "modpack.export_message" = "Chọn định dạng modpack để xuất.";

@@ -1,9 +1,20 @@
 #import <Foundation/Foundation.h>
 #import "WitchPlugin.h"
+#import "WitchPluginRisk.h"
 
 NS_ASSUME_NONNULL_BEGIN
 
 extern NSString * const WitchPluginsDidChangeNotification;
+
+// How a package is installed with respect to the launcher sandbox.
+typedef NS_ENUM(NSInteger, WitchPluginSandboxPolicy) {
+    // Sandbox the plugin when the risk analysis asks for it.
+    WitchPluginSandboxPolicyAuto = 0,
+    // Always run the plugin inside the sandbox.
+    WitchPluginSandboxPolicyAlways = 1,
+    // Never sandbox. Only used when the user explicitly accepts the risk.
+    WitchPluginSandboxPolicyNever = 2
+};
 
 @interface WitchPluginManager : NSObject
 
@@ -19,8 +30,16 @@ extern NSString * const WitchPluginsDidChangeNotification;
 - (nullable NSDictionary *)inspectPackageAtURL:(NSURL *)url error:(NSError **)error;
 - (BOOL)installPackageAtURL:(NSURL *)url error:(NSError **)error;
 - (BOOL)installPackageAtURL:(NSURL *)url expectedInfo:(nullable NSDictionary *)info error:(NSError **)error;
+- (BOOL)installPackageAtURL:(NSURL *)url
+                expectedInfo:(nullable NSDictionary *)info
+             sandboxPolicy:(WitchPluginSandboxPolicy)sandboxPolicy
+               allowReplace:(BOOL)allowReplace
+                       error:(NSError **)error;
 - (BOOL)uninstallPluginID:(NSString *)pluginID error:(NSError **)error;
 - (BOOL)setPluginID:(NSString *)pluginID enabled:(BOOL)enabled error:(NSError **)error;
+- (BOOL)setPluginID:(NSString *)pluginID sandboxed:(BOOL)sandboxed error:(NSError **)error;
+- (BOOL)sandboxEnabledForPluginID:(NSString *)pluginID;
+- (nullable WitchPluginRiskReport *)riskReportForPluginID:(NSString *)pluginID;
 - (BOOL)setSafeMode:(BOOL)safeMode error:(NSError **)error;
 - (void)verifyPlugin:(WitchPlugin *)plugin completion:(nullable void (^)(BOOL verified, NSError * _Nullable error))completion;
 - (void)verifyInstalledPlugins;

@@ -126,6 +126,17 @@ Witch.setThemeColor("amethyst_accent_color", "#7c5cff");
 
 JavaScript runs synchronously during launcher startup and must return promptly; there is no execution-time watchdog, and there is no direct access to launcher view controllers.
 
+### Behaviour the launcher flags
+Before a plugin is installed, the launcher reads the manifest and the payload and grades what the plugin would do. The rules are in [Risk analysis and sandbox](risk.md). In short:
+
+| Pattern in your plugin | Result |
+| --- | --- |
+| Declarative settings and a theme only | Safe — installed without a prompt |
+| A `java` entrypoint, an unknown permission, `eval(`, a network API in the script | Warning — the user sees the findings before installing |
+| A `native` entrypoint, a compiled binary in the package, `ObjC` or `WebKit` in the script, a permission such as `filesystem` or `shell` | Dangerous — the user has to confirm with **Force Install** |
+
+A plugin that is not Safe runs inside the sandbox: native code is blocked, `eval` and `Function` are removed, theme changes are refused and the script runs off the main thread. Keep the script free of `eval`, `Function` and network calls so it stays in the Safe band and installs without friction.
+
 ### Settings value mirroring
 Plugin settings live in the plugin's `state.json` and are mirrored to `plugins.json` in the launcher's app folder. The launcher merges the global configuration at startup, so a user can disable the plugin or override individual settings manually. Keys under `features` are exposed as `feature.<name>` settings read through `Witch.getSetting` or native `get_setting`; values can be strings, numbers, booleans or JSON objects. The manifest's `settings` array declares defaults and UI controls, while `plugins.json` holds the user's overrides.
 

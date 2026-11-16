@@ -1,0 +1,18 @@
+{
+  "version": 1,
+  "plugins": [
+    {
+      "id": "com.witch.example.hello",
+      "name": "Hello Witch",
+      "version": "1.0.0",
+      "description": "Example plugin",
+      "author": "Witch Examples",
+      "license": "MIT",
+      "source": "https://github.com/example/witch-hello-plugin",
+      "package": "packages/hello-1.0.0.plgw",
+      "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "channel": "stable",
+      "notes": "First release"
+    }
+  ]
+}

@@ -26,6 +26,8 @@ The package root must contain `witch-plugin.json`, `checksums.json`, and `witch-
 
 The launcher verifies the package signature and every checksum locally, then queries the Witch registry before installing. Only registry-verified builds can be installed. If the registry is unavailable or the build is not verified, the install is rejected.
 
+Plugins can also be installed and updated straight from a GitHub catalog. The repository is validated, the package is pinned by its SHA-256 and it goes through the same checks as a local file. See [Plugin catalog](catalog.md).
+
 ## Plugin states
 
 | State | Meaning |
@@ -36,6 +38,18 @@ The launcher verifies the package signature and every checksum locally, then que
 | Invalid | The registry rejected the build, or the package no longer matches the verified checksums. |
 
 Only builds verified by the Witch registry are installable. A self-signed package can be inspected locally, but it must be submitted and verified by the registry before the launcher will install it.
+
+## Behaviour risk
+
+Before a plugin runs, the launcher reads its manifest and its payload and works out what it is going to execute. The result is shown as a badge: green for a safe plugin, yellow for one that needs attention, red for a dangerous one.
+
+| Risk | What happens |
+| --- | --- |
+| Safe | Installed right after the verification |
+| Warning | The findings are listed and the user confirms |
+| Dangerous | A destructive **Force Install** confirmation |
+
+A plugin that is not safe runs inside the launcher sandbox, which blocks native code, isolates the script in its own JavaScriptCore machine and evaluates it off the main thread. See [Risk analysis and sandbox](risk.md).
 
 ## Safe mode
 
@@ -79,7 +93,7 @@ If a plugin misbehaves but the launcher does not detect the failure, set `enable
 | `ui` | Reserved. Theme files are applied; layout injection is not implemented. |
 | `java` | Registered and logged, but not executed in this build. |
 
-Native plugins are the highest-risk extension type. They run in the launcher process and cannot be safely sandboxed. Install only code you trust and can rebuild from its published source.
+Native plugins are the highest-risk extension type. They run in the launcher process and cannot be safely sandboxed, so the launcher blocks them for every plugin that is not graded Safe. Install only code you trust and can rebuild from its published source.
 
 ## Tooling
 
@@ -89,4 +103,4 @@ python3 scripts/plugins/pack_plugin.py --source examples/plugins/hello --private
 python3 scripts/plugins/pack_plugin.py --verify ./hello-1.0.0.plgw
 ```
 
-See [manifest.md](manifest.md), [security.md](security.md), [api.md](api.md), [publishing.md](publishing.md), and [server.md](server.md).
+See [manifest.md](manifest.md), [security.md](security.md), [risk.md](risk.md), [catalog.md](catalog.md), [api.md](api.md), [publishing.md](publishing.md), and [server.md](server.md).

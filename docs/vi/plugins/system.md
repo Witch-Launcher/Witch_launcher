@@ -28,6 +28,21 @@ Nên hôm nay một plugin có thể theme launcher, đẩy cài đặt riêng c
 
 Launcher xác minh chữ ký gói và từng checksum cục bộ, rồi hỏi Witch registry trước khi cài. Base URL của registry đọc từ **Cài đặt → Witch base URL** (`witch.proxy_base_url`). Một gói registry chưa xác minh không thể cài; nếu registry không tới được, lượt cài bị từ chối thay vì bỏ qua.
 
+### Cài và cập nhật từ repository GitHub
+
+Màn hình Cài đặt → Plugins có mục **Plugin có sẵn** lấy từ một danh mục GitHub. Chỉ cần một repository hợp lệ: launcher kiểm tra repository, đọc danh mục, tra cứu gói và ghim mọi lượt tải bằng mã băm.
+
+Mọi gói đi qua cùng một chuỗi tin cậy, dù nó đến từ tệp, từ liên kết hay từ danh mục:
+
+1. Lượt tải được ghim bằng SHA-256 mà danh mục công bố.
+2. Chữ ký ES256 và manifest checksum được xác minh cục bộ.
+3. Launcher xác định plugin sẽ thực thi gì và chấm điểm rủi ro.
+4. Registry xác minh đúng build này.
+
+Một plugin không có phát hiện nào sẽ được cài ngay sau khi qua các bước kiểm tra. Một plugin cần chú ý hoặc nguy hiểm sẽ được hiện kèm các phát hiện trước, và người dùng tự quyết — plugin nguy hiểm có nút **Cài đặt dù cảnh báo** kèm cảnh báo phá hủy.
+
+Một bản cập nhật thay thế plugin đã cài và giữ lại cài đặt cùng trạng thái bật của nó. Định dạng danh mục và toàn bộ quy trình được mô tả trong [Danh mục plugin](plugins/catalog.md).
+
 ### Cài đặt từ liên kết
 
 Một trang web có thể trao cho launcher một gói với `witch://install-plugin?url=…`. Scheme nhận HTTPS; HTTP chỉ được tôn trọng cho kiểm thử trên localhost. Một gói tải về vẫn qua cùng quy trình xác minh chữ ký và checksum như một tệp cục bộ — phương tiện vận chuyển không thay đổi gì quy trình kiểm duyệt.
@@ -78,6 +93,20 @@ Hai quyết định được giữ tách rời: một gói có hợp lệ về m
 
 > [!IMPORTANT] Một gói hợp lệ về mật mã và việc nó đáng tin là hai chuyện khác nhau. Xác minh bằng khóa công khai nhúng trong gói chỉ chứng minh danh sách checksum được ký bằng khóa riêng khớp — chứ không chứng minh ai sở hữu nó. Quyền sở hữu đến từ ghim khóa hoặc xác minh registry. Một gói tự ký có thể được soi cục bộ, nhưng phải được nộp lên và xác minh bởi registry trước khi launcher chịu cài nó.
 
+## Rủi ro hành vi và sandbox {#risk}
+
+Tính hợp lệ về mật mã nói rằng gói còn nguyên vẹn. Nó không nói gì về gói đó làm gì. Trước khi chạy, launcher đọc manifest và payload của plugin, xác định điều gì sẽ được thực thi và chấm điểm kết quả.
+
+| Rủi ro | Huy hiệu | Hành vi |
+| --- | --- | --- |
+| An toàn | Xanh | Cài ngay sau khi xác minh |
+| Cảnh báo | Vàng | Cài sau khi người dùng đã xem các phát hiện |
+| Nguy hiểm | Đỏ | Chỉ cài sau khi người dùng xác nhận bằng **Cài đặt dù cảnh báo** |
+
+Một plugin không an toàn sẽ chạy trong sandbox của launcher: mã native bị chặn, script chạy trong JavaScriptCore virtual machine riêng với các cửa thoát host đã bị gỡ, thay đổi theme bị từ chối và script được đánh giá ngoài luồng chính nên không thể treo launcher. Sandbox có thể được tắt từ màn hình plugin, kèm một bảng xác nhận.
+
+Toàn bộ bộ quy tắc được mô tả trong [Phân tích rủi ro và sandbox](plugins/risk.md).
+
 ## Thái độ bảo mật {#security}
 
 Launcher kiểm tra gì, và khi nào:
@@ -90,12 +119,17 @@ Launcher kiểm tra gì, và khi nào:
 | Ghim khóa | **Tin khóa developer này** ghim một ID khóa và khóa công khai vào tùy chọn cục bộ, để các gói sau của nhà phát hành đó không còn cảnh báo |
 | Rà registry | Plugin đã cài được rà lại ngay sau khởi chạy. Registry không tới được giữ trạng thái đã biết gần nhất; kết quả thu hồi hoặc từ chối vô hiệu hóa plugin |
 | Bộ đếm crash safe-mode | Mỗi lần nạp lỗi được đánh dấu theo plugin và tăng bộ đếm crash của nó. Hai lần lỗi bật safe mode tự động |
+| Ghim mã băm danh mục | Gói tải từ danh mục GitHub phải khớp SHA-256 mà danh mục công bố, và repository phải công khai, không bị lưu trữ |
+| Phân tích rủi ro | Mọi gói được đọc trước khi cài. Các phát hiện và danh sách những gì launcher sẽ chạy được hiện cho người dùng |
+| Sandbox | Plugin bị xếp mức Cảnh báo hoặc Nguy hiểm chạy với mã native bị chặn, trong JavaScriptCore machine riêng, ngoài luồng chính |
 
-> [!IMPORTANT] Plugin native là loại mở rộng rủi ro nhất. Chúng chạy trong tiến trình launcher và không thể được sandbox một cách an toàn, và một crash native có thể tiêu launcher trước khi đường mã phục hồi kịp chạy. Dylib đã nạp ở lại cho tới hết tiến trình. Cài chỉ những mã bạn tin và có thể build lại từ mã nguồn đã công bố.
+> [!IMPORTANT] Plugin native là loại mở rộng rủi ro nhất. Chúng chạy trong tiến trình launcher và không thể được sandbox một cách an toàn, và một crash native có thể tiêu launcher trước khi đường mã phục hồi kịp chạy. Dylib đã nạp ở lại cho tới hết tiến trình. Sandbox chặn mã native cho mọi plugin không được xếp mức An toàn, nên tắt sandbox là hành động duy nhất mở lại launcher trước binary của plugin. Cài chỉ những mã bạn tin và có thể build lại từ mã nguồn đã công bố.
 
 ### Khuyến nghị
-
 - Build từ mã nguồn và đối chiếu hash gói.
 - Chỉ ghim khóa nhà phát hành sau khi đã soi mã nguồn.
 - Ưu tiên plugin JavaScript và theme hơn plugin native.
+- Đọc phần phân tích rủi ro trước khi cài bất cứ thứ gì không phải màu xanh.
+- Giữ sandbox bật trừ khi bạn có lý do rõ ràng để tắt.
 - Thu hồi hoặc gỡ plugin không qua được xác minh registry.
+

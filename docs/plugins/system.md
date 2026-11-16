@@ -25,6 +25,21 @@ So today a plugin can theme the launcher, surface its own settings, log to the l
 
 The launcher verifies the package signature and every checksum locally, then queries the Witch registry before installing. The registry base URL is read from **Settings → Witch base URL** (`witch.proxy_base_url`). A build the registry has not verified cannot be installed; if the registry is unreachable, the install is rejected rather than waved through.
 
+### Install and update from a GitHub repository
+
+Settings → Plugins has an **Available Plugins** section that is filled from a GitHub catalog. A valid repository is all that is needed: the launcher validates the repository, reads the catalog, resolves the packages and pins every download by hash.
+
+Every package follows the same chain of trust, whether it comes from a file, a link or the catalog:
+
+1. The download is pinned by the SHA-256 the catalog publishes.
+2. The ES256 signature and the checksum manifest are verified locally.
+3. The launcher works out what the plugin is going to execute and grades it.
+4. The registry verifies this exact build.
+
+A plugin without findings is installed right after it passes those checks. A plugin that needs attention or is dangerous is shown with its findings first, and the user decides — a dangerous plugin offers **Force Install** with a destructive warning.
+
+An update replaces the installed plugin and keeps its settings and its enabled state. The catalog format and the full flow are documented in [Plugin catalog](catalog.md).
+
 ### Install from a link
 A web page can hand the launcher a package with `witch://install-plugin?url=…`. The scheme accepts HTTPS; HTTP is only honored for localhost testing. A downloaded package still passes the same signature and checksum validation as a local file — the transport changes nothing about the vetting.
 
@@ -71,6 +86,20 @@ Two decisions are kept separate: whether a package is cryptographically valid �
 
 > [!IMPORTANT] A package being cryptographically valid and it being trustworthy are different things. Verifying with the public key embedded in the package proves only that the checksum list was signed by the matching private key — not who owns it. Ownership comes from key pinning or registry verification. A self-signed package can be inspected locally, but it must be submitted and verified by the registry before the launcher will install it.
 
+## Behaviour risk and the sandbox {#risk}
+
+Cryptographic validity says a package is intact. It says nothing about what the package does. Before a plugin runs, the launcher reads its manifest and its payload, works out what would be executed and grades the result.
+
+| Risk | Badge | Behavior |
+| --- | --- | --- |
+| Safe | Green | Installed right away after the verification |
+| Warning | Yellow | Installed after the user reviewed the findings |
+| Dangerous | Red | Installed only after the user confirmed with **Force Install** |
+
+A plugin that is not safe runs inside the launcher sandbox: native code is blocked, the script runs in its own JavaScriptCore virtual machine with the host escape hatches removed, theme changes are refused and the script is evaluated off the main thread so it cannot freeze the launcher. The sandbox can be lifted from the plugin screen, with a confirmation.
+
+The full rule set is documented in [Risk analysis and sandbox](risk.md).
+
 ## Security posture {#security}
 What the launcher checks, and when:
 
@@ -82,8 +111,11 @@ What the launcher checks, and when:
 | Key pinning | **Trust this developer key** pins a key ID and public key in local preferences, so future packages from that publisher carry no warning |
 | Registry re-checks | Installed plugins are re-checked shortly after launch. An unreachable registry keeps the last known state; a revoked or rejected result disables the plugin |
 | Safe-mode crash counters | Each failed load is marked per plugin and increments its crash count. Two failures enable safe mode automatically |
+| Catalog hash pinning | A package downloaded from the GitHub catalog must match the SHA-256 the catalog publishes, and the repository must be public and not archived |
+| Risk analysis | Every package is read before it is installed. The findings and the list of things the launcher would run are shown to the user |
+| Sandbox | A plugin that is graded Warning or Dangerous runs with native code blocked, in an isolated JavaScriptCore machine, off the main thread |
 
-> [!IMPORTANT] Native plugins are the highest-risk extension type. They run in the launcher process and cannot be safely sandboxed, and a native crash can terminate the launcher before recovery code runs. Loaded dylibs stay resident for the rest of the process. Install only code you trust and can rebuild from its published source.
+> [!IMPORTANT] Native plugins are the highest-risk extension type. They run in the launcher process and cannot be safely sandboxed, and a native crash can terminate the launcher before recovery code runs. Loaded dylibs stay resident for the rest of the process. The sandbox blocks native code for every plugin that is not graded Safe, so lifting the sandbox is the one action that re-exposes the launcher to the plugin's binary. Install only code you trust and can rebuild from its published source.
 
 ### Recommendations
 - Build from source and compare the package hash.

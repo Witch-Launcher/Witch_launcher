@@ -340,7 +340,10 @@ egl_bridge.m
     PluginKit/WitchPlugin.m
     PluginKit/WitchPluginManager.m
     PluginKit/WitchPluginRuntime.m
+    PluginKit/WitchPluginRisk.m
     PluginKit/WitchPluginTheme.m
+    PluginKit/WitchPluginUpdateService.m
+    PluginKit/WitchPluginVersion.m
 
    # UI
    ../UI/Common/ThemeManager.m
@@ -430,6 +433,8 @@ egl_bridge.m
    ../UI/Screens/Plugins/PluginsViewController.m
    ../UI/Screens/Plugins/PluginDetailViewController.m
    ../UI/Screens/Plugins/PluginSettingsViewController.m
+   ../UI/Screens/Plugins/PluginInstallFlow.m
+   ../UI/Screens/Plugins/PluginRiskBadgeView.m
    ../UI/Screens/Account/AccountViewController.m
    ../UI/Screens/Account/Skin3DView.m
    ../UI/Screens/Account/SkinTextureManager.m

@@ -29,6 +29,11 @@
 @property (nonatomic, readwrite, nullable) NSString *artifactSha256;
 @property (nonatomic, readwrite, nullable) NSString *verifiedAt;
 @property (nonatomic, readwrite) NSInteger crashCount;
+@property (nonatomic, readwrite) WitchPluginRiskLevel riskLevel;
+@property (nonatomic, readwrite) NSArray<NSDictionary *> *riskFindings;
+@property (nonatomic, readwrite) NSArray<NSString *> *riskSummary;
+@property (nonatomic, readwrite) BOOL sandboxRequired;
+@property (nonatomic, readwrite) BOOL sandboxed;
 @end
 
 static NSString *WPString(id value) {
@@ -81,6 +86,11 @@ static NSString *WPString(id value) {
     _artifactSha256 = [_state[@"artifactSha256"] isKindOfClass:[NSString class]] ? _state[@"artifactSha256"] : nil;
     _verifiedAt = [_state[@"verifiedAt"] isKindOfClass:[NSString class]] ? _state[@"verifiedAt"] : nil;
     _crashCount = [_state[@"crashCount"] integerValue];
+    _riskLevel = (WitchPluginRiskLevel)[_state[@"riskLevel"] integerValue];
+    _riskFindings = [_state[@"riskFindings"] isKindOfClass:[NSArray class]] ? _state[@"riskFindings"] : @[];
+    _riskSummary = [_state[@"riskSummary"] isKindOfClass:[NSArray class]] ? _state[@"riskSummary"] : @[];
+    _sandboxRequired = [_state[@"sandboxRequired"] boolValue];
+    _sandboxed = [_state[@"sandboxed"] boolValue];
 }
 
 - (NSDictionary *)settings {
