@@ -226,6 +226,32 @@ static NSString *WPRiskFileSize(unsigned long long bytes) {
     }
 }
 
+- (WitchPluginRiskReport *)reportByMergingFindings:(NSArray<WitchPluginRiskFinding *> *)findings {
+    if (findings.count == 0) return self;
+    NSMutableArray<WitchPluginRiskFinding *> *merged = [self.findings mutableCopy];
+    for (WitchPluginRiskFinding *finding in findings) {
+        if (!finding) continue;
+        BOOL duplicate = NO;
+        for (WitchPluginRiskFinding *existing in merged) {
+            if ([existing.code isEqualToString:finding.code] && [existing.title isEqualToString:finding.title]) {
+                duplicate = YES;
+                break;
+            }
+        }
+        if (!duplicate) [merged addObject:finding];
+    }
+    WitchPluginRiskLevel level = WitchPluginRiskLevelSafe;
+    for (WitchPluginRiskFinding *finding in merged) {
+        if (finding.level > level) level = finding.level;
+    }
+    WitchPluginRiskReport *report = [[WitchPluginRiskReport alloc] init];
+    report->_level = level;
+    report->_findings = [merged copy];
+    report->_executionSummary = self.executionSummary;
+    report->_sandboxRequired = (level != WitchPluginRiskLevelSafe);
+    return report;
+}
+
 + (WitchPluginRiskReport *)reportFromDictionary:(NSDictionary *)dictionary {
     NSMutableArray<WitchPluginRiskFinding *> *findings = [NSMutableArray array];
     NSArray *rawFindings = [dictionary[@"findings"] isKindOfClass:[NSArray class]] ? dictionary[@"findings"] : @[];

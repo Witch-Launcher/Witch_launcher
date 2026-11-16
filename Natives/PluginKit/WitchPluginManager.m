@@ -1,6 +1,7 @@
 #import "WitchPluginManager.h"
 #import "WitchPluginTheme.h"
 #import "WitchPluginRisk.h"
+#import "WitchPluginSandbox.h"
 #import "WitchCrypto.h"
 #import "LauncherPreferences.h"
 #import "UnzipKit.h"
@@ -454,7 +455,12 @@ static BOOL WPVerifySignature(NSData *message, NSData *signature, NSData *public
         @"riskFindings": @[],
         @"riskSummary": @[],
         @"sandboxRequired": @NO,
-        @"sandboxed": @NO
+        @"sandboxed": @NO,
+        @"sandboxVerdict": @(WitchPluginSandboxVerdictClean),
+        @"sandboxObservations": @[],
+        @"sandboxBlocked": @[],
+        @"sandboxErrors": @[],
+        @"sandboxCapabilities": @[]
     };
 }
 
@@ -761,7 +767,15 @@ static BOOL WPVerifySignature(NSData *message, NSData *signature, NSData *public
     NSString *artifactHash = WPSHA256File(path, error);
     if (!artifactHash) return nil;
     BOOL trusted = WPTrustedKey(keyID, WPString(signature[@"publicKey"]));
-    WitchPluginRiskReport *risk = [WitchPluginRiskReport analyzeManifest:manifest directory:destination];
+
+    // The package passed every cryptographic check, so it is safe to run it
+    // for a moment inside the sandbox. The rehearsal shows what it tries to
+    // do and feeds the findings into the grade.
+    WitchPluginSandboxReport *sandbox = [WitchPluginSandboxProbe probeManifest:manifest
+                                                                      directory:destination
+                                                                      cacheKey:artifactHash];
+    WitchPluginRiskReport *risk = [[WitchPluginRiskReport analyzeManifest:manifest directory:destination]
+                                   reportByMergingFindings:sandbox.findings];
     NSMutableArray *riskFindings = [NSMutableArray array];
     for (WitchPluginRiskFinding *finding in risk.findings) {
         [riskFindings addObject:[finding dictionaryRepresentation]];
@@ -776,9 +790,14 @@ static BOOL WPVerifySignature(NSData *message, NSData *signature, NSData *public
         @"riskLevel": @(risk.level),
         @"riskFindings": riskFindings,
         @"riskSummary": risk.executionSummary ?: @[],
-        @"sandboxRequired": @(risk.sandboxRequired)
+        @"sandboxRequired": @(risk.sandboxRequired),
+        @"sandboxVerdict": @(sandbox.verdict),
+        @"sandboxObservations": sandbox.observations ?: @[],
+        @"sandboxBlocked": sandbox.blocked ?: @[],
+        @"sandboxErrors": sandbox.errors ?: @[],
+        @"sandboxCapabilities": sandbox.capabilities ?: @[]
     } mutableCopy];
-    return @{@"manifest": manifest, @"signature": signature, @"state": state, @"risk": risk};
+    return @{@"manifest": manifest, @"signature": signature, @"state": state, @"risk": risk, @"sandbox": sandbox};
 }
 
 - (BOOL)verifyIntegrityForPlugin:(WitchPlugin *)plugin error:(NSError **)error {

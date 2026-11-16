@@ -1,6 +1,7 @@
 #import "PluginInstallFlow.h"
 #import "WitchPluginManager.h"
 #import "WitchPluginRisk.h"
+#import "WitchPluginSandbox.h"
 #import "WitchPluginTheme.h"
 #import "WitchPluginUpdateService.h"
 #import "ThemeManager.h"
@@ -89,6 +90,10 @@
             [message appendFormat:@"• %@\n", line];
         }
     }
+    NSString *rehearsal = [self rehearsalSummaryForInfo:info];
+    if (rehearsal.length > 0) {
+        [message appendFormat:@"\n%@\n%@", localize(@"Sandbox rehearsal:", nil), rehearsal];
+    }
     for (WitchPluginRiskFinding *finding in risk.findings) {
         [message appendFormat:@"\n• %@\n%@\n", finding.title, finding.detail];
     }
@@ -137,6 +142,38 @@
     } onCancel:^{
         [[NSFileManager defaultManager] removeItemAtPath:packageURL.path error:nil];
     }];
+}
+
+// What the sandbox rehearsal saw while the package was verified.
+- (NSString *)rehearsalSummaryForInfo:(NSDictionary *)info {
+    WitchPluginSandboxReport *report = [info[@"sandbox"] isKindOfClass:[WitchPluginSandboxReport class]] ? info[@"sandbox"] : nil;
+    if (!report) return @"";
+    NSMutableArray *parts = [NSMutableArray array];
+    if (report.observations.count > 0) {
+        [parts addObject:[NSString stringWithFormat:localize(@"%lu calls recorded", nil), (unsigned long)report.observations.count]];
+    }
+    if (report.blocked.count > 0) {
+        [parts addObject:[NSString stringWithFormat:localize(@"%lu blocked attempts", nil), (unsigned long)report.blocked.count]];
+    }
+    if (report.errors.count > 0) {
+        [parts addObject:[NSString stringWithFormat:localize(@"%lu errors", nil), (unsigned long)report.errors.count]];
+    }
+    if (report.capabilities.count > 0) {
+        [parts addObject:[NSString stringWithFormat:localize(@"%lu capabilities", nil), (unsigned long)report.capabilities.count]];
+    }
+    if (parts.count == 0) return @"";
+    NSMutableString *summary = [NSMutableString stringWithString:[report verdictLabel]];
+    [summary appendFormat:@" — %@", [parts componentsJoinedByString:@", "]];
+    for (NSString *blocked in report.blocked) {
+        [summary appendFormat:@"\n• %@", [NSString stringWithFormat:localize(@"blocked: %@", nil), blocked]];
+    }
+    for (NSString *error in report.errors) {
+        [summary appendFormat:@"\n• %@", error];
+    }
+    for (NSString *capability in report.capabilities) {
+        [summary appendFormat:@"\n• %@", capability];
+    }
+    return summary;
 }
 
 - (void)installPackage:(NSURL *)packageURL

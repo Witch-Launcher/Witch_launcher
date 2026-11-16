@@ -52,6 +52,34 @@ Huy hiệu hiển thị trong danh sách plugin và ở màn hình chi tiết pl
 | `XMLHttpRequest`, `fetch(`, `WebSocket`, `EventSource`, `sendBeacon` | **Cảnh báo** — script tự nói chuyện với mạng |
 | `localStorage`, `sessionStorage`, `indexedDB` | **Cảnh báo** — API lưu trữ của trình duyệt không có ý nghĩa trong launcher |
 
+## Buổi tập trong sandbox {#rehearsal}
+
+Các quy tắc ở trên được đọc từ manifest và từ các tệp. Launcher làm thêm một bước: sau khi chữ ký và checksum đã được xác minh, gói được **chạy thử trong một khoảnh khắc bên trong sandbox** và launcher quan sát nó làm gì.
+
+| Thứ được tập thử | Cách thực hiện |
+| --- | --- |
+| Entrypoint JavaScript | Chạy trong `JSVirtualMachine` riêng với một bridge chỉ ghi nhận. Bridge trả lời mọi lời gọi và không ghi gì vào launcher |
+| Các global nguy hiểm | `eval`, `Function`, `WebKit`, `ObjC`, `PHP`, API mạng và API lưu trữ được thay bằng bộ ghi nhận thay vì bị gỡ bỏ, nên hành vi vẫn nhìn thấy được |
+| Payload native | Không thể thực thi an toàn, kể cả để biết nó làm gì. Thay vào đó khả năng của nó được đọc từ binary |
+
+Những gì buổi tập báo cáo:
+
+| Phát hiện | Mức |
+| --- | --- |
+| Script với tới `ObjC`, `WebKit` hoặc `PHP` | Nguy hiểm |
+| Script cố dùng `eval` hoặc `Function` | Cảnh báo |
+| Script cố ra mạng | Cảnh báo |
+| Script cố dùng API lưu trữ web | Cảnh báo |
+| Script không bao giờ kết thúc (ngân sách 3 giây) | Nguy hiểm |
+| Script ném lỗi | Cảnh báo |
+| Script đổi theme lúc khởi chạy | Cảnh báo |
+| Binary mang API tiến trình, keychain, camera hoặc vị trí | Nguy hiểm |
+| Binary mang API tệp hoặc mạng | Cảnh báo |
+
+Buổi tập diễn ra trong lúc xác minh, trước khi gói được cài. Kết quả được lưu cùng plugin, nên màn hình plugin vẫn hiện gói đã làm gì khi được kiểm tra: các lời gọi nó thực hiện, những hành vi bị sandbox từ chối và các khả năng mà payload của nó mang.
+
+> [!IMPORTANT] Buổi tập chạy code của một gói chưa được tin cậy bên trong tiến trình launcher. Script được cách ly trong virtual machine riêng và chỉ thấy một bridge ghi nhận, chữ ký và checksum đã được xác minh trước khi nó bắt đầu, và nó bị giới hạn trong ba giây. Một script không bao giờ kết thúc sẽ bị bỏ rơi, không phải chờ đợi.
+
 ## Cài đặt một plugin {#install}
 
 | Rủi ro | Launcher làm gì |

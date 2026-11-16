@@ -341,6 +341,7 @@ egl_bridge.m
     PluginKit/WitchPluginManager.m
     PluginKit/WitchPluginRuntime.m
     PluginKit/WitchPluginRisk.m
+    PluginKit/WitchPluginSandbox.m
     PluginKit/WitchPluginTheme.m
     PluginKit/WitchPluginUpdateService.m
     PluginKit/WitchPluginVersion.m

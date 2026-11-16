@@ -98,6 +98,8 @@ Cryptographic validity says a package is intact. It says nothing about what the 
 
 A plugin that is not safe runs inside the launcher sandbox: native code is blocked, the script runs in its own JavaScriptCore virtual machine with the host escape hatches removed, theme changes are refused and the script is evaluated off the main thread so it cannot freeze the launcher. The sandbox can be lifted from the plugin screen, with a confirmation.
 
+The launcher does not only read the package, it runs it. After the signature and the checksums are verified, the package is rehearsed inside the sandbox for at most three seconds: the script is executed against a recording bridge and the attempts the sandbox refuses are folded into the grade. A native payload is never executed — its capabilities are read from the binary instead.
+
 The full rule set is documented in [Risk analysis and sandbox](risk.md).
 
 ## Security posture {#security}

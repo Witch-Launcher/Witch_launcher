@@ -26,6 +26,10 @@ typedef NS_ENUM(NSInteger, PluginDetailSection) {
 @property (nonatomic) UIView *headerView;
 @end
 
+static NSString *WPRiskString(id value) {
+    return [value isKindOfClass:[NSString class]] ? value : @"";
+}
+
 @implementation PluginDetailViewController
 
 - (instancetype)initWithPlugin:(WitchPlugin *)plugin {
@@ -159,8 +163,87 @@ typedef NS_ENUM(NSInteger, PluginDetailSection) {
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section {
     if (section == PluginDetailSectionAbout) return 5;
     if (section == PluginDetailSectionSecurity) return 4;
-    if (section == PluginDetailSectionAnalysis) return 2 + self.plugin.riskFindings.count;
+    if (section == PluginDetailSectionAnalysis) return [self analysisRows].count;
     return [self manageRows].count;
+}
+
+// The analysis section is built from a list so the sandbox rows and the
+// findings always stay in the same order.
+- (NSArray<NSDictionary *> *)analysisRows {
+    NSMutableArray<NSDictionary *> *rows = [NSMutableArray array];
+    NSString *level = localize(@"Safe", nil);
+    if (self.plugin.riskLevel == WitchPluginRiskLevelWarning) level = localize(@"Warning", nil);
+    else if (self.plugin.riskLevel == WitchPluginRiskLevelDangerous) level = localize(@"Dangerous", nil);
+    [rows addObject:@{@"kind": @"risk", @"title": localize(@"Risk level", nil), @"value": level}];
+    [rows addObject:@{@"kind": @"runs",
+                       @"title": localize(@"What the launcher runs", nil),
+                       @"value": self.plugin.riskSummary.count > 0 ? [self.plugin.riskSummary componentsJoinedByString:@"\n"] : localize(@"Nothing", nil)}];
+    [rows addObject:@{@"kind": @"sandbox",
+                       @"title": localize(@"Sandbox rehearsal", nil),
+                       @"value": [self sandboxSummary]}];
+    for (NSDictionary *finding in self.plugin.riskFindings) {
+        NSString *findingLevel = [finding[@"level"] integerValue] == WitchPluginRiskLevelDangerous ? localize(@"Dangerous", nil) : localize(@"Warning", nil);
+        [rows addObject:@{@"kind": @"finding",
+                           @"title": [NSString stringWithFormat:@"%@  ·  %@", findingLevel, WPRiskString(finding[@"title"])],
+                           @"value": WPRiskString(finding[@"detail"])}];
+    }
+    for (NSString *blocked in self.plugin.sandboxBlocked) {
+        [rows addObject:@{@"kind": @"blocked",
+                           @"title": [NSString stringWithFormat:localize(@"Blocked: %@", nil), blocked],
+                           @"value": localize(@"The sandbox refused this call while the package was verified.", nil)}];
+    }
+    for (NSString *error in self.plugin.sandboxErrors) {
+        [rows addObject:@{@"kind": @"error",
+                           @"title": localize(@"Failed while it was verified", nil),
+                           @"value": error}];
+    }
+    for (NSString *capability in self.plugin.sandboxCapabilities) {
+        [rows addObject:@{@"kind": @"capability",
+                           @"title": capability,
+                           @"value": localize(@"The payload carries this system API.", nil)}];
+    }
+    if (self.plugin.sandboxObservations.count > 0) {
+        NSMutableArray *calls = [NSMutableArray array];
+        for (NSString *observation in self.plugin.sandboxObservations) {
+            if (calls.count >= 8) break;
+            [calls addObject:observation];
+        }
+        NSString *value = [calls componentsJoinedByString:@"\n"];
+        if (self.plugin.sandboxObservations.count > calls.count) {
+            value = [value stringByAppendingFormat:@"\n%@", [NSString stringWithFormat:localize(@"and %lu more", nil), (unsigned long)(self.plugin.sandboxObservations.count - calls.count)]];
+        }
+        [rows addObject:@{@"kind": @"calls",
+                           @"title": [NSString stringWithFormat:localize(@"Calls recorded (%lu)", nil), (unsigned long)self.plugin.sandboxObservations.count],
+                           @"value": value}];
+    }
+    return rows;
+}
+
+- (NSString *)sandboxSummary {
+    WitchPluginSandboxReport *report = [WitchPluginSandboxReport reportFromDictionary:@{
+        @"verdict": @(self.plugin.sandboxVerdict),
+        @"observations": self.plugin.sandboxObservations ?: @[],
+        @"blocked": self.plugin.sandboxBlocked ?: @[],
+        @"errors": self.plugin.sandboxErrors ?: @[],
+        @"capabilities": self.plugin.sandboxCapabilities ?: @[]
+    }];
+    if (!self.plugin.sandboxVerdict && self.plugin.sandboxObservations.count == 0 && self.plugin.sandboxCapabilities.count == 0) {
+        return localize(@"Nothing was executed during the verification.", nil);
+    }
+    NSMutableArray *parts = [NSMutableArray array];
+    if (self.plugin.sandboxObservations.count > 0) {
+        [parts addObject:[NSString stringWithFormat:localize(@"%lu calls recorded", nil), (unsigned long)self.plugin.sandboxObservations.count]];
+    }
+    if (self.plugin.sandboxBlocked.count > 0) {
+        [parts addObject:[NSString stringWithFormat:localize(@"%lu blocked attempts", nil), (unsigned long)self.plugin.sandboxBlocked.count]];
+    }
+    if (self.plugin.sandboxErrors.count > 0) {
+        [parts addObject:[NSString stringWithFormat:localize(@"%lu errors", nil), (unsigned long)self.plugin.sandboxErrors.count]];
+    }
+    if (self.plugin.sandboxCapabilities.count > 0) {
+        [parts addObject:[NSString stringWithFormat:localize(@"%lu capabilities", nil), (unsigned long)self.plugin.sandboxCapabilities.count]];
+    }
+    return [NSString stringWithFormat:@"%@ — %@", [report verdictLabel], [parts componentsJoinedByString:@", "]];
 }
 
 // The manage section is built from a list so a new row never shifts the
@@ -229,23 +312,18 @@ typedef NS_ENUM(NSInteger, PluginDetailSection) {
         cell.textLabel.text = labels[indexPath.row];
         cell.detailTextLabel.text = values[indexPath.row];
     } else if (indexPath.section == PluginDetailSectionAnalysis) {
-        if (indexPath.row == 0) {
-            cell.textLabel.text = localize(@"Risk level", nil);
-            NSString *level = localize(@"Safe", nil);
-            if (self.plugin.riskLevel == WitchPluginRiskLevelWarning) level = localize(@"Warning", nil);
-            else if (self.plugin.riskLevel == WitchPluginRiskLevelDangerous) level = localize(@"Dangerous", nil);
-            cell.detailTextLabel.text = level;
+        NSDictionary *row = [self analysisRows][indexPath.row];
+        cell.textLabel.text = WPRiskString(row[@"title"]);
+        cell.detailTextLabel.text = WPRiskString(row[@"value"]);
+        NSString *kind = WPRiskString(row[@"kind"]);
+        if ([kind isEqualToString:@"risk"]) {
             if (self.plugin.riskLevel == WitchPluginRiskLevelDangerous) cell.detailTextLabel.textColor = ThemeManager.shared.errorColor;
             else if (self.plugin.riskLevel == WitchPluginRiskLevelWarning) cell.detailTextLabel.textColor = ThemeManager.shared.warningColor;
             else cell.detailTextLabel.textColor = ThemeManager.shared.successColor;
-        } else if (indexPath.row == 1) {
-            cell.textLabel.text = localize(@"What the launcher runs", nil);
-            cell.detailTextLabel.text = self.plugin.riskSummary.count > 0 ? [self.plugin.riskSummary componentsJoinedByString:@"\n"] : localize(@"Nothing", nil);
+        } else if ([kind isEqualToString:@"blocked"] || [kind isEqualToString:@"error"]) {
+            cell.detailTextLabel.textColor = ThemeManager.shared.warningColor;
         } else {
-            NSDictionary *finding = self.plugin.riskFindings[indexPath.row - 2];
-            NSString *level = [finding[@"level"] integerValue] == WitchPluginRiskLevelDangerous ? localize(@"Dangerous", nil) : localize(@"Warning", nil);
-            cell.textLabel.text = [NSString stringWithFormat:@"%@  ·  %@", level, [finding[@"title"] isKindOfClass:[NSString class]] ? finding[@"title"] : @""];
-            cell.detailTextLabel.text = [finding[@"detail"] isKindOfClass:[NSString class]] ? finding[@"detail"] : @"";
+            cell.detailTextLabel.textColor = ThemeManager.shared.secondaryTextColor;
         }
     } else {
         NSString *row = [self manageRows][indexPath.row];

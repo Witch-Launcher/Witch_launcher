@@ -38,6 +38,12 @@ A plugin that the launcher grades Warning or Dangerous runs inside the sandbox. 
 
 A sandboxed plugin with a `native` entrypoint never loads that entrypoint. The sandbox is described in [Risk analysis and sandbox](risk.md).
 
+### The rehearsal
+
+Before a package is installed, the launcher runs the script once inside the sandbox against a **recording bridge**: the same `Witch` object, but every call is only recorded and nothing is written to the launcher. The dangerous globals answer with a recorder instead of disappearing, so an attempt is visible. A script that never returns is abandoned after three seconds.
+
+What the rehearsal saw is shown on the plugin screen and it feeds the risk grade, so a script that behaves well is installed without a prompt and a script that reaches for the host runtime is not.
+
 ## Native
 
 Native entrypoints are `.dylib` files with a `witch_plugin_init` symbol:

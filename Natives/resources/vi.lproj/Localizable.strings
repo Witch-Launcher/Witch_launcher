@@ -1492,6 +1492,21 @@
 
 "Available Plugins" = "Plugin có sẵn";
 
+"Sandbox rehearsal" = "Buổi tập trong sandbox";
+"Sandbox rehearsal:" = "Buổi tập trong sandbox:";
+"Blocked: %@" = "Bị chặn: %@";
+"blocked: %@" = "bị chặn: %@";
+"Failed while it was verified" = "Lỗi khi đang xác minh";
+"The sandbox refused this call while the package was verified." = "Sandbox đã từ chối lời gọi này khi xác minh gói.";
+"The payload carries this system API." = "Payload có chứa API hệ thống này.";
+"Calls recorded (%lu)" = "Lời gọi được ghi nhận (%lu)";
+"and %lu more" = "và %lu lệnh nữa";
+"%lu calls recorded" = "%lu lời gọi được ghi nhận";
+"%lu blocked attempts" = "%lu lần bị chặn";
+"%lu errors" = "%lu lỗi";
+"%lu capabilities" = "%lu khả năng";
+"Nothing was executed during the verification." = "Không có gì được thực thi trong lúc xác minh.";
+
 "preference.title.witch_plugin_repo" = "Repository danh mục plugin";
 
 "preference.detail.witch_plugin_repo" = "Repository GitHub phát hành danh mục plugin (owner/repo)";

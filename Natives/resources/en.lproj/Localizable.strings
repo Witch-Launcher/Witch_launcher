@@ -1493,6 +1493,21 @@
 
 "Available Plugins" = "Available Plugins";
 
+"Sandbox rehearsal" = "Sandbox rehearsal";
+"Sandbox rehearsal:" = "Sandbox rehearsal:";
+"Blocked: %@" = "Blocked: %@";
+"blocked: %@" = "blocked: %@";
+"Failed while it was verified" = "Failed while it was verified";
+"The sandbox refused this call while the package was verified." = "The sandbox refused this call while the package was verified.";
+"The payload carries this system API." = "The payload carries this system API.";
+"Calls recorded (%lu)" = "Calls recorded (%lu)";
+"and %lu more" = "and %lu more";
+"%lu calls recorded" = "%lu calls recorded";
+"%lu blocked attempts" = "%lu blocked attempts";
+"%lu errors" = "%lu errors";
+"%lu capabilities" = "%lu capabilities";
+"Nothing was executed during the verification." = "Nothing was executed during the verification.";
+
 "preference.title.witch_plugin_repo" = "Plugin catalog repository";
 
 "preference.detail.witch_plugin_repo" = "GitHub repository that publishes the plugin catalog (owner/repo)";

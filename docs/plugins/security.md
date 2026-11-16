@@ -70,6 +70,19 @@ Signature and checksum answer *is the package intact*. The risk analysis answers
 
 A plugin that is not Safe is installed only after the user reviewed the findings, and a dangerous plugin needs a **Force Install** confirmation. The full rule set is in [Risk analysis and sandbox](risk.md).
 
+### The sandbox rehearsal
+
+The grade is not only read, it is measured. After the signature and the checksums are verified, the package is run for a moment inside the sandbox and the launcher watches it:
+
+- The JavaScript entrypoint runs in a private `JSVirtualMachine` with a recording bridge. The bridge answers every call and writes nothing to the launcher.
+- `eval`, `Function`, `WebKit`, `ObjC`, `PHP`, the network APIs and the storage APIs are replaced by recorders, so an attempt is reported instead of silently failing.
+- The script is bounded to three seconds. A script that never returns is abandoned.
+- A native payload is never executed. Its capabilities are read from the binary instead, which is how the process, keychain, camera and location APIs are found.
+
+The observations are merged into the grade, so a package that behaves badly while it is verified ends up in the same red badge as a package that merely looks bad. The result is stored with the plugin and shown on the plugin screen.
+
+> [!IMPORTANT] The rehearsal executes code from an untrusted package inside the launcher process. It is bounded, isolated and only reachable through a recording bridge, but it is still untrusted code — the signature and the checksums are verified before it starts.
+
 ## Sandbox
 
 A plugin that is graded Warning or Dangerous runs inside the launcher sandbox:

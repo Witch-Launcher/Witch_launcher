@@ -52,6 +52,34 @@ The badge is shown in the plugin list and on the plugin screen. The analysis its
 | `XMLHttpRequest`, `fetch(`, `WebSocket`, `EventSource`, `sendBeacon` | **Warning** — the script talks to the network on its own |
 | `localStorage`, `sessionStorage`, `indexedDB` | **Warning** — web storage APIs have no meaning inside the launcher |
 
+## The sandbox rehearsal {#rehearsal}
+
+The rules above are read from the manifest and from the files. The launcher goes one step further: once the signature and the checksums are verified, the package is **run for a moment inside the sandbox** and the launcher watches what it does.
+
+| What is rehearsed | How |
+| --- | --- |
+| The JavaScript entrypoint | It runs in its own `JSVirtualMachine` with a recording bridge. The bridge answers every call and writes nothing to the launcher |
+| The dangerous globals | `eval`, `Function`, `WebKit`, `ObjC`, `PHP`, the network APIs and the storage APIs are replaced by recorders instead of being removed, so an attempt stays visible |
+| A native payload | It cannot be executed safely, not even to find out what it does. Its capabilities are read from the binary instead |
+
+What the rehearsal reports:
+
+| Observation | Grade |
+| --- | --- |
+| The script reached for `ObjC`, `WebKit` or `PHP` | Dangerous |
+| The script tried to use `eval` or `Function` | Warning |
+| The script tried to reach the network | Warning |
+| The script tried to use web storage | Warning |
+| The script never finished, the budget is three seconds | Dangerous |
+| The script threw | Warning |
+| The script changed the theme at launch | Warning |
+| The binary carries the process, keychain, camera or location APIs | Dangerous |
+| The binary carries file or network APIs | Warning |
+
+The rehearsal happens during the verification, before the package is installed. Its result is stored with the plugin, so the plugin screen keeps showing what the package did when it was checked: the calls it made, the attempts the sandbox refused and the capabilities its payload carries.
+
+> [!IMPORTANT] The rehearsal runs code from an untrusted package inside the launcher process. The script is isolated in its own virtual machine and only sees a recording bridge, the signature and the checksums are verified before it starts, and it is bounded to three seconds. A script that never returns is abandoned, not waited for.
+
 ## Installing a plugin {#install}
 
 | Risk | What the launcher does |

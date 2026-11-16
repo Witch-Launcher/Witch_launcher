@@ -38,6 +38,9 @@ typedef NS_ENUM(NSInteger, WitchPluginRiskLevel) {
 
 + (WitchPluginRiskReport *)analyzeManifest:(NSDictionary *)manifest
                                   directory:(nullable NSString *)directory;
+// Adds findings, for example the ones the sandbox rehearsal collected, and
+// re-grades the report.
+- (WitchPluginRiskReport *)reportByMergingFindings:(NSArray<WitchPluginRiskFinding *> *)findings;
 + (WitchPluginRiskReport *)reportFromDictionary:(nullable NSDictionary *)dictionary;
 - (NSDictionary *)dictionaryRepresentation;
 - (NSString *)levelLabel;

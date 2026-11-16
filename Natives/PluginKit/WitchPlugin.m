@@ -34,6 +34,11 @@
 @property (nonatomic, readwrite) NSArray<NSString *> *riskSummary;
 @property (nonatomic, readwrite) BOOL sandboxRequired;
 @property (nonatomic, readwrite) BOOL sandboxed;
+@property (nonatomic, readwrite) WitchPluginSandboxVerdict sandboxVerdict;
+@property (nonatomic, readwrite) NSArray<NSString *> *sandboxObservations;
+@property (nonatomic, readwrite) NSArray<NSString *> *sandboxBlocked;
+@property (nonatomic, readwrite) NSArray<NSString *> *sandboxErrors;
+@property (nonatomic, readwrite) NSArray<NSString *> *sandboxCapabilities;
 @end
 
 static NSString *WPString(id value) {
@@ -91,6 +96,11 @@ static NSString *WPString(id value) {
     _riskSummary = [_state[@"riskSummary"] isKindOfClass:[NSArray class]] ? _state[@"riskSummary"] : @[];
     _sandboxRequired = [_state[@"sandboxRequired"] boolValue];
     _sandboxed = [_state[@"sandboxed"] boolValue];
+    _sandboxVerdict = (WitchPluginSandboxVerdict)[_state[@"sandboxVerdict"] integerValue];
+    _sandboxObservations = [_state[@"sandboxObservations"] isKindOfClass:[NSArray class]] ? _state[@"sandboxObservations"] : @[];
+    _sandboxBlocked = [_state[@"sandboxBlocked"] isKindOfClass:[NSArray class]] ? _state[@"sandboxBlocked"] : @[];
+    _sandboxErrors = [_state[@"sandboxErrors"] isKindOfClass:[NSArray class]] ? _state[@"sandboxErrors"] : @[];
+    _sandboxCapabilities = [_state[@"sandboxCapabilities"] isKindOfClass:[NSArray class]] ? _state[@"sandboxCapabilities"] : @[];
 }
 
 - (NSDictionary *)settings {
