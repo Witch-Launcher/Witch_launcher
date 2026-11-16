@@ -1492,6 +1492,17 @@
 
 "Available Plugins" = "Plugin có sẵn";
 
+"Publisher" = "Nhà phát hành";
+"Trusted publisher" = "Nhà phát hành đáng tin";
+"Unknown publisher" = "Nhà phát hành chưa biết";
+"Published build" = "Bản đã phát hành";
+"Matches the package on GitHub (%@)" = "Khớp với gói trên GitHub (%@)";
+"Differs from the package on GitHub (%@)" = "Khác với gói trên GitHub (%@)";
+"No published package for this plugin" = "Chưa có gói nào được phát hành cho plugin này";
+"Matches the package that was published (%@)" = "Khớp với gói đã phát hành (%@)";
+"Pinned by the plugin catalog" = "Được ghim bởi danh mục plugin";
+"Unknown. The registry does not know it. Install only if you trust the author." = "Chưa biết. Registry không biết plugin này. Chỉ cài nếu bạn tin tác giả.";
+
 "Sandbox rehearsal" = "Buổi tập trong sandbox";
 "Sandbox rehearsal:" = "Buổi tập trong sandbox:";
 "Blocked: %@" = "Bị chặn: %@";

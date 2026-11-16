@@ -298,17 +298,21 @@ typedef NS_ENUM(NSInteger, PluginsSection) {
 - (void)verifyPackage:(NSDictionary *)info localURL:(NSURL *)localURL {
     [self showVerificationOverlay];
     __weak typeof(self) weakSelf = self;
-    [WitchPluginManager.shared verifyPackageInfo:info completion:^(BOOL verified, NSError *verifyError) {
+    [WitchPluginManager.shared checkPackageTrust:info completion:^(WitchPluginTrust trust, NSString *reason, NSError *trustError) {
         PluginsViewController *strongSelf = weakSelf;
         if (!strongSelf) return;
         [strongSelf hideVerificationOverlay];
-        if (!verified) {
+        if (trustError) {
+            // A build the registry blocked is never installed.
             [[NSFileManager defaultManager] removeItemAtPath:localURL.path error:nil];
-            showDialog(localize(@"Verification Failed", nil), verifyError.localizedDescription ?: localize(@"Registry verification failed.", nil));
+            showDialog(localize(@"Verification Failed", nil), trustError.localizedDescription);
             return;
         }
         WitchPluginRiskReport *risk = [info[@"risk"] isKindOfClass:[WitchPluginRiskReport class]] ? info[@"risk"] : nil;
-        [strongSelf presentInstallForPackage:localURL info:info risk:risk isUpdate:NO];
+        WitchPluginInstallOptions *options = [WitchPluginInstallOptions defaultOptions];
+        options.trust = trust;
+        options.trustMessage = reason;
+        [strongSelf presentInstallForPackage:localURL info:info risk:risk options:options];
     }];
 }
 
@@ -330,7 +334,7 @@ typedef NS_ENUM(NSInteger, PluginsSection) {
 - (void)presentInstallForPackage:(NSURL *)packageURL
                             info:(NSDictionary *)info
                             risk:(WitchPluginRiskReport *)risk
-                         isUpdate:(BOOL)isUpdate {
+                         options:(WitchPluginInstallOptions *)options {
     NSDictionary *manifest = info[@"manifest"];
     NSString *pluginID = [manifest[@"id"] isKindOfClass:[NSString class]] ? manifest[@"id"] : @"";
     if (pluginID.length > 0 && risk) {
@@ -340,7 +344,7 @@ typedef NS_ENUM(NSInteger, PluginsSection) {
     [PluginInstallFlow.shared presentInstallForPackageURL:packageURL
                                                      info:info
                                                      risk:risk
-                                                  isUpdate:isUpdate
+                                                  options:options
                                         fromViewController:self];
 }
 
@@ -540,7 +544,7 @@ typedef NS_ENUM(NSInteger, PluginsSection) {
     cell.catalogEntryID = nil;
     cell.actionButton.hidden = YES;
     NSString *status = localize(@"Unverified", nil);
-    if (plugin.verificationState == WitchPluginVerificationStateVerified) status = localize(@"Verified", nil);
+    if (plugin.trust == WitchPluginTrustPublisher) status = localize(@"Verified", nil);
     else if (plugin.verificationState == WitchPluginVerificationStateRevoked) status = localize(@"Revoked", nil);
     else if (plugin.verificationState == WitchPluginVerificationStateInvalid) status = localize(@"Blocked", nil);
     NSMutableString *subtitle = [NSMutableString stringWithFormat:@"v%@  ·  %@  ·  %@", plugin.version, plugin.license, status];

@@ -1493,6 +1493,17 @@
 
 "Available Plugins" = "Available Plugins";
 
+"Publisher" = "Publisher";
+"Trusted publisher" = "Trusted publisher";
+"Unknown publisher" = "Unknown publisher";
+"Published build" = "Published build";
+"Matches the package on GitHub (%@)" = "Matches the package on GitHub (%@)";
+"Differs from the package on GitHub (%@)" = "Differs from the package on GitHub (%@)";
+"No published package for this plugin" = "No published package for this plugin";
+"Matches the package that was published (%@)" = "Matches the package that was published (%@)";
+"Pinned by the plugin catalog" = "Pinned by the plugin catalog";
+"Unknown. The registry does not know it. Install only if you trust the author." = "Unknown. The registry does not know it. Install only if you trust the author.";
+
 "Sandbox rehearsal" = "Sandbox rehearsal";
 "Sandbox rehearsal:" = "Sandbox rehearsal:";
 "Blocked: %@" = "Blocked: %@";

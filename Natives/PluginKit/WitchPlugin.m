@@ -34,6 +34,9 @@
 @property (nonatomic, readwrite) NSArray<NSString *> *riskSummary;
 @property (nonatomic, readwrite) BOOL sandboxRequired;
 @property (nonatomic, readwrite) BOOL sandboxed;
+@property (nonatomic, readwrite) WitchPluginTrust trust;
+@property (nonatomic, readwrite, copy) NSString *trustMessage;
+@property (nonatomic, readwrite, nullable) NSString *publishedSha256;
 @property (nonatomic, readwrite) WitchPluginSandboxVerdict sandboxVerdict;
 @property (nonatomic, readwrite) NSArray<NSString *> *sandboxObservations;
 @property (nonatomic, readwrite) NSArray<NSString *> *sandboxBlocked;
@@ -96,6 +99,9 @@ static NSString *WPString(id value) {
     _riskSummary = [_state[@"riskSummary"] isKindOfClass:[NSArray class]] ? _state[@"riskSummary"] : @[];
     _sandboxRequired = [_state[@"sandboxRequired"] boolValue];
     _sandboxed = [_state[@"sandboxed"] boolValue];
+    _trust = (WitchPluginTrust)[_state[@"trust"] integerValue];
+    _trustMessage = WPString(_state[@"trustMessage"]);
+    _publishedSha256 = [_state[@"publishedSha256"] isKindOfClass:[NSString class]] ? _state[@"publishedSha256"] : nil;
     _sandboxVerdict = (WitchPluginSandboxVerdict)[_state[@"sandboxVerdict"] integerValue];
     _sandboxObservations = [_state[@"sandboxObservations"] isKindOfClass:[NSArray class]] ? _state[@"sandboxObservations"] : @[];
     _sandboxBlocked = [_state[@"sandboxBlocked"] isKindOfClass:[NSArray class]] ? _state[@"sandboxBlocked"] : @[];

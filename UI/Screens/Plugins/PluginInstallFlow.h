@@ -1,5 +1,6 @@
 #import <UIKit/UIKit.h>
 #import "WitchPluginRisk.h"
+#import "WitchPluginManager.h"
 
 NS_ASSUME_NONNULL_BEGIN
 
@@ -18,7 +19,7 @@ NS_ASSUME_NONNULL_BEGIN
 - (void)presentInstallForPackageURL:(NSURL *)packageURL
                                 info:(NSDictionary *)info
                                 risk:(nullable WitchPluginRiskReport *)risk
-                             isUpdate:(BOOL)isUpdate
+                             options:(nullable WitchPluginInstallOptions *)options
                    fromViewController:(UIViewController *)viewController;
 
 @end

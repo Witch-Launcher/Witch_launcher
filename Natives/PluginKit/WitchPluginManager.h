@@ -16,6 +16,25 @@ typedef NS_ENUM(NSInteger, WitchPluginSandboxPolicy) {
     WitchPluginSandboxPolicyNever = 2
 };
 
+// What the launcher does with a package when it is installed.
+@interface WitchPluginInstallOptions : NSObject
+
+// Sandbox the plugin when the risk analysis asks for it.
+@property (nonatomic) WitchPluginSandboxPolicy sandboxPolicy;
+// Replace an already installed plugin of the same id.
+@property (nonatomic) BOOL allowReplace;
+// Trust in the publisher of the package.
+@property (nonatomic) WitchPluginTrust trust;
+// Why the publisher is trusted, shown on the plugin screen.
+@property (nonatomic, copy, nullable) NSString *trustMessage;
+// The package hash the catalog publishes, so the launcher can tell later
+// whether the installed build is still the published one.
+@property (nonatomic, copy, nullable) NSString *publishedSha256;
+
++ (instancetype)defaultOptions;
+
+@end
+
 @interface WitchPluginManager : NSObject
 
 @property (class, readonly) WitchPluginManager *shared;
@@ -32,8 +51,7 @@ typedef NS_ENUM(NSInteger, WitchPluginSandboxPolicy) {
 - (BOOL)installPackageAtURL:(NSURL *)url expectedInfo:(nullable NSDictionary *)info error:(NSError **)error;
 - (BOOL)installPackageAtURL:(NSURL *)url
                 expectedInfo:(nullable NSDictionary *)info
-             sandboxPolicy:(WitchPluginSandboxPolicy)sandboxPolicy
-               allowReplace:(BOOL)allowReplace
+                     options:(nullable WitchPluginInstallOptions *)options
                        error:(NSError **)error;
 - (BOOL)uninstallPluginID:(NSString *)pluginID error:(NSError **)error;
 - (BOOL)setPluginID:(NSString *)pluginID enabled:(BOOL)enabled error:(NSError **)error;
@@ -43,7 +61,16 @@ typedef NS_ENUM(NSInteger, WitchPluginSandboxPolicy) {
 - (BOOL)setSafeMode:(BOOL)safeMode error:(NSError **)error;
 - (void)verifyPlugin:(WitchPlugin *)plugin completion:(nullable void (^)(BOOL verified, NSError * _Nullable error))completion;
 - (void)verifyInstalledPlugins;
-- (void)verifyPackageInfo:(NSDictionary *)info completion:(nullable void (^)(BOOL verified, NSError * _Nullable error))completion;
+// Asks the registry about a package. The verdict is a trust signal, not a
+// gate: a package the registry does not know can still be installed, it is
+// simply marked as an unknown publisher.
+- (void)checkPackageTrust:(NSDictionary *)info
+               completion:(nullable void (^)(WitchPluginTrust trust, NSString * _Nullable reason, NSError * _Nullable error))completion;
+// Turns an answer of the registry into a trust signal. A build the registry
+// blocked is the only one that produces an error.
++ (WitchPluginTrust)trustForRegistryResponse:(nullable NSDictionary *)json
+                                       reason:(NSString * _Nullable * _Nullable)reason
+                                        error:(NSError * _Nullable * _Nullable)error;
 - (BOOL)verifyIntegrityForPlugin:(WitchPlugin *)plugin error:(NSError **)error;
 - (void)markPluginIDInvalid:(NSString *)pluginID message:(NSString *)message;
 - (NSDictionary *)settingsForPluginID:(NSString *)pluginID;

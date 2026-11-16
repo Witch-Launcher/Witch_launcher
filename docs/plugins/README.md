@@ -24,7 +24,7 @@ The package root must contain `witch-plugin.json`, `checksums.json`, and `witch-
 5. Review the verified package details.
 6. Confirm the install and restart the launcher.
 
-The launcher verifies the package signature and every checksum locally, then queries the Witch registry before installing. Only registry-verified builds can be installed. If the registry is unavailable or the build is not verified, the install is rejected.
+The launcher verifies the package signature and every checksum locally, then asks the Witch registry who the publisher is. The verdict is a trust signal, not a wall: a build the registry has never heard of is still installable — so a plugin can be tried out and published — and it is marked as an unknown publisher. Only a build the registry revoked or rejected is refused.
 
 Plugins can also be installed and updated straight from a GitHub catalog. The repository is validated, the package is pinned by its SHA-256 and it goes through the same checks as a local file. See [Plugin catalog](catalog.md).
 
@@ -32,12 +32,12 @@ Plugins can also be installed and updated straight from a GitHub catalog. The re
 
 | State | Meaning |
 | --- | --- |
-| Unverified | Signature and checksums are valid, but the build is not verified by the registry. |
-| Verified | The registry verified this exact checksum set and package hash. |
+| Unverified | Signature and checksums are valid, but no publisher vouched for this build. |
+| Verified | The registry verified this exact checksum set and package hash, or the catalog publishes this exact hash. |
 | Revoked | The registry revoked this build. The launcher disables it. |
 | Invalid | The registry rejected the build, or the package no longer matches the verified checksums. |
 
-Only builds verified by the Witch registry are installable. A self-signed package can be inspected locally, but it must be submitted and verified by the registry before the launcher will install it.
+A self-signed package is installable: the launcher shows that the publisher is unknown and asks you to look at the source first. Submitting it to the registry and having it approved turns the publisher into a trusted one. The plugin screen also compares the SHA-256 the catalog publishes with the hash of the installed build, so you can see at a glance whether what is installed is still the published package.
 
 ## Behaviour risk
 

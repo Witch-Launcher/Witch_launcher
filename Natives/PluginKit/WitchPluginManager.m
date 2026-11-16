@@ -229,6 +229,18 @@ static BOOL WPVerifySignature(NSData *message, NSData *signature, NSData *public
     return ok;
 }
 
+@implementation WitchPluginInstallOptions
+
++ (instancetype)defaultOptions {
+    WitchPluginInstallOptions *options = [[WitchPluginInstallOptions alloc] init];
+    options.sandboxPolicy = WitchPluginSandboxPolicyAuto;
+    options.allowReplace = NO;
+    options.trust = WitchPluginTrustNone;
+    return options;
+}
+
+@end
+
 @interface WitchPluginManager ()
 @property (nonatomic, readwrite) BOOL safeMode;
 @property (nonatomic, readwrite) NSArray<WitchPlugin *> *plugins;
@@ -456,6 +468,8 @@ static BOOL WPVerifySignature(NSData *message, NSData *signature, NSData *public
         @"riskSummary": @[],
         @"sandboxRequired": @NO,
         @"sandboxed": @NO,
+        @"trust": @(WitchPluginTrustNone),
+        @"trustMessage": @"The publisher of this build is not verified",
         @"sandboxVerdict": @(WitchPluginSandboxVerdictClean),
         @"sandboxObservations": @[],
         @"sandboxBlocked": @[],
@@ -919,14 +933,14 @@ static BOOL WPVerifySignature(NSData *message, NSData *signature, NSData *public
 }
 
 - (BOOL)installPackageAtURL:(NSURL *)url expectedInfo:(NSDictionary *)expectedInfo error:(NSError **)error {
-    return [self installPackageAtURL:url expectedInfo:expectedInfo sandboxPolicy:WitchPluginSandboxPolicyAuto allowReplace:NO error:error];
+    return [self installPackageAtURL:url expectedInfo:expectedInfo options:nil error:error];
 }
 
 - (BOOL)installPackageAtURL:(NSURL *)url
                 expectedInfo:(NSDictionary *)expectedInfo
-             sandboxPolicy:(WitchPluginSandboxPolicy)sandboxPolicy
-               allowReplace:(BOOL)allowReplace
+                     options:(WitchPluginInstallOptions *)options
                        error:(NSError **)error {
+    WitchPluginInstallOptions *installOptions = options ?: [WitchPluginInstallOptions defaultOptions];
     NSString *temp = [NSTemporaryDirectory() stringByAppendingPathComponent:[NSString stringWithFormat:@"witch-plugin-install-%@", NSUUID.UUID.UUIDString]];
     NSDictionary *info = [self inspectPackageAtURL:url extractTo:temp error:error];
     if (!info) {
@@ -953,7 +967,7 @@ static BOOL WPVerifySignature(NSData *message, NSData *signature, NSData *public
     NSString *destination = [amethyst_hidden_dir(@"plugins") stringByAppendingPathComponent:pluginID];
     NSString *backup = nil;
     if (WPFileExists(destination)) {
-        if (!allowReplace) {
+        if (!installOptions.allowReplace) {
             if (error) *error = WPError(60, [NSString stringWithFormat:@"Plugin %@ is already installed", pluginID]);
             [[NSFileManager defaultManager] removeItemAtPath:temp error:nil];
             return NO;
@@ -1003,10 +1017,16 @@ static BOOL WPVerifySignature(NSData *message, NSData *signature, NSData *public
     WitchPluginRiskReport *risk = [info[@"risk"] isKindOfClass:[WitchPluginRiskReport class]] ? info[@"risk"] : nil;
     BOOL required = (risk != nil && risk.sandboxRequired);
     BOOL effectiveSandbox = required;
-    if (sandboxPolicy == WitchPluginSandboxPolicyAlways) effectiveSandbox = YES;
-    if (sandboxPolicy == WitchPluginSandboxPolicyNever) effectiveSandbox = NO;
+    if (installOptions.sandboxPolicy == WitchPluginSandboxPolicyAlways) effectiveSandbox = YES;
+    if (installOptions.sandboxPolicy == WitchPluginSandboxPolicyNever) effectiveSandbox = NO;
     state[@"sandboxed"] = @(effectiveSandbox);
     if (risk) state[@"sandboxRequired"] = @(required);
+
+    // The publisher trust is what the registry or the catalog said about this
+    // build. An unknown publisher is not an error, it is a warning.
+    state[@"trust"] = @(installOptions.trust);
+    if (installOptions.trustMessage.length > 0) state[@"trustMessage"] = installOptions.trustMessage;
+    if (installOptions.publishedSha256.length > 0) state[@"publishedSha256"] = installOptions.publishedSha256;
 
     NSDictionary *signature = info[@"signature"];
     NSString *keyID = WPString(signature[@"keyId"]);
@@ -1200,6 +1220,8 @@ static BOOL WPVerifySignature(NSData *message, NSData *signature, NSData *public
         if (verified) {
             state[@"verificationState"] = @(WitchPluginVerificationStateVerified);
             state[@"verificationMessage"] = @"Verified by the Witch plugin registry";
+            state[@"trust"] = @(WitchPluginTrustPublisher);
+            state[@"trustMessage"] = @"Verified by the Witch plugin registry";
             state[@"verifiedAt"] = WPString(json[@"verifiedAt"]);
             state[@"license"] = WPString([json[@"plugin"] isKindOfClass:[NSDictionary class]] ? json[@"plugin"][@"license"] : nil);
         } else if ([status isEqualToString:@"revoked"]) {
@@ -1237,7 +1259,8 @@ static BOOL WPVerifySignature(NSData *message, NSData *signature, NSData *public
     }
 }
 
-- (void)verifyPackageInfo:(NSDictionary *)info completion:(void (^)(BOOL, NSError * _Nullable))completion {
+- (void)checkPackageTrust:(NSDictionary *)info
+               completion:(void (^)(WitchPluginTrust, NSString * _Nullable, NSError * _Nullable))completion {
     NSDictionary *manifest = [info[@"manifest"] isKindOfClass:[NSDictionary class]] ? info[@"manifest"] : @{};
     NSDictionary *state = [info[@"state"] isKindOfClass:[NSDictionary class]] ? info[@"state"] : @{};
     NSError *urlError = nil;
@@ -1248,7 +1271,9 @@ static BOOL WPVerifySignature(NSData *message, NSData *signature, NSData *public
                                                         keyID:WPString(state[@"keyId"])
                                                         error:&urlError];
     if (!verificationURL) {
-        if (completion) dispatch_async(dispatch_get_main_queue(), ^{ completion(NO, urlError); });
+        // No registry configured: the package is signed and checksummed, the
+        // publisher is simply unknown.
+        if (completion) completion(WitchPluginTrustNone, @"No registry is configured", nil);
         return;
     }
     NSMutableURLRequest *request = [NSMutableURLRequest requestWithURL:verificationURL];
@@ -1257,39 +1282,58 @@ static BOOL WPVerifySignature(NSData *message, NSData *signature, NSData *public
     [request setValue:@"WitchLauncher/1.0" forHTTPHeaderField:@"User-Agent"];
     NSURLSessionDataTask *task = [NSURLSession.sharedSession dataTaskWithRequest:request completionHandler:^(NSData *data, NSURLResponse *response, NSError *networkError) {
         if (networkError) {
-            if (completion) dispatch_async(dispatch_get_main_queue(), ^{ completion(NO, networkError); });
+            dispatch_async(dispatch_get_main_queue(), ^{ completion(WitchPluginTrustNone, @"The registry could not be reached", nil); });
             return;
         }
         NSInteger statusCode = [response isKindOfClass:[NSHTTPURLResponse class]] ? ((NSHTTPURLResponse *)response).statusCode : 0;
         if (statusCode >= 400) {
-            if (completion) dispatch_async(dispatch_get_main_queue(), ^{ completion(NO, WPError(71, [NSString stringWithFormat:@"Registry verification failed (HTTP %ld)", (long)statusCode])); });
+            dispatch_async(dispatch_get_main_queue(), ^{ completion(WitchPluginTrustNone, [NSString stringWithFormat:@"The registry answered HTTP %ld", (long)statusCode], nil); });
             return;
         }
         NSDictionary *json = data ? [NSJSONSerialization JSONObjectWithData:data options:0 error:nil] : nil;
         if (![json isKindOfClass:[NSDictionary class]]) {
-            if (completion) dispatch_async(dispatch_get_main_queue(), ^{ completion(NO, WPError(71, @"Invalid verification response")); });
+            dispatch_async(dispatch_get_main_queue(), ^{ completion(WitchPluginTrustNone, @"The registry sent an invalid answer", nil); });
             return;
         }
         if (![json[@"ok"] boolValue]) {
             NSString *serverError = WPString(json[@"error"]);
-            if (completion) dispatch_async(dispatch_get_main_queue(), ^{ completion(NO, WPError(71, serverError.length > 0 ? serverError : @"Registry verification failed")); });
+            dispatch_async(dispatch_get_main_queue(), ^{ completion(WitchPluginTrustNone, serverError.length > 0 ? serverError : @"The registry refused the request", nil); });
             return;
         }
-        BOOL verified = [json[@"verified"] boolValue];
-        NSString *status = WPString(json[@"status"]);
-        NSString *reason = WPString(json[@"reason"]);
-        if ([status isEqualToString:@"unavailable"]) {
-            if (completion) dispatch_async(dispatch_get_main_queue(), ^{ completion(NO, WPError(71, reason.length > 0 ? reason : @"Registry verification is unavailable")); });
-            return;
-        }
-        if (verified) {
-            if (completion) dispatch_async(dispatch_get_main_queue(), ^{ completion(YES, nil); });
-            return;
-        }
-        NSString *message = reason.length > 0 ? reason : @"This plugin is not verified by the Witch registry";
-        if (completion) dispatch_async(dispatch_get_main_queue(), ^{ completion(NO, WPError(78, message)); });
+        NSString *reason = nil;
+        NSError *verdictError = nil;
+        WitchPluginTrust verdict = [WitchPluginManager trustForRegistryResponse:json reason:&reason error:&verdictError];
+        dispatch_async(dispatch_get_main_queue(), ^{ completion(verdict, reason, verdictError); });
     }];
     [task resume];
+}
+
++ (WitchPluginTrust)trustForRegistryResponse:(NSDictionary *)json
+                                       reason:(NSString * _Nullable * _Nullable)reason
+                                        error:(NSError * _Nullable * _Nullable)error {
+    NSDictionary *answer = [json isKindOfClass:[NSDictionary class]] ? json : @{};
+    if (![answer[@"ok"] boolValue]) {
+        NSString *serverError = WPString(answer[@"error"]);
+        if (reason) *reason = serverError.length > 0 ? serverError : @"The registry refused the request";
+        return WitchPluginTrustNone;
+    }
+    BOOL verified = [answer[@"verified"] boolValue];
+    NSString *status = WPString(answer[@"status"]);
+    NSString *serverReason = WPString(answer[@"reason"]);
+    if (verified) {
+        if (reason) *reason = serverReason.length > 0 ? serverReason : @"Verified by the Witch plugin registry";
+        return WitchPluginTrustPublisher;
+    }
+    if ([status isEqualToString:@"revoked"] || [status isEqualToString:@"rejected"] || [status isEqualToString:@"invalid"]) {
+        NSString *message = serverReason.length > 0 ? serverReason : @"The registry blocked this build";
+        if (reason) *reason = message;
+        if (error) *error = WPError(79, message);
+        return WitchPluginTrustNone;
+    }
+    // Pending or unknown: the publisher is not vetted, but the package is
+    // still a valid signed package and can be installed for testing.
+    if (reason) *reason = serverReason.length > 0 ? serverReason : @"The registry does not know this publisher";
+    return WitchPluginTrustNone;
 }
 
 - (NSDictionary *)settingsForPluginID:(NSString *)pluginID {

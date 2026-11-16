@@ -62,8 +62,21 @@ Entries that miss an id, a version, a package path or a valid hash are ignored i
 5. **Pin the download.** The SHA-256 of the downloaded file must equal the `sha256` from the catalog. A swapped file is rejected before anything is unpacked.
 6. **Verify the package locally.** The ES256 signature, the checksum manifest, the file set and the size limits are checked exactly as for a local file.
 7. **Analyse the risk.** The launcher works out what the plugin is going to execute — see [Risk analysis and sandbox](risk.md).
-8. **Ask the registry.** Only a build the registry verified for this exact hash is installable.
+8. **Ask the registry.** The verdict decides how the publisher is shown. A build the registry verified for this exact hash, or a build the catalog publishes, is installed with a trusted publisher; one the registry never heard of is still installable and is marked as an unknown publisher.
 9. **Install.** A plugin without findings is installed right away. A plugin that needs attention or is dangerous is shown first, with everything it is going to do, and the user decides.
+
+## Updating an installed plugin {#update}
+
+## The published hash and the installed build {#compare}
+
+The catalog publishes the SHA-256 of the released package. The launcher stores it with the plugin and compares it with the hash of the installed build on the plugin screen:
+
+| Comparison | What it means |
+| --- | --- |
+| The hashes match | The installed plugin is the published package, byte for byte |
+| The hashes differ | The catalog publishes another build — usually a newer one, which the launcher offers as an update |
+
+The comparison is separate from the integrity check. The integrity check compares the files on the device with the checksum manifest of the package that was installed; the published hash answers a different question: is this still the package the publisher released?
 
 ## Updating an installed plugin {#update}
 
@@ -86,6 +99,6 @@ layout.
 3. Add an entry to `witch-plugins.json` with the id, the version and the SHA-256 that the packer printed.
 4. Commit and push. The launcher picks the catalog up on the next refresh.
 
-The catalog is a convenience and a distribution channel, never a trust anchor on its own. A catalog entry can only publish a package that already passes the signature, checksum and registry checks.
+The catalog is a distribution channel and a publisher pin: the hash it publishes is what the launcher compares the download with, and what the plugin screen compares the installed build with. A catalog entry can only publish a package that already passes the signature and the checksum checks.
 
 > [!NOTE] The ECDSA signature is randomized, so every packed `.plgw` differs byte for byte. Publish the exact file you attach to the release and put the SHA-256 of that very file into the catalog.

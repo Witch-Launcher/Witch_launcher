@@ -404,13 +404,17 @@ static NSString *WPCatalogSHA256File(NSString *path) {
                 return;
             }
             WitchPluginRiskReport *risk = [info[@"risk"] isKindOfClass:[WitchPluginRiskReport class]] ? info[@"risk"] : nil;
-            [WitchPluginManager.shared verifyPackageInfo:info completion:^(BOOL verified, NSError *verifyError) {
-                if (!verified) {
+            [WitchPluginManager.shared checkPackageTrust:info completion:^(WitchPluginTrust trust, NSString *reason, NSError *trustError) {
+                if (trustError) {
+                    // The registry blocked this build, it never installs.
                     [[NSFileManager defaultManager] removeItemAtPath:temp error:nil];
-                    completion(nil, nil, nil, verifyError ?: WPCatalogError(23, @"The registry did not verify this plugin build"));
+                    completion(nil, nil, nil, trustError);
                     return;
                 }
-                completion([NSURL fileURLWithPath:temp], info, risk, nil);
+                NSMutableDictionary *trusted = [info mutableCopy];
+                trusted[@"registryTrust"] = @(trust);
+                if (reason.length > 0) trusted[@"registryTrustMessage"] = reason;
+                completion([NSURL fileURLWithPath:temp], trusted, risk, nil);
             }];
         });
     }];

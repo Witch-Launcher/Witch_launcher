@@ -45,7 +45,9 @@ The public key must be the same base64 65-byte point printed by the packer. Keep
 python3 scripts/plugins/pack_plugin.py --verify ./hello-1.0.0.plgw
 ```
 
-## 4. Submit to the registry
+## 4. Submit to the registry (optional)
+
+Submitting is what turns the publisher into one the registry vouched for. It is not required to install: a package the catalog publishes is already pinned by hash, and a local package can be installed for testing. Submit it when you want the plugin to carry a trusted publisher.
 
 ```sh
 curl -X POST https://witch-worker.vvvuduyanh2012.workers.dev/v1/plugins/submit \
@@ -125,7 +127,7 @@ A repository with a catalog file lets users install and update the plugin withou
 
 `package` is the path of the `.plgw` file inside the repository. `sha256` is the `artifact_sha256` the packer printed — the launcher rejects a download whose hash does not match.
 
-The catalog only distributes packages. A build still needs to be submitted to the registry and verified before the launcher will install it, and the launcher grades the package before it runs. See [Plugin catalog](catalog.md).
+The catalog only distributes packages. A build that the catalog publishes is installed with a trusted publisher, because the launcher compares the hash of the download with the hash the catalog pins. Submitting the build to the registry as well turns it into a publisher the registry vouched for. The launcher grades the package before it runs either way. See [Plugin catalog](catalog.md).
 
 Two rules matter for updates:
 

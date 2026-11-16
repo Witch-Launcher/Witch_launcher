@@ -5,6 +5,16 @@
 
 NS_ASSUME_NONNULL_BEGIN
 
+// How much the launcher trusts the publisher of a build. Trust says nothing
+// about what the plugin does, that is the risk level.
+typedef NS_ENUM(NSInteger, WitchPluginTrust) {
+    // Only the signature and the checksums are valid. The publisher is unknown.
+    WitchPluginTrustNone = 0,
+    // The publisher is trusted: the registry verified this exact build, or the
+    // package hash is the one the catalog publishes.
+    WitchPluginTrustPublisher = 1
+};
+
 typedef NS_ENUM(NSInteger, WitchPluginVerificationState) {
     WitchPluginVerificationStateUnverified = 0,
     WitchPluginVerificationStateVerified = 1,
@@ -49,6 +59,12 @@ typedef NS_ENUM(NSInteger, WitchPluginVerificationState) {
 @property (nonatomic, readonly) BOOL sandboxRequired;
 // YES when the plugin runs inside the launcher sandbox.
 @property (nonatomic, readonly) BOOL sandboxed;
+// Trust in the publisher of this build.
+@property (nonatomic, readonly) WitchPluginTrust trust;
+@property (nonatomic, readonly, copy) NSString *trustMessage;
+// The package hash the catalog publishes for this plugin, when it came from a
+// catalog. The launcher compares it with the hash of the installed build.
+@property (nonatomic, readonly, nullable) NSString *publishedSha256;
 // What the sandbox rehearsal found while the package was verified.
 @property (nonatomic, readonly) WitchPluginSandboxVerdict sandboxVerdict;
 @property (nonatomic, readonly) NSArray<NSString *> *sandboxObservations;

@@ -36,10 +36,21 @@
             return;
         }
         BOOL isUpdate = [WitchPluginManager.shared pluginWithID:entry.pluginID] != nil;
+        WitchPluginInstallOptions *options = [WitchPluginInstallOptions defaultOptions];
+        options.allowReplace = isUpdate;
+        // The download matched the hash the catalog publishes, so this build is
+        // the published one even when the registry never heard of the publisher.
+        options.trust = WitchPluginTrustPublisher;
+        WitchPluginTrust registryTrust = (WitchPluginTrust)[info[@"registryTrust"] integerValue];
+        NSString *registryMessage = [info[@"registryTrustMessage"] isKindOfClass:[NSString class]] ? info[@"registryTrustMessage"] : nil;
+        options.trustMessage = (registryTrust == WitchPluginTrustPublisher && registryMessage.length > 0)
+            ? registryMessage
+            : localize(@"Pinned by the plugin catalog", nil);
+        options.publishedSha256 = entry.sha256;
         [strongSelf presentInstallForPackageURL:packageURL
                                            info:info
                                            risk:risk
-                                        isUpdate:isUpdate
+                                        options:options
                               fromViewController:viewController];
     }];
 }
@@ -47,8 +58,10 @@
 - (void)presentInstallForPackageURL:(NSURL *)packageURL
                                 info:(NSDictionary *)info
                                 risk:(WitchPluginRiskReport *)risk
-                             isUpdate:(BOOL)isUpdate
+                             options:(WitchPluginInstallOptions *)options
                    fromViewController:(UIViewController *)viewController {
+    WitchPluginInstallOptions *installOptions = options ?: [WitchPluginInstallOptions defaultOptions];
+    BOOL isUpdate = installOptions.allowReplace;
     NSDictionary *manifest = [info[@"manifest"] isKindOfClass:[NSDictionary class]] ? info[@"manifest"] : @{};
     NSString *name = [manifest[@"name"] isKindOfClass:[NSString class]] ? manifest[@"name"] : @"Plugin";
     NSString *version = [manifest[@"version"] isKindOfClass:[NSString class]] ? manifest[@"version"] : @"";
@@ -58,7 +71,7 @@
 
     // Nothing to report: the package passed every check, install it right away.
     if (risk && risk.level == WitchPluginRiskLevelSafe) {
-        [self installPackage:packageURL info:info name:name isUpdate:isUpdate policy:WitchPluginSandboxPolicyAuto fromViewController:viewController];
+        [self installPackage:packageURL info:info name:name isUpdate:isUpdate options:installOptions fromViewController:viewController];
         return;
     }
     if (!risk) {
@@ -83,6 +96,11 @@
         [message appendFormat:@"\n%@\n", localize(@"This plugin is dangerous. It asks for access the launcher sandbox cannot protect.", nil)];
     } else {
         [message appendFormat:@"\n%@\n", localize(@"This plugin needs attention before you trust it.", nil)];
+    }
+    if (installOptions.trust == WitchPluginTrustPublisher) {
+        [message appendFormat:@"\n%@: %@\n", localize(@"Publisher", nil), installOptions.trustMessage.length > 0 ? installOptions.trustMessage : localize(@"Trusted publisher", nil)];
+    } else {
+        [message appendFormat:@"\n%@: %@\n", localize(@"Publisher", nil), localize(@"Unknown. The registry does not know it. Install only if you trust the author.", nil)];
     }
     if (risk.executionSummary.count > 0) {
         [message appendFormat:@"\n%@\n", localize(@"What the launcher will run:", nil)];
@@ -123,8 +141,8 @@
                               selection:^(NSInteger index) {
             PluginInstallFlow *strongSelf = weakSelf;
             if (!strongSelf) return;
-            WitchPluginSandboxPolicy policy = (index == 1) ? WitchPluginSandboxPolicyNever : WitchPluginSandboxPolicyAlways;
-            [strongSelf installPackage:packageURL info:info name:name isUpdate:isUpdate policy:policy fromViewController:viewController];
+            installOptions.sandboxPolicy = (index == 1) ? WitchPluginSandboxPolicyNever : WitchPluginSandboxPolicyAlways;
+            [strongSelf installPackage:packageURL info:info name:name isUpdate:isUpdate options:installOptions fromViewController:viewController];
         } cancel:^{
             [[NSFileManager defaultManager] removeItemAtPath:packageURL.path error:nil];
         }];
@@ -138,7 +156,8 @@
                          onConfirm:^{
         PluginInstallFlow *strongSelf = weakSelf;
         if (!strongSelf) return;
-        [strongSelf installPackage:packageURL info:info name:name isUpdate:isUpdate policy:WitchPluginSandboxPolicyAlways fromViewController:viewController];
+        installOptions.sandboxPolicy = WitchPluginSandboxPolicyAlways;
+        [strongSelf installPackage:packageURL info:info name:name isUpdate:isUpdate options:installOptions fromViewController:viewController];
     } onCancel:^{
         [[NSFileManager defaultManager] removeItemAtPath:packageURL.path error:nil];
     }];
@@ -180,14 +199,13 @@
                    info:(NSDictionary *)info
                    name:(NSString *)name
                 isUpdate:(BOOL)isUpdate
-                 policy:(WitchPluginSandboxPolicy)policy
+                options:(WitchPluginInstallOptions *)options
       fromViewController:(UIViewController *)viewController {
     dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
         NSError *error = nil;
         BOOL installed = [WitchPluginManager.shared installPackageAtURL:packageURL
                                                           expectedInfo:info
-                                                       sandboxPolicy:policy
-                                                         allowReplace:isUpdate
+                                                               options:options
                                                                  error:&error];
         dispatch_async(dispatch_get_main_queue(), ^{
             [[NSFileManager defaultManager] removeItemAtPath:packageURL.path error:nil];
@@ -195,7 +213,8 @@
                 showDialog(localize(@"Install Failed", nil), error.localizedDescription ?: @"Cannot install plugin");
                 return;
             }
-            NSLog(@"[Plugins] Installed %@ after verification (sandbox=%@)", name, policy == WitchPluginSandboxPolicyNever ? @"off" : @"on");
+            NSLog(@"[Plugins] Installed %@ after verification (sandbox=%@, trust=%ld)",
+                  name, options.sandboxPolicy == WitchPluginSandboxPolicyNever ? @"off" : @"on", (long)options.trust);
             [WitchPluginTheme reload];
             [ThemeManager.shared broadcastThemeChange];
             NSString *message = isUpdate

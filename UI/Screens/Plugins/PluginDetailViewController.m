@@ -112,9 +112,9 @@ static NSString *WPRiskString(id value) {
     UILabel *status = [[UILabel alloc] initWithFrame:CGRectMake(20, 112, width - 140, 22)];
     status.autoresizingMask = UIViewAutoresizingFlexibleWidth;
     status.font = [UIFont systemFontOfSize:13 weight:UIFontWeightSemibold];
-    if (self.plugin.verificationState == WitchPluginVerificationStateVerified) {
+    if (self.plugin.trust == WitchPluginTrustPublisher) {
         status.textColor = ThemeManager.shared.successColor;
-        status.text = localize(@"Verified by the Witch registry", nil);
+        status.text = self.plugin.trustMessage.length > 0 ? self.plugin.trustMessage : localize(@"Trusted publisher", nil);
     } else if (self.plugin.verificationState == WitchPluginVerificationStateRevoked) {
         status.textColor = ThemeManager.shared.errorColor;
         status.text = localize(@"Revoked by the Witch registry", nil);
@@ -145,6 +145,38 @@ static NSString *WPRiskString(id value) {
     self.tableView.tableHeaderView = header;
 }
 
+#pragma mark - Published build
+
+// The catalog publishes the hash of the released package. Comparing it with
+// the hash of the installed build tells whether the installed plugin is still
+// the one that was published.
+- (nullable WitchPluginCatalogEntry *)publishedEntry {
+    return [WitchPluginUpdateService.shared entryForPluginID:self.pluginID];
+}
+
+- (BOOL)publishedBuildMatches {
+    WitchPluginCatalogEntry *entry = [self publishedEntry];
+    if (!entry) return NO;
+    if (entry.sha256.length == 0 || self.plugin.artifactSha256.length == 0) return NO;
+    return [entry.sha256.lowercaseString isEqualToString:self.plugin.artifactSha256.lowercaseString];
+}
+
+- (NSString *)publishedBuildText {
+    WitchPluginCatalogEntry *entry = [self publishedEntry];
+    if (!entry) {
+        return self.plugin.publishedSha256.length > 0
+            ? [NSString stringWithFormat:localize(@"Matches the package that was published (%@)", nil), self.plugin.publishedSha256]
+            : localize(@"No published package for this plugin", nil);
+    }
+    if ([self publishedBuildMatches]) {
+        return [NSString stringWithFormat:localize(@"Matches the package on GitHub (%@)", nil), entry.sha256];
+    }
+    if (entry.sha256.length > 0) {
+        return [NSString stringWithFormat:localize(@"Differs from the package on GitHub (%@)", nil), entry.sha256];
+    }
+    return localize(@"No published package for this plugin", nil);
+}
+
 #pragma mark - Catalog
 
 - (nullable WitchPluginCatalogEntry *)updateEntry {
@@ -162,7 +194,7 @@ static NSString *WPRiskString(id value) {
 
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section {
     if (section == PluginDetailSectionAbout) return 5;
-    if (section == PluginDetailSectionSecurity) return 4;
+    if (section == PluginDetailSectionSecurity) return 6;
     if (section == PluginDetailSectionAnalysis) return [self analysisRows].count;
     return [self manageRows].count;
 }
@@ -299,18 +331,25 @@ static NSString *WPRiskString(id value) {
         }
     } else if (indexPath.section == PluginDetailSectionSecurity) {
         NSString *state = localize(@"Unverified", nil);
-        if (self.plugin.verificationState == WitchPluginVerificationStateVerified) state = localize(@"Verified", nil);
+        if (self.plugin.trust == WitchPluginTrustPublisher) state = localize(@"Verified", nil);
         else if (self.plugin.verificationState == WitchPluginVerificationStateRevoked) state = localize(@"Revoked", nil);
         else if (self.plugin.verificationState == WitchPluginVerificationStateInvalid) state = localize(@"Blocked", nil);
-        NSArray *labels = @[localize(@"Registry status", nil), localize(@"Signature", nil), localize(@"Signing key", nil), localize(@"Checksums SHA-256", nil)];
+        NSArray *labels = @[localize(@"Registry status", nil), localize(@"Publisher", nil), localize(@"Published build", nil), localize(@"Signature", nil), localize(@"Signing key", nil), localize(@"Checksums SHA-256", nil)];
         NSArray *values = @[
             self.plugin.verificationMessage ?: state,
+            self.plugin.trust == WitchPluginTrustPublisher ? (self.plugin.trustMessage.length > 0 ? self.plugin.trustMessage : localize(@"Trusted publisher", nil)) : (self.plugin.trustMessage.length > 0 ? self.plugin.trustMessage : localize(@"Unknown publisher", nil)),
+            [self publishedBuildText],
             self.plugin.trustedSignature ? localize(@"Trusted publisher key", nil) : localize(@"Valid self-signed / developer key", nil),
             self.plugin.signatureKeyID ?: @"",
             self.plugin.checksumsSha256 ?: @""
         ];
         cell.textLabel.text = labels[indexPath.row];
         cell.detailTextLabel.text = values[indexPath.row];
+        if (indexPath.row == 1) {
+            cell.detailTextLabel.textColor = self.plugin.trust == WitchPluginTrustPublisher ? ThemeManager.shared.successColor : ThemeManager.shared.warningColor;
+        } else if (indexPath.row == 2) {
+            cell.detailTextLabel.textColor = [self publishedBuildMatches] ? ThemeManager.shared.successColor : ThemeManager.shared.secondaryTextColor;
+        }
     } else if (indexPath.section == PluginDetailSectionAnalysis) {
         NSDictionary *row = [self analysisRows][indexPath.row];
         cell.textLabel.text = WPRiskString(row[@"title"]);

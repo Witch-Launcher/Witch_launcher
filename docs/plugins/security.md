@@ -31,18 +31,32 @@ Verification uses the public key embedded in the package. That proves the checks
 
 The launcher rejects packages larger than 32 MB, packages with more than 2,048 entries, and packages that would expand beyond 128 MB. These limits reduce zip-bomb and disk-exhaustion risk. Per-plugin `state.json` is capped at 1 MB.
 
-## Trust and registry verification
+## Trust and publisher verification
 
 Two decisions are separate:
 
 1. The package is cryptographically valid.
 2. The publisher and build are trusted.
 
-A valid package with an unknown key is installable with an `Unverified` warning and a `developerSigned` state. Tapping `Trust this developer key` pins the key ID and public key in local preferences. Pinned keys are accepted without a warning. Registry verification is checked independently and is tied to the package hash and checksum hash.
+The launcher answers the first one locally and always: the package must be signed, every file must be covered by the checksum manifest, and the file set and the size limits are checked.
 
-A registry `verified` result for a different package hash or checksum hash is treated as `Invalid`. Installed plugins are re-checked shortly after launch; an unreachable registry keeps the last known state, while a revoked or rejected result disables the plugin.
+The second one has two signals, and neither of them is a wall:
+
+| Signal | What it means |
+| --- | --- |
+| The registry verified this exact build | The registry checked the source, the license and the behaviour and confirmed this hash. The plugin screen shows the publisher as trusted |
+| The catalog publishes this exact hash | The package the launcher downloaded is the one the GitHub catalog publishes, byte for byte. The plugin screen compares the published SHA-256 with the hash of the installed build and says whether they still match |
+| Neither | The publisher is unknown. The package is still a valid signed package and can be installed, which is what makes it possible to try a plugin out or to build one |
+
+A build the registry **revoked** or **rejected** is never installed, no matter where it came from. An unreachable registry, a registry that does not know the publisher, or no registry at all leaves the plugin installable and simply marked as an unknown publisher.
+
+Tapping `Trust this developer key` pins the key ID and public key in local preferences. Pinned keys are accepted without a warning.
+
+Installed plugins are re-checked shortly after launch; an unreachable registry keeps the last known state, while a revoked or rejected result disables the plugin.
 
 Before loading an installed plugin, the launcher re-verifies its signature, signing key pin, checksums, file set, and size limits. A modified plugin is marked `Invalid` and disabled. Enabling a plugin and applying a registry result also run the same integrity check, so a stale verified badge cannot bypass local tampering.
+
+> [!NOTE] Trust in the publisher says nothing about what the plugin does. A trusted publisher can still ship something dangerous — that is what the [risk analysis](risk.md) is for.
 
 ## Open-source policy
 

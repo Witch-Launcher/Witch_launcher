@@ -23,7 +23,9 @@ So today a plugin can theme the launcher, surface its own settings, log to the l
 5. Review the verified package details.
 6. Confirm the install and restart the launcher.
 
-The launcher verifies the package signature and every checksum locally, then queries the Witch registry before installing. The registry base URL is read from **Settings → Witch base URL** (`witch.proxy_base_url`). A build the registry has not verified cannot be installed; if the registry is unreachable, the install is rejected rather than waved through.
+The launcher verifies the package signature and every checksum locally, then asks the Witch registry who the publisher is. The registry base URL is read from **Settings → Witch base URL** (`witch.proxy_base_url`).
+
+The registry verdict is a trust signal, not a wall. A build the registry verified is marked with a trusted publisher; a build it has never heard of is still installable — that is what makes it possible to try a plugin out or to publish one — and it is simply marked as an unknown publisher. Only a build the registry **revoked** or **rejected** is refused.
 
 ### Install and update from a GitHub repository
 
@@ -79,8 +81,8 @@ Two decisions are kept separate: whether a package is cryptographically valid �
 
 | State | Meaning | What the launcher does |
 | --- | --- | --- |
-| Unverified | Signature and checksums are valid, but the build is not verified by the registry | Surfaces a `developerSigned` warning. Tapping **Trust this developer key** pins the key ID and public key locally; pinned keys are accepted without a warning |
-| Verified | The registry verified this exact checksum set and package hash | Installs cleanly. The verdict is tied to the package hash — a verified result for a different hash is treated as **Invalid** |
+| Unverified | Signature and checksums are valid, but no publisher vouched for this build | Installs anyway and says so. Tapping **Trust this developer key** pins the key ID and public key locally; pinned keys are accepted without a warning |
+| Verified | The registry verified this exact checksum set and package hash, or the catalog publishes this exact hash | Installs cleanly and the publisher is shown as trusted. The verdict is tied to the package hash — a verified result for a different hash is treated as **Invalid** |
 | Revoked | The registry revoked this build | Disables the plugin at the next verification pass |
 | Invalid | The registry rejected the build, or the package no longer matches the verified checksums | Rejects the install, or disables an installed plugin. Before every load the launcher re-verifies signature, signing key pin, checksums, file set and size limits — a stale verified badge cannot bypass local tampering |
 

@@ -26,7 +26,9 @@ Nên hôm nay một plugin có thể theme launcher, đẩy cài đặt riêng c
 5. Xem lại chi tiết gói đã được xác minh.
 6. Xác nhận cài và khởi động lại launcher.
 
-Launcher xác minh chữ ký gói và từng checksum cục bộ, rồi hỏi Witch registry trước khi cài. Base URL của registry đọc từ **Cài đặt → Witch base URL** (`witch.proxy_base_url`). Một gói registry chưa xác minh không thể cài; nếu registry không tới được, lượt cài bị từ chối thay vì bỏ qua.
+Launcher xác minh chữ ký gói và từng checksum cục bộ, rồi hỏi Witch registry xem nhà phát hành là ai. Base URL của registry đọc từ **Cài đặt → Witch base URL** (`witch.proxy_base_url`).
+
+Kết luận của registry là một tín hiệu tin cậy, không phải bức tường. Gói đã được registry xác minh sẽ hiện nhà phát hành đáng tin; gói registry chưa từng nghe tới vẫn cài được — đó là lý do có thể thử plugin hoặc phát hành plugin của riêng mình — và chỉ được đánh dấu là nhà phát hành chưa biết. Chỉ gói bị registry **thu hồi** hoặc **từ chối** mới bị từ chối cài.
 
 ### Cài và cập nhật từ repository GitHub
 
@@ -86,8 +88,8 @@ Hai quyết định được giữ tách rời: một gói có hợp lệ về m
 
 | Trạng thái | Ý nghĩa | Launcher làm gì |
 | --- | --- | --- |
-| Unverified | Chữ ký và checksum hợp lệ, nhưng build chưa được registry xác minh | Hiển thị cảnh báo `developerSigned`. Nhấn **Tin khóa developer này** sẽ ghim ID khóa và khóa công khai cục bộ; khóa đã ghim được chấp nhận không cảnh báo |
-| Verified | Registry đã xác minh đúng tập checksum và hash gói này | Cài sạch. Kết luận gắn với hash gói — một kết quả verified cho một hash khác được coi là **Invalid** |
+| Unverified | Chữ ký và checksum hợp lệ, nhưng chưa nhà phát hành nào bảo chứng cho build này | Vẫn cài được và nói rõ là chưa rõ nhà phát hành. Nhấn **Tin khóa developer này** sẽ ghim ID khóa và khóa công khai cục bộ; khóa đã ghim được chấp nhận không cảnh báo |
+| Verified | Registry đã xác minh đúng tập checksum và hash gói này, hoặc danh mục công bố đúng hash này | Cài sạch và nhà phát hành hiện là đáng tin. Kết luận gắn với hash gói — một kết quả verified cho một hash khác được coi là **Invalid** |
 | Revoked | Registry đã thu hồi build này | Vô hiệu hóa plugin ở lượt rà xác minh kế |
 | Invalid | Registry đã từ chối build, hoặc gói không còn khớp các checksum đã xác minh | Từ chối cài, hoặc vô hiệu hóa plugin đã cài. Trước mỗi lần nạp, launcher rà lại chữ ký, ghim khóa ký, checksum, tập tệp và ngưỡng kích thước — một huy hiệu verified cũ không thể vượt qua can thiệp cục bộ |
 
