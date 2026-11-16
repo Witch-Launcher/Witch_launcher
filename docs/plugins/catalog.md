@@ -14,7 +14,9 @@ The configured repository is validated before a single byte of a package is down
 | `full_name` matches the configured `owner/repo` | A redirect or a renamed repository must not silently serve different content |
 | The default branch contains the catalog file | The catalog is the only entry point into the repository |
 
-The default repository is `Witch-Launcher/Witch_plugin_catalog`. Override it with the `witch.plugins.repo` preference; override the catalog file name with `witch.plugins.catalog_file` (default `witch-plugins.json`).
+The repository is configured in **Settings → Network → Plugin catalog repository** (`witch.plugins.repo`, `owner/repo`). The default is `Witch-Launcher/Witch_plugin_catalog`. The catalog file name can be changed with `witch.plugins.catalog_file` (default `witch-plugins.json`).
+
+A plugin repository can serve as its own catalog. [`examples/plugins/pe-buttons`](https://github.com/Ynnyny/witch-pe-buttons) does exactly that: pointing the setting at `Ynnyny/witch-pe-buttons` makes PE Buttons appear under **Available Plugins**.
 
 ## Catalog file {#format}
 

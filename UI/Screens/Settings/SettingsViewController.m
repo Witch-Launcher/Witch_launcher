@@ -351,6 +351,7 @@ static BOOL isPercentPrefKey(NSString *key) {
             header(@"settings.group.witch"),
             @{@"type": @"switch", @"label": localize(@"preference.title.witch_enabled", nil), @"key": @"witch.server_enabled", @"default": @YES},
             @{@"type": @"text", @"label": localize(@"preference.title.witch_base_url", nil), @"key": @"witch.proxy_base_url", @"placeholder": localize(@"preference.detail.witch_base_url", nil)},
+            @{@"type": @"text", @"label": localize(@"preference.title.witch_plugin_repo", nil), @"key": @"witch.plugins.repo", @"placeholder": @"owner/repo"},
             @{@"type": @"text", @"label": localize(@"preference.title.witch_token", nil), @"key": @"witch.proxy_token", @"placeholder": @"Bearer token"},
             @{@"type": @"text", @"label": localize(@"preference.title.witch_hmac", nil), @"key": @"witch.proxy_hmac", @"placeholder": @"HMAC secret"},
             header(@"settings.group.curseforge"),

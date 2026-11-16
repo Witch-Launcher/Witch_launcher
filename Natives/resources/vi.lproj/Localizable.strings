@@ -1492,6 +1492,10 @@
 
 "Available Plugins" = "Plugin có sẵn";
 
+"preference.title.witch_plugin_repo" = "Repository danh mục plugin";
+
+"preference.detail.witch_plugin_repo" = "Repository GitHub phát hành danh mục plugin (owner/repo)";
+
 "Loading the plugin catalog..." = "Đang tải danh mục plugin...";
 
 "No plugin catalog is available." = "Không có danh mục plugin nào khả dụng.";

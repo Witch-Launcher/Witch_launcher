@@ -14,7 +14,9 @@ Repository được cấu hình sẽ được kiểm tra trước khi bất kỳ
 | `full_name` khớp với `owner/repo` đã cấu hình | Một chuyển hướng hay đổi tên không được âm thầm phục vụ nội dung khác |
 | Nhánh mặc định có tệp danh mục | Danh mục là cửa vào duy nhất của repository |
 
-Repository mặc định là `Witch-Launcher/Witch_plugin_catalog`. Ghi đè bằng tùy chọn `witch.plugins.repo`; đổi tên tệp danh mục bằng `witch.plugins.catalog_file` (mặc định `witch-plugins.json`).
+Repository được cấu hình ở **Cài đặt → Mạng → Repository danh mục plugin** (`witch.plugins.repo`, `owner/repo`). Mặc định là `Witch-Launcher/Witch_plugin_catalog`. Đổi tên tệp danh mục bằng `witch.plugins.catalog_file` (mặc định `witch-plugins.json`).
+
+Một repository plugin có thể làm luôn catalog của chính nó. [`examples/plugins/pe-buttons`](https://github.com/Ynnyny/witch-pe-buttons) làm đúng như vậy: trỏ cài đặt về `Ynnyny/witch-pe-buttons` là PE Buttons xuất hiện ở mục **Plugin có sẵn**.
 
 ## Tệp danh mục {#format}
 
