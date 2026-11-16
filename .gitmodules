@@ -16,3 +16,6 @@
 [submodule "Natives/external/MoltenVK"]
 	path = Natives/external/MoltenVK
 	url = https://github.com/Witch-Launcher/MoltenVK-iOS-edit.git
+[submodule "examples/plugins/pe-buttons"]
+	path = examples/plugins/pe-buttons
+	url = https://github.com/Ynnyny/witch-pe-buttons.git

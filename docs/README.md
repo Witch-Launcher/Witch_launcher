@@ -24,7 +24,7 @@ Boardwalk
 | `depends/` | Java dependency sources for the runtime builds |
 | `lwgjl/` | LWJGL 3.3.3 / 3.3.6 / 3.4.1 trees |
 | `scripts/` | Build helpers, including `scripts/plugins/pack_plugin.py` |
-| `examples/plugins/` | Reference `.plgw` plugins: hello, aurora-ui, pe-controls, theme-studio |
+| `examples/plugins/` | Reference `.plgw` plugins: hello, aurora-ui, pe-controls, theme-studio, plus `pe-buttons` — a published plugin kept as a git submodule |
 | `keys/` | Registry signing key material (private keys never ship in a package) |
 | `third_party/stikjit/` | Prebuilt arm64 StikJIT helper slice |
 | `tools/WitchJITHelper/` | Swift app extension that performs the built-in JIT attach |

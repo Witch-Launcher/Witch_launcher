@@ -134,6 +134,7 @@ Two rules matter for updates:
 - **Pin the file you release.** The ECDSA signature is randomized, so every packed package
   differs byte for byte. Copy the SHA-256 of the exact file attached to the release.
 
+A complete example lives in [`examples/plugins/pe-buttons`](https://github.com/Ynnyny/witch-pe-buttons), which is tracked as a git submodule of this repository.
 
 ## Deployment
 

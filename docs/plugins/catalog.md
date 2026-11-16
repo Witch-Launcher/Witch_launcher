@@ -69,6 +69,14 @@ An update replaces the plugin directory but keeps the user facing configuration:
 
 The risk analysis runs again for the new build. A plugin that becomes dangerous with the update is sandboxed by default even if the old version was not.
 
+## A published example {#example}
+
+[`examples/plugins/pe-buttons`](https://github.com/Ynnyny/witch-pe-buttons) is a complete
+catalog repository: it publishes a native plugin as a GitHub release, pins the download by
+SHA-256 in `witch-plugins.json` and keeps a stable publisher key so updates are accepted.
+It is tracked as a git submodule of the launcher repository, so it doubles as a reference
+layout.
+
 ## Publishing a catalog {#publishing}
 
 1. Build and sign the package as described in [Publishing](publishing.md).
