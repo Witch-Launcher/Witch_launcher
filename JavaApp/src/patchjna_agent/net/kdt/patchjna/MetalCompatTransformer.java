@@ -19,6 +19,7 @@ import java.util.Map;
  */
 final class MetalCompatTransformer implements ClassFileTransformer {
 
+    private static final String NATIVE_IOS_MARKER = "META-INF/metallum-ios-native";
     private static final Map<String, byte[]> PATCHES = new HashMap<String, byte[]>();
 
     static {
@@ -42,6 +43,10 @@ final class MetalCompatTransformer implements ClassFileTransformer {
     public byte[] transform(ClassLoader loader, String className, Class<?> classBeingRedefined,
                             ProtectionDomain protectionDomain, byte[] classfileBuffer) {
         if (className == null) {
+            return null;
+        }
+        if (loader != null && loader.getResource(NATIVE_IOS_MARKER) != null) {
+            System.out.println("[MetalCompat] native iOS Metallum jar detected; skipping legacy class replacements");
             return null;
         }
         byte[] patch = PATCHES.get(className);

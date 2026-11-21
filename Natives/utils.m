@@ -12,6 +12,7 @@
 
 #include "utils.h"
 #import "LauncherPreferences.h"
+#import "PLProfiles.h"
 
 CFTypeRef SecTaskCopyValueForEntitlement(void* task, NSString* entitlement, CFErrorRef  _Nullable *error);
 void* SecTaskCreateFromSelf(CFAllocatorRef allocator);
@@ -808,12 +809,24 @@ void amethyst_migrate_legacy_home(void) {
 }
 
 /*
- * True when the FidelityFX upscaler is enabled (the launcher's setting).
+ * True when the FidelityFX upscaler will actually run for the current
+ * profile (the launcher's setting AND a game the agent can patch).
  *
  * The values are the ones the settings screen writes: 0 = off, 1 = FSR1,
  * 2 = FSR2, 3 = FSR3. The frame generation switch is independent of them.
+ *
+ * The agent only patches MC 26.x's VulkanGpuSurface (renderpearl backend).
+ * On older versions nothing ever upscales, so the drawable has to follow the
+ * render resolution: with a physical-size drawable and a windowWidth-sized
+ * render, the whole window shrinks (res < 100%) or crops/magnifies
+ * (res > 100%) instead of only changing render resolution.
  */
 BOOL fsrUpscalerActive(void) {
     NSInteger upscaler = getPrefInt(@"fsr3.upscaler");
-    return (upscaler >= 1 && upscaler <= 3) ? YES : NO;
+    if (upscaler < 1 || upscaler > 3) {
+        return NO;
+    }
+    NSString *versionId = [PLProfiles resolveKeyForCurrentProfile:@"lastVersionId"];
+    NSInteger major = [[versionId componentsSeparatedByString:@"."].firstObject integerValue];
+    return major >= 26;
 }

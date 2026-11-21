@@ -66,6 +66,14 @@ static void installMetalMathModeCompat(void) {
     }
 }
 
+// Exported for egl_bridge.m: gl4es's constructor now initializes the Metal
+// ANGLE display during the renderer preload (GetHardwareExtensions' pbuffer
+// probe), so the iOS <18 math-mode compat must be installed before that
+// eglInitialize, not only from gl_init().
+void PLInstallMetalMathModeCompat(void) {
+    installMetalMathModeCompat();
+}
+
 // dlopen with a one-line success/failure log. ANGLE/MoltenVK/MobileGL
 // mismatches are silent by default (NULL handle + later 0x300B), so every
 // backend load must be visible in latestlog.txt.
@@ -148,6 +156,72 @@ void* PLResolveGLEntryPreferred(const char* name) {
 // the EGL/GLES instance that created the current context (fence calls then
 // fail with "no context"). eglGetProcAddress() of the active EGL always
 // returns the entry point of the instance that owns the context.
+void* g_gl4esEglHandle = NULL;  // Metal EGL image used by the GL4ES renderer
+
+// GL4ES's prebuilt Apple binary resolves every entry point lazily with
+// dlsym(RTLD_NEXT). libgl4es links the shared ANGLE framework pair as
+// dependencies, so that lookup can hand out the Vulkan libGLESv2 instance —
+// which does not own the current EGL context. Calls then run on an ANGLE
+// instance without a context and FBO queries return 0 (Minecraft 1.12.2:
+// "glCheckFramebufferStatus returned unknown status:0").
+// Route GL4ES's lookups through the EGL implementation that created the
+// context instead: EGL names from the Metal EGL image, GL names from its
+// eglGetProcAddress.
+// Exported for ctxbridges/gl_sync_shim.m, which interposes dlsym() inside
+// libgl4es so the raw dlsym(RTLD_NEXT, "gl...") paths are covered too.
+void* PLResolveGL4ESEntry(const char* name) {
+    if (!name) return NULL;
+    if (strncmp(name, "egl", 3) == 0) {
+        if (!g_gl4esEglHandle) {
+            // Safety net for lookups that fire before pojavInitOpenGL
+            // publishes the handle: RTLD_NOLOAD only returns the image that is
+            // already loaded, it never loads a second copy.
+            static BOOL tried = NO;
+            if (!tried) {
+                tried = YES;
+                NSString* fw = NSBundle.mainBundle.privateFrameworksPath;
+                g_gl4esEglHandle = dlopen([fw stringByAppendingPathComponent:@"libEGL_angle_metal"].UTF8String,
+                                          RTLD_LAZY | RTLD_NOLOAD);
+                if (g_gl4esEglHandle) {
+                    NSLog(@"[EGLBridge] GL4ES EGL handle recovered late via RTLD_NOLOAD");
+                }
+            }
+        }
+        if (g_gl4esEglHandle) {
+            void* fn = dlsym(g_gl4esEglHandle, name);
+            if (fn) return fn;
+        }
+        // Never hand back NULL for an EGL name: gl4es calls each pointer right
+        // after LOAD_EGL (GetHardwareExtensions) and a NULL call is the
+        // "Fatal signal 11 pc=0x0" crash. The Metal ANGLE pair is RTLD_GLOBAL,
+        // so RTLD_DEFAULT resolves it even when the handle is missing.
+        return dlsym(RTLD_DEFAULT, name);
+    }
+    void* fn = PLResolveGLEntryPreferred(name);
+    if (fn) return fn;
+
+    // initialize_gl4es -> GetHardwareExtensions runs from the renderer preload,
+    // before gl_init() fills handle.eglGetProcAddress. It creates its own EGL
+    // pbuffer context (eglGetDisplay/eglInitialize/eglCreateContext/
+    // eglMakeCurrent) through the egl* branch above, so its GL lookups must be
+    // served by that same Metal EGL. Falling through to dlsym() would hand out
+    // another image's entry point: the dlsym interposer calls the real dlsym
+    // from this app image, so RTLD_NEXT no longer starts at libgl4es (the
+    // construction-time probe then hits Apple's OpenGLES, which has no current
+    // context and returns NULL -> strstr(NULL) crash in GetHardwareExtensions).
+    static void* (*metal_get_proc)(const char*) = NULL;
+    static BOOL triedProc = NO;
+    if (!triedProc && g_gl4esEglHandle) {
+        triedProc = YES;
+        metal_get_proc = (void* (*)(const char*))dlsym(g_gl4esEglHandle, "eglGetProcAddress");
+        Dl_info eglInfo;
+        const char *eglImage = (dladdr(g_gl4esEglHandle, &eglInfo) && eglInfo.dli_fname)
+            ? eglInfo.dli_fname : "active ANGLE EGL";
+        NSLog(@"[EGLBridge] GL4ES pre-init GL lookups -> %s eglGetProcAddress (%p)", eglImage, metal_get_proc);
+    }
+    return metal_get_proc ? metal_get_proc(name) : NULL;
+}
+
 void* PLResolveGLEntry(const char* name) {
     if (!name) return NULL;
     void* fn = resolve_gl(name);
@@ -339,28 +413,70 @@ void dlsym_EGL() {
             return;
         }
     } else if ([@ RENDERER_NAME_GL4ES isEqualToString:renderer]) {
-        // GL4ES renders through the private Metal ANGLE build. That libEGL was
-        // linked with ANGLE_CUSTOM_DISPATCH_LIBRARY=libGLESv2_angle_metal.dylib
-        // and loads the companion directly from Frameworks/, so do NOT route it
-        // through tinygl4angle (which links the shared Vulkan framework pair).
-        dl_handle = checked_dlopen([fwPath stringByAppendingPathComponent:@"libEGL_angle_metal"],
-                                   RTLD_LAZY | RTLD_GLOBAL, "libEGL_angle_metal (GL4ES Metal)");
-        if (!dl_handle) {
-            NSLog(@"[EGLBridge] GL4ES Metal EGL missing; falling back to tinygl4angle/Vulkan");
-            dl_handle = dlopen("@rpath/libtinygl4angle.dylib", RTLD_GLOBAL);
-            if (!dl_handle) dl_handle = dlopen([fwPath stringByAppendingPathComponent:@"libtinygl4angle.dylib"].UTF8String, RTLD_LAZY | RTLD_GLOBAL);
-        }
-        if (!dl_handle) {
-            dl_handle = dlopen("@rpath/libEGL.framework/libEGL", RTLD_LOCAL);
+        // GL4ES (like TinyANGLE) can run on either ANGLE backend, Metal or
+        // Vulkan. pojavInitOpenGL pre-loads the selected EGL pair and
+        // publishes it in g_gl4esEglHandle before the renderer is dlopened
+        // (its constructor queries GL through that same image). Reuse that
+        // handle here: force-loading libEGL_angle_metal would split EGL state
+        // from the GLES companion whenever a different pair was selected.
+        if (g_gl4esEglHandle) {
+            dl_handle = g_gl4esEglHandle;
+            NSLog(@"[EGLBridge] GL4ES reusing preloaded ANGLE EGL (%p)", dl_handle);
+        } else {
+            // Fallback: the private Metal ANGLE build linked with
+            // ANGLE_CUSTOM_DISPATCH_LIBRARY=libGLESv2_angle_metal.dylib. It
+            // loads that companion directly from Frameworks/, so do NOT route
+            // it through tinygl4angle (which links the shared framework pair).
+            dl_handle = checked_dlopen([fwPath stringByAppendingPathComponent:@"libEGL_angle_metal"],
+                                       RTLD_LAZY | RTLD_GLOBAL, "libEGL_angle_metal (GL4ES Metal)");
+            if (!dl_handle) {
+                NSLog(@"[EGLBridge] GL4ES Metal EGL missing; falling back to tinygl4angle/Vulkan");
+                dl_handle = dlopen("@rpath/libtinygl4angle.dylib", RTLD_GLOBAL);
+                if (!dl_handle) dl_handle = dlopen([fwPath stringByAppendingPathComponent:@"libtinygl4angle.dylib"].UTF8String, RTLD_LAZY | RTLD_GLOBAL);
+            }
+            if (!dl_handle) {
+                dl_handle = dlopen("@rpath/libEGL.framework/libEGL", RTLD_LOCAL);
+            }
         }
         if (!dl_handle) {
             NSLog(@"EGLBridge: Failed to load EGL library for GL4ES");
             return;
         }
+        g_gl4esEglHandle = dl_handle;
+        // set_getprocaddress() is gl4es' own hook (src/gl/init.c): once set,
+        // proc_address() routes every lookup through it instead of
+        // dlsym(RTLD_NEXT). Resolve it from the GL4ES image itself so a
+        // different gl4es build (e.g. MobileGlues' bundled copy) is never
+        // picked up. libgl4es is preloaded by pojavInitOpenGL.
+        void* gl4es = dlopen([NSString stringWithFormat:@"@rpath/%@", renderer].UTF8String,
+                             RTLD_LAZY | RTLD_NOLOAD);
+        void (*setProcAddress)(void* (*)(const char*)) = gl4es
+            ? (void (*)(void* (*)(const char*)))dlsym(gl4es, "set_getprocaddress")
+            : NULL;
+        if (!setProcAddress) {
+            setProcAddress = (void (*)(void* (*)(const char*)))dlsym(RTLD_DEFAULT, "set_getprocaddress");
+        }
+        if (setProcAddress) {
+            Dl_info eglInfo;
+            const char *eglImage = (dladdr(dl_handle, &eglInfo) && eglInfo.dli_fname)
+                ? eglInfo.dli_fname : "active ANGLE EGL";
+            setProcAddress(PLResolveGL4ESEntry);
+            NSLog(@"[EGLBridge] GL4ES proc_address routed through %s", eglImage);
+        } else {
+            NSLog(@"[EGLBridge] GL4ES set_getprocaddress not found (dlsym interposer only)");
+        }
     } else {
-        // MTL_ANGLE (legacy tinygl4angle) and any other non-ANGLE renderer.
-        dl_handle = dlopen("@rpath/libtinygl4angle.dylib", RTLD_GLOBAL);
-        if (!dl_handle) dl_handle = dlopen([fwPath stringByAppendingPathComponent:@"libtinygl4angle.dylib"].UTF8String, RTLD_LAZY | RTLD_GLOBAL);
+        // MTL_ANGLE (TinyANGLE) and any other non-ANGLE renderer. When the
+        // "ANGLE Backend" setting is metal, load the Metal variant of the
+        // binary (libtinygl4angle_metal links the Metal pair instead of the
+        // canonical Vulkan pair); TinyANGLE resolves most GL entry points
+        // through dlsym(RTLD_DEFAULT), and the Metal pair is pre-loaded
+        // first by JavaLauncher/PLPreloadTinyAngleBackend, so Metal stays
+        // ahead of the canonical Vulkan framework in the global scope.
+        NSString *angleLibName = [PLAngleBackend() isEqualToString:@"vulkan"]
+            ? @"libtinygl4angle.dylib" : @"libtinygl4angle_metal.dylib";
+        dl_handle = dlopen([fwPath stringByAppendingPathComponent:angleLibName].UTF8String, RTLD_GLOBAL);
+        if (!dl_handle) dl_handle = dlopen([NSString stringWithFormat:@"@rpath/%@", angleLibName].UTF8String, RTLD_LAZY | RTLD_GLOBAL);
         if (!dl_handle) {
             dl_handle = dlopen("@rpath/libEGL.framework/libEGL", RTLD_LOCAL);
         }

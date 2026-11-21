@@ -295,6 +295,49 @@ void PLPreloadMobileGluesBackend(void) {
     }
 }
 
+// Read the "ANGLE Backend" setting (video.angle_backend): "metal" (default)
+// or "vulkan". Used by the TinyANGLE (MTL_ANGLE) renderer and the GL4ES
+// renderer so both share one switch.
+NSString* PLAngleBackend(void) {
+    id pref = getPrefObject(@"video.angle_backend");
+    NSString *backend = (pref && [pref isKindOfClass:NSString.class])
+        ? (NSString *)pref : @"metal";
+    return [backend isEqualToString:@"vulkan"] ? backend : @"metal";
+}
+
+// Pre-load TinyANGLE's ANGLE backend according to the "ANGLE Backend"
+// setting. Runs before JLI_Launch because MC 26.2 dlopens libtinygl4angle
+// (or its Metal variant) during JVM startup, before any GLFW hook —
+// libtinygl4angle_metal links the Metal pair, and the canonical libGLESv2
+// image dlopens only the Vulkan pair, so the backend must be in the global
+// scope before either is touched. Idempotent: dlopen() of an already-loaded
+// image returns the same handle.
+void PLPreloadTinyAngleBackend(void) {
+    NSString *frameworks = NSBundle.mainBundle.privateFrameworksPath;
+    NSString *backend = PLAngleBackend();
+    if ([backend isEqualToString:@"vulkan"]) {
+        NSLog(@"[EGLBridge] TinyANGLE + ANGLE Vulkan (ES 3.2, via MoltenVK)");
+        // libEGL_angle_vulkan is ANGLE's Vulkan build; it needs MoltenVK
+        // (driver via the runtime ICD manifest) + the loader before any
+        // eglInitialize() call.
+        ensureMoltenVKICD();
+        egl_checked_dlopen(getMoltenVKDylibPath(), "MoltenVK (TinyANGLE VulkanANGLE)");
+        egl_preloadVulkanLoader(frameworks);
+        egl_checked_dlopen([frameworks stringByAppendingPathComponent:@"libGLESv2_angle_vulkan"],
+                           "TinyANGLE ANGLE GLES (vulkan)");
+        egl_checked_dlopen([frameworks stringByAppendingPathComponent:@"libEGL_angle_vulkan"],
+                           "TinyANGLE ANGLE EGL (vulkan)");
+    } else {
+        NSLog(@"[EGLBridge] TinyANGLE + ANGLE Metal (ES 3.0-era)");
+        egl_checked_dlopen([frameworks stringByAppendingPathComponent:@"libGLESv2_angle_metal.dylib"],
+                           "TinyANGLE ANGLE GLES (metal)");
+        egl_checked_dlopen([frameworks stringByAppendingPathComponent:@"libEGL_angle_metal"],
+                           "TinyANGLE ANGLE EGL (metal)");
+    }
+    setenv("ANGLE_BACKEND", backend.UTF8String, 1);
+    NSLog(@"[EGLBridge] TinyANGLE preload ready: backend=%@", backend);
+}
+
 uint64_t pojavSwapCount(void) {
     if (widgetUsesFinalPresentCounter()) {
         return atomic_load_explicit(&widgetFinalPresentFrameCount, memory_order_relaxed);
@@ -350,20 +393,64 @@ int pojavInitOpenGL() {
         // GL4ES uses the private Metal ANGLE pair. libEGL_angle_metal is built
         // with ANGLE_CUSTOM_DISPATCH_LIBRARY=libGLESv2_angle_metal.dylib, so it
         // resolves the Metal companion directly instead of the shared framework
-        // pair (which stays Vulkan for LTW/MobileGL). Preload the GLES image
-        // first so dyld keeps Metal for GL4ES's own install_name lookups.
+        // pair (which stays Vulkan for LTW/MobileGL). Load both before the
+        // context is created; gl_bridge.m then routes GL4ES's own
+        // dlsym(RTLD_NEXT) lookups to this Metal EGL (set_getprocaddress +
+        // dlsym interposer), because libgl4es also links the shared Vulkan
+        // framework pair and RTLD_NEXT could hand out that context-less copy.
         NSString *frameworks = NSBundle.mainBundle.privateFrameworksPath;
-        NSLog(@"[EGLBridge] GL4ES + ANGLE Metal (private companion)");
-        NSString *metalGles = [frameworks stringByAppendingPathComponent:@"libGLESv2_angle_metal.dylib"];
-        if (![NSFileManager.defaultManager fileExistsAtPath:metalGles]) {
-            metalGles = [frameworks stringByAppendingPathComponent:@"libGLESv2_angle_metal"];
+        NSString *angleBackend = PLAngleBackend();
+        if ([angleBackend isEqualToString:@"vulkan"]) {
+            NSLog(@"[EGLBridge] GL4ES + ANGLE Vulkan (ES 3.2, via MoltenVK)");
+            // ANGLE's Vulkan build: MoltenVK ICD + loader must be ready before
+            // eglInitialize(); gl_bridge.m then routes GL4ES's own
+            // dlsym(RTLD_NEXT) lookups through g_gl4esEglHandle.
+            ensureMoltenVKICD();
+            egl_checked_dlopen(getMoltenVKDylibPath(), "MoltenVK (GL4ES VulkanANGLE)");
+            egl_preloadVulkanLoader(frameworks);
+            egl_checked_dlopen([frameworks stringByAppendingPathComponent:@"libGLESv2_angle_vulkan"],
+                               "GL4ES ANGLE GLES (vulkan)");
+            void *vulkanEgl = egl_checked_dlopen([frameworks stringByAppendingPathComponent:@"libEGL_angle_vulkan"],
+                                                 "GL4ES ANGLE EGL (vulkan)");
+            if (vulkanEgl) {
+                g_gl4esEglHandle = vulkanEgl;
+            }
+        } else {
+            // GL4ES uses the private Metal ANGLE pair. libEGL_angle_metal is built
+            // with ANGLE_CUSTOM_DISPATCH_LIBRARY=libGLESv2_angle_metal.dylib, so it
+            // resolves the Metal companion directly instead of the shared framework
+            // pair (which stays Vulkan for LTW/MobileGL). Load both before the
+            // context is created; gl_bridge.m then routes GL4ES's own
+            // dlsym(RTLD_NEXT) lookups to this Metal EGL (set_getprocaddress +
+            // dlsym interposer), because libgl4es also links the shared Vulkan
+            // framework pair and RTLD_NEXT could hand out that context-less copy.
+            NSLog(@"[EGLBridge] GL4ES + ANGLE Metal (private companion)");
+            // The gl4es constructor (initialize_gl4es -> GetHardwareExtensions)
+            // calls eglInitialize on the Metal EGL during the renderer preload
+            // below; compile the iOS <18 math-mode compat before that first
+            // entry point, not only from gl_init().
+            PLInstallMetalMathModeCompat();
+            NSString *metalGles = [frameworks stringByAppendingPathComponent:@"libGLESv2_angle_metal.dylib"];
+            if (![NSFileManager.defaultManager fileExistsAtPath:metalGles]) {
+                metalGles = [frameworks stringByAppendingPathComponent:@"libGLESv2_angle_metal"];
+            }
+            egl_checked_dlopen(metalGles, "GL4ES ANGLE GLES (metal)");
+            void *metalEgl = egl_checked_dlopen([frameworks stringByAppendingPathComponent:@"libEGL_angle_metal"],
+                               "GL4ES ANGLE EGL (metal)");
+            // libgl4es's constructor (initialize_gl4es -> GetHardwareExtensions)
+            // runs inside the renderer preload below, before gl_init() ever
+            // reaches dlsym_EGL(). That function builds its own EGL pbuffer
+            // context and queries GL through it, so publish the Metal EGL handle
+            // now: the dlsym interposer resolves egl* names through
+            // g_gl4esEglHandle and GL names through this EGL's eglGetProcAddress
+            // (PLResolveGL4ESEntry). Both sides must be the same instance.
+            if (metalEgl) {
+                g_gl4esEglHandle = metalEgl;
+            }
+            // Keep the ICD manifest as a fallback for the tinygl4angle/Vulkan path
+            // in case the custom Metal EGL is missing.
+            ensureMoltenVKICD();
         }
-        egl_checked_dlopen(metalGles, "GL4ES ANGLE GLES (metal)");
-        egl_checked_dlopen([frameworks stringByAppendingPathComponent:@"libEGL_angle_metal"],
-                           "GL4ES ANGLE EGL (metal)");
-        // Keep the ICD manifest as a fallback for the tinygl4angle/Vulkan path
-        // in case the custom Metal EGL is missing.
-        ensureMoltenVKICD();
         set_gl_bridge_tbl();
     } else if ([renderer isEqualToString:@ RENDERER_NAME_MOBILEGLUES]) {
         renderer = @ RENDERER_NAME_MOBILEGLUES;
@@ -376,7 +463,11 @@ int pojavInitOpenGL() {
         PLPreloadMobileGluesBackend();
         set_gl_bridge_tbl();
     } else if ([renderer isEqualToString:@ RENDERER_NAME_MTL_ANGLE]) {
-        ensureMoltenVKICD();
+        // TinyANGLE picks its ANGLE backend (Metal variant vs canonical
+        // Vulkan) via the "ANGLE Backend" setting; pre-load it now. On the
+        // LWJGL path libtinygl4angle/its Metal variant is already loaded and
+        // bound to its backend pair before this runs.
+        PLPreloadTinyAngleBackend();
         set_gl_bridge_tbl();
     } else if ([renderer isEqualToString:@ RENDERER_NAME_LTW]) {
         // libltw's constructor dlopens LIBGL_EGL during JVM startup, before
@@ -531,6 +622,17 @@ int pojavInitOpenGL() {
     // setups; keep that here too.
     if ([renderer isEqualToString:@ RENDERER_NAME_MOLTENVK]) {
         JNI_LWJGL_changeRenderer(RENDERER_NAME_MOBILEGLUES);
+    } else if ([renderer isEqualToString:@ RENDERER_NAME_MTL_ANGLE] &&
+               [PLAngleBackend() isEqualToString:@"metal"]) {
+        // Point LWJGL at the Metal variant of the TinyANGLE binary. The
+        // canonical libtinygl4angle links the canonical Vulkan framework
+        // pair; the Metal variant is the same binary with its two-level
+        // GLES dependency redirected to the Metal ANGLE pair (already
+        // pre-loaded by JavaLauncher), so LWJGL must load it, not the
+        // canonical image, or game GL calls would bind to Vulkan.
+        NSString *metalVariant = [NSBundle.mainBundle.privateFrameworksPath
+                                  stringByAppendingPathComponent:@"libtinygl4angle_metal.dylib"];
+        JNI_LWJGL_changeRenderer(metalVariant.UTF8String);
     } else {
         JNI_LWJGL_changeRenderer(renderer.UTF8String);
     }

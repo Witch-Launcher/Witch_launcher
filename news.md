@@ -29,6 +29,9 @@
 * Built-in StikJIT
 * Correct visual rendering when entering Multiplayer
 * Frame generation
+* Hotbar not registering
+* Fixed a GLFW error that occurred when using an external keyboard
+* TGLMT render
 ## Mod Fixes:
 * Voicechat mod
 * LabyMod

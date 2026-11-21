@@ -126,6 +126,17 @@ void PLPreloadMobileGluesBackend(void);
 // it again on the GLFW path (idempotent).
 void PLPreloadLTWBackend(void);
 
+// Defined in egl_bridge.m. Reads the "ANGLE Backend" setting
+// (video.angle_backend, "metal" | "vulkan").
+NSString* PLAngleBackend(void);
+
+// Defined in egl_bridge.m. Pre-loads TinyANGLE's ANGLE backend (Metal
+// variant vs canonical Vulkan pair) per the "ANGLE Backend" setting.
+// JavaLauncher calls it before JLI_Launch (MC 26.2 loads libtinygl4angle
+// during JVM startup); pojavInitOpenGL calls it again on the GLFW path
+// (idempotent).
+void PLPreloadTinyAngleBackend(void);
+
 // Init functions
 void init_bypassDyldLibValidation();
 void init_jit_vm_remap_hook();

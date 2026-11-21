@@ -209,7 +209,7 @@ static GameSurfaceView* pojavWindow;
 
     [self updateSavedResolution];
 
-    self.rootView = [[UIView alloc] initWithFrame:CGRectMake(0, 0, self.view.frame.size.width + 30.0, self.view.frame.size.height)];
+    self.rootView = [[UIView alloc] initWithFrame:self.view.frame];
     [self.view addSubview:self.rootView];
 
     self.ctrlView = [[ControlLayout alloc] initWithFrame:getSafeArea(self.view.frame)];
@@ -822,17 +822,27 @@ static GameSurfaceView* pojavWindow;
         self.surfaceView.frame = self.surfaceView.superview.frame;
     }
 
-    // Witch patch: with the FidelityFX upscaler the swapchain has to be as
-    // big as the drawable (the physical screen), because the game renders
-    // into its own smaller render target and the upscaler writes the
-    // upscaled frame into the swapchain. With the drawable at the
-    // resolution scale instead, iOS would magnify the whole frame with a
-    // nearest filter (blocky) and the HUD would be blown up with it.
-    // The agent forces VulkanGpuSurface.configure() to the drawable size,
-    // so the drawable and the swapchain always match.
-    CGFloat surfaceScale = fsrUpscalerActive() ? 1.0f : resolutionScale;
+    // Witch fix: the visible game window must stay at the full physical
+    // size when video.resolution changes. The game renders its framebuffer
+    // (windowWidth/Height = physical x reso, below) into the CAMetalLayer,
+    // and iOS stretches the layer to the full screen — so with the surface
+    // scale at the full value (the FSR path already forces this) the game
+    // stays full-screen on reso changes and there is no black gap. The old
+    // code set contentsScale = screenScale x reso: lowering reso made the
+    // game's window shrink and the screen below it go uncovered, while the
+    // touch mapping (sendTouchPoint → physical x reso) stayed in the
+    // smaller framebuffer space — the hotbar/inventory in-world UI became
+    // unclickable. With the visible window full, taps land in the game's
+    // framebuffer where the game draws its UI.
+    self.surfaceView.layer.contentsScale = self.screenScale;
 
-    self.surfaceView.layer.contentsScale = self.screenScale * surfaceScale;
+    // contentsScale changes alone never trigger layoutSubviews (the frame
+    // assignment above is a no-op when the size is unchanged), so the
+    // drawable and the size-tracking backends would keep the old scale —
+    // the window itself then shrinks/crops with video.resolution instead of
+    // only the render resolution changing. Sync them here, exactly as a
+    // rotation (bounds change) does.
+    [self.surfaceView syncLayerSize];
 
     physicalWidth = roundf(self.surfaceView.frame.size.width * self.screenScale);
     physicalHeight = roundf(self.surfaceView.frame.size.height * self.screenScale);
@@ -1015,7 +1025,7 @@ static GameSurfaceView* pojavWindow;
 - (void)viewWillTransitionToSize:(CGSize)size withTransitionCoordinator:(id<UIViewControllerTransitionCoordinator>)coordinator
 {
     [coordinator animateAlongsideTransition:^(id<UIViewControllerTransitionCoordinatorContext>  _Nonnull context) {
-        self.rootView.bounds = CGRectMake(0, 0, size.width + 30.0, size.height);
+        self.rootView.frame = CGRectMake(0, 0, size.width, size.height);
 
         CGRect frame = self.view.frame;
         frame.size = size;

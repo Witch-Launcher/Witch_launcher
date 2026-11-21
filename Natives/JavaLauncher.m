@@ -1027,6 +1027,14 @@ int launchJVMWithArgs(NSString *username, id launchTarget, int width, int height
         // startup. MC 26.3 reaches that point before pojavInitOpenGL, so the
         // backend and environment must be ready here or proc_init() aborts.
         PLPreloadLTWBackend();
+    } else if ([renderer isEqualToString:@ RENDERER_NAME_MTL_ANGLE]) {
+        // libtinygl4angle_metal (Metal variant) and the canonical Vulkan pair
+        // are both dependencies of the two ANGLE images the app uses; the
+        // backend selected by the "ANGLE Backend" setting must be in the
+        // global scope before JLI_Launch (LWJGL loads libtinygl4angle during
+        // JVM startup, and the game resolves GL entry points through
+        // RTLD_DEFAULT). Idempotent — pojavInitOpenGL re-runs it.
+        PLPreloadTinyAngleBackend();
     }
 
     // The TouchController mod (0.3.1-alpha13+) only activates its iOS
@@ -1355,6 +1363,17 @@ int launchJVMWithArgs(NSString *username, id launchTarget, int width, int height
             // this with libEGL_Mesa26.dylib.
             openglLibName = RENDERER_NAME_LTW;
             NSLog(@"[JavaLauncher] opengl.libname → %s (LTW GL wrapper)", openglLibName);
+        } else if (strcmp(glLibName, RENDERER_NAME_MTL_ANGLE) == 0) {
+            // TinyANGLE: when the "ANGLE Backend" setting is metal (default),
+            // load the Metal variant of the binary (libtinygl4angle_metal
+            // links the Metal pair instead of the canonical Vulkan pair).
+            // The Metal pair is pre-loaded before JLI_Launch; this makes LWJGL
+            // load the same image that owns the GL entry points.
+            NSString *angleBackend = PLAngleBackend();
+            openglLibName = [angleBackend isEqualToString:@"metal"]
+                ? "libtinygl4angle_metal.dylib" : RENDERER_NAME_MTL_ANGLE;
+            NSLog(@"[JavaLauncher] opengl.libname → %s (TinyANGLE, ANGLE Backend=%@)",
+                  openglLibName, angleBackend);
         } else if (strncmp(glLibName, "libOSMesa", 9) == 0 && [ZinkConfig isZinkUsingEGL]) {
             // Mesa 26.2.2 (EGL): LWJGL must resolve GL procs from libEGL.1.dylib
             openglLibName = "libEGL_Mesa26.dylib";
@@ -1421,6 +1440,7 @@ int launchJVMWithArgs(NSString *username, id launchTarget, int width, int height
     // so the result is libspirv-cross-c-shared.0.dylib (not
     // liblibspirv-cross-c-shared.0.dylib.dylib).
     margv[++margc] = "-Dorg.lwjgl.spvc.libname=spirv-cross-c-shared.0";
+    margv[++margc] = "-Dmetallum.platform=ios-arm64";
 
     NSString *librariesPath = [NSString stringWithFormat:@"%@/libs", NSBundle.mainBundle.bundlePath];
     margv[++margc] = [NSString stringWithFormat:@"-javaagent:%@/cacio-init-agent.jar=", librariesPath].UTF8String;

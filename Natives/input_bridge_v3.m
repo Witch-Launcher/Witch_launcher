@@ -382,6 +382,27 @@ void handleFramebufferSizeJava(void* window, int w, int h) {
     }
 }
 
+/* cursorX/cursorY are physical device pixels only in grabbed (relative
+ * mouse) mode, where SurfaceViewController.sendTouchPoint feeds the raw
+ * screenScale deltas. In free-cursor mode sendTouchPoint already scales by
+ * resolutionScale, so those values are already in the game's framebuffer
+ * space (windowWidth x windowHeight) and must pass through untouched.
+ * Converting unconditionally squared the resolution factor after a
+ * video.resolution change and moved every menu cursor short of its target. */
+static void aasdl_cursorToGame(CGFloat *x, CGFloat *y) {
+    if (isGrabbing && physicalWidth > 0 && physicalHeight > 0 && windowWidth > 0 && windowHeight > 0) {
+        *x = *x * (CGFloat)windowWidth / (CGFloat)physicalWidth;
+        *y = *y * (CGFloat)windowHeight / (CGFloat)physicalHeight;
+    }
+}
+
+static void aasdl_cursorFromGame(CGFloat *x, CGFloat *y) {
+    if (isGrabbing && physicalWidth > 0 && physicalHeight > 0 && windowWidth > 0 && windowHeight > 0) {
+        *x = *x * (CGFloat)physicalWidth / (CGFloat)windowWidth;
+        *y = *y * (CGFloat)physicalHeight / (CGFloat)windowHeight;
+    }
+}
+
 void pojavPumpEvents(void* window) {
     static BOOL setInputReady = NO;
     if (window && showingWindow == 0) {
@@ -396,8 +417,11 @@ void pojavPumpEvents(void* window) {
     if((cLastX != cursorX || cLastY != cursorY) && GLFW_invoke_CursorPos) {
         cLastX = cursorX;
         cLastY = cursorY;
-        if (isUseStackQueueCall)
-            safeInvokeCursorPos(window, cursorX, cursorY);
+        if (isUseStackQueueCall) {
+            CGFloat gx = cursorX, gy = cursorY;
+            aasdl_cursorToGame(&gx, &gy);
+            safeInvokeCursorPos(window, gx, gy);
+        }
     }
     for(size_t i = 0; i < counter; i++) {
         GLFWInputEvent event = events[i];
@@ -440,22 +464,31 @@ void pojavRewindEvents() {
 JNIEXPORT void JNICALL
 Java_org_lwjgl_glfw_GLFW_nglfwGetCursorPos(JNIEnv *env, jclass clazz, jlong window, jobject xpos,
                                           jobject ypos) {
-    *(double*)(*env)->GetDirectBufferAddress(env, xpos) = cursorX;
-    *(double*)(*env)->GetDirectBufferAddress(env, ypos) = cursorY;
+    CGFloat gx = cursorX, gy = cursorY;
+    aasdl_cursorToGame(&gx, &gy);
+    *(double*)(*env)->GetDirectBufferAddress(env, xpos) = gx;
+    *(double*)(*env)->GetDirectBufferAddress(env, ypos) = gy;
 }
 
 JNIEXPORT void JNICALL
 Java_org_lwjgl_glfw_GLFW_nglfwGetCursorPosA(JNIEnv *env, jclass clazz, jlong window,
                                             jdoubleArray xpos, jdoubleArray ypos) {
-    (*env)->SetDoubleArrayRegion(env, xpos, 0,1, &cursorX);
-    (*env)->SetDoubleArrayRegion(env, ypos, 0,1, &cursorY);
+    CGFloat gx = cursorX, gy = cursorY;
+    aasdl_cursorToGame(&gx, &gy);
+    (*env)->SetDoubleArrayRegion(env, xpos, 0,1, &gx);
+    (*env)->SetDoubleArrayRegion(env, ypos, 0,1, &gy);
 }
 
 JNIEXPORT void JNICALL
 Java_org_lwjgl_glfw_GLFW_glfwSetCursorPos(JNIEnv *env, jclass clazz, jlong window, jdouble xpos,
                                           jdouble ypos) {
-    cLastX = cursorX = xpos;
-    cLastY = cursorY = ypos;
+    /* The game hands back framebuffer-space coordinates; store them as
+     * physical pixels so grab-mode deltas and the flush comparison keep
+     * working in one space. */
+    CGFloat px = (CGFloat) xpos, py = (CGFloat) ypos;
+    aasdl_cursorFromGame(&px, &py);
+    cLastX = cursorX = px;
+    cLastY = cursorY = py;
 }
 
 // Cursor type switching: called from Java when glfwSetCursor or glfwCreateStandardCursor is invoked.
@@ -721,6 +754,20 @@ typedef struct {
     uint32_t windowID;
     const char *text;    /* UTF-8 */
 } AASDL_TextInputEvent;
+
+/* SDL3 window event (SDL_events.h: struct SDL_WindowEvent). data1/data2 are
+ * pushed as the framebuffer size - the space Minecraft's Window.getScreenWidth
+ * lives in (see aasdl_coords), mirroring how nativeSendScreenSize passes the
+ * framebuffer size to both GLFW callbacks. */
+typedef struct {
+    uint32_t type;       /* SDL_EVENT_WINDOW_RESIZED = 0x206,
+                          * SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED = 0x207 */
+    uint32_t reserved;
+    uint64_t timestamp;
+    uint32_t windowID;
+    int32_t data1;
+    int32_t data2;
+} AASDL_WindowEvent;
 
 /* SDL3 touch finger events. TouchController 0.3.1-alpha13+ drives its iOS
  * input through SdlPlatform, which only consumes SDL_EVENT_FINGER_* events;
@@ -1118,20 +1165,26 @@ void AASDL_NoteGrab(bool grabbed) {
     });
 }
 
-/* Map the launcher's cursor coordinates to the game's mouse space. Pass
- * framebuffer-pixel coordinates straight through: Minecraft 26.3 scales mouse
- * positions by Window.getScreenWidth(), which the launcher forces to the
- * framebuffer size (MCOptionUtils sets overrideWidth/Height = the screensize
- * -D property = 2208x1242; the in-game F3 "Window: 2208x1242 (3x pixel
- * density)" line proves it: getScreenWidth()=2208 while
- * pixelDensity=pixels/SDL_GetWindowSize=2208/736=3.0). An earlier commit
- * divided these to SDL window points (736x414), which made every GUI cursor,
- * hover and menu click land at 1/3 of the intended position — menus looked
- * dead to taps while drag-motion and keyboard still worked. Relative deltas
- * (xrel/yrel) are kept in framebuffer pixels in aasdl_pushMouseMotion. */
+/* Map the launcher's cursor coordinates to the game's mouse space. The game
+ * lives in the framebuffer (windowWidth x windowHeight): Minecraft's
+ * Window.getScreenWidth() / SDL_GetWindowSizeInPixels report that size, and
+ * every injected event carries coordinates in it.
+ *
+ * SurfaceViewController.sendTouchPoint already delivers framebuffer pixels
+ * while the cursor is free (it multiplies the touch point by
+ * screenScale * resolutionScale), so those pass through untouched. Only the
+ * grabbed (relative mouse) path stays in physical device pixels; scale that
+ * one down so the absolute x/y kept alongside the deltas cannot exceed the
+ * framebuffer and clamp to the wrong edge. Scaling unconditionally would
+ * square the resolution factor and land every menu click short whenever
+ * video.resolution != 100%. */
 static BOOL aasdl_coords(CGFloat x, CGFloat y, float *outX, float *outY) {
     if (windowWidth <= 0 || windowHeight <= 0 || aasdl_winW <= 0 || aasdl_winH <= 0) {
         return NO;
+    }
+    if (isGrabbing && physicalWidth > 0 && physicalHeight > 0) {
+        x *= (CGFloat)windowWidth / (CGFloat)physicalWidth;
+        y *= (CGFloat)windowHeight / (CGFloat)physicalHeight;
     }
     *outX = (float) x;
     *outY = (float) y;
@@ -1267,8 +1320,13 @@ static void aasdl_pushFinger(uint32_t type, CGFloat x, CGFloat y) {
     f->type = type;
     f->touchID = 1;
     f->fingerID = 1;
-    if (windowWidth > 0) f->x = (float) x / (float) windowWidth;
-    if (windowHeight > 0) f->y = (float) y / (float) windowHeight;
+    /* x/y arrive in the same framebuffer-pixel space as the injected mouse
+     * events (sendTouchPoint pre-scales by resolutionScale while the cursor
+     * is free), so normalize by windowWidth/Height. Using the physical size
+     * here shrank every touch by the resolution factor whenever
+     * video.resolution != 100%. */
+    if (windowWidth > 0) f->x = (float) (x / (CGFloat) windowWidth);
+    if (windowHeight > 0) f->y = (float) (y / (CGFloat) windowHeight);
     f->pressure = 1.0f;
     f->windowID = aasdl_windowID();
     aasdl_PushEvent(&ev);
@@ -1448,7 +1506,9 @@ void CallbackBridge_nativeSendCursorPos(char event, CGFloat x, CGFloat y) {
 
     if (GLFW_invoke_CursorPos) {
         if (isInputReady && !isUseStackQueueCall) {
-            safeInvokeCursorPos((void*) showingWindow, (double) cursorX, (double) cursorY);
+            CGFloat gx = cursorX, gy = cursorY;
+            aasdl_cursorToGame(&gx, &gy);
+            safeInvokeCursorPos((void*) showingWindow, (double) gx, (double) gy);
         }
     } else if (aasdl_available()) {
         float mx, my;
@@ -1628,7 +1688,40 @@ void CallbackBridge_nativeSendScreenSize(int width, int height) {
             }
         }
     }
-    
+
+    /* SDL3 sessions (Minecraft 26.x) never register the GLFW callbacks above:
+     * without a resize event the game keeps the launch-time screen size
+     * (overrideWidth/Height) while the launcher already moved to the new
+     * framebuffer - mouse scaling, GUI layout and the launcher's own hit
+     * tests then disagree and clicks land at the wrong place after a
+     * video.resolution change. Push the window events a real size change
+     * would deliver. Guarded so a repeated updateSavedResolution with the
+     * same size does not spam the queue. */
+    static int lastSdlW = -1, lastSdlH = -1;
+    if (aasdl_available() && aasdl_winID != 0 &&
+        (width != lastSdlW || height != lastSdlH)) {
+        lastSdlW = width;
+        lastSdlH = height;
+        AASDL_Event ev;
+        AASDL_WindowEvent *we;
+        memset(&ev, 0, sizeof(ev));
+        we = (AASDL_WindowEvent *) ev.raw;
+        we->type = 0x206; /* SDL_EVENT_WINDOW_RESIZED */
+        we->windowID = aasdl_winID;
+        we->data1 = width;
+        we->data2 = height;
+        aasdl_PushEvent(&ev);
+        memset(&ev, 0, sizeof(ev));
+        we = (AASDL_WindowEvent *) ev.raw;
+        we->type = 0x207; /* SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED */
+        we->windowID = aasdl_winID;
+        we->data1 = width;
+        we->data2 = height;
+        aasdl_PushEvent(&ev);
+        NSLog(@"[Input] pushed SDL window resize %dx%d (win=%u)",
+              width, height, aasdl_winID);
+    }
+
     // return (isInputReady && (GLFW_invoke_FramebufferSize || GLFW_invoke_WindowSize));
 }
 

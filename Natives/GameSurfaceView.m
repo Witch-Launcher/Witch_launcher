@@ -69,6 +69,10 @@
     // Bounds can be zero at init (view not attached yet) and become valid
     // after autolayout / rotation. Refresh drawableSize so a later
     // eglCreateWindowSurface never sees a 0x0 native window.
+    [self syncLayerSize];
+}
+
+- (void)syncLayerSize {
     [self configureMetalLayerIfNeeded];
     [self notifyTGLESResizeIfNeeded];
     [self notifyTGLMTResizeIfNeeded];

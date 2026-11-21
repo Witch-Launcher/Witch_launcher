@@ -25,6 +25,7 @@
 
 extern void* PLResolveGLEntry(const char* name);
 extern void* PLResolveGLEntryPreferred(const char* name);
+extern void* PLResolveGL4ESEntry(const char* name);
 extern JavaVM* runtimeJavaVMPtr;
 
 typedef void* (*PFN_FENCE_SYNC)(unsigned int condition, unsigned int flags);
@@ -202,6 +203,67 @@ void PLPatchGLSyncTable(void) {
     caps[665] = (void*)shim_glGetSynciv;
 }
 
+// ---- GL4ES dlsym interposer ----
+//
+// The prebuilt libgl4es_114.dylib is a NO_LOADER build: proc_address() and
+// the LOAD_GLES2_OR_OES macro resolve every entry point with
+// dlsym(RTLD_NEXT) (gl4es-114-extra/src/gl/loader.c, loader.h). libgl4es
+// links the shared ANGLE framework pair as dependencies, so that lookup can
+// land on the Vulkan libGLESv2 image — not the Metal libGLESv2_angle_metal
+// instance that owns the EGL context. Calls then execute without a current
+// context, and glCheckFramebufferStatus() returns 0 (Minecraft 1.12.2:
+// "glCheckFramebufferStatus returned unknown status:0").
+// Interpose dlsym() inside libgl4es and hand out the live Metal ANGLE entry
+// points (PLResolveGL4ESEntry) instead.
+static void* (*orig_dlsym_gl4es)(void* handle, const char* symbol) = NULL;
+
+static void* gl4es_shim_dlsym(void* handle, const char* symbol) {
+    if (symbol && (handle == RTLD_NEXT || handle == RTLD_DEFAULT)) {
+        void* fn = PLResolveGL4ESEntry(symbol);
+        if (fn) {
+            static BOOL loggedFbo = NO;
+            if (!loggedFbo && !strcmp(symbol, "glCheckFramebufferStatus")) {
+                loggedFbo = YES;
+                void* core = orig_dlsym_gl4es ? orig_dlsym_gl4es(handle, symbol) : NULL;
+                NSLog(@"[GL4ES] glCheckFramebufferStatus: active EGL=%p, dlsym(RTLD_NEXT)=%p", fn, core);
+            }
+            return fn;
+        }
+    }
+    void* fn = orig_dlsym_gl4es ? orig_dlsym_gl4es(handle, symbol) : NULL;
+    // An unresolved egl* name during gl4es's constructor (LOAD_EGL in
+    // GetHardwareExtensions) becomes a NULL call and a "Fatal signal 11
+    // pc=0x0" crash. Log the first one so a device log shows whether the
+    // handle/interposer path failed rather than only showing the crash.
+    if (!fn && symbol && handle == RTLD_NEXT && !strncmp(symbol, "egl", 3)) {
+        static BOOL loggedUnresolved = NO;
+        if (!loggedUnresolved) {
+            loggedUnresolved = YES;
+            NSLog(@"[GL4ES] unresolved egl entry via dlsym(RTLD_NEXT): %s", symbol);
+        }
+    }
+    return fn;
+}
+
+static void rebindGL4ESInImage(const struct mach_header* mh, intptr_t slide, const char* name) {
+    static const struct mach_header* done[8];
+    static int doneCount = 0;
+    for (int i = 0; i < doneCount; i++) {
+        if (done[i] == mh) return;
+    }
+    if (doneCount >= (int)(sizeof(done) / sizeof(done[0]))) return;
+    done[doneCount++] = mh;
+
+    // Only the first rebind captures the real dlsym; a second interposition
+    // must not overwrite it with our own shim (that would recurse).
+    static void* ignoredOriginal = NULL;
+    struct rebinding rb[] = (struct rebinding[]){
+        {"dlsym", (void*)gl4es_shim_dlsym, orig_dlsym_gl4es ? &ignoredOriginal : (void**)&orig_dlsym_gl4es},
+    };
+    int rc = rebind_symbols_image((void*)mh, slide, rb, sizeof(rb) / sizeof(rb[0]));
+    NSLog(@"[GL4ES] dlsym interposed in %s (rc=%d)", name, rc);
+}
+
 static void rebindSyncInImage(const struct mach_header* mh, intptr_t slide) {    if (!mh) return;
     const char* name = NULL;
     for (uint32_t i = 0; i < _dyld_image_count(); i++) {
@@ -210,7 +272,12 @@ static void rebindSyncInImage(const struct mach_header* mh, intptr_t slide) {   
             break;
         }
     }
-    if (!name || !strstr(name, "liblwjgl")) return;
+    if (!name) return;
+    if (strstr(name, "libgl4es")) {
+        rebindGL4ESInImage(mh, slide, name);
+        return;
+    }
+    if (!strstr(name, "liblwjgl")) return;
 
     // Rebind at most once per image: a second interposition would make our
     // shim resolve through itself and recurse.
