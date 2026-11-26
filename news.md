@@ -32,6 +32,8 @@
 * Hotbar not registering
 * Fixed a GLFW error that occurred when using an external keyboard
 * TGLMT render
+* Black borders / wrong render size when changing video resolution (GL4ES, TinyANGLE, TGLMT)
+* TinyANGLE crash on Minecraft 1.20.1 ("could not preload blit shader")
 ## Mod Fixes:
 * Voicechat mod
 * LabyMod
