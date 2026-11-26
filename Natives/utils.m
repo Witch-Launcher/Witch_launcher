@@ -810,14 +810,20 @@ void amethyst_migrate_legacy_home(void) {
 
 /*
  * True when the FidelityFX upscaler will actually run for the current
- * profile (the launcher's setting AND a game the agent can patch).
+ * profile (the launcher's setting AND a game/backend the agent can patch).
  *
  * The values are the ones the settings screen writes: 0 = off, 1 = FSR1,
  * 2 = FSR2, 3 = FSR3. The frame generation switch is independent of them.
  *
- * The agent only patches MC 26.x's VulkanGpuSurface (renderpearl backend).
- * On older versions nothing ever upscales, so the drawable has to follow the
- * render resolution: with a physical-size drawable and a windowWidth-sized
+ * The agent only patches MC 26.x's VulkanGpuSurface (RenderPearl's Vulkan
+ * backend). RenderPearl picks that backend from options.txt
+ * (PojavLauncher.java): only the MoltenVK renderer gets Vulkan, every GL
+ * renderer (GL4ES, TinyANGLE, LTW, TGLMT, ...) gets OpenGL, where the agent
+ * is inert. The graphics_backend_forcing pref can override the choice:
+ * "vulkan"/"opengl" force the API, "auto"/"none" follow the renderer (the
+ * launcher writes the renderer-derived value to options.txt on every
+ * launch). On any other backend the drawable has to follow the render
+ * resolution: with a physical-size drawable and a windowWidth-sized
  * render, the whole window shrinks (res < 100%) or crops/magnifies
  * (res > 100%) instead of only changing render resolution.
  */
@@ -828,5 +834,24 @@ BOOL fsrUpscalerActive(void) {
     }
     NSString *versionId = [PLProfiles resolveKeyForCurrentProfile:@"lastVersionId"];
     NSInteger major = [[versionId componentsSeparatedByString:@"."].firstObject integerValue];
-    return major >= 26;
+    if (major < 26) {
+        return NO;
+    }
+    id forcingObj = getPrefObject(@"video.graphics_backend_forcing");
+    NSString *forcing = [forcingObj isKindOfClass:NSString.class] ? (NSString *)forcingObj : @"auto";
+    if ([forcing isEqualToString:@"opengl"]) {
+        return NO;
+    }
+    NSString *renderer = [PLProfiles resolveKeyForCurrentProfile:@"renderer"];
+    // The Metal renderers replace the GPU backend with a mod: there is no
+    // RenderPearl and thus no VulkanGpuSurface for the agent to patch,
+    // whatever --graphicsBackend says.
+    if ([renderer isEqualToString:@ RENDERER_NAME_METAL] ||
+        [renderer isEqualToString:@ RENDERER_NAME_METAL_MACOS]) {
+        return NO;
+    }
+    if ([forcing isEqualToString:@"vulkan"]) {
+        return YES;
+    }
+    return [renderer isEqualToString:@ RENDERER_NAME_MOLTENVK];
 }

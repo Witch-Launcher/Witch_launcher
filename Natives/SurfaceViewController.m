@@ -822,27 +822,19 @@ static GameSurfaceView* pojavWindow;
         self.surfaceView.frame = self.surfaceView.superview.frame;
     }
 
-    // Witch fix: the visible game window must stay at the full physical
-    // size when video.resolution changes. The game renders its framebuffer
-    // (windowWidth/Height = physical x reso, below) into the CAMetalLayer,
-    // and iOS stretches the layer to the full screen — so with the surface
-    // scale at the full value (the FSR path already forces this) the game
-    // stays full-screen on reso changes and there is no black gap. The old
-    // code set contentsScale = screenScale x reso: lowering reso made the
-    // game's window shrink and the screen below it go uncovered, while the
-    // touch mapping (sendTouchPoint → physical x reso) stayed in the
-    // smaller framebuffer space — the hotbar/inventory in-world UI became
-    // unclickable. With the visible window full, taps land in the game's
-    // framebuffer where the game draws its UI.
-    self.surfaceView.layer.contentsScale = self.screenScale;
-
-    // contentsScale changes alone never trigger layoutSubviews (the frame
-    // assignment above is a no-op when the size is unchanged), so the
-    // drawable and the size-tracking backends would keep the old scale —
-    // the window itself then shrinks/crops with video.resolution instead of
-    // only the render resolution changing. Sync them here, exactly as a
-    // rotation (bounds change) does.
-    [self.surfaceView syncLayerSize];
+    // Every layer-derived backend sizes its drawable from
+    // bounds x contentsScale (ANGLE: GL4ES/TinyANGLE/LTW/MobileGlues; TGLES;
+    // TGLMT's fallback), so contentsScale IS the render scale. It must
+    // follow the game framebuffer (windowWidth/Height = physical x reso,
+    // below): the game draws windowWidth x windowHeight and Core Animation
+    // stretches that drawable over the full-screen layer. With the full
+    // screen scale the drawable stays physical while the game only fills
+    // the smaller framebuffer area, leaving black borders around the frame
+    // when video.resolution < 100%. FSR is the exception: its agent forces
+    // the swapchain to the drawable size, so that path needs a
+    // physical-size drawable.
+    CGFloat surfaceScale = fsrUpscalerActive() ? 1.0f : resolutionScale;
+    self.surfaceView.layer.contentsScale = self.screenScale * surfaceScale;
 
     physicalWidth = roundf(self.surfaceView.frame.size.width * self.screenScale);
     physicalHeight = roundf(self.surfaceView.frame.size.height * self.screenScale);
@@ -856,6 +848,19 @@ static GameSurfaceView* pojavWindow;
     if ((windowHeight % 2) != 0) {
         --windowHeight;
     }
+
+    // contentsScale changes alone never trigger layoutSubviews (the frame
+    // assignment above is a no-op when the size is unchanged), so the
+    // drawable and the size-tracking backends would keep the old scale —
+    // the window itself then shrinks/crops with video.resolution instead of
+    // only the render resolution changing. Sync them here, exactly as a
+    // rotation (bounds change) does. NOTE: sync AFTER the new
+    // windowWidth/windowHeight are computed above — TGLMT's target resize
+    // follows the game framebuffer size, so syncing first would resize it
+    // to the stale size and leave the render smaller than the screen
+    // (black border on reso change / stretched image on rotation).
+    [self.surfaceView syncLayerSize];
+
     CallbackBridge_nativeSendScreenSize(windowWidth, windowHeight);
 }
 
@@ -896,7 +901,11 @@ static GameSurfaceView* pojavWindow;
 
     // Update cursor position
     if (isGrabbing == JNI_TRUE) {
-        CGFloat screenScale = self.surfaceView.layer.contentsScale;
+        // Grab-mode cursor positions are physical device pixels (the input
+        // bridge scales them down to the game framebuffer while grabbing).
+        // layer.contentsScale is the render scale, not the screen scale, so
+        // it must not be used here once video.resolution < 100%.
+        CGFloat screenScale = self.screenScale;
         CallbackBridge_nativeSendCursorPos(ACTION_DOWN, lastVirtualMousePoint.x * screenScale, lastVirtualMousePoint.y * screenScale);
         virtualMouseFrame.origin.x = self.view.frame.size.width / 2;
         virtualMouseFrame.origin.y = self.view.frame.size.height / 2;

@@ -234,11 +234,15 @@ void callback_LauncherViewController_installMinecraft();
 void callback_SurfaceViewController_launchMinecraft(int width, int height);
 int callback_SurfaceViewController_touchHotbar(CGFloat x, CGFloat y);
 
-// True when the FidelityFX upscaler is enabled. The launcher then renders the
-// game into a drawable with the physical screen size: the game draws into its
-// own (smaller) render target and the FidelityFX agent forces the swapchain
-// to the drawable size, so the upscaled frame reaches the screen at the
-// native resolution instead of being magnified by iOS.
+// True when the FidelityFX agent will actually upscale the game's Vulkan
+// swapchain: the launcher setting, MC 26.x, and a RenderPearl Vulkan backend
+// (the MoltenVK renderer or forced Vulkan). The launcher then renders the
+// game into a drawable with the physical screen size: the agent forces the
+// swapchain to the drawable size, so the upscaled frame reaches the screen at
+// the native resolution instead of being magnified by iOS. Every other
+// backend draws into a drawable at the game framebuffer size
+// (screenScale x resolution) so iOS stretches only the render, not the
+// window.
 BOOL fsrUpscalerActive(void);
 
 void CallbackBridge_nativeSetInputReady(BOOL inputReady);
