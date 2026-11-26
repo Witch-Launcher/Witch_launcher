@@ -8,6 +8,13 @@
 #import <QuartzCore/QuartzCore.h>
 #import <math.h>
 
+@interface SurfaceViewController (WidgetNavigationItems)
+- (void)refreshMenuItems;
+@end
+
+// FidelityFX frame generation stats (ffx_bridge.cpp, C linkage).
+extern void ffxfg_get_frame_stats(float *outFps);
+
 static NSTimer *widgetTimer;
 static BOOL widgetLastMenuOn;
 static uint64_t widgetLastSwapCount;
@@ -159,6 +166,15 @@ static NSString *widgetShortBytes(uint64_t bytes) {
 @end
 
 @implementation TMUsageRingView
+
+- (instancetype)initWithFrame:(CGRect)frame {
+    self = [super initWithFrame:frame];
+    if (self) {
+        self.backgroundColor = UIColor.clearColor;
+        self.opaque = NO;
+    }
+    return self;
+}
 
 - (void)setUsage:(CGFloat)usage {
     if (!isfinite(usage)) usage = 0.0;
@@ -352,15 +368,16 @@ static NSString *widgetShortBytes(uint64_t bytes) {
     [self updateWidgetMode];
 
     [self widgetStopTimer];
-    widgetTimer = [NSTimer scheduledTimerWithTimeInterval:0.5 target:self selector:@selector(widgetTick) userInfo:nil repeats:YES];
+    __weak typeof(self) weakSelf = self;
+    widgetTimer = [NSTimer scheduledTimerWithTimeInterval:0.5 repeats:YES block:^(NSTimer *timer) {
+        [weakSelf widgetTick];
+    }];
     [[NSRunLoop mainRunLoop] addTimer:widgetTimer forMode:NSRunLoopCommonModes];
     [self widgetTick];
 }
 
 - (void)buildWidgetPanel {
     CGFloat panelW = MIN(220, self.view.bounds.size.width * 0.6);
-    NSInteger count = self.menuArray.count;
-    CGFloat panelH = 6 + count * 46 + 6;
 
     self.widgetPanelBackdrop = [[UIView alloc] initWithFrame:self.view.bounds];
     self.widgetPanelBackdrop.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
@@ -370,11 +387,30 @@ static NSString *widgetShortBytes(uint64_t bytes) {
     [self.widgetPanelBackdrop addGestureRecognizer:backdropTap];
     [self.view addSubview:self.widgetPanelBackdrop];
 
-    self.widgetPanelView = [[UIView alloc] initWithFrame:CGRectMake(-panelW, 0, panelW, panelH)];
+    self.widgetPanelView = [[UIView alloc] initWithFrame:CGRectMake(-panelW, 0, panelW, 58)];
     self.widgetPanelView.backgroundColor = [UIColor colorWithWhite:0.09 alpha:0.85];
     self.widgetPanelView.layer.cornerRadius = 16;
     self.widgetPanelView.clipsToBounds = YES;
     self.widgetPanelView.hidden = YES;
+    [self.view addSubview:self.widgetPanelView];
+
+    [self widgetPanelReloadItems];
+}
+
+// The action list is not static: performance recording flips between
+// "start" and "stop" while the game runs. Rebuild the buttons from the
+// current menuArray every time the panel opens instead of freezing the
+// snapshot taken at setup time (which never showed the perf entry).
+- (void)widgetPanelReloadItems {
+    if (!self.widgetPanelView) return;
+    CGFloat panelW = self.widgetPanelView.bounds.size.width;
+    for (UIView *sub in self.widgetPanelView.subviews.copy) {
+        [sub removeFromSuperview];
+    }
+    NSInteger count = self.menuArray.count;
+    CGRect frame = self.widgetPanelView.frame;
+    frame.size.height = 6 + count * 46 + 6;
+    self.widgetPanelView.frame = frame;
 
     CGFloat py = 6;
     for (NSInteger i = 0; i < count; i++) {
@@ -392,7 +428,7 @@ static NSString *widgetShortBytes(uint64_t bytes) {
         [self.widgetPanelView addSubview:btn];
         py += 46;
     }
-    [self.view addSubview:self.widgetPanelView];
+    if (self.widgetPanelView.hidden) [self widgetLayoutPanel:YES];
 }
 
 - (UILabel *)widgetMakeLabelWithFontSize:(CGFloat)size weight:(UIFontWeight)weight {
@@ -515,6 +551,10 @@ static NSString *widgetShortBytes(uint64_t bytes) {
 
 - (void)widgetOpenPanel {
     if (!self.widgetPanelView.hidden) return;
+    // Recompute the action list first (start/stop recording depends on the
+    // live recorder state) and rebuild the buttons to match it.
+    [self refreshMenuItems];
+    [self widgetPanelReloadItems];
     self.widgetPanelView.hidden = NO;
     self.widgetPanelBackdrop.hidden = NO;
     [self widgetLayoutPanel:YES];
@@ -609,6 +649,15 @@ static NSString *widgetShortBytes(uint64_t bytes) {
     }
 
     BOOL menuOpen = self.menuView != nil && !self.menuView.hidden;
+    if (widgetOn) {
+        // The navigation menu has no close strip in widget mode, so an edge
+        // swipe used to leave the game stuck at 0.7x scale. Keep the edge
+        // recognizer off and snap the game back if it was already shifted.
+        self.edgeGesture.enabled = NO;
+        if (menuOpen || fabs(self.rootView.transform.a - 1.0) > 0.001) {
+            [self animateMenuScale:1 duration:0.25];
+        }
+    }
     self.widgetView.hidden = !widgetOn || menuOpen;
     if (!widgetOn || menuOpen) return;
 
@@ -643,8 +692,23 @@ static NSString *widgetShortBytes(uint64_t bytes) {
         widgetLastFpsTime = 0;
     }
 
-    // FG FPS removed - always hide the label
-    self.widgetFgFpsLabel.hidden = YES;
+    // FG FPS: generated-frame rate reported by the FidelityFX bridge
+    // (0 while frame generation is off or not yet producing frames).
+    BOOL fgFpsOn = getPrefBool(@"general.widget_show_fgfps");
+    if (fgFpsOn) {
+        float fgStats[2] = {0.0f, 0.0f};
+        ffxfg_get_frame_stats(fgStats);
+        unsigned long genFps = fgStats[1] > 0.5f ? (unsigned long)lround(fgStats[1]) : 0;
+        if (genFps > 0) {
+            self.widgetFgFpsLabel.text = [NSString stringWithFormat:@"FG: +%lu", genFps];
+            self.widgetFgFpsLabel.hidden = NO;
+        } else {
+            self.widgetFgFpsLabel.text = nil;
+            self.widgetFgFpsLabel.hidden = YES;
+        }
+    } else {
+        self.widgetFgFpsLabel.hidden = YES;
+    }
 
     // CPU/GPU/temperature/battery: sample at ~1Hz when any unit is enabled
     BOOL cpuOn = getPrefBool(@"general.widget_show_cpu");
@@ -823,6 +887,9 @@ static NSString *widgetShortBytes(uint64_t bytes) {
     if (fpsOn) {
         contentW = MAX(contentW, ceil([self.widgetFpsLabel sizeThatFits:CGSizeMake(CGFLOAT_MAX, 15)].width));
     }
+    if (fgFpsOn) {
+        contentW = MAX(contentW, ceil([self.widgetFgFpsLabel sizeThatFits:CGSizeMake(CGFLOAT_MAX, 13)].width));
+    }
     if (ramTextOn) {
         contentW = MAX(contentW, ceil([self.widgetRamLabel sizeThatFits:CGSizeMake(CGFLOAT_MAX, 14)].width));
     }
@@ -872,6 +939,10 @@ static NSString *widgetShortBytes(uint64_t bytes) {
     if (fpsOn) {
         self.widgetFpsLabel.frame = CGRectMake(xPad, y, barW, 15);
         y += 17;
+    }
+    if (fgFpsOn && !self.widgetFgFpsLabel.hidden) {
+        self.widgetFgFpsLabel.frame = CGRectMake(xPad, y, barW, 13);
+        y += 15;
     }
     if (ramBarOn) {
         self.widgetBarView.frame = CGRectMake(xPad, y, barW, barH);
@@ -951,7 +1022,7 @@ static NSString *widgetShortBytes(uint64_t bytes) {
     }
     CGFloat height = y + yPad - 5;
 
-    BOOL anyContentOn = fpsOn || ramTextOn || ramBarOn || tempOn || battOn || clockOn || cpuOn || gpuOn;
+    BOOL anyContentOn = fpsOn || (fgFpsOn && !self.widgetFgFpsLabel.hidden) || ramTextOn || ramBarOn || tempOn || battOn || clockOn || cpuOn || gpuOn;
     if (!anyContentOn) {
         // Nothing enabled yet: keep a visible tile instead of an invisible sliver
         self.widgetEmptyIcon.hidden = NO;

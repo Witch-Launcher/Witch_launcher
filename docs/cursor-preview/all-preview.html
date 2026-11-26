@@ -1,0 +1,386 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Vẽ lại toàn bộ con trỏ — Witch launcher</title>
+<style>
+  :root {
+    --paper: #F4F4F6;
+    --card: #FFFFFF;
+    --ink: #17171A;
+    --muted: #6B6B73;
+    --line: rgba(0,0,0,0.09);
+    --blue: #0A84FF;
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", sans-serif;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --paper: #131316;
+      --card: #1C1C1F;
+      --ink: #F5F5F7;
+      --muted: #9A9AA2;
+      --line: rgba(255,255,255,0.10);
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background:
+      radial-gradient(1100px 600px at 12% -10%, rgba(10,132,255,0.10), transparent 60%),
+      radial-gradient(900px 500px at 100% 0%, rgba(255,159,10,0.08), transparent 55%),
+      var(--paper);
+    color: var(--ink);
+    padding: 42px 32px 56px;
+  }
+  header { max-width: 1180px; margin: 0 auto 28px; }
+  .eyebrow {
+    font-size: 11px; font-weight: 700; letter-spacing: 0.14em;
+    text-transform: uppercase; color: var(--blue); margin-bottom: 10px;
+  }
+  h1 { margin: 0 0 8px; font-size: 34px; line-height: 1.1; letter-spacing: -0.02em; }
+  .lede { margin: 0; color: var(--muted); font-size: 15px; line-height: 1.55; max-width: 900px; }
+  .grid {
+    max-width: 1180px; margin: 0 auto;
+    display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 18px;
+  }
+  @media (max-width: 980px) { .grid { grid-template-columns: 1fr; } }
+  .card {
+    background: var(--card); border: 1px solid var(--line);
+    border-radius: 18px; padding: 20px 20px 18px;
+    box-shadow: 0 18px 45px rgba(0,0,0,0.06);
+    display: flex; flex-direction: column; gap: 13px;
+  }
+  .card h2 {
+    margin: 0 0 4px; font-size: 17px; letter-spacing: -0.01em;
+    display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  }
+  .tag {
+    font-size: 9.5px; font-weight: 600; letter-spacing: 0.04em;
+    color: var(--muted); background: rgba(127,127,127,0.12);
+    padding: 3px 7px; border-radius: 999px;
+  }
+  .card p { margin: 0; color: var(--muted); font-size: 12.5px; line-height: 1.45; min-height: 36px; }
+  .hero {
+    height: 148px; border-radius: 14px; overflow: hidden;
+    border: 1px solid var(--line);
+    display: flex; align-items: center; justify-content: center;
+    background: linear-gradient(90deg, #F8F8FA 0 50%, #17171A 50% 100%);
+  }
+  .hero img { display: block; height: 112px; width: auto; filter: drop-shadow(0 8px 14px rgba(0,0,0,0.16)); }
+  .meta { font-size: 10.5px; color: var(--muted); font-variant-numeric: tabular-nums; }
+  .section-label {
+    font-size: 10px; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase;
+    color: var(--muted); margin: 0 0 -5px;
+  }
+  .ladder {
+    display: flex; align-items: flex-end; justify-content: space-between; gap: 4px;
+    min-height: 112px; padding: 12px 8px 9px; border-radius: 12px;
+    background: linear-gradient(180deg, rgba(127,127,127,0.06), rgba(127,127,127,0.02));
+    border: 1px solid var(--line);
+  }
+  .step { display: flex; flex-direction: column; align-items: center; justify-content: flex-end; gap: 8px; }
+  .step span { font-size: 9.5px; color: var(--muted); font-variant-numeric: tabular-nums; }
+  .step img { display: block; width: auto; }
+  .actual-section { max-width: 1180px; margin: 30px auto 0; }
+  .actual-section h2 { margin: 0 0 6px; font-size: 20px; letter-spacing: -0.01em; }
+  .actual-section > p { margin: 0 0 14px; color: var(--muted); font-size: 12.5px; line-height: 1.5; }
+  .actual-table {
+    width: 100%; border-collapse: separate; border-spacing: 0;
+    background: var(--card); border: 1px solid var(--line); border-radius: 14px;
+    overflow: hidden;
+  }
+  .actual-table th, .actual-table td {
+    padding: 9px 12px; border-bottom: 1px solid var(--line); vertical-align: middle;
+  }
+  .actual-table tr:last-child td { border-bottom: 0; }
+  .actual-table th {
+    text-align: left; font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase;
+    color: var(--muted); font-weight: 700; background: rgba(127,127,127,0.05);
+  }
+  .actual-table td:first-child { width: 28%; }
+  .actual-table td:first-child strong { display: block; font-size: 12.5px; font-weight: 600; }
+  .actual-table td:first-child span { display: block; font-size: 10.5px; color: var(--muted); margin-top: 2px; }
+  .actual-table td:not(:first-child) { width: 24%; text-align: center; }
+  .actual-table img { display: block; width: auto; margin: 0 auto; }
+  footer {
+    max-width: 1180px; margin: 26px auto 0; padding-top: 18px;
+    border-top: 1px solid var(--line); color: var(--muted); font-size: 12px; line-height: 1.6;
+  }
+  footer strong { color: var(--ink); font-weight: 600; }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="eyebrow">Xem trước thiết kế · Witch launcher</div>
+  <h1>Vẽ lại toàn bộ con trỏ</h1>
+  <p class="lede">
+    14 hình cho 13 kiểu con trỏ (2 biến thể chéo), theo hướng <strong>Slate</strong>:
+    mũi tên quen thuộc, nét mảnh, viền tối, bóng rất nhẹ. Các glyph như I-beam, chữ thập,
+    mũi tên resize dùng lõi tối + quầng trắng để không chìm trên nền tối.
+    Tất cả là SVG; sau khi duyệt sẽ được render đúng kích thước pixel trên máy.
+  </p>
+</header>
+
+<main class="grid">
+
+  <section class="card">
+    <h2>Normal <span class="tag">Mặc định</span></h2>
+    <p>Mũi tên mặc định, dáng quen thuộc, nét mảnh và bóng rất nhẹ. Điểm nóng ở đầu mũi tên.</p>
+    <div class="hero"><img src="svg/normal.svg" alt="Normal cursor"></div>
+    <div class="meta">Điểm nóng: (1.5, 1.5) · viewBox 20×28</div>
+    <p class="section-label">Thang kích thước</p>
+    <div class="ladder">
+      <div class="step"><img src="svg/normal.svg" style="height:16px"><span>16</span></div>
+      <div class="step"><img src="svg/normal.svg" style="height:24px"><span>24</span></div>
+      <div class="step"><img src="svg/normal.svg" style="height:32px"><span>32</span></div>
+      <div class="step"><img src="svg/normal.svg" style="height:48px"><span>48</span></div>
+      <div class="step"><img src="svg/normal.svg" style="height:64px"><span>64</span></div>
+      <div class="step"><img src="svg/normal.svg" style="height:96px"><span>96</span></div>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>Link <span class="tag">Chọn liên kết</span></h2>
+    <p>Bàn tay chỉ liên kết, ngón trỏ duỗi, các ngón gấp gọn. Điểm nóng ở đầu ngón trỏ.</p>
+    <div class="hero"><img src="svg/link.svg" alt="Link cursor"></div>
+    <div class="meta">Điểm nóng: (8.0, 2.2) · viewBox 20×28</div>
+    <p class="section-label">Thang kích thước</p>
+    <div class="ladder">
+      <div class="step"><img src="svg/link.svg" style="height:16px"><span>16</span></div>
+      <div class="step"><img src="svg/link.svg" style="height:24px"><span>24</span></div>
+      <div class="step"><img src="svg/link.svg" style="height:32px"><span>32</span></div>
+      <div class="step"><img src="svg/link.svg" style="height:48px"><span>48</span></div>
+      <div class="step"><img src="svg/link.svg" style="height:64px"><span>64</span></div>
+      <div class="step"><img src="svg/link.svg" style="height:96px"><span>96</span></div>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>Text <span class="tag">Chọn văn bản</span></h2>
+    <p>I-beam chọn văn bản. Lõi tối + quầng trắng để không chìm trên nền tối.</p>
+    <div class="hero"><img src="svg/text.svg" alt="Text cursor"></div>
+    <div class="meta">Điểm nóng: (10.0, 14.0) · viewBox 20×28</div>
+    <p class="section-label">Thang kích thước</p>
+    <div class="ladder">
+      <div class="step"><img src="svg/text.svg" style="height:16px"><span>16</span></div>
+      <div class="step"><img src="svg/text.svg" style="height:24px"><span>24</span></div>
+      <div class="step"><img src="svg/text.svg" style="height:32px"><span>32</span></div>
+      <div class="step"><img src="svg/text.svg" style="height:48px"><span>48</span></div>
+      <div class="step"><img src="svg/text.svg" style="height:64px"><span>64</span></div>
+      <div class="step"><img src="svg/text.svg" style="height:96px"><span>96</span></div>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>Busy <span class="tag">Đang bận</span></h2>
+    <p>Đĩa trắng viền mảnh, cung xanh 270°. Tĩnh, không cần ảnh động.</p>
+    <div class="hero"><img src="svg/busy.svg" alt="Busy cursor"></div>
+    <div class="meta">Điểm nóng: (12, 12) · viewBox 24×24</div>
+    <p class="section-label">Thang kích thước</p>
+    <div class="ladder">
+      <div class="step"><img src="svg/busy.svg" style="height:16px"><span>16</span></div>
+      <div class="step"><img src="svg/busy.svg" style="height:24px"><span>24</span></div>
+      <div class="step"><img src="svg/busy.svg" style="height:32px"><span>32</span></div>
+      <div class="step"><img src="svg/busy.svg" style="height:48px"><span>48</span></div>
+      <div class="step"><img src="svg/busy.svg" style="height:64px"><span>64</span></div>
+      <div class="step"><img src="svg/busy.svg" style="height:96px"><span>96</span></div>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>Working <span class="tag">Xử lý nền</span></h2>
+    <p>Mũi tên Slate + vòng xoay nhỏ ở góc phải dưới, báo game đang xử lý nền.</p>
+    <div class="hero"><img src="svg/working.svg" alt="Working cursor"></div>
+    <div class="meta">Điểm nóng: (1.5, 1.5) · viewBox 22×28</div>
+    <p class="section-label">Thang kích thước</p>
+    <div class="ladder">
+      <div class="step"><img src="svg/working.svg" style="height:16px"><span>16</span></div>
+      <div class="step"><img src="svg/working.svg" style="height:24px"><span>24</span></div>
+      <div class="step"><img src="svg/working.svg" style="height:32px"><span>32</span></div>
+      <div class="step"><img src="svg/working.svg" style="height:48px"><span>48</span></div>
+      <div class="step"><img src="svg/working.svg" style="height:64px"><span>64</span></div>
+      <div class="step"><img src="svg/working.svg" style="height:96px"><span>96</span></div>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>Precision <span class="tag">Chính xác</span></h2>
+    <p>Chữ thập bốn hướng, hở giữa, viền trắng. Dùng chung cho precision và crosshair.</p>
+    <div class="hero"><img src="svg/precision.svg" alt="Precision cursor"></div>
+    <div class="meta">Điểm nóng: (12, 12) · viewBox 24×24</div>
+    <p class="section-label">Thang kích thước</p>
+    <div class="ladder">
+      <div class="step"><img src="svg/precision.svg" style="height:16px"><span>16</span></div>
+      <div class="step"><img src="svg/precision.svg" style="height:24px"><span>24</span></div>
+      <div class="step"><img src="svg/precision.svg" style="height:32px"><span>32</span></div>
+      <div class="step"><img src="svg/precision.svg" style="height:48px"><span>48</span></div>
+      <div class="step"><img src="svg/precision.svg" style="height:64px"><span>64</span></div>
+      <div class="step"><img src="svg/precision.svg" style="height:96px"><span>96</span></div>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>Unavailable <span class="tag">Không khả dụng</span></h2>
+    <p>Đĩa trắng viền đậm, gạch đỏ chéo — báo hành động không thực hiện được.</p>
+    <div class="hero"><img src="svg/unavailable.svg" alt="Unavailable cursor"></div>
+    <div class="meta">Điểm nóng: (12, 12) · viewBox 24×24</div>
+    <p class="section-label">Thang kích thước</p>
+    <div class="ladder">
+      <div class="step"><img src="svg/unavailable.svg" style="height:16px"><span>16</span></div>
+      <div class="step"><img src="svg/unavailable.svg" style="height:24px"><span>24</span></div>
+      <div class="step"><img src="svg/unavailable.svg" style="height:32px"><span>32</span></div>
+      <div class="step"><img src="svg/unavailable.svg" style="height:48px"><span>48</span></div>
+      <div class="step"><img src="svg/unavailable.svg" style="height:64px"><span>64</span></div>
+      <div class="step"><img src="svg/unavailable.svg" style="height:96px"><span>96</span></div>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>V-Resize <span class="tag">Kéo dọc</span></h2>
+    <p>Hai đầu mũi tên nối liền, thân mảnh; kéo thay đổi chiều cao.</p>
+    <div class="hero"><img src="svg/vresize.svg" alt="Vertical resize cursor"></div>
+    <div class="meta">Điểm nóng: (12, 12) · viewBox 24×24</div>
+    <p class="section-label">Thang kích thước</p>
+    <div class="ladder">
+      <div class="step"><img src="svg/vresize.svg" style="height:16px"><span>16</span></div>
+      <div class="step"><img src="svg/vresize.svg" style="height:24px"><span>24</span></div>
+      <div class="step"><img src="svg/vresize.svg" style="height:32px"><span>32</span></div>
+      <div class="step"><img src="svg/vresize.svg" style="height:48px"><span>48</span></div>
+      <div class="step"><img src="svg/vresize.svg" style="height:64px"><span>64</span></div>
+      <div class="step"><img src="svg/vresize.svg" style="height:96px"><span>96</span></div>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>H-Resize <span class="tag">Kéo ngang</span></h2>
+    <p>Bản xoay 90° của kéo dọc; thân mảnh, hai đầu cân đối.</p>
+    <div class="hero"><img src="svg/hresize.svg" alt="Horizontal resize cursor"></div>
+    <div class="meta">Điểm nóng: (12, 12) · viewBox 24×24</div>
+    <p class="section-label">Thang kích thước</p>
+    <div class="ladder">
+      <div class="step"><img src="svg/hresize.svg" style="height:16px"><span>16</span></div>
+      <div class="step"><img src="svg/hresize.svg" style="height:24px"><span>24</span></div>
+      <div class="step"><img src="svg/hresize.svg" style="height:32px"><span>32</span></div>
+      <div class="step"><img src="svg/hresize.svg" style="height:48px"><span>48</span></div>
+      <div class="step"><img src="svg/hresize.svg" style="height:64px"><span>64</span></div>
+      <div class="step"><img src="svg/hresize.svg" style="height:96px"><span>96</span></div>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>Diagonal NW–SE <span class="tag">Kéo chéo</span></h2>
+    <p>Mũi tên hai đầu theo trục NW–SE, thân liền, điểm nóng ở tâm.</p>
+    <div class="hero"><img src="svg/diag_nwse.svg" alt="Diagonal NW-SE cursor"></div>
+    <div class="meta">Điểm nóng: (12, 12) · viewBox 24×24</div>
+    <p class="section-label">Thang kích thước</p>
+    <div class="ladder">
+      <div class="step"><img src="svg/diag_nwse.svg" style="height:16px"><span>16</span></div>
+      <div class="step"><img src="svg/diag_nwse.svg" style="height:24px"><span>24</span></div>
+      <div class="step"><img src="svg/diag_nwse.svg" style="height:32px"><span>32</span></div>
+      <div class="step"><img src="svg/diag_nwse.svg" style="height:48px"><span>48</span></div>
+      <div class="step"><img src="svg/diag_nwse.svg" style="height:64px"><span>64</span></div>
+      <div class="step"><img src="svg/diag_nwse.svg" style="height:96px"><span>96</span></div>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>Diagonal NE–SW <span class="tag">Kéo chéo</span></h2>
+    <p>Bản lật của NW–SE; game chọn hướng dựa trên constant GLFW/SDL.</p>
+    <div class="hero"><img src="svg/diag_nesw.svg" alt="Diagonal NE-SW cursor"></div>
+    <div class="meta">Điểm nóng: (12, 12) · viewBox 24×24</div>
+    <p class="section-label">Thang kích thước</p>
+    <div class="ladder">
+      <div class="step"><img src="svg/diag_nesw.svg" style="height:16px"><span>16</span></div>
+      <div class="step"><img src="svg/diag_nesw.svg" style="height:24px"><span>24</span></div>
+      <div class="step"><img src="svg/diag_nesw.svg" style="height:32px"><span>32</span></div>
+      <div class="step"><img src="svg/diag_nesw.svg" style="height:48px"><span>48</span></div>
+      <div class="step"><img src="svg/diag_nesw.svg" style="height:64px"><span>64</span></div>
+      <div class="step"><img src="svg/diag_nesw.svg" style="height:96px"><span>96</span></div>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>Move <span class="tag">Di chuyển</span></h2>
+    <p>Bốn mũi tên chung thân, tâm ở giữa; di chuyển cửa sổ hoặc vật thể.</p>
+    <div class="hero"><img src="svg/move.svg" alt="Move cursor"></div>
+    <div class="meta">Điểm nóng: (12, 12) · viewBox 24×24</div>
+    <p class="section-label">Thang kích thước</p>
+    <div class="ladder">
+      <div class="step"><img src="svg/move.svg" style="height:16px"><span>16</span></div>
+      <div class="step"><img src="svg/move.svg" style="height:24px"><span>24</span></div>
+      <div class="step"><img src="svg/move.svg" style="height:32px"><span>32</span></div>
+      <div class="step"><img src="svg/move.svg" style="height:48px"><span>48</span></div>
+      <div class="step"><img src="svg/move.svg" style="height:64px"><span>64</span></div>
+      <div class="step"><img src="svg/move.svg" style="height:96px"><span>96</span></div>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>Help <span class="tag">Trợ giúp</span></h2>
+    <p>Mũi tên Slate + huy hiệu dấu hỏi; giữ nguyên điểm nóng ở đầu mũi tên.</p>
+    <div class="hero"><img src="svg/help.svg" alt="Help cursor"></div>
+    <div class="meta">Điểm nóng: (1.5, 1.5) · viewBox 22×28</div>
+    <p class="section-label">Thang kích thước</p>
+    <div class="ladder">
+      <div class="step"><img src="svg/help.svg" style="height:16px"><span>16</span></div>
+      <div class="step"><img src="svg/help.svg" style="height:24px"><span>24</span></div>
+      <div class="step"><img src="svg/help.svg" style="height:32px"><span>32</span></div>
+      <div class="step"><img src="svg/help.svg" style="height:48px"><span>48</span></div>
+      <div class="step"><img src="svg/help.svg" style="height:64px"><span>64</span></div>
+      <div class="step"><img src="svg/help.svg" style="height:96px"><span>96</span></div>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>Hidden <span class="tag">Ẩn</span></h2>
+    <p>Asset trong suốt 1×1. Game tự ẩn con trỏ; preview chỉ hiện khung nét đứt.</p>
+    <div class="hero"><img src="svg/hidden.svg" alt="Hidden cursor placeholder"></div>
+    <div class="meta">Không có điểm nóng · 1×1 trong suốt</div>
+    <p class="section-label">Thang kích thước</p>
+    <div class="ladder">
+      <div class="step"><img src="svg/hidden.svg" style="height:16px"><span>16</span></div>
+      <div class="step"><img src="svg/hidden.svg" style="height:24px"><span>24</span></div>
+      <div class="step"><img src="svg/hidden.svg" style="height:32px"><span>32</span></div>
+      <div class="step"><img src="svg/hidden.svg" style="height:48px"><span>48</span></div>
+      <div class="step"><img src="svg/hidden.svg" style="height:64px"><span>64</span></div>
+      <div class="step"><img src="svg/hidden.svg" style="height:96px"><span>96</span></div>
+    </div>
+  </section>
+
+</main>
+
+<section class="actual-section">
+  <h2>Kích thước thực tế</h2>
+  <p>So sánh ở 27 pt (100%), 81 pt (300%) và 135 pt (500%) — cùng thang với con trỏ trong game.</p>
+  <table class="actual-table">
+    <thead><tr><th>Kiểu</th><th>27 pt · 100%</th><th>81 pt · 300%</th><th>135 pt · 500%</th></tr></thead>
+    <tbody>
+      <tr><td><strong>Normal</strong><span>Mặc định</span></td><td><img src="svg/normal.svg" style="height:27px"></td><td><img src="svg/normal.svg" style="height:81px"></td><td><img src="svg/normal.svg" style="height:135px"></td></tr>
+      <tr><td><strong>Link</strong><span>Chọn liên kết</span></td><td><img src="svg/link.svg" style="height:27px"></td><td><img src="svg/link.svg" style="height:81px"></td><td><img src="svg/link.svg" style="height:135px"></td></tr>
+      <tr><td><strong>Text</strong><span>Chọn văn bản</span></td><td><img src="svg/text.svg" style="height:27px"></td><td><img src="svg/text.svg" style="height:81px"></td><td><img src="svg/text.svg" style="height:135px"></td></tr>
+      <tr><td><strong>Busy</strong><span>Đang bận</span></td><td><img src="svg/busy.svg" style="height:27px"></td><td><img src="svg/busy.svg" style="height:81px"></td><td><img src="svg/busy.svg" style="height:135px"></td></tr>
+      <tr><td><strong>Working</strong><span>Xử lý nền</span></td><td><img src="svg/working.svg" style="height:27px"></td><td><img src="svg/working.svg" style="height:81px"></td><td><img src="svg/working.svg" style="height:135px"></td></tr>
+      <tr><td><strong>Precision</strong><span>Chính xác</span></td><td><img src="svg/precision.svg" style="height:27px"></td><td><img src="svg/precision.svg" style="height:81px"></td><td><img src="svg/precision.svg" style="height:135px"></td></tr>
+      <tr><td><strong>Unavailable</strong><span>Không khả dụng</span></td><td><img src="svg/unavailable.svg" style="height:27px"></td><td><img src="svg/unavailable.svg" style="height:81px"></td><td><img src="svg/unavailable.svg" style="height:135px"></td></tr>
+      <tr><td><strong>V-Resize</strong><span>Kéo dọc</span></td><td><img src="svg/vresize.svg" style="height:27px"></td><td><img src="svg/vresize.svg" style="height:81px"></td><td><img src="svg/vresize.svg" style="height:135px"></td></tr>
+      <tr><td><strong>H-Resize</strong><span>Kéo ngang</span></td><td><img src="svg/hresize.svg" style="height:27px"></td><td><img src="svg/hresize.svg" style="height:81px"></td><td><img src="svg/hresize.svg" style="height:135px"></td></tr>
+      <tr><td><strong>Diagonal NW–SE</strong><span>Kéo chéo</span></td><td><img src="svg/diag_nwse.svg" style="height:27px"></td><td><img src="svg/diag_nwse.svg" style="height:81px"></td><td><img src="svg/diag_nwse.svg" style="height:135px"></td></tr>
+      <tr><td><strong>Diagonal NE–SW</strong><span>Kéo chéo</span></td><td><img src="svg/diag_nesw.svg" style="height:27px"></td><td><img src="svg/diag_nesw.svg" style="height:81px"></td><td><img src="svg/diag_nesw.svg" style="height:135px"></td></tr>
+      <tr><td><strong>Move</strong><span>Di chuyển</span></td><td><img src="svg/move.svg" style="height:27px"></td><td><img src="svg/move.svg" style="height:81px"></td><td><img src="svg/move.svg" style="height:135px"></td></tr>
+      <tr><td><strong>Help</strong><span>Trợ giúp</span></td><td><img src="svg/help.svg" style="height:27px"></td><td><img src="svg/help.svg" style="height:81px"></td><td><img src="svg/help.svg" style="height:135px"></td></tr>
+      <tr><td><strong>Hidden</strong><span>Ẩn</span></td><td><img src="svg/hidden.svg" style="height:27px"></td><td><img src="svg/hidden.svg" style="height:81px"></td><td><img src="svg/hidden.svg" style="height:135px"></td></tr>
+    </tbody>
+  </table>
+</section>
+
+<footer>
+  Điểm nóng ghi theo toạ độ viewBox; khi tích hợp sẽ quy đổi theo khung hiển thị và hitbox hiện có.
+  Đây là bản chính thức — <strong>đã sửa asset và code</strong>. Làm: path vector được
+  rasterize ở đúng kích thước pixel (kể cả Retina 3×), ảnh nhập PNG/GIF/.ani chuyển từ
+  nearest-neighbor sang nội suy linear.
+</footer>
+
+</body>
+</html>

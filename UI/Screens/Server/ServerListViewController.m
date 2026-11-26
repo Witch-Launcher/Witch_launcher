@@ -19,8 +19,7 @@ static NSString *kServersFilePath;
 
 + (void)initialize {
     if (self == [ServerListViewController self]) {
-        NSString *docDir = NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES).firstObject;
-        kServersFilePath = [docDir stringByAppendingPathComponent:@"servers.json"];
+        kServersFilePath = amethyst_hidden_path(@"servers.json");
     }
 }
 

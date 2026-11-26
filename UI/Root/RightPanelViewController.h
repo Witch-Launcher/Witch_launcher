@@ -6,6 +6,7 @@
 - (void)rightPanelDidTapDownloadHub;
 - (void)rightPanelDidTapFileManager;
 - (void)rightPanelDidTapSettings;
+- (void)rightPanelDidTapBackup;
 - (void)rightPanelDidAddVersion;
 - (void)rightPanelDidRemoveVersion:(NSString *)versionName;
 - (void)rightPanelDidSelectVersion:(NSString *)versionName;

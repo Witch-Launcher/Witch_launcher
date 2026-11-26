@@ -70,6 +70,55 @@ NSMutableArray<NSDictionary *> *localVersionList, *remoteVersionList;
     }
 }
 
++ (BOOL)isLabyModVersionJson:(NSDictionary *)json {
+    NSString *identifier = json[@"id"];
+    if ([identifier isKindOfClass:NSString.class] &&
+        [identifier rangeOfString:@"labymod" options:NSCaseInsensitiveSearch].location != NSNotFound) {
+        return YES;
+    }
+    NSString *mainClass = json[@"mainClass"];
+    if ([mainClass isKindOfClass:NSString.class] &&
+        [mainClass rangeOfString:@"labymod" options:NSCaseInsensitiveSearch].location != NSNotFound) {
+        return YES;
+    }
+    NSArray *libraries = [json[@"libraries"] isKindOfClass:NSArray.class] ? json[@"libraries"] : @[];
+    for (NSDictionary *library in libraries) {
+        if (![library isKindOfClass:NSDictionary.class]) continue;
+        NSString *name = library[@"name"];
+        if (![name isKindOfClass:NSString.class]) continue;
+        if ([name hasPrefix:@"net.labymod:"] || [name hasPrefix:@"net.laby:"]) {
+            return YES;
+        }
+    }
+    return NO;
+}
+
++ (NSString *)labyModMinecraftVersionForJson:(NSDictionary *)json {
+    for (NSString *key in @[@"_minecraftVersion", @"minecraftVersion", @"inheritsFrom"]) {
+        id value = json[key];
+        if ([value isKindOfClass:NSString.class] && [value length] > 0) {
+            return value;
+        }
+    }
+    NSArray *jvmArgs = json[@"arguments"][@"jvm"];
+    if ([jvmArgs isKindOfClass:NSArray.class]) {
+        NSString *prefix = @"-Dnet.labymod.running-version=";
+        for (id arg in jvmArgs) {
+            if ([arg isKindOfClass:NSString.class] && [arg hasPrefix:prefix]) {
+                NSString *value = [arg substringFromIndex:prefix.length];
+                if (value.length > 0) return value;
+            }
+        }
+    }
+    NSString *identifier = json[@"id"];
+    if ([identifier isKindOfClass:NSString.class]) {
+        NSRegularExpression *regex = [NSRegularExpression regularExpressionWithPattern:@"[0-9]+(?:\\.[0-9]+)+" options:0 error:nil];
+        NSTextCheckingResult *match = [regex firstMatchInString:identifier options:0 range:NSMakeRange(0, identifier.length)];
+        if (match) return [identifier substringWithRange:match.range];
+    }
+    return nil;
+}
+
 + (void)tweakVersionJson:(NSMutableDictionary *)json {
     // Exclude some libraries
     for (NSMutableDictionary *library in [json[@"libraries"] copy]) {
@@ -164,16 +213,14 @@ NSMutableArray<NSDictionary *> *localVersionList, *remoteVersionList;
         [json[@"libraries"] addObject:client];
     }
 
-    // Parse Forge/NeoForge additional JVM Arguments.
+    // Resolve loader-specific JVM arguments before JLI_Launch builds argv.
     // resolveFullInheritsChain merges the chain into the vanilla parent, so the
     // "inheritsFrom" key is gone by the time we get here; detect loader-style
     // module-path args by content instead (bootstraplauncher / ${...} markers).
-    if (![json[@"arguments"] isKindOfClass:NSDictionary.class] ||
-        ![json[@"arguments"][@"jvm"] isKindOfClass:NSArray.class]) {
-        return;
-    }
+    NSDictionary *rawArguments = [json[@"arguments"] isKindOfClass:NSDictionary.class] ? json[@"arguments"] : nil;
+    NSArray *jvmArgs = [rawArguments[@"jvm"] isKindOfClass:NSArray.class] ? rawArguments[@"jvm"] : @[];
     BOOL hasLoaderJvmArgs = NO;
-    for (id arg in json[@"arguments"][@"jvm"]) {
+    for (id arg in jvmArgs) {
         // MC 26.x uses rule-based JVM args as NSDictionary entries
         // ({"rules": [...], "value": ...}) in addition to plain strings.
         if (![arg isKindOfClass:NSString.class]) {
@@ -186,33 +233,86 @@ NSMutableArray<NSDictionary *> *localVersionList, *remoteVersionList;
             break;
         }
     }
-    if (!hasLoaderJvmArgs) {
+
+    BOOL isLabyMod = [self isLabyModVersionJson:json];
+    if (!hasLoaderJvmArgs && !isLabyMod) {
         return;
     }
-    json[@"arguments"][@"jvm_processed"] = [[NSMutableArray alloc] init];
-    NSDictionary *varArgMap = @{
-        @"${classpath_separator}": @":",
-        @"${library_directory}": [NSString stringWithFormat:@"%s/libraries", getenv("POJAV_GAME_DIR")],
-        @"${version_name}": json[@"id"]
-    };
-    int argsToSkip = 0;
-    for (id arg in json[@"arguments"][@"jvm"]) {
-        if (![arg isKindOfClass:NSString.class]) {
-            continue;
-        }
-        if (argsToSkip == 0) {
-            argsToSkip = [self numberOfArgsToSkipForArg:arg];
-        }
-        if (argsToSkip == 0) {
-            NSString *argStr = arg;
-            for (NSString *key in varArgMap.allKeys) {
-                argStr = [argStr stringByReplacingOccurrencesOfString:key withString:varArgMap[key]];
+
+    NSMutableDictionary *arguments;
+    if ([rawArguments isKindOfClass:NSMutableDictionary.class]) {
+        arguments = (NSMutableDictionary *)rawArguments;
+    } else if (rawArguments != nil) {
+        arguments = [rawArguments mutableCopy];
+        json[@"arguments"] = arguments;
+    } else {
+        arguments = [NSMutableDictionary dictionary];
+        json[@"arguments"] = arguments;
+    }
+
+    NSMutableArray *jvmProcessed = [NSMutableArray array];
+
+    if (hasLoaderJvmArgs) {
+        NSDictionary *varArgMap = @{
+            @"${classpath_separator}": @":",
+            @"${library_directory}": [NSString stringWithFormat:@"%s/libraries", getenv("POJAV_GAME_DIR")],
+            @"${version_name}": json[@"id"]
+        };
+        int argsToSkip = 0;
+        for (id arg in jvmArgs) {
+            if (![arg isKindOfClass:NSString.class]) {
+                continue;
             }
-            [json[@"arguments"][@"jvm_processed"] addObject:argStr];
-        } else {
-            argsToSkip--;
+            if (argsToSkip == 0) {
+                argsToSkip = [self numberOfArgsToSkipForArg:arg];
+            }
+            if (argsToSkip == 0) {
+                NSString *argStr = arg;
+                for (NSString *key in varArgMap.allKeys) {
+                    argStr = [argStr stringByReplacingOccurrencesOfString:key withString:varArgMap[key]];
+                }
+                [jvmProcessed addObject:argStr];
+            } else {
+                argsToSkip--;
+            }
         }
     }
+
+    if (isLabyMod) {
+        // LabyMod's own JVM args assume the official launcher's environment
+        // (${natives_directory}, ${classpath}, ...). Only carry over flags that
+        // are environment-independent and safe on iOS.
+        for (id arg in jvmArgs) {
+            if (![arg isKindOfClass:NSString.class]) continue;
+            if ([arg containsString:@"${"]) continue;
+            if ([arg hasPrefix:@"--add-opens="] ||
+                [arg hasPrefix:@"--add-exports="] ||
+                [arg hasPrefix:@"--enable-native-access="] ||
+                [arg hasPrefix:@"-Dnet.labymod.running-version="] ||
+                [arg isEqualToString:@"--sun-misc-unsafe-memory-access=allow"]) {
+                if (![jvmProcessed containsObject:arg]) {
+                    [jvmProcessed addObject:arg];
+                }
+            }
+        }
+
+        // LabyMod reads this system property from MinecraftVersions.<clinit>
+        // and NPEs when it is absent, so it must reach the JVM before any
+        // LabyMod class loads. 26.x manifests omit "inheritsFrom" entirely.
+        NSString *mcVersion = [self labyModMinecraftVersionForJson:json];
+        if (mcVersion.length > 0) {
+            NSString *propertyPrefix = @"-Dnet.labymod.running-version=";
+            for (NSInteger i = (NSInteger)jvmProcessed.count - 1; i >= 0; i--) {
+                if ([jvmProcessed[i] hasPrefix:propertyPrefix]) {
+                    [jvmProcessed removeObjectAtIndex:i];
+                }
+            }
+            [jvmProcessed addObject:[propertyPrefix stringByAppendingString:mcVersion]];
+            NSLog(@"[MCDL] LabyMod %@: injected -Dnet.labymod.running-version=%@", json[@"id"], mcVersion);
+        }
+    }
+
+    arguments[@"jvm_processed"] = jvmProcessed;
 }
 
 + (NSObject *)findVersion:(NSString *)version inList:(NSArray *)list {
@@ -276,7 +376,8 @@ NSMutableArray<NSDictionary *> *localVersionList, *remoteVersionList;
 
     NSFileManager *fileManager = NSFileManager.defaultManager;
     NSString *versionPath = [NSString stringWithFormat:@"%s/versions/", getenv("POJAV_GAME_DIR")];
-    NSArray *list = [fileManager contentsOfDirectoryAtPath:versionPath error:nil];
+    NSArray *list = [[fileManager contentsOfDirectoryAtPath:versionPath error:nil]
+                     sortedArrayUsingSelector:@selector(localizedStandardCompare:)];
     for (NSString *versionId in list) {
         NSString *localPath = [versionPath stringByAppendingPathComponent:versionId];
         BOOL isDirectory;

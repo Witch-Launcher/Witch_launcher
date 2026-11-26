@@ -30,6 +30,10 @@ extern UIWindow *externalWindow;
     if (SurfaceViewController.isRunning && getPrefBool(@"video.fullscreen_airplay")) {
         [UIWindow.mainWindow.rootViewController performSelector:@selector(switchToInternalDisplay)];
     }
+    // Release the scene's window; the external UIWindow (and its root view
+    // tree) must not survive a disconnected AirPlay/HDMI session.
+    self.window = nil;
+    externalWindow = nil;
 }
 
 

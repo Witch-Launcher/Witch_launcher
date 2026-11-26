@@ -7,6 +7,8 @@
 	<key>BGTaskSchedulerPermittedIdentifiers</key>
 	<array>
 		<string>com.witch.zad626.minecraft.gpu.*</string>
+		<string>com.witch.zad626.backup.refresh</string>
+		<string>com.witch.zad626.backup.processing</string>
 	</array>
 	<key>CADisableMinimumFrameDurationOnPhone</key>
 	<true/>
@@ -18,78 +20,27 @@
 	<string>Witch</string>
 	<key>CFBundleIcons</key>
 	<dict>
-		<key>CFBundleAlternateIcons</key>
-		<dict>
-			<key>AppIcon-Dark</key>
-			<dict>
-				<key>CFBundleIconFiles</key>
-				<array>
-					<string>AppIcon-Dark60x60</string>
-				</array>
-			</dict>
-			<key>AppIcon-Development</key>
-			<dict>
-				<key>CFBundleIconFiles</key>
-				<array>
-					<string>AppIcon-Development60x60</string>
-				</array>
-			</dict>
-			<key>AppIcon-Purple</key>
-			<dict>
-				<key>CFBundleIconFiles</key>
-				<array>
-					<string>AppIcon-Purple60x60</string>
-				</array>
-			</dict>
-		</dict>
 		<key>CFBundlePrimaryIcon</key>
 		<dict>
 			<key>CFBundleIconFiles</key>
 			<array>
-				<string>AppIcon-Light60x60</string>
+				<string>AppIcon-Witch60x60</string>
 			</array>
 			<key>CFBundleIconName</key>
-			<string>AppIcon-Light</string>
+			<string>AppIcon-Witch</string>
 		</dict>
 	</dict>
 	<key>CFBundleIcons~ipad</key>
 	<dict>
-		<key>CFBundleAlternateIcons</key>
-		<dict>
-			<key>AppIcon-Dark</key>
-			<dict>
-				<key>CFBundleIconFiles</key>
-				<array>
-					<string>AppIcon-Dark60x60</string>
-					<string>AppIcon-Dark76x76</string>
-				</array>
-			</dict>
-			<key>AppIcon-Development</key>
-			<dict>
-				<key>CFBundleIconFiles</key>
-				<array>
-					<string>AppIcon-Development60x60</string>
-					<string>AppIcon-Development76x76</string>
-				</array>
-			</dict>
-			<key>AppIcon-Purple</key>
-			<dict>
-				<key>CFBundleIconFiles</key>
-				<array>
-					<string>AppIcon-Purple60x60</string>
-					<string>AppIcon-Purple76x76</string>
-				</array>
-			</dict>
-		</dict>
 		<key>CFBundlePrimaryIcon</key>
 		<dict>
 			<key>CFBundleIconFiles</key>
 			<array>
-				<string>AppIcon-Light60x60</string>
-				<string>AppIcon-Light76x76</string>
+				<string>AppIcon-Witch60x60</string>
+				<string>AppIcon-Witch76x76</string>
 			</array>
 			<key>CFBundleIconName</key>
-			<string>AppIcon-Light</string>
+			<string>AppIcon-Witch</string>
 		</dict>
 	</dict>
 	<key>CFBundleIdentifier</key>
@@ -111,6 +62,8 @@
 		<string>el</string>
 		<string>en</string>
 		<string>en-GB</string>
+		<string>en-PT</string>
+		<string>en-UD</string>
 		<string>es</string>
 		<string>et</string>
 		<string>fa</string>
@@ -126,6 +79,7 @@
 		<string>kk</string>
 		<string>ko</string>
 		<string>la</string>
+		<string>lol</string>
 		<string>lt</string>
 		<string>ms</string>
 		<string>nl</string>
@@ -153,7 +107,7 @@
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
-	<string>0.0.3</string>
+	<string>0.0.5</string>
 	<key>CFBundleSignature</key>
 	<string>????</string>
 	<key>CFBundleURLTypes</key>
@@ -174,9 +128,100 @@
 				<string>ms-xal-00000000402b5328</string>
 			</array>
 		</dict>
+		<dict>
+			<key>CFBundleURLName</key>
+			<string>com.witch.zad626.msal.auth</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>msauth.com.witch.zad626</string>
+			</array>
+		</dict>
+		<dict>
+			<key>CFBundleURLName</key>
+			<string>com.witch.zad626.dropbox</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>db-v53kn147bp3zckq</string>
+			</array>
+		</dict>
+	</array>
+	<key>CFBundleDocumentTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleTypeName</key>
+			<string>Witch Plugin Package</string>
+			<key>CFBundleTypeRole</key>
+			<string>Editor</string>
+			<key>LSHandlerRank</key>
+			<string>Owner</string>
+			<key>LSItemContentTypes</key>
+			<array>
+				<string>com.witch.plugin-package</string>
+			</array>
+		</dict>
+		<dict>
+			<key>CFBundleTypeName</key>
+			<string>Remote Pairing File</string>
+			<key>CFBundleTypeRole</key>
+			<string>Viewer</string>
+			<key>LSHandlerRank</key>
+			<string>Alternate</string>
+			<key>LSItemContentTypes</key>
+			<array>
+				<string>com.apple.mobiledevice.pairing</string>
+				<string>public.property-list</string>
+			</array>
+		</dict>
+	</array>
+	<key>LSSupportsOpeningDocumentsInPlace</key>
+	<true/>
+	<key>UTExportedTypeDeclarations</key>
+	<array>
+		<dict>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>public.data</string>
+				<string>public.archive</string>
+			</array>
+			<key>UTTypeDescription</key>
+			<string>Witch Plugin Package</string>
+			<key>UTTypeIdentifier</key>
+			<string>com.witch.plugin-package</string>
+			<key>UTTypeTagSpecification</key>
+			<dict>
+				<key>public.filename-extension</key>
+				<array>
+					<string>plgw</string>
+				</array>
+				<key>public.mime-type</key>
+				<string>application/x-witch-plugin</string>
+			</dict>
+		</dict>
+	</array>
+	<key>UTImportedTypeDeclarations</key>
+	<array>
+		<dict>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>public.data</string>
+				<string>public.property-list</string>
+			</array>
+			<key>UTTypeDescription</key>
+			<string>Remote Pairing File</string>
+			<key>UTTypeIdentifier</key>
+			<string>com.apple.mobiledevice.pairing</string>
+			<key>UTTypeTagSpecification</key>
+			<dict>
+				<key>public.filename-extension</key>
+				<array>
+					<string>mobiledevicepairing</string>
+					<string>pairing</string>
+				</array>
+			</dict>
+		</dict>
 	</array>
 	<key>CFBundleVersion</key>
-	<string>0.0.3</string>
+	<string>0.0.5</string>
 	<key>GCSupportedGameControllers</key>
 	<array>
 		<dict>
@@ -199,19 +244,19 @@
 		<string>sidestore</string>
 		<string>apple-magnifier</string>
 		<string>trollstore</string>
+		<string>localdevvpn</string>
 	</array>
 	<key>LSRequiresIPhoneOS</key>
-	<true/>
-	<key>LSSupportsOpeningDocumentsInPlace</key>
 	<true/>
 	<key>MinimumOSVersion</key>
 	<string>14.0</string>
 	<key>NSBonjourServices</key>
 	<array>
 		<string>_altserver._tcp</string>
+		<string>_remotepairing._tcp</string>
 	</array>
 	<key>NSLocalNetworkUsageDescription</key>
-	<string>Witch uses the local network to find and communicate with AltServer and LAN servers.</string>
+	<string>Witch uses the local network to find AltServer, LAN servers, and the device's RemotePairing service for Built-in StikJIT.</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Witch uses the microphone to enable support for voice chat mods.</string>
 	<key>UIApplicationSceneManifest</key>
@@ -245,6 +290,7 @@
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>fetch</string>
+		<string>processing</string>
 	</array>
 	<key>UIDeviceFamily</key>
 	<array>

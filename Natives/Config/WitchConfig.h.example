@@ -24,6 +24,24 @@
 // Optional: CurseForge API key for direct mode (if you want to ship a fallback key)
 // Leave empty to force Witch proxy or user-owned key
 #define WITCH_DEFAULT_CURSEFORGE_API_KEY @""
+#define WITCH_PLUGIN_OFFICIAL_KEY_ID @""
+#define WITCH_PLUGIN_OFFICIAL_PUBLIC_KEY @""
+
+// OAuth applications used by the optional cloud Backup feature.
+// Client IDs / app keys are public identifiers, NOT user passwords. Users still
+// sign in to their own cloud account; these values only identify this app.
+#define WITCH_GOOGLE_DRIVE_CLIENT_ID @""
+#define WITCH_MS_OAUTH_CLIENT_ID @""
+#define WITCH_DROPBOX_APP_KEY @""
+
+// OAuth application for Ely.by browser login (ElyAuthenticator).
+// Create an application at https://account.ely.by/dev/applications (type: Website)
+// and register the exact redirect URI you put in WITCH_ELY_OAUTH_REDIRECT_URI.
+// The redirect URI is intercepted in the login web view, so any URL works
+// (e.g. http://localhost/witch-ely).
+#define WITCH_ELY_OAUTH_CLIENT_ID @""
+#define WITCH_ELY_OAUTH_CLIENT_SECRET @""
+#define WITCH_ELY_OAUTH_REDIRECT_URI @"http://localhost/witch-ely"
 
 // 2) Master encryption key (obfuscated) — chỉ có khi WITCH_ENCRYPTION_KEY được set trong CI
 // Ví dụ khi có key: (được tạo bởi scripts/encrypt_witch_config.py)

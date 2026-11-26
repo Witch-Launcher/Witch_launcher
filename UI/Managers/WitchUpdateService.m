@@ -2,6 +2,7 @@
 #import "LauncherPreferences.h"
 #import "config.h"
 #import "AppSheet.h"
+#import "utils.h"
 #import <objc/runtime.h>
 
 @implementation WitchReleaseAsset
@@ -74,9 +75,9 @@
 - (NSString *)channelDisplayName:(WitchUpdateChannel)channel {
     switch (channel) {
         case WitchUpdateChannelBeta: return @"Beta (pre-release)";
-        case WitchUpdateChannelStable: return @"Ổn định (release)";
+        case WitchUpdateChannelStable: return localize(@"launcher_update.channel.stable", nil);
         default: {
-            return [self isBetaBuild] ? @"Tự động (Beta)" : @"Tự động (Ổn định)";
+            return [self isBetaBuild] ? localize(@"launcher_update.channel.auto_beta", nil) : localize(@"launcher_update.channel.auto_stable", nil);
         }
     }
 }
@@ -105,6 +106,42 @@
     return NSBundle.mainBundle.infoDictionary[@"CFBundleShortVersionString"] ?: @"1.0";
 }
 
+// Release tags are rolling ("release"/"pre-release"), so the version only
+// lives in the release name or the asset filenames. Extract the first
+// dotted numeric component (e.g. Witch-slimmed-0.0.4-ios.ipa -> 0.0.4).
+- (NSString *)versionStringForRelease:(WitchReleaseInfo *)info {
+    static NSRegularExpression *regex = nil;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        regex = [NSRegularExpression regularExpressionWithPattern:@"v?(\\d+(?:\\.\\d+)+)" options:0 error:nil];
+    });
+
+    NSMutableArray<NSString *> *candidates = [NSMutableArray array];
+    if (info.name.length > 0) [candidates addObject:info.name];
+    if (info.tagName.length > 0) [candidates addObject:info.tagName];
+    for (WitchReleaseAsset *asset in info.assets) {
+        if (asset.name.length > 0) [candidates addObject:asset.name];
+    }
+    for (NSString *candidate in candidates) {
+        NSTextCheckingResult *match = [regex firstMatchInString:candidate options:0 range:NSMakeRange(0, candidate.length)];
+        if (match) return [candidate substringWithRange:[match rangeAtIndex:1]];
+    }
+    return nil;
+}
+
+- (NSComparisonResult)compareVersion:(NSString *)lhs toVersion:(NSString *)rhs {
+    NSArray<NSString *> *a = [lhs componentsSeparatedByString:@"."];
+    NSArray<NSString *> *b = [rhs componentsSeparatedByString:@"."];
+    NSUInteger count = MAX(a.count, b.count);
+    for (NSUInteger i = 0; i < count; i++) {
+        NSInteger x = i < a.count ? a[i].integerValue : 0;
+        NSInteger y = i < b.count ? b[i].integerValue : 0;
+        if (x < y) return NSOrderedAscending;
+        if (x > y) return NSOrderedDescending;
+    }
+    return NSOrderedSame;
+}
+
 - (void)checkForUpdateForce:(BOOL)force completion:(void(^)(WitchReleaseInfo *, BOOL, NSError *))completion {
     NSString *tag = [self effectiveTag];
     NSString *urlStr = [NSString stringWithFormat:@"https://api.github.com/repos/%@/releases/tags/%@", [self githubRepo], tag];
@@ -125,7 +162,7 @@
         }
         if (json[@"message"] && !json[@"tag_name"]) {
             // e.g. {"message":"Not Found"} when tag doesn't exist yet
-            NSError *e = [NSError errorWithDomain:@"WitchUpdate" code:404 userInfo:@{NSLocalizedDescriptionKey: [NSString stringWithFormat:@"Release '%@' chưa có: %@", tag, json[@"message"]]}];
+            NSError *e = [NSError errorWithDomain:@"WitchUpdate" code:404 userInfo:@{NSLocalizedDescriptionKey: [NSString stringWithFormat:localize(@"launcher_update.error.missing_release", nil), tag, json[@"message"]]}];
             dispatch_async(dispatch_get_main_queue(), ^{ completion(nil, NO, e); });
             return;
         }
@@ -138,6 +175,16 @@
         NSString *lastSeen = getPrefObject(key);
         BOOL hasUpdate = YES;
         if ([lastSeen isKindOfClass:[NSString class]] && [lastSeen isEqualToString:updatedAt]) {
+            hasUpdate = NO;
+        }
+        // A rebuilt release (rolling tag) bumps updated_at even when the
+        // version did not change. Fresh installs have no last-seen marker,
+        // so without this they were told "Có bản mới" on first launch even
+        // though they had just downloaded this exact build.
+        NSString *releaseVersion = [self versionStringForRelease:info];
+        NSString *installedVersion = [self currentVersion];
+        if (releaseVersion.length > 0 && installedVersion.length > 0 &&
+            [self compareVersion:releaseVersion toVersion:installedVersion] != NSOrderedDescending) {
             hasUpdate = NO;
         }
         // Always mark as seen when checking (force or not) so user won't be nagged again for same release
@@ -216,7 +263,7 @@
 - (void)downloadAsset:(WitchReleaseAsset *)asset progress:(void(^)(float))progress completion:(void(^)(NSURL *, NSError *))completion {
     NSURL *url = [NSURL URLWithString:asset.downloadURL];
     if (!url) {
-        completion(nil, [NSError errorWithDomain:@"WitchUpdate" code:-2 userInfo:@{NSLocalizedDescriptionKey: @"URL tải không hợp lệ"}]);
+        completion(nil, [NSError errorWithDomain:@"WitchUpdate" code:-2 userInfo:@{NSLocalizedDescriptionKey: localize(@"launcher_update.error.invalid_url", nil)}]);
         return;
     }
     NSURLSessionDownloadTask *task = [_session downloadTaskWithURL:url completionHandler:^(NSURL *tmp, NSURLResponse *resp, NSError *error) {
@@ -225,19 +272,19 @@
             return;
         }
         NSString *ext = asset.name.pathExtension.length ? asset.name.pathExtension : @"ipa";
-        NSString *dest = [NSTemporaryDirectory() stringByAppendingPathComponent:[NSString stringWithFormat:@"Witch-update-%@.%@", [[NSUUID UUID] UUIDString], ext]];
-        // Move to a stable path keeping original filename for share sheet clarity
-        NSString *named = [NSTemporaryDirectory() stringByAppendingPathComponent:asset.name];
+        // Persistent hidden location: NSTemporaryDirectory gets purged, and the
+        // launcher-files page lists/re-shares these installers later, so store
+        // them in .amethyst/updates with the release filename intact.
+        NSString *updatesDir = amethyst_hidden_dir(@"updates");
+        NSString *named = asset.name.length > 0
+            ? [updatesDir stringByAppendingPathComponent:asset.name]
+            : [updatesDir stringByAppendingPathComponent:[NSString stringWithFormat:@"Witch-update-%@.%@", [[NSUUID UUID] UUIDString], ext]];
         [[NSFileManager defaultManager] removeItemAtPath:named error:nil];
         NSError *me = nil;
-        NSURL *srcURL = tmp;
-        // Prefer original filename
-        [[NSFileManager defaultManager] moveItemAtURL:srcURL toURL:[NSURL fileURLWithPath:named] error:&me];
-        NSURL *finalURL = me ? [NSURL fileURLWithPath:dest] : [NSURL fileURLWithPath:named];
-        if (me) {
-            [[NSFileManager defaultManager] moveItemAtURL:srcURL toURL:finalURL error:nil];
-        }
-        dispatch_async(dispatch_get_main_queue(), ^{ completion(finalURL, nil); });
+        [[NSFileManager defaultManager] moveItemAtURL:tmp toURL:[NSURL fileURLWithPath:named] error:&me];
+        NSURL *finalURL = me ? nil : [NSURL fileURLWithPath:named];
+        if (me) NSLog(@"[WitchUpdate] move download failed: %@", me);
+        dispatch_async(dispatch_get_main_queue(), ^{ completion(finalURL, me); });
     }];
     // Progress via KVO is overkill; poll countOfBytesReceived for UI that passes progress block.
     // Simple: report indeterminate 0.1 then 1.0 on completion; caller shows spinner.
@@ -296,26 +343,37 @@
 
 - (void)autoCheckFromViewController:(UIViewController *)vc {
     if (!vc) return;
+    // Users can opt out of background update checks entirely. Manual checks
+    // from the Update screen use checkForUpdateForce: and are unaffected.
+    if (!getPrefBool(@"witch.update_auto_check")) return;
     // Respect "Để sau": don't nag more than once per 3 days unless force.
     NSTimeInterval now = [[NSDate date] timeIntervalSince1970];
     NSTimeInterval lastPrompt = [getPrefObject(@"witch.update_last_prompt") doubleValue];
     if (now - lastPrompt < 3*24*3600) return;
+
+    // Fresh install: no baseline yet. Let this check record the current
+    // release silently instead of greeting a new user with an update sheet.
+    NSString *seenKey = [NSString stringWithFormat:@"witch.update_last_seen_%@", [self effectiveTag]];
+    id seen = getPrefObject(seenKey);
+    BOOL hasBaseline = ([seen isKindOfClass:[NSString class]] && [(NSString *)seen length] > 0) || lastPrompt > 0;
+
     [self checkForUpdateForce:NO completion:^(WitchReleaseInfo *info, BOOL hasUpdate, NSError *error) {
         if (error || !hasUpdate || !info) return;
+        if (!hasBaseline) return;
         // Only prompt if there is at least one installable asset
         WitchReleaseAsset *any = [info assetForVariant:WitchAppVariantFull isTrollStore:[self isTrollStoreInstall]];
         if (!any) any = info.assets.firstObject;
         if (!any) return;
-        [AppSheet showConfirmWithTitle:@"Có bản mới"
-                               message:[NSString stringWithFormat:@"Kênh %@ (%@) có bản mới.\nMở màn hình Cập nhật để chọn bản và cài đặt.", [self channelDisplayName:[self selectedChannel]], [self effectiveTag]]
-                          confirmTitle:@"Cập nhật"
+        [AppSheet showConfirmWithTitle:localize(@"launcher_update.new.title", nil)
+                               message:[NSString stringWithFormat:localize(@"launcher_update.new.message", nil), [self channelDisplayName:[self selectedChannel]], [self effectiveTag]]
+                          confirmTitle:localize(@"Update", nil)
                            destructive:NO
                              onConfirm:^{
             setPrefObject(@"witch.update_last_prompt", @([[NSDate date] timeIntervalSince1970]));
             Class cls = NSClassFromString(@"LauncherUpdateViewController");
             if (cls) {
                 UIViewController *uvc = [[cls alloc] init];
-                uvc.title = @"Cập nhật";
+                uvc.title = localize(@"Update", nil);
                 [vc.navigationController pushViewController:uvc animated:YES];
                 if (!vc.navigationController) [vc presentViewController:[[UINavigationController alloc] initWithRootViewController:uvc] animated:YES completion:nil];
             }

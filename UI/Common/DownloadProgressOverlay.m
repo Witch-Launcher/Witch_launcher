@@ -1,6 +1,7 @@
 #import "DownloadProgressOverlay.h"
 
 #import "AmethystBlurView.h"
+#import "UIView+LiquidGlass.h"
 #import "ThemeManager.h"
 #import "utils.h"
 
@@ -8,6 +9,8 @@
 @property (nonatomic) UIView *containerView;
 @property (nonatomic) UILabel *titleLabel;
 @property (nonatomic) UIButton *cancelBtn;
+@property (nonatomic) UIButton *infoBtn;
+@property (nonatomic) UIButton *hideBtn;
 @property (nonatomic) BOOL isFinished;
 @property (nonatomic) BOOL isDismissing;
 @end
@@ -44,6 +47,7 @@
         _containerView.translatesAutoresizingMaskIntoConstraints = NO;
         _containerView.layer.cornerRadius = 14;
         _containerView.clipsToBounds = YES;
+        [_containerView lg_enableLiquidGlassWithTint:nil cornerRadius:14.0 maskedCorners:kCALayerMinXMinYCorner | kCALayerMaxXMinYCorner | kCALayerMinXMaxYCorner | kCALayerMaxXMaxYCorner];
         [self addSubview:_containerView];
 
         _titleLabel = [[UILabel alloc] init];
@@ -125,6 +129,20 @@
             [_etaLabel.bottomAnchor constraintLessThanOrEqualToAnchor:_containerView.bottomAnchor constant:-16],
         ]];
 
+        _infoBtn = [UIButton buttonWithType:UIButtonTypeSystem];
+        _infoBtn.translatesAutoresizingMaskIntoConstraints = NO;
+        [_infoBtn setImage:[UIImage systemImageNamed:@"info.circle"] forState:UIControlStateNormal];
+        _infoBtn.hidden = YES;
+        [_infoBtn addTarget:self action:@selector(infoTapped) forControlEvents:UIControlEventTouchUpInside];
+        [_containerView addSubview:_infoBtn];
+
+        [NSLayoutConstraint activateConstraints:@[
+            [_infoBtn.topAnchor constraintEqualToAnchor:_containerView.topAnchor constant:8],
+            [_infoBtn.trailingAnchor constraintEqualToAnchor:_containerView.trailingAnchor constant:-8],
+            [_infoBtn.widthAnchor constraintEqualToConstant:26],
+            [_infoBtn.heightAnchor constraintEqualToConstant:26],
+        ]];
+
         _cancelBtn = [UIButton buttonWithType:UIButtonTypeSystem];
         _cancelBtn.translatesAutoresizingMaskIntoConstraints = NO;
         _cancelBtn.hidden = YES;
@@ -145,6 +163,22 @@
             [_cancelBtn.heightAnchor constraintEqualToConstant:28],
         ]];
 
+        _hideBtn = [UIButton buttonWithType:UIButtonTypeSystem];
+        _hideBtn.translatesAutoresizingMaskIntoConstraints = NO;
+        _hideBtn.hidden = YES;
+        [_hideBtn setTitle:localize(@"progress.hide", nil) forState:UIControlStateNormal];
+        _hideBtn.titleLabel.font = [UIFont systemFontOfSize:12 weight:UIFontWeightMedium];
+        [_hideBtn setTitleColor:ThemeManager.shared.secondaryTextColor forState:UIControlStateNormal];
+        [_hideBtn addTarget:self action:@selector(hideTapped) forControlEvents:UIControlEventTouchUpInside];
+        [_containerView addSubview:_hideBtn];
+
+        [NSLayoutConstraint activateConstraints:@[
+            [_hideBtn.leadingAnchor constraintEqualToAnchor:_containerView.leadingAnchor constant:12],
+            [_hideBtn.bottomAnchor constraintEqualToAnchor:_containerView.bottomAnchor constant:-12],
+            [_hideBtn.heightAnchor constraintEqualToConstant:28],
+            [_hideBtn.widthAnchor constraintGreaterThanOrEqualToConstant:44],
+        ]];
+
         _speedLabel.text = nil;
         _etaLabel.text = nil;
         _percentLabel.text = nil;
@@ -157,14 +191,26 @@
 
 - (void)updateTheme {
     _containerView.backgroundColor = ThemeManager.shared.cardBackgroundColor;
+    [_containerView lg_setLiquidGlassBaseColor:ThemeManager.shared.cardBackgroundColor];
+    [_containerView lg_refreshLiquidGlass];
     _titleLabel.textColor = ThemeManager.shared.primaryTextColor;
     _statusLabel.textColor = ThemeManager.shared.secondaryTextColor;
     _progressView.progressTintColor = ThemeManager.shared.accentColor;
     _percentLabel.textColor = ThemeManager.shared.accentColor;
     _speedLabel.textColor = ThemeManager.shared.secondaryTextColor;
     _etaLabel.textColor = ThemeManager.shared.secondaryTextColor;
+    _infoBtn.tintColor = ThemeManager.shared.accentColor;
+    [_hideBtn setTitleColor:ThemeManager.shared.secondaryTextColor forState:UIControlStateNormal];
     [_cancelBtn setTitleColor:ThemeManager.shared.errorColor forState:UIControlStateNormal];
     _cancelBtn.layer.borderColor = ThemeManager.shared.errorColor.CGColor;
+}
+
+- (void)infoTapped {
+    if (self.infoBlock) self.infoBlock();
+}
+
+- (void)hideTapped {
+    if (self.hideBlock) self.hideBlock();
 }
 
 - (void)updateProgress:(float)progress message:(NSString *)message {
@@ -225,6 +271,20 @@
     _cancelBlock = [cancelBlock copy];
     dispatch_async(dispatch_get_main_queue(), ^{
         self.cancelBtn.hidden = cancelBlock == nil;
+    });
+}
+
+- (void)setInfoBlock:(void (^)(void))infoBlock {
+    _infoBlock = [infoBlock copy];
+    dispatch_async(dispatch_get_main_queue(), ^{
+        self.infoBtn.hidden = infoBlock == nil;
+    });
+}
+
+- (void)setHideBlock:(void (^)(void))hideBlock {
+    _hideBlock = [hideBlock copy];
+    dispatch_async(dispatch_get_main_queue(), ^{
+        self.hideBtn.hidden = hideBlock == nil;
     });
 }
 

@@ -1,8 +1,11 @@
 #import "PLLogOutputView.h"
+#import "PerfRecorder.h"
 #import "SurfaceViewController.h"
 #import "utils.h"
 #import "CrashScreenViewController.h"
 #import "AppSheet.h"
+
+NSNotificationName const WitchLogLineDidAppendNotification = @"WitchLogLineDidAppendNotification";
 
 @interface PLLogOutputView()<UITableViewDataSource, UITableViewDelegate>
 @property(nonatomic) UITableView* logTableView;
@@ -12,21 +15,41 @@
 @implementation PLLogOutputView
 static BOOL fatalErrorOccurred;
 static NSMutableArray* logLines;
-static PLLogOutputView* current;
+// weak: the live view is owned by SurfaceViewController. Keeping a strong
+// static pointer here turned every finished game session into a permanent
+// log-view leak even after the view was removed from the hierarchy.
+static __weak PLLogOutputView* current;
+// A long session with the log panel open otherwise appends one line per
+// log chunk forever (verbose:gc + the 2s MemSampler alone are unbounded).
+static const NSUInteger kMaxLogLines = 2000;
 
 - (instancetype)initWithFrame:(CGRect)frame {
+    self = [super initWithFrame:frame];
+    if (!self) {
+        return nil;
+    }
+
+    // Do not make this view the navigation controller's root view: that
+    // creates navController -> rootVC -> view(self) -> navController and
+    // retains the whole log panel after the game exits. The controller owns
+    // a plain container instead; the table and navigation bar live there.
+    CGRect logFrame = frame;
+    logFrame.origin.y = logFrame.size.height;
+
+    UIView *container = [[UIView alloc] initWithFrame:logFrame];
+    container.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
+    // Keep the translucent backdrop the old root view had; the navigation
+    // controller's default background is opaque and would hide the game.
+    container.backgroundColor = [UIColor colorWithWhite:0 alpha:0.5];
     UIViewController *vc = [UIViewController new];
-    vc.view = self;
+    vc.view = container;
+
+    self.frame = logFrame;
     self.navController = [[UINavigationController alloc] initWithRootViewController:vc];
     self.navigationBar = self.navController.navigationBar;
-    
-    frame.origin.y = frame.size.height;
-    self = [super initWithFrame:frame];
-    frame.origin.y = 0;
+    self.navController.view.hidden = YES;
 
     logLines = [NSMutableArray new];
-    self.backgroundColor = [UIColor colorWithWhite:0 alpha:0.5];
-    self.navController.view.hidden = YES;
 
     vc.navigationItem.rightBarButtonItems = @[
         [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemStop
@@ -37,7 +60,7 @@ static PLLogOutputView* current;
     NSString *ver = NSBundle.mainBundle.infoDictionary[@"CFBundleShortVersionString"] ?: @"1.0";
     vc.title = [NSString stringWithFormat:@"%@ v%@", localize(@"game.menu.log_output", nil), ver];
 
-    self.logTableView = [[UITableView alloc] initWithFrame:frame];
+    self.logTableView = [[UITableView alloc] initWithFrame:container.bounds];
     //self.logTableView.allowsSelection = NO;
     self.logTableView.autoresizingMask = UIViewAutoresizingFlexibleHeight | UIViewAutoresizingFlexibleWidth;
     self.logTableView.backgroundColor = UIColor.clearColor;
@@ -48,13 +71,17 @@ static PLLogOutputView* current;
     self.logTableView.rowHeight = 20;
     self.logTableView.separatorInset = UIEdgeInsetsZero;
     self.logTableView.separatorStyle = UITableViewCellSeparatorStyleNone;
-    [self addSubview:self.logTableView];
-    [self addSubview:self.navigationBar];
+    [container addSubview:self.logTableView];
+    [container addSubview:self.navigationBar];
+
+    // Register the live view BEFORE toggling capture: setCaptureEnabled: looks
+    // up `current` to install the play/pause bar button, so calling it while
+    // `current` is still nil silently dropped that button from the log panel.
+    current = self;
 
     canAppendToLog = YES;
     [self actionStartStopLogOutput];
 
-    current = self;
     return self;
 }
 
@@ -102,6 +129,28 @@ static PLLogOutputView* current;
     [self.logTableView reloadData];
 }
 
++ (void)clearLog {
+    if (!logLines) return;
+    [logLines removeAllObjects];
+    if (current) {
+        [current.logTableView reloadData];
+    }
+}
+
++ (void)trimLogToMaxLines:(NSUInteger)maxLines {
+    if (!logLines || logLines.count == 0) {
+        return;
+    }
+    if (maxLines == 0) {
+        maxLines = 1;
+    }
+    if (logLines.count <= maxLines) {
+        return;
+    }
+    [logLines removeObjectsInRange:NSMakeRange(0, logLines.count - maxLines)];
+    [current.logTableView reloadData];
+}
+
 - (void)actionShareLatestlog {
     NSString *latestlogPath = [NSString stringWithFormat:@"file://%s/latestlog.txt", getenv("POJAV_HOME")];
     UIActivityViewController *activityVC = [[UIActivityViewController alloc] initWithActivityItems:@[@"latestlog.txt",
@@ -112,12 +161,22 @@ static PLLogOutputView* current;
 }
 
 - (void)actionStartStopLogOutput {
-    canAppendToLog = !canAppendToLog;
-    UINavigationItem* item = self.navigationBar.items[0];
-    item.leftBarButtonItem =
-        [[UIBarButtonItem alloc] initWithBarButtonSystemItem:
-            canAppendToLog ? UIBarButtonSystemItemPause : UIBarButtonSystemItemPlay
-        target:self action:@selector(actionStartStopLogOutput)];
+    [PLLogOutputView setCaptureEnabled:!canAppendToLog];
+}
+
++ (void)setCaptureEnabled:(BOOL)enabled {
+    canAppendToLog = enabled;
+    UINavigationItem *item = current.navigationBar.items.firstObject;
+    if (item) {
+        item.leftBarButtonItem =
+            [[UIBarButtonItem alloc] initWithBarButtonSystemItem:
+                enabled ? UIBarButtonSystemItemPause : UIBarButtonSystemItemPlay
+             target:current action:@selector(actionStartStopLogOutput)];
+    }
+}
+
++ (BOOL)captureEnabled {
+    return canAppendToLog;
 }
 
 - (void)actionToggleLogOutput {
@@ -127,35 +186,70 @@ static PLLogOutputView* current;
         return;
     }
 
-    UIViewAnimationOptions opt = self.navController.view.hidden ? UIViewAnimationOptionCurveEaseOut : UIViewAnimationOptionCurveEaseIn;
-    [UIView transitionWithView:self duration:0.4 options:UIViewAnimationOptionCurveEaseOut animations:^(void){
-        CGRect frame = self.frame;
-        frame.origin.y = self.navController.view.hidden ? 0 : frame.size.height;
-        self.navController.view.hidden = NO;
-        self.frame = frame;
+    UIView *navView = self.navController.view;
+    // The navigation controller view is the visible container (not `self`),
+    // because `self` must stay outside the navController -> rootVC -> view
+    // retain cycle. Animate the container instead.
+    UIViewAnimationOptions opt = navView.hidden ? UIViewAnimationOptionCurveEaseOut : UIViewAnimationOptionCurveEaseIn;
+    [UIView transitionWithView:navView duration:0.4 options:opt animations:^(void){
+        CGRect frame = navView.frame;
+        frame.origin.y = navView.hidden ? 0 : self.frame.size.height;
+        navView.hidden = NO;
+        navView.frame = frame;
     } completion: ^(BOOL finished) {
-        self.navController.view.hidden = self.frame.origin.y != 0;
+        navView.hidden = navView.frame.origin.y != 0;
     }];
 }
 
 + (void)_appendToLog:(NSString *)line {
-    if (line.length == 0) {
+    if (line.length == 0 || !logLines) {
+        return;
+    }
+    [[NSNotificationCenter defaultCenter] postNotificationName:WitchLogLineDidAppendNotification object:nil userInfo:@{@"line": line}];
+    PLLogOutputView *view = current;
+    if (!view) {
+        // No live log panel: keep the buffer trimmed and drop the line instead
+        // of growing a static array for the rest of the process.
+        if (logLines.count >= kMaxLogLines) {
+            [logLines removeObjectsInRange:NSMakeRange(0, logLines.count - kMaxLogLines + 1)];
+        }
+        [logLines addObject:line];
+        return;
+    }
+
+    // Trim in batches so a capped panel does not reload the table for every
+    // single line once it reaches the limit.
+    if (logLines.count >= kMaxLogLines) {
+        NSUInteger drop = MAX((NSUInteger)1, kMaxLogLines / 10);
+        [logLines removeObjectsInRange:NSMakeRange(0, MIN(drop, logLines.count))];
+        [logLines addObject:line];
+        UIView.animationsEnabled = NO;
+        [view.logTableView reloadData];
+        UIView.animationsEnabled = YES;
+        [view.logTableView scrollToRowAtIndexPath:
+            [NSIndexPath indexPathForRow:logLines.count - 1 inSection:0]
+            atScrollPosition:UITableViewScrollPositionBottom animated:NO];
         return;
     }
 
     NSIndexPath *indexPath = [NSIndexPath indexPathForRow:logLines.count inSection:0];
     [logLines addObject:line];
     UIView.animationsEnabled = NO;
-    [current.logTableView beginUpdates];
-    [current.logTableView
+    [view.logTableView beginUpdates];
+    [view.logTableView
         insertRowsAtIndexPaths:@[indexPath]
         withRowAnimation:UITableViewRowAnimationNone];
-    [current.logTableView endUpdates];
+    [view.logTableView endUpdates];
     UIView.animationsEnabled = YES;
 
-    [current.logTableView 
+    [view.logTableView 
         scrollToRowAtIndexPath:indexPath
         atScrollPosition:UITableViewScrollPositionBottom animated:NO];
+}
+
++ (NSString *)fullLogText {
+    if (!logLines.count) return @"";
+    return [logLines componentsJoinedByString:@"\n"];
 }
 
 + (void)appendToLog:(NSString *)string {
@@ -169,6 +263,9 @@ static PLLogOutputView* current;
 }
 
 + (void)handleExitCode:(int)code {
+    if (code != 0) {
+        [[PerfRecorder shared] noteCrash];
+    }
     dispatch_async(dispatch_get_main_queue(), ^(void){
         UIWindow *window = UIWindow.mainWindow;
         if (!window) {

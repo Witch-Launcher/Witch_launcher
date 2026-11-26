@@ -27,6 +27,7 @@ CLASSES := $(SOURCES:$(SOURCEDIR)/%.java=$(OUTPUTDIR)/%.class)
 TARGETS := $(shell find $(SOURCEDIR) -mindepth 1 -maxdepth 1 -type d ! -name agent)
 TARGETS := $(TARGETS:$(SOURCEDIR)/%=$(OUTPUTDIR)/%.jar)
 TARGETS += $(OUTPUTDIR)/lwjgl-3.3.3.jar $(OUTPUTDIR)/lwjgl-3.3.6.jar $(OUTPUTDIR)/lwjgl-3.4.1.jar $(OUTPUTDIR)/cacio-init-agent.jar
+TARGETS += $(OUTPUTDIR)/fsr3-agent.jar
 
 # Add all jars to classpath and allow compiling with private API
 JCFLAGS := -J-Djava.io.tmpdir=$(JAVAC_TMPDIR) -cp "$(subst $() $(),:,$(wildcard $(SOURCEDIR)/*/):$(wildcard libs/*/*.jar))" -XDignore.symbol.file
@@ -51,31 +52,32 @@ $(CLASSES): $(OUTPUTDIR)/%.class: $(SOURCEDIR)/%.java
 	base="$$(basename "$$src" .java)"; \
 	echo "Compiling $$src"; \
 	mkdir -p "$$out"; \
-	find "$$out" -maxdepth 1 -name "$$base*.class" -delete; \
+	find "$$out" -maxdepth 1 \( -name "$$base.class" -o -name "$$base\$$*.class" \) -delete; \
 	staging="$$(mktemp -d)"; \
 	trap 'rm -rf "$$staging"' EXIT; \
 	"$(BOOTJDK)/javac" $(JCFLAGS) -d "$$staging" "$$src"; \
-	count=$$(find "$$staging" -name "$$base*.class" | wc -l | tr -d ' '); \
+	count=$$(find "$$staging" \( -name "$$base.class" -o -name "$$base\$$*.class" \) | wc -l | tr -d ' '); \
 	if [ "$$count" -eq 0 ]; then \
 		echo "Error: javac produced no class files for $$src"; \
 		exit 1; \
 	fi; \
-	find "$$staging" -name "$$base*.class" -exec cp {} "$$out" \;
+	find "$$staging" \( -name "$$base.class" -o -name "$$base\$$*.class" \) -exec cp {} "$$out" \;
 
-# Depends on the merged LWJGL jar: the iOS shims it carries (MacosUtil,
-# GLFWNativeCocoa) are also embedded into launcher.jar (/macosfix/) so
-# patchMacPlatformShims() can overwrite mod-bundled REAL copies of those
-# classes inside game-directory jars (Essential et al).
-$(OUTPUTDIR)/launcher.jar: $(CLASSES) $(OUTPUTDIR)/lwjgl-3.4.1.jar
+# The iOS shims (MacosUtil, GLFWNativeCocoa) are embedded into launcher.jar
+# (/macosfix/) so patchMacPlatformShims() can overwrite mod-bundled REAL copies
+# of those classes inside game-directory jars (Essential et al). They are read
+# from the compiled classes directory, NOT from lwjgl-3.4.1.jar: that jar must
+# not carry com/mojang/blaze3d/platform (see the lwjgl rules below).
+$(OUTPUTDIR)/launcher.jar: $(CLASSES)
 	@set -e
 	@echo "Creating $@"
 	@cp -r $(SOURCEDIR)/launcher/META-INF $(basename $@)/ 2>/dev/null || true
 	@mkdir -p $(basename $@)/lwjglfix
 	@unzip -o -p libs/lwjgl41/lwjgl.jar org/lwjgl/system/Library.class > $(basename $@)/lwjglfix/Library.class
 	@mkdir -p $(basename $@)/macosfix
-	@unzip -o -p $(OUTPUTDIR)/lwjgl-3.4.1.jar com/mojang/blaze3d/platform/MacosUtil.class > $(basename $@)/macosfix/MacosUtil.class
-	@unzip -o -p $(OUTPUTDIR)/lwjgl-3.4.1.jar org/lwjgl/glfw/GLFWNativeCocoa.class > $(basename $@)/macosfix/GLFWNativeCocoa.class
-	@unzip -o -p $(OUTPUTDIR)/lwjgl-3.4.1.jar 'org/lwjgl/glfw/GLFWNativeCocoa$$Functions.class' > '$(basename $@)/macosfix/GLFWNativeCocoa$$Functions.class'
+	@cp $(OUTPUTDIR)/lwjgl/com/mojang/blaze3d/platform/MacosUtil.class $(basename $@)/macosfix/MacosUtil.class
+	@cp $(OUTPUTDIR)/lwjgl/org/lwjgl/glfw/GLFWNativeCocoa.class $(basename $@)/macosfix/GLFWNativeCocoa.class
+	@cp '$(OUTPUTDIR)/lwjgl/org/lwjgl/glfw/GLFWNativeCocoa$$Functions.class' '$(basename $@)/macosfix/GLFWNativeCocoa$$Functions.class'
 	@mkdir -p $(basename $@)/launchwrapper
 	@cp libs/launchwrapper-1.12.jar $(basename $@)/launchwrapper/launchwrapper-1.12.jar
 	@find $(basename $@) -name '*.class' -size 0 | grep -v '\$$' && { echo "Error: found empty class files"; exit 1; } || true
@@ -96,6 +98,23 @@ $(OUTPUTDIR)/lwjgl-3.3.3.jar: $(CLASSES)
 	@cd $(OUTPUTDIR)/lwjgl33_lib && find ../../libs/lwjgl -name 'lwjgl*.jar' ! -name 'lwjgl.jar' -exec $(BOOTJDK)/jar -xf {} \; && rm -rf META-INF
 	@cd $(OUTPUTDIR)/lwjgl33_lib && $(BOOTJDK)/jar -xf "../../libs/lwjgl/lwjgl.jar" && rm -rf META-INF
 	@cp -R $(OUTPUTDIR)/lwjgl/* $(OUTPUTDIR)/lwjgl33_lib/
+	# Re-apply the LWJGL2 compatibility overloads from the launcher jar. The
+	# official lwjgl.jar extracted above overwrites GL11/GL20/ARBShaderObjects
+	# with builds that lack the ByteBuffer variants used by MC 1.8.9.
+	@cd $(OUTPUTDIR)/lwjgl33_lib && $(BOOTJDK)/jar -xf "../../../lwjgl.jar" \
+		org/lwjgl/opengl/GL11.class \
+		org/lwjgl/opengl/GL20.class \
+		org/lwjgl/opengl/ARBShaderObjects.class \
+		org/lwjgl/openal/AL10.class
+	# Forge's BootStrapLauncher builds a JPMS layer from the classpath jars. An
+	# automatic module ("lwjgl", named after lwjgl.jar) exports every package
+	# it contains, so leaving com.mojang.blaze3d.platform in here collides with
+	# the "minecraft" module (the srg client jar also has that package):
+	# "Module minecraft contains package com.mojang.blaze3d.platform, module
+	# lwjgl exports package com.mojang.blaze3d.platform to minecraft" ->
+	# ResolutionException, Forge never starts. MacosUtil is applied inside the
+	# game jar by patchMacPlatformShims() and kept in launcher.jar (/macosfix/).
+	@rm -rf $(OUTPUTDIR)/lwjgl33_lib/com/mojang/blaze3d
 	@$(BOOTJDK)/jar -cf $@ -C $(OUTPUTDIR)/lwjgl33_lib .
 
 # Build LWJGL 3.3.6
@@ -107,6 +126,14 @@ $(OUTPUTDIR)/lwjgl-3.3.6.jar: $(CLASSES)
 	@cd $(OUTPUTDIR)/lwjgl36_lib && find ../../libs/lwjgl36 -name 'lwjgl*.jar' ! -name 'lwjgl.jar' -exec $(BOOTJDK)/jar -xf {} \; && rm -rf META-INF
 	@cd $(OUTPUTDIR)/lwjgl36_lib && $(BOOTJDK)/jar -xf "../../libs/lwjgl36/lwjgl.jar" && rm -rf META-INF
 	@cp -R $(OUTPUTDIR)/lwjgl/* $(OUTPUTDIR)/lwjgl36_lib/
+	# See lwjgl-3.3.3: re-apply the LWJGL2 ByteBuffer compat overloads.
+	@cd $(OUTPUTDIR)/lwjgl36_lib && $(BOOTJDK)/jar -xf "../../../lwjgl.jar" \
+		org/lwjgl/opengl/GL11.class \
+		org/lwjgl/opengl/GL20.class \
+		org/lwjgl/opengl/ARBShaderObjects.class \
+		org/lwjgl/openal/AL10.class
+	# See lwjgl-3.3.3: strip com.mojang.blaze3d.platform (Forge module clash).
+	@rm -rf $(OUTPUTDIR)/lwjgl36_lib/com/mojang/blaze3d
 	@$(BOOTJDK)/jar -cf $@ -C $(OUTPUTDIR)/lwjgl36_lib .
 
 $(OUTPUTDIR)/lwjgl-3.4.1.jar: $(CLASSES)
@@ -121,26 +148,50 @@ $(OUTPUTDIR)/lwjgl-3.4.1.jar: $(CLASSES)
 	# lwjgl-tinyfd.jar (int API) due to alphabetical extraction order.
 	@cd $(OUTPUTDIR)/lwjgl41_lib && $(BOOTJDK)/jar -xf "../../libs/lwjgl41/lwjgl-tinyfd.jar"
 	@cp -R $(OUTPUTDIR)/lwjgl/* $(OUTPUTDIR)/lwjgl41_lib/
+	# See lwjgl-3.3.3: re-apply the LWJGL2 ByteBuffer compat overloads.
+	@cd $(OUTPUTDIR)/lwjgl41_lib && $(BOOTJDK)/jar -xf "../../../lwjgl.jar" \
+		org/lwjgl/opengl/GL11.class \
+		org/lwjgl/opengl/GL20.class \
+		org/lwjgl/opengl/ARBShaderObjects.class \
+		org/lwjgl/openal/AL10.class
 	# Forge 26.2 builds a JPMS layer containing the classpath jars; the merged
 	# org/jspecify from lwjgl-core would split the package with the real
 	# org.jspecify:jspecify jar -> "Split package: org.jspecify". Strip it.
 	@rm -rf $(OUTPUTDIR)/lwjgl41_lib/org/jspecify
+	# See lwjgl-3.3.3: strip com.mojang.blaze3d.platform (Forge module clash).
+	@rm -rf $(OUTPUTDIR)/lwjgl41_lib/com/mojang/blaze3d
 	@$(BOOTJDK)/jar -cf $@ -C $(OUTPUTDIR)/lwjgl41_lib .
 
 # Legacy alias
 $(OUTPUTDIR)/lwjgl.jar: $(OUTPUTDIR)/lwjgl-3.3.3.jar
 	@cp $< $@
 
-$(OUTPUTDIR)/patchjna_agent.jar: $(CLASSES)
+METAL_COMPAT_PATCHES := $(shell find $(SOURCEDIR)/patchjna_agent/patched -type f 2>/dev/null)
+
+$(OUTPUTDIR)/patchjna_agent.jar: $(CLASSES) $(METAL_COMPAT_PATCHES)
 	@set -e
 	@mv $(basename $@)/com/sun/jna/Platform.class $(basename $@)/com/sun/jna/Platform.class.patch
 	@echo "Creating $@"
+	@rm -rf $(basename $@)/patched
+	@cp -R $(SOURCEDIR)/patchjna_agent/patched $(basename $@)/
 	@$(BOOTJDK)/jar -cfm $@ $(SOURCEDIR)/patchjna_agent.txt -C $(basename $@) .
 
 $(OUTPUTDIR)/cacio-init-agent.jar: $(CLASSES)
 	@set -e
 	@echo "Creating $@"
 	@$(BOOTJDK)/jar -cfm $@ $(SOURCEDIR)/cacio_init_agent.txt -C $(basename $@) .
+
+$(OUTPUTDIR)/f3agent.jar: $(CLASSES)
+	@set -e
+	@echo "Creating $@"
+	@$(BOOTJDK)/jar -cfm $@ $(SOURCEDIR)/f3agent.txt -C $(basename $@) .
+
+$(OUTPUTDIR)/fsr3-agent.jar: $(CLASSES)
+	@set -e
+	@echo "Creating $@"
+	@mkdir -p $(basename $@)
+	@cp -R $(OUTPUTDIR)/agent/. $(basename $@)/
+	@$(BOOTJDK)/jar -cfm $@ $(SOURCEDIR)/fsr3_agent.txt -C $(basename $@) .
 
 clean:
 	rm -rf $(OUTPUTDIR)

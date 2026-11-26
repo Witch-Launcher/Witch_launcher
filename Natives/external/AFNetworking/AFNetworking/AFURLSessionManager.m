@@ -83,9 +83,54 @@ typedef void (^AFURLSessionDownloadTaskDidWriteDataBlock)(NSURLSession *session,
 typedef void (^AFURLSessionDownloadTaskDidResumeBlock)(NSURLSession *session, NSURLSessionDownloadTask *downloadTask, int64_t fileOffset, int64_t expectedTotalBytes);
 typedef void (^AFURLSessionTaskProgressBlock)(NSProgress *);
 
+typedef NSURL * (^AFURLSessionDownloadTaskDestinationBlock)(NSURL *targetPath, NSURLResponse *response);
 typedef void (^AFURLSessionTaskCompletionHandler)(NSURLResponse *response, id responseObject, NSError *error);
 
 #pragma mark -
+
+// Witch patch: a dropped connection (NSURLErrorNetworkConnectionLost) is
+// almost always transient - a mobile network handover, a sleeping CDN
+// connection, a proxy hiccup. Without a retry a single dropped file aborts
+// the whole download (the Minecraft installer queues thousands of files).
+// The same applies to a timeout, an unreachable host or a failed DNS lookup.
+static const NSUInteger AFURLSessionMaxDownloadRetries = 3;
+
+static BOOL AFURLSessionIsRetryableError(NSError *error) {
+    if (!error) {
+        return NO;
+    }
+    switch (error.code) {
+        case NSURLErrorTimedOut:
+        case NSURLErrorCannotFindHost:
+        case NSURLErrorCannotConnectToHost:
+        case NSURLErrorNetworkConnectionLost:
+        case NSURLErrorDNSLookupFailed:
+        case NSURLErrorNotConnectedToInternet:
+        case NSURLErrorInternationalRoamingOff:
+        case NSURLErrorCallIsActive:
+        case NSURLErrorDataNotAllowed:
+        case NSURLErrorResourceUnavailable:
+            return YES;
+        default:
+            return NO;
+    }
+}
+
+// Witch patch: forward declarations so the task delegate can start a retry
+// (it needs the manager's private delegate bookkeeping).
+@class AFURLSessionManagerTaskDelegate;
+
+@interface AFURLSessionManager (AFURLSessionManagerPrivate)
+- (AFURLSessionManagerTaskDelegate *)delegateForTask:(NSURLSessionTask *)task;
+- (void)addDelegateForDownloadTask:(NSURLSessionDownloadTask *)downloadTask
+                           progress:(void (^)(NSProgress *downloadProgress)) downloadProgressBlock
+                        destination:(NSURL * (^)(NSURL *targetPath, NSURLResponse *response))destination
+                  completionHandler:(void (^)(NSURLResponse *response, NSURL *filePath, NSError *error))completionHandler;
+- (void)addDelegateForDataTask:(NSURLSessionDataTask *)dataTask
+                uploadProgress:(void (^)(NSProgress *uploadProgress)) uploadProgressBlock
+              downloadProgress:(void (^)(NSProgress *downloadProgress)) downloadProgressBlock
+             completionHandler:(void (^)(NSURLResponse *response, id responseObject, NSError *error))completionHandler;
+@end
 
 @interface AFURLSessionManagerTaskDelegate : NSObject <NSURLSessionTaskDelegate, NSURLSessionDataDelegate, NSURLSessionDownloadDelegate>
 - (instancetype)initWithTask:(NSURLSessionTask *)task;
@@ -98,6 +143,8 @@ typedef void (^AFURLSessionTaskCompletionHandler)(NSURLResponse *response, id re
 @property (nonatomic, strong) NSURLSessionTaskMetrics *sessionTaskMetrics AF_API_AVAILABLE(ios(10), macosx(10.12), watchos(3), tvos(10));
 #endif
 @property (nonatomic, copy) AFURLSessionDownloadTaskDidFinishDownloadingBlock downloadTaskDidFinishDownloading;
+@property (nonatomic, copy) AFURLSessionDownloadTaskDestinationBlock downloadDestinationBlock;
+@property (nonatomic, assign) NSUInteger retryCount;
 @property (nonatomic, copy) AFURLSessionTaskProgressBlock uploadProgressBlock;
 @property (nonatomic, copy) AFURLSessionTaskProgressBlock downloadProgressBlock;
 @property (nonatomic, copy) AFURLSessionTaskCompletionHandler completionHandler;
@@ -176,6 +223,55 @@ didCompleteWithError:(NSError *)error
 {
     error = objc_getAssociatedObject(task, AuthenticationChallengeErrorKey) ?: error;
     __strong AFURLSessionManager *manager = self.manager;
+
+    // Witch patch: retry a download whose connection was dropped. The
+    // failure is reported to the caller only after the retries are
+    // exhausted, so a single lost connection no longer aborts a multi
+    // thousand file download.
+    if (error && manager && AFURLSessionIsRetryableError(error) &&
+        self.retryCount < AFURLSessionMaxDownloadRetries) {
+        NSURLRequest *request = task.originalRequest ?: task.currentRequest;
+        const BOOL isDownloadTask = [task isKindOfClass:[NSURLSessionDownloadTask class]];
+        if (request && (!isDownloadTask || self.downloadDestinationBlock)) {
+            const NSUInteger retryCount = self.retryCount + 1;
+            const NSTimeInterval delay = 1.0 + 2.0 * (double)(retryCount - 1);
+            NSURLSessionTask *retryTask = nil;
+            if (isDownloadTask) {
+                NSURLSessionDownloadTask *downloadRetry = [manager.session downloadTaskWithRequest:request];
+                [manager addDelegateForDownloadTask:downloadRetry
+                                            progress:self.downloadProgressBlock
+                                         destination:self.downloadDestinationBlock
+                                   completionHandler:self.completionHandler];
+                AFURLSessionManagerTaskDelegate *retryDelegate = [manager delegateForTask:downloadRetry];
+                retryDelegate.retryCount = retryCount;
+                // Keep the progress object of the failed attempt so the
+                // caller (which tracks it per file) keeps seeing the same
+                // numbers.
+                if (self.downloadProgress) {
+                    retryDelegate.downloadProgress = self.downloadProgress;
+                    __weak NSURLSessionDownloadTask *weakRetryTask = downloadRetry;
+                    self.downloadProgress.cancellationHandler = ^{
+                        [weakRetryTask cancel];
+                    };
+                }
+                retryTask = downloadRetry;
+            } else {
+                NSURLSessionDataTask *dataRetry = [manager.session dataTaskWithRequest:request];
+                [manager addDelegateForDataTask:dataRetry
+                                  uploadProgress:nil
+                                downloadProgress:self.downloadProgressBlock
+                               completionHandler:self.completionHandler];
+                AFURLSessionManagerTaskDelegate *retryDelegate = [manager delegateForTask:dataRetry];
+                retryDelegate.retryCount = retryCount;
+                retryTask = dataRetry;
+            }
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(delay * NSEC_PER_SEC)),
+                           dispatch_get_main_queue(), ^{
+                [retryTask resume];
+            });
+            return;
+        }
+    }
 
     __block id responseObject = nil;
 
@@ -634,6 +730,7 @@ static NSString * const AFNSURLSessionTaskDidSuspendNotification = @"com.alamofi
     delegate.completionHandler = completionHandler;
 
     if (destination) {
+        delegate.downloadDestinationBlock = destination;
         delegate.downloadTaskDidFinishDownloading = ^NSURL * (NSURLSession * __unused session, NSURLSessionDownloadTask *task, NSURL *location) {
             return destination(location, task.response);
         };

@@ -484,6 +484,91 @@ TextureObject* mgGetTexObjectByID(unsigned texture) {
     return BufferObjectsVec[texture];
 }
 
+// Make the driver's active unit and binding match the frontend's before a texture
+// state change or upload. Minecraft's GUI atlas and every sprite sub-upload go
+// through a mixture of plain and DSA entry points; when the driver is left on a
+// different unit (an internal borrow, a context switch, or a driver-side change
+// this layer did not see) a param or an upload silently lands on another texture
+// while the frontend records it on the one the application named. Sampling then
+// returns the untouched storage, which is exactly the invisible-GUI symptom.
+//
+// The lookup mirrors mgGetTexObjectByTarget: the object bound to the application's
+// current unit and target. Name 0 is a valid binding and is restored as such.
+static void mg_sync_driver_texture(GLenum target) {
+    const TextureTarget targetR = ConvertGLEnumToTextureTarget(target);
+    if (targetR == TextureTarget::UNKNWON) return;
+
+    const int unit = CurrentTextureUnitIndex;
+    if (DriverActiveTextureUnit != unit) {
+        GLES.glActiveTexture(GL_TEXTURE0 + unit);
+        DriverActiveTextureUnit = unit;
+    }
+
+    const TextureObject* tex = mgGetTexObjectByTarget(target);
+    const GLuint texture = tex ? tex->texture : 0;
+    // Cube faces are upload targets, not bind targets; GL only accepts
+    // GL_TEXTURE_CUBE_MAP in glBindTexture.
+    const GLenum bindTarget =
+        (target >= GL_TEXTURE_CUBE_MAP_POSITIVE_X && target <= GL_TEXTURE_CUBE_MAP_NEGATIVE_Z) ? GL_TEXTURE_CUBE_MAP
+                                                                                              : target;
+    GLES.glBindTexture(bindTarget, texture);
+    set_driver_texture_binding(unit, targetR, texture);
+}
+
+// Forced diagnostics for the texture completeness state that makes a GUI atlas
+// sample transparent. MAX_LEVEL/BASE_LEVEL and a mipmap MIN_FILTER are exactly
+// the settings GL/ANGLE use to decide whether a level-0-only texture is
+// complete; if they land on the wrong texture, nothing else in the frame shows
+// it. Logged without a build flag because the release MG compiles LOG_D out.
+static bool mg_tex_param_detail_id(GLuint id) {
+    return id == 8 || id == 10 || id == 11 || id == 12 || id == 152 || id == 1624 || (id >= 1150 && id <= 1157) ||
+           (id >= 1161 && id <= 1166);
+}
+
+static void mg_tex_param_diag(GLenum target, GLenum pname, GLint param) {
+    const bool mipmap_filter = pname == GL_TEXTURE_MIN_FILTER &&
+                               param >= GL_NEAREST_MIPMAP_NEAREST && param <= GL_LINEAR_MIPMAP_LINEAR;
+    const TextureObject* tex = mgGetTexObjectByTarget(target);
+    const GLuint front = tex ? tex->texture : 0;
+    const bool detail = mg_tex_param_detail_id(front);
+    if (!detail && pname != GL_TEXTURE_MAX_LEVEL && pname != GL_TEXTURE_BASE_LEVEL && !mipmap_filter) return;
+
+    GLint actual = -1;
+    if (target == GL_TEXTURE_2D) GLES.glGetIntegerv(GL_TEXTURE_BINDING_2D, &actual);
+
+    // Every parameter the loading screen and the in-world GUI textures receive:
+    // MIN/MAG filter, wrap and swizzle are the values a level-0 atlas needs to
+    // sample at all, and the completeness-only log below never showed them.
+    if (detail) {
+        static int detailLogged = 0;
+        if (detailLogged < 800) {
+            ++detailLogged;
+            LOG_W_FORCE("[MGTEX] dparam unit=%d target=0x%X pname=0x%X value=0x%X front=%u driverBinding=%d",
+                        CurrentTextureUnitIndex, target, pname, param, front, actual);
+        }
+    }
+    if (pname != GL_TEXTURE_MAX_LEVEL && pname != GL_TEXTURE_BASE_LEVEL && !mipmap_filter) return;
+
+    static int logged = 0;
+    if (logged >= 1200) return;
+    ++logged;
+
+    LOG_W_FORCE("[MGTEX] param unit=%d target=0x%X pname=0x%X value=0x%X front=%u driverBinding=%d", CurrentTextureUnitIndex,
+                target, pname, param, front, actual);
+}
+
+// The textures the loading screen and the world actually sample: the font
+// pages, the GUI atlas and the block atlas. A sub-upload for one of these is
+// logged with its first bytes, because an atlas that is allocated but never
+// filled samples exactly like one whose sampler or UVs are wrong.
+static int mg_tex_detail_index(GLuint id) {
+    if (id == 8) return 0;
+    if (id == 152) return 1;
+    if (id == 1624) return 2;
+    if (id >= 1150 && id <= 1157) return 3 + static_cast<int>(id - 1150);
+    return -1;
+}
+
 // Inline mapping for various internal formats to format and type.
 //
 // has_data says whether this call carries bytes for `type` to describe -- the
@@ -824,6 +909,8 @@ void glTexParameterf(GLenum target, GLenum pname, GLfloat param) {
         return;
     }
 
+    mg_sync_driver_texture(target);
+    mg_tex_param_diag(target, pname, (GLint)param);
     GLES.glTexParameterf(target, pname, param);
     CHECK_GL_ERROR
 }
@@ -944,6 +1031,15 @@ void glTexImage2D(GLenum target, GLint level, GLint internalFormat, GLsizei widt
 
     tex->format = format;
 
+    mg_sync_driver_texture(target);
+    if (level == 0 && width >= 256 && height >= 256) {
+        static int logged = 0;
+        if (logged++ < 300) {
+            LOG_W_FORCE("[MGTEX] upload2D unit=%d target=0x%X tex=%u size=%dx%d ifmt=0x%X fmt=0x%X type=0x%X data=%p",
+                        CurrentTextureUnitIndex, target, tex->texture, width, height, internalFormat, format, type,
+                        fix.pixels);
+        }
+    }
     GLES.glTexImage2D(target, level, internalFormat, width, height, border, format, type, fix.pixels);
 
     CHECK_GL_ERROR
@@ -989,6 +1085,7 @@ void glTexImage3D(GLenum target, GLint level, GLint internalFormat, GLsizei widt
         return;
     }
 
+    mg_sync_driver_texture(target);
     GLES.glTexImage3D(target, level, internalFormat, width, height, depth, border, format, type, fix.pixels);
 
     GET_TEXTURE_OBJECT(target);
@@ -1039,6 +1136,7 @@ void glTexStorage2D(GLenum target, GLsizei levels, GLenum internalFormat, GLsize
           target, levels, internalFormat, width, height)
 
     internal_convert(&internalFormat, nullptr, nullptr, /*has_data=*/false);
+    mg_sync_driver_texture(target);
     GLES.glTexStorage2D(target, levels, internalFormat, width, height);
 
     GET_TEXTURE_OBJECT(target);
@@ -1064,7 +1162,7 @@ void glTexStorage3D(GLenum target, GLsizei levels, GLenum internalFormat, GLsize
           target, levels, internalFormat, width, height, depth)
 
     internal_convert(&internalFormat, nullptr, nullptr, /*has_data=*/false);
-
+    mg_sync_driver_texture(target);
     GLES.glTexStorage3D(target, levels, internalFormat, width, height, depth);
 
     GET_TEXTURE_OBJECT(target);
@@ -1431,6 +1529,9 @@ void glTexParameteriv(GLenum target, GLenum pname, const GLint* params) {
     LOG()
     LOG_D("glTexParameteriv, target: %s, pname: %s", glEnumToString(target), glEnumToString(pname))
 
+    mg_sync_driver_texture(target);
+    if (params) mg_tex_param_diag(target, pname, params[0]);
+
     if (pname == GL_TEXTURE_SWIZZLE_RGBA) {
         LOG_D("find GL_TEXTURE_SWIZZLE_RGBA, now use glTexParameteri")
         if (params) {
@@ -1470,14 +1571,77 @@ void glTexSubImage2D(GLenum target, GLint level, GLint xoffset, GLint yoffset, G
     // changed as a side effect of an upload, wrong the moment the application
     // uploads RGBA to the same texture, renders into it, or swizzles it itself.
     mg_upload_fix_t fix(width, height, 1, format, type, pixels, /*want_format=*/0, /*three_d=*/false);
+    const TextureObject* detailTex = mgGetTexObjectByTarget(target);
+    const int detailIndex = detailTex ? mg_tex_detail_index(detailTex->texture) : -1;
     // A dropped conversion leaves pixels null, and glTexSubImage2D has no
     // allocate-only form: with the unpack buffer unbound the driver would read
     // client memory from address zero.
     if (fix.dropped()) {
+        if (detailIndex >= 0) {
+            LOG_W_FORCE("[MGTEX] sub2D-drop tex=%u offset=%d,%d size=%dx%d fmt=0x%X type=0x%X data=%p", detailTex->texture,
+                        xoffset, yoffset, width, height, fix.format, fix.type, fix.pixels);
+        }
         CHECK_GL_ERROR
         return;
     }
 
+    mg_sync_driver_texture(target);
+    if (level == 0 && width >= 512 && height >= 512) {
+        static int logged = 0;
+        if (logged++ < 300) {
+            const TextureObject* tex = mgGetTexObjectByTarget(target);
+            LOG_W_FORCE("[MGTEX] sub2D unit=%d target=0x%X tex=%u offset=%d,%d size=%dx%d fmt=0x%X type=0x%X data=%p",
+                        CurrentTextureUnitIndex, target, tex ? tex->texture : 0, xoffset, yoffset, width, height,
+                        fix.format, fix.type, fix.pixels);
+        }
+    }
+    if (detailIndex >= 0 && fix.has_client_pointer()) {
+        static int detailCount[11] = {};
+        if (detailCount[detailIndex] < 4) {
+            ++detailCount[detailIndex];
+            const unsigned char* bytes = static_cast<const unsigned char*>(fix.pixels);
+            size_t pixelBytes = 4;
+            if (fix.format == GL_RGB) pixelBytes = 3;
+            else if (fix.format == GL_RG) pixelBytes = 2;
+            else if (fix.format == GL_RED) pixelBytes = 1;
+            size_t totalBytes = static_cast<size_t>(width) * static_cast<size_t>(height) * pixelBytes;
+            size_t sampleBytes = totalBytes < 64 ? totalBytes : 64;
+            unsigned nonzero = 0, sum = 0;
+            for (size_t i = 0; bytes && i < sampleBytes; ++i) {
+                nonzero += bytes[i] != 0;
+                sum += bytes[i];
+            }
+            // The first 64 bytes are the top-left corner, which is transparent for
+            // every centred logo and most font pages. Scan the whole upload (up to
+            // 4 MiB) so an all-zero texture is distinguishable from a transparent
+            // border, and report where the first non-zero byte lives.
+            const size_t kScanCap = 4u * 1024u * 1024u;
+            size_t scanBytes = totalBytes < kScanCap ? totalBytes : kScanCap;
+            unsigned long long scanNonzero = 0, scanSum = 0;
+            unsigned long long alphaNonzero = 0, alphaSum = 0;
+            long long firstNonzero = -1;
+            const bool hasAlpha = pixelBytes == 4;
+            for (size_t i = 0; bytes && i < scanBytes; ++i) {
+                if (bytes[i] != 0) {
+                    ++scanNonzero;
+                    if (firstNonzero < 0) firstNonzero = static_cast<long long>(i);
+                }
+                scanSum += bytes[i];
+                if (hasAlpha && (i & 3u) == 3u) {
+                    alphaNonzero += bytes[i] != 0;
+                    alphaSum += bytes[i];
+                }
+            }
+            LOG_W_FORCE("[MGTEX] sub2D-detail tex=%u level=%d offset=%d,%d size=%dx%d fmt=0x%X type=0x%X data=%p "
+                        "b0=%u,%u,%u,%u nz64=%u sum64=%u nzScan=%llu sumScan=%llu first=%lld scan=%llu total=%llu "
+                        "a0=%u nzA=%llu sumA=%llu",
+                        detailTex->texture, level, xoffset, yoffset, width, height, fix.format, fix.type, fix.pixels,
+                        bytes ? bytes[0] : 0, bytes ? bytes[1] : 0, bytes ? bytes[2] : 0, bytes ? bytes[3] : 0, nonzero,
+                        sum, scanNonzero, scanSum, firstNonzero, static_cast<unsigned long long>(scanBytes),
+                        static_cast<unsigned long long>(totalBytes), (hasAlpha && bytes) ? bytes[3] : 0, alphaNonzero,
+                        alphaSum);
+        }
+    }
     GLES.glTexSubImage2D(target, level, xoffset, yoffset, width, height, fix.format, fix.type, fix.pixels);
 
     CHECK_GL_ERROR
@@ -1496,40 +1660,17 @@ void glBindTexture(GLenum target, GLuint texture) {
         hardware && gl_state && hardware->emulate_texture_buffer && target == GL_TEXTURE_BUFFER;
     // Where the driver actually keeps this binding, which is not where the
     // application put it: the emulation parks the buffer texture on unit 15's
-    // GL_TEXTURE_2D. The plain branch lands on whichever unit the driver has
-    // active, which is the driver's own count and not GetCurrentTextureUnitIndex.
-    const int driver_unit = emulated_buffer_texture ? MG_TEXTURE_BUFFER_EMULATION_UNIT : DriverActiveTextureUnit;
+    // GL_TEXTURE_2D. The plain branch selects the application's current unit
+    // first, so this is where that bind lands even if the driver was elsewhere.
+    const int driver_unit = emulated_buffer_texture ? MG_TEXTURE_BUFFER_EMULATION_UNIT : currentUnitIndex;
     const TextureTarget driver_target = emulated_buffer_texture ? TextureTarget::TEXTURE_2D : targetR;
 
-    // Rebinding what is already bound is the single most common redundant call
-    // Minecraft makes, and only the driver call is skipped -- everything below
-    // still runs, because the slot record and TextureObject::target are this
-    // layer's own state and a caller may be re-binding to correct them.
-    //
-    // Both halves are required. The frontend half alone would miss the emulation
-    // above writing a driver slot the application never named, and would trust a
-    // slot record that survived a driver-side change. The driver half alone would
-    // skip the bind that repairs a slot record, and would confuse the buffer
-    // texture on unit 15 with an ordinary 2D texture bound there.
-    //
-    // Who else moves driver texture bindings through GLES.*, and whether it nets
-    // to zero: gl/buffer.cpp's glTexBuffer borrows unit 15, reads its
-    // GL_TEXTURE_BINDING_2D and rebinds the value it read, restoring the active
-    // unit on all three of its exits -- zero. gl/drawing.cpp's
-    // setupBufferTextureUniforms only reads unit 15 and restores the active unit --
-    // zero. This function's own emulation branch is recorded below rather than
-    // left to net out. FSR1's GLStateGuard does not net to zero, which is what
-    // driver_texture_shadow_trustworthy() is for -- as is the shared fallback
-    // record, whose values belong to no context in particular. gl/gl.cpp's
-    // depth-clear triangle and the multidraw backends touch no texture state at
-    // all; bench/ is a separate program.
-    bool redundant = false;
-    if (targetR != TextureTarget::UNKNWON && driver_texture_shadow_trustworthy()) {
-        const TextureObject* bound = currentUnit.GetBindingSlot(targetR).GetBoundObject();
-        redundant = bound != nullptr && bound->texture == texture &&
-                    get_driver_texture_binding(driver_unit, driver_target) == texture;
-    }
-
+    // A skipped driver bind is indistinguishable from a correct one until a
+    // sample goes wrong: the slot record can be right while the driver's active
+    // unit or binding was moved behind this layer's back. Pay the bind every
+    // time; Minecraft's texture binds are not the bottleneck, and a GUI that
+    // samples an untouched texture is not recoverable from a later call.
+    const bool redundant = false;
     if (!redundant) {
         if (emulated_buffer_texture) {
             GLES.glActiveTexture(GL_TEXTURE0 + MG_TEXTURE_BUFFER_EMULATION_UNIT);
@@ -1537,6 +1678,12 @@ void glBindTexture(GLenum target, GLuint texture) {
             GLES.glActiveTexture(GL_TEXTURE0 + gl_state->current_tex_unit);
             DriverActiveTextureUnit = (int)gl_state->current_tex_unit;
         } else {
+            // Never trust the shadow for where the driver actually is: bind on the
+            // unit the application selected, not on whatever unit was last active.
+            if (DriverActiveTextureUnit != CurrentTextureUnitIndex) {
+                GLES.glActiveTexture(GL_TEXTURE0 + CurrentTextureUnitIndex);
+                DriverActiveTextureUnit = CurrentTextureUnitIndex;
+            }
             GLES.glBindTexture(target, texture);
         }
         set_driver_texture_binding(driver_unit, driver_target, texture);
@@ -1595,23 +1742,12 @@ void glActiveTexture(GLenum texture) {
     const int unit = (int)(texture - GL_TEXTURE0);
     set_gl_state_current_tex_unit(texture - GL_TEXTURE0);
 
-    // Only the driver call is skipped; both pieces of bookkeeping around it run
-    // either way, so a caller that re-selects the unit it is already on still
-    // leaves this layer's idea of the active unit written.
-    //
-    // Every internal borrower of the active unit hands it back: gl/buffer.cpp's
-    // glTexBuffer and gl/drawing.cpp's setupBufferTextureUniforms both return to
-    // gl_state->current_tex_unit (or to the value they saved, which is the same
-    // number) on every exit including their early ones, FSR1's GLStateGuard
-    // restores GL_ACTIVE_TEXTURE in its destructor, and the emulation branch in
-    // glBindTexture above writes DriverActiveTextureUnit itself rather than
-    // relying on that. So the shadow is only ever consulted where the driver
-    // agrees with it -- as long as it describes this context at all, which for the
-    // shared fallback record it does not, hence the gate.
-    if (!driver_active_unit_shadow_trustworthy() || DriverActiveTextureUnit != unit) {
-        GLES.glActiveTexture(texture);
-        DriverActiveTextureUnit = unit;
-    }
+    // The driver call is not skippable. A shadow that disagrees with the driver
+    // is invisible here and only shows up much later as a draw sampling the wrong
+    // texture -- the GUI atlas is the case that matters -- and the redundant call
+    // is exactly what repairs it. Both bookkeeping writes still run.
+    GLES.glActiveTexture(texture);
+    DriverActiveTextureUnit = unit;
     ActivateTextureUnit(unit);
     CHECK_GL_ERROR
 }
@@ -1731,6 +1867,7 @@ void glTexSubImage3D(GLenum target, GLint level, GLint xoffset, GLint yoffset, G
         CHECK_GL_ERROR
         return;
     }
+    mg_sync_driver_texture(target);
     GLES.glTexSubImage3D(target, level, xoffset, yoffset, zoffset, width, height, depth, fix.format, fix.type,
                          fix.pixels);
     CHECK_GL_ERROR
@@ -1768,6 +1905,8 @@ void glTexParameteri(GLenum target, GLenum pname, GLint param) {
         return;
     }
 
+    mg_sync_driver_texture(target);
+    mg_tex_param_diag(target, pname, param);
     GLES.glTexParameteri(target, pname, param);
     CHECK_GL_ERROR
 }

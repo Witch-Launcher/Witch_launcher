@@ -9,6 +9,7 @@ import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import java.io.BufferedInputStream;
 import java.io.BufferedOutputStream;
+import java.io.ByteArrayOutputStream;
 import java.io.BufferedWriter;
 import java.io.File;
 import java.io.FileFilter;
@@ -37,6 +38,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.jar.JarFile;
 import java.util.zip.ZipEntry;
+import java.util.zip.ZipFile;
 import net.kdt.pojavlaunch.uikit.UIKit;
 import net.kdt.pojavlaunch.utils.JSONUtils;
 import net.kdt.pojavlaunch.value.DependentLibrary;
@@ -52,7 +54,20 @@ public final class Tools {
     public static final String DIR_GAME_PROFILE = System.getProperty("user.dir");
     
     public static final String DIR_APP_DATA = System.getenv("POJAV_HOME");
-    public static final String DIR_ACCOUNT_NEW = DIR_APP_DATA + "/accounts";
+
+    // Launcher-private files (accounts, cursors, runtimes, ...) live in the
+    // hidden ".amethyst" dir. Native sets POJAV_HIDDEN_HOME before the JVM
+    // starts; fall back to the same convention when it is missing.
+    private static String resolveHiddenHome() {
+        String hiddenHome = System.getenv("POJAV_HIDDEN_HOME");
+        if (hiddenHome == null || hiddenHome.isEmpty()) {
+            hiddenHome = DIR_APP_DATA + "/.amethyst";
+        }
+        return hiddenHome;
+    }
+
+    public static final String DIR_HIDDEN_HOME = resolveHiddenHome();
+    public static final String DIR_ACCOUNT_NEW = DIR_HIDDEN_HOME + "/accounts";
 
     // New since 2.4.2
     public static final String DIR_HOME_VERSION = DIR_GAME_NEW + "/versions";
@@ -61,87 +76,43 @@ public final class Tools {
     public static final String ASSETS_PATH = DIR_GAME_NEW + "/assets";
     public static final String OBSOLETE_RESOURCES_PATH=DIR_GAME_NEW + "/resources";
 
-    // Voxy fix: RocksDB native is not usable on iOS (macOS build SIGILLs on
-    // A11). Voxy reads <world>/voxy/config.json and uses whatever storage
-    // backend is written there, so force every save (existing AND newly
-    // created in-game) to use the pure-Java "Memory" backend (TYPE=Memory)
-    // instead of the default RocksDB+ZSTD.
-    //
-    // A watchdog thread keeps scanning <gameDir>/saves while the game runs,
-    // because worlds created after launch would otherwise get Voxy's default
-    // config (RocksDB) and crash the JVM the moment it loads the native lib.
-    private static void injectVoxyMemoryStorageConfig() {
-        injectVoxyMemoryStorageConfigOnce();
-        Thread watcher = new Thread(new Runnable() {
-            public void run() {
-                long deadline = System.currentTimeMillis() + 15L * 60L * 1000L;
-                while (System.currentTimeMillis() < deadline) {
-                    try { Thread.sleep(2000L); } catch (InterruptedException e) { break; }
-                    try { injectVoxyMemoryStorageConfigOnce(false); } catch (Throwable ignored) {}
-                }
-            }
-        }, "VoxyConfigWatcher");
-        watcher.setDaemon(true);
-        watcher.start();
-    }
-
-    private static void injectVoxyMemoryStorageConfigOnce() {
-        injectVoxyMemoryStorageConfigOnce(true);
-    }
-
-    private static void injectVoxyMemoryStorageConfigOnce(boolean verbose) {
-        try {
-            File savesDir = new File(DIR_GAME_PROFILE, "saves");
-            if (!savesDir.isDirectory()) {
-                if (verbose) {
-                    System.out.println("[Voxy Fix] No saves dir at " + savesDir + ", skipping");
-                }
-                return;
-            }
-            String memoryConfig = "{\n" +
-                "  \"version\": 1,\n" +
-                "  \"disabled\": false,\n" +
-                "  \"sectionStorageConfig\": {\n" +
-                "    \"TYPE\": \"Serializer\",\n" +
-                "    \"storage\": {\n" +
-                "      \"TYPE\": \"Memory\"\n" +
-                "    }\n" +
-                "  }\n" +
-                "}";
-            File[] worlds = savesDir.listFiles();
-            if (worlds == null) return;
-            int patched = 0;
-            for (File world : worlds) {
-                if (!world.isDirectory() || !new File(world, "level.dat").exists()) continue;
-                File voxyDir = new File(world, "voxy");
-                File configFile = new File(voxyDir, "config.json");
-                if (configFile.exists()) {
-                    // Skip already-configured worlds
-                    try {
-                        byte[] b = new byte[(int) configFile.length()];
-                        java.io.FileInputStream fis = new java.io.FileInputStream(configFile);
-                        try { int rd = 0; while (rd < b.length) { int r = fis.read(b, rd, b.length - rd); if (r < 0) break; rd += r; } }
-                        finally { fis.close(); }
-                        if (new String(b, java.nio.charset.StandardCharsets.UTF_8).contains("Memory")) continue;
-                    } catch (Exception ignored) {}
-                }
-                voxyDir.mkdirs();
-                try (java.io.FileOutputStream fos = new java.io.FileOutputStream(configFile)) {
-                    fos.write(memoryConfig.getBytes(java.nio.charset.StandardCharsets.UTF_8));
-                }
-                patched++;
-            }
-            if (verbose || patched > 0) {
-                System.out.println("[Voxy Fix] Injected Memory storage config into " + patched + " world(s)");
-            }
-        } catch (Exception e) {
-            System.err.println("[Voxy Fix] Failed to inject voxy config: " + e);
+    // Voxy 0.2.20 uses RocksDB+ZSTD for its persistent section store. Older
+    // Witch builds could not load RocksDB on iOS (the bundled macOS arm64
+    // binary uses ARMv8.3 RCPC instructions that SIGILL on A11), so they
+    // rewrote every save to Voxy's volatile "Memory" backend. RocksDB is now
+    // built for iOS, so remove only those legacy injected configs and let
+    // Voxy generate its default persistent RocksDB config again.
+    private static void migrateLegacyVoxyMemoryStorageConfig() {
+        File savesDir = new File(DIR_GAME_PROFILE, "saves");
+        if (!savesDir.isDirectory()) return;
+        File[] worlds = savesDir.listFiles();
+        if (worlds == null) return;
+        int migrated = 0;
+        for (File world : worlds) {
+            if (!world.isDirectory() || !new File(world, "level.dat").exists()) continue;
+            File configFile = new File(new File(world, "voxy"), "config.json");
+            if (!configFile.isFile()) continue;
+            try {
+                JsonObject root = JsonParser.parseString(read(configFile.getAbsolutePath())).getAsJsonObject();
+                JsonObject serializer = root.getAsJsonObject("sectionStorageConfig");
+                JsonObject storage = serializer == null ? null : serializer.getAsJsonObject("storage");
+                boolean legacy = root.has("version") && root.get("version").getAsInt() == 1
+                        && root.has("disabled") && !root.get("disabled").getAsBoolean()
+                        && serializer != null && serializer.has("TYPE")
+                        && "Serializer".equals(serializer.get("TYPE").getAsString())
+                        && storage != null && storage.has("TYPE")
+                        && "Memory".equals(storage.get("TYPE").getAsString());
+                if (legacy && configFile.delete()) migrated++;
+            } catch (Throwable ignored) {}
+        }
+        if (migrated > 0) {
+            System.out.println("[Voxy Fix] Removed legacy Memory storage config from " + migrated + " world(s); Voxy will recreate RocksDB storage");
         }
     }
 
     public static void launchMinecraft(MinecraftAccount profile, final JMinecraftVersionList.Version versionInfo) throws Throwable {
         System.out.println("[DEBUG] launchMinecraft: id=" + versionInfo.id + " inheritsFrom=" + versionInfo.inheritsFrom + " assets=" + versionInfo.assets + " mainClass=" + versionInfo.mainClass);
-        injectVoxyMemoryStorageConfig();
+        migrateLegacyVoxyMemoryStorageConfig();
         // Forge/NeoForge/Fabric log4j configs write logs/latest.log relative to
         // the process working directory; create it before the game's logging
         // starts or its RollingRandomAccessFile appender fails to open.
@@ -153,10 +124,36 @@ public final class Tools {
             neutralizeFabricLwjgl(versionInfo);
         }
         String[] launchArgs = getMinecraftArgs(profile, versionInfo);
+        String renderer = System.getenv("AMETHYST_RENDERER");
+        // Graphics-API forcing is now user-configurable (video.graphics_backend_forcing
+        // pref → WITCH_FORCE_BACKEND env, set in JavaLauncher before the JVM boots):
+        //   vulkan/opengl → append --graphicsBackend with that value
+        //   none          → append nothing; MC 26.x then honors its own in-game
+        //                   "Graphics Backend" option (options.txt) again
+        //   auto/unset    → legacy behavior, derived from the profile renderer
+        String forceBackend = System.getenv("WITCH_FORCE_BACKEND");
+        String forcedGraphicsBackend = null;
+        if (supportsForcedGraphicsBackend(versionInfo)) {
+            if ("vulkan".equals(forceBackend) || "opengl".equals(forceBackend)) {
+                forcedGraphicsBackend = forceBackend;
+            } else if (forceBackend != null && (forceBackend.isEmpty() || "none".equals(forceBackend))) {
+                // follow-minecraft: append nothing; MC reads its own options
+            } else if (renderer != null && !renderer.isEmpty()) {
+                forcedGraphicsBackend = "libMoltenVK.dylib".equals(renderer) ? "vulkan" : "opengl";
+            }
+        }
+        if (forcedGraphicsBackend != null) {
+            String[] withBackend = Arrays.copyOf(launchArgs, launchArgs.length + 2);
+            withBackend[launchArgs.length] = "--graphicsBackend";
+            withBackend[launchArgs.length + 1] = forcedGraphicsBackend;
+            launchArgs = withBackend;
+        }
         System.out.println("[DEBUG] Minecraft Args: " + Arrays.toString(launchArgs));
 
         final String launchClassPath = generateLaunchClassPath(versionInfo);
         System.out.println("[DEBUG] Launch classpath: " + launchClassPath);
+        prepareJnaDispatch(launchClassPath);
+        disableForgeEarlyWindow(launchClassPath);
 
         System.out.println("Args init finished. Now starting game");
 
@@ -179,6 +176,120 @@ public final class Tools {
         Class<?> clazz = loader.loadClass(mainClass);
         Method method = clazz.getMethod("main", String[].class);
         method.invoke(null, new Object[]{launchArgs});
+    }
+
+    // Forge 1.18+ opens its own splash window (fmlearlydisplay) on a separate
+    // thread and calls GL.createCapabilities() from there. On iOS that thread
+    // never has a current GL context, so the game dies with "There is no
+    // OpenGL context current in the current thread" before Minecraft's own
+    // window exists. Forge falls back to its DummyProvider when
+    // earlyWindowControl is off, which is exactly what we need.
+    private static void disableForgeEarlyWindow(String launchClassPath) {
+        boolean forge = false;
+        for (String entry : launchClassPath.split(":")) {
+            String name = entry.substring(entry.lastIndexOf('/') + 1);
+            if (name.startsWith("fmlearlydisplay-") || name.startsWith("earlydisplay-")
+                    || name.startsWith("fmlearlywindow-") || name.contains("neoforge")) {
+                forge = true;
+                break;
+            }
+        }
+        if (!forge) return;
+        try {
+            File configDir = new File(DIR_GAME_PROFILE, "config");
+            if (!configDir.isDirectory() && !configDir.mkdirs()) return;
+            File fmlConfig = new File(configDir, "fml.toml");
+            String content = fmlConfig.isFile() ? read(fmlConfig.getAbsolutePath()) : "";
+            String patched = patchTomlBool(content, "earlyWindowControl", false);
+            if (!fmlConfig.isFile() || !patched.equals(content)) {
+                write(fmlConfig.getAbsolutePath(), patched);
+                System.out.println("[ForgeFix] earlyWindowControl = false -> " + fmlConfig);
+            }
+        } catch (Throwable t) {
+            System.err.println("[ForgeFix] failed to disable early window: " + t);
+        }
+    }
+
+    private static String patchTomlBool(String content, String key, boolean value) {
+        String wanted = key + " = " + value;
+        String[] lines = content.split("\n", -1);
+        boolean found = false;
+        for (int i = 0; i < lines.length; i++) {
+            String trimmed = lines[i].trim();
+            if (trimmed.startsWith(key) && trimmed.length() > key.length()) {
+                char next = trimmed.charAt(key.length());
+                if (next == '=' || next == ' ' || next == '\t') {
+                    lines[i] = wanted;
+                    found = true;
+                }
+            }
+        }
+        if (found) return String.join("\n", lines);
+        if (content.isEmpty()) return wanted + "\n";
+        return content.endsWith("\n") ? content + wanted + "\n" : content + "\n" + wanted + "\n";
+    }
+
+    // MC ships JNA 5.x, whose native dispatch reports version 6.1.6, while the
+    // launcher bundle carries a 7.0.4 build: JNA then refuses to initialise
+    // ("There is an incompatible JNA native library installed on this system /
+    // Expected: 6.1.6 / Found: 7.0.4") and every mod that touches oshi/JNA
+    // dies with ExceptionInInitializerError (e.g. wonderland on Forge).
+    // Extract the darwin-arm64 dispatch that ships inside the exact jna jar on
+    // the game classpath into a writable dir and point jna.boot.library.path
+    // at it. The extracted copy is a macOS dylib; the launcher's dyld bypass
+    // patches its platform on dlopen, same as any other mod native.
+    private static void prepareJnaDispatch(String launchClassPath) {
+        try {
+            for (String entry : launchClassPath.split(":")) {
+                if (entry.isEmpty() || !entry.endsWith(".jar")) continue;
+                File jar = new File(entry);
+                if (!jar.isFile()) continue;
+                byte[] dispatch = null;
+                try (ZipFile zip = new ZipFile(jar)) {
+                    for (String candidate : new String[] {
+                            "com/sun/jna/darwin-aarch64/libjnidispatch.jnilib",
+                            "com/sun/jna/darwin-aarch64/libjnidispatch.dylib"}) {
+                        ZipEntry nativeEntry = zip.getEntry(candidate);
+                        if (nativeEntry == null) continue;
+                        try (InputStream in = zip.getInputStream(nativeEntry)) {
+                            dispatch = readAllBytes(in);
+                        }
+                        break;
+                    }
+                } catch (Exception ignored) {
+                    continue;
+                }
+                if (dispatch == null) continue;
+
+                File dir = new File(System.getProperty("java.io.tmpdir"),
+                        "jna_dispatch/" + jar.getName().replaceAll("[^A-Za-z0-9._-]", "_"));
+                if (!dir.isDirectory() && !dir.mkdirs()) continue;
+                // JNA tries System.mapLibraryName("jnidispatch") and then the
+                // explicit suffixes; provide both spellings.
+                for (String name : new String[] {"libjnidispatch.dylib", "libjnidispatch.jnilib"}) {
+                    File out = new File(dir, name);
+                    if (!(out.isFile() && out.length() == dispatch.length)) {
+                        try (FileOutputStream fos = new FileOutputStream(out)) {
+                            fos.write(dispatch);
+                        }
+                    }
+                    out.setExecutable(true, false);
+                }
+                System.setProperty("jna.boot.library.path", dir.getAbsolutePath());
+                System.out.println("[JNAFix] dispatch from " + jar.getName() + " -> " + dir);
+                return;
+            }
+        } catch (Throwable t) {
+            System.err.println("[JNAFix] prepareJnaDispatch failed: " + t);
+        }
+    }
+
+    private static byte[] readAllBytes(InputStream in) throws IOException {
+        ByteArrayOutputStream out = new ByteArrayOutputStream();
+        byte[] buffer = new byte[8192];
+        int read;
+        while ((read = in.read(buffer)) > 0) out.write(buffer, 0, read);
+        return out.toByteArray();
     }
 
     // Fabric/Quilt instances load Mojang's original (unpatched) LWJGL jars from
@@ -429,6 +540,17 @@ public final class Tools {
         return argsFromJson;
     }
 
+    public static boolean supportsForcedGraphicsBackend(JMinecraftVersionList.Version versionInfo) {
+        try {
+            File jar = new File(DIR_HOME_VERSION + "/" + versionInfo.id + "/" + versionInfo.id + ".jar");
+            try (ZipFile zip = new ZipFile(jar)) {
+                return zip.getEntry("net/minecraft/client/PreferredGraphicsApi.class") != null;
+            }
+        } catch (Throwable t) {
+            return false;
+        }
+    }
+
     public static String fromStringArray(String[] strArr) {
         StringBuilder builder = new StringBuilder();
         for (int i = 0; i < strArr.length; i++) {
@@ -457,8 +579,20 @@ public final class Tools {
             library.downloads.artifact != null &&
             library.downloads.artifact.path != null)
             return library.downloads.artifact.path;
-        String[] libInfos = library.name.split(":");
-        return libInfos[0].replaceAll("\\.", "/") + "/" + libInfos[1] + "/" + libInfos[2] + "/" + libInfos[1] + "-" + libInfos[2] + ".jar";
+        // Handle Maven coordinates with an explicit extension and/or
+        // classifier ("net.neoforged:mergetool:1.1.5:api@jar"), which some
+        // NeoForge/Forge version JSONs use and which would otherwise produce
+        // a path containing the raw "@jar" token.
+        String name = library.name;
+        String extension = "jar";
+        int extAt = name.indexOf('@');
+        if (extAt >= 0) {
+            extension = name.substring(extAt + 1);
+            name = name.substring(0, extAt);
+        }
+        String[] libInfos = name.split(":");
+        String classifier = libInfos.length > 3 && !libInfos[3].isEmpty() ? "-" + libInfos[3] : "";
+        return libInfos[0].replaceAll("\\.", "/") + "/" + libInfos[1] + "/" + libInfos[2] + "/" + libInfos[1] + "-" + libInfos[2] + classifier + "." + extension;
     }
 
 /*
@@ -546,6 +680,8 @@ public final class Tools {
 
     public static void preProcessLibraries(DependentLibrary[] libraries) {
         if (libraries == null) return;
+        // ASM 9.9.1 is only required to read Java 25 class files (major 69).
+        boolean asmBumpAllowed = javaFeatureVersion() >= 25;
         // Ignore some libraries since they are unsupported (jinput, text2speech) or unused (LWJGL)
         // Support for text2speech is not planned, so skip it for now.
         for (int i = 0; i < libraries.length; i++) {
@@ -565,11 +701,17 @@ public final class Tools {
                 libItem._skip = true;
                 continue;
             }
-            String[] version = libParts[2].split("\\.");
+            // NeoForge/Forge version JSONs may pin a Maven extension on the
+            // version token ("org.ow2.asm:asm-commons:9.8@jar"), so strip
+            // "@ext" before splitting or parseInt throws on "8@jar".
+            String versionToken = libParts[2];
+            int extAt = versionToken.indexOf('@');
+            if (extAt >= 0) versionToken = versionToken.substring(0, extAt);
+            String[] version = versionToken.split("\\.");
             if (libItem.name.startsWith("net.java.dev.jna:jna:")) {
                 // Special handling for LabyMod 1.8.9 and Forge 1.12.2(?)
                 // we have libjnidispatch 5.13.0 in Frameworks directory
-                if (Integer.parseInt(version[0]) >= 5 && Integer.parseInt(version[1]) >= 13) continue;
+                if (parseLeadingInt(version, 0, -1) >= 5 && parseLeadingInt(version, 1, -1) >= 13) continue;
                 //System.out.println("Library " + libItem.name + " has been changed to version 5.13.0");
                 
 createLibraryInfo(libItem);
@@ -577,7 +719,7 @@ createLibraryInfo(libItem);
                 libItem.downloads.artifact.path = "net/java/dev/jna/jna/5.13.0/jna-5.13.0.jar";
                 libItem.downloads.artifact.url = "https://libraries.minecraft.net/net/java/dev/jna/jna/5.13.0/jna-5.13.0.jar";
             } else if (libItem.name.startsWith("org.ow2.asm:asm-all:")) {
-                if(Integer.parseInt(version[0]) >= 5) continue;
+                if(parseLeadingInt(version, 0, -1) >= 5) continue;
                 //System.out.println("Library " + libItem.name + " has been changed to version 5.0.4");
                 createLibraryInfo(libItem);
                 libItem.name = "org.ow2.asm:asm-all:5.0.4";
@@ -585,17 +727,21 @@ createLibraryInfo(libItem);
                 libItem.downloads.artifact.path = "org/ow2/asm/asm-all/5.0.4/asm-all-5.0.4.jar";
                 libItem.downloads.artifact.sha1 = "e6244859997b3d4237a552669279780876228909";
                 libItem.downloads.artifact.url = "https://repo1.maven.org/maven2/org/ow2/asm/asm-all/5.0.4/asm-all-5.0.4.jar";
-            } else if (libItem.name.startsWith("org.ow2.asm:asm:") ||
+            } else if (asmBumpAllowed && (libItem.name.startsWith("org.ow2.asm:asm:") ||
                        libItem.name.startsWith("org.ow2.asm:asm-analysis:") ||
                        libItem.name.startsWith("org.ow2.asm:asm-commons:") ||
                        libItem.name.startsWith("org.ow2.asm:asm-tree:") ||
-                       libItem.name.startsWith("org.ow2.asm:asm-util:")) {
+                       libItem.name.startsWith("org.ow2.asm:asm-util:"))) {
                 // Replace ASM < 9.9.1 with 9.9.1 for Java 25 class file support (major version 69).
                 // 9.7.1 (used by Quilt meta and NeoForge < 26.2) cannot read Java 25 class files.
+                // Only do this on a Java 25+ runtime: NeoForge 20.4 puts the original ASM
+                // jars on its -p module path, so bumping only the classpath copy creates a
+                // second module named org.objectweb.asm.tree.analysis and bootstraplauncher
+                // dies with "reads more than one module named ...".
                 if (version.length >= 2) {
-                    int major = Integer.parseInt(version[0]);
-                    int minor = Integer.parseInt(version[1]);
-                    int patch = version.length > 2 ? Integer.parseInt(version[2]) : 0;
+                    int major = parseLeadingInt(version, 0, -1);
+                    int minor = parseLeadingInt(version, 1, -1);
+                    int patch = parseLeadingInt(version, 2, 0);
                     if (major > 9 || (major == 9 && minor > 9) || (major == 9 && minor == 9 && patch >= 1)) {
                         continue;
                     }
@@ -607,6 +753,33 @@ createLibraryInfo(libItem);
                 libItem.downloads.artifact.path = "org/ow2/asm/" + asmArtifact + "/9.9.1/" + asmArtifact + "-9.9.1.jar";
                 libItem.downloads.artifact.url = "https://repo1.maven.org/maven2/org/ow2/asm/" + asmArtifact + "/9.9.1/" + asmArtifact + "-9.9.1.jar";
             }
+        }
+    }
+
+    // java.specification.version without Runtime.version() (Java 8 target).
+    private static int javaFeatureVersion() {
+        String version = System.getProperty("java.specification.version", "8");
+        try {
+            if (version.startsWith("1.")) version = version.substring(2);
+            int dot = version.indexOf('.');
+            return Integer.parseInt(dot >= 0 ? version.substring(0, dot) : version);
+        } catch (Throwable t) {
+            return 8;
+        }
+    }
+
+    // Reads the leading integer of version[index] ("8@jar" -> 8, "9-beta"
+    // -> 9) and returns fallback when there is no numeric prefix at all.
+    private static int parseLeadingInt(String[] version, int index, int fallback) {
+        if (version == null || index < 0 || index >= version.length) return fallback;
+        String token = version[index];
+        int end = 0;
+        while (end < token.length() && Character.isDigit(token.charAt(end))) end++;
+        if (end == 0) return fallback;
+        try {
+            return Integer.parseInt(token.substring(0, end));
+        } catch (NumberFormatException e) {
+            return fallback;
         }
     }
 
@@ -639,8 +812,11 @@ createLibraryInfo(libItem);
         // classifier entry, so the jar never lands on the classpath and FML
         // aborts with "Failed to find system mod: forge". Append every
         // *-universal.jar shipped under libraries/net/minecraftforge/forge/.
+        // Only for Forge-family instances: doing this unconditionally put the
+        // 1.20.1 Forge universal jar on LabyMod 26.3's classpath and injected
+        // foreign net.minecraftforge/FML classes into it.
         File forgeLibRoot = new File(Tools.DIR_HOME_LIBRARY + "/net/minecraftforge/forge");
-        if (forgeLibRoot.isDirectory()) {
+        if (isForgeFamily(info) && forgeLibRoot.isDirectory()) {
             File[] forgeVersionDirs = forgeLibRoot.listFiles();
             if (forgeVersionDirs != null) {
                 for (File forgeVersionDir : forgeVersionDirs) {
@@ -657,6 +833,29 @@ createLibraryInfo(libItem);
             }
         }
         return libDir.toArray(new String[0]);
+    }
+
+    // True for Forge/NeoForge instances (whose launch needs the Forge
+    // *-universal.jar on the classpath). Deliberately ignores unrelated
+    // net.minecraftforge artifacts such as srgutils, which LabyMod ships too.
+    private static boolean isForgeFamily(JMinecraftVersionList.Version info) {
+        String id = info.id == null ? "" : info.id.toLowerCase(java.util.Locale.ROOT);
+        String mainClass = info.mainClass == null ? "" : info.mainClass.toLowerCase(java.util.Locale.ROOT);
+        if (id.contains("forge") || mainClass.contains("bootstraplauncher") || mainClass.contains("modlauncher")) {
+            return true;
+        }
+        if (info.libraries != null) {
+            for (DependentLibrary lib : info.libraries) {
+                String name = lib.name;
+                if (name == null) continue;
+                if (name.startsWith("net.minecraftforge:forge:")
+                        || name.startsWith("net.neoforged:neoforge:")
+                        || name.startsWith("net.neoforged:forge:")) {
+                    return true;
+                }
+            }
+        }
+        return false;
     }
 
     public static JMinecraftVersionList.Version getVersionInfo(String versionName) {
@@ -854,13 +1053,20 @@ createLibraryInfo(libItem);
     }
 
     // ==================== Distant Horizons Fix ====================
-    // On iOS, DH mod extracts libzstd-jni_dh-1.5.7-6.dylib to a temp directory,
-    // but the relocation process invalidates the code signature, causing crash.
-    // Fix: Pre-extract the library, sign it with ad-hoc signature, and add to java.library.path
+    // Distant Horizons ships its zstd native inside its own jar
+    // (darwin/aarch64/libzstd-jni_dh-<version>.dylib). On iOS that library is
+    // a macOS binary, so the launcher has to patch its platform and re-sign it
+    // before dyld accepts it - that happens natively in the dlopen hook
+    // (PLPatchMachOPlatformForFile) whenever the library is loaded.
+    //
+    // The launcher pre-extracts the native into a persistent directory that is
+    // part of java.library.path, so zstd-jni finds it with System.loadLibrary()
+    // instead of unpacking an unsigned copy into the temp directory first.
+    // The file name has to match the one the jar ships, otherwise the lookup
+    // fails and zstd-jni falls back to the temp directory copy.
 
     private static final String DH_MOD_ID = "distanthorizons";
-    private static final String ZSTD_LIB_NAME = "libzstd-jni_dh-1.5.7-6.dylib";
-    private static final String ZSTD_LIB_NAME_ALT = "libzstd-jni_dh.dylib"; // fallback
+    private static final String ZSTD_LIB_KEYWORD = "zstd-jni";
 
     /**
      * Detect if a mod with the given keyword is in the library list.
@@ -920,8 +1126,12 @@ createLibraryInfo(libItem);
     }
 
     /**
-     * Extract and sign zstd-jni native library for Distant Horizons.
-     * Returns the directory containing the signed library, or null if failed.
+     * Extract the zstd-jni native library of Distant Horizons.
+     * Returns the directory containing the library, or null if failed.
+     *
+     * The library is not signed here: the launcher patches the platform and
+     * rebuilds the ad-hoc signature natively when the library is loaded, so
+     * the copy that ships in the jar stays the single source of truth.
      */
     public static String prepareDistantHorizonsNativeLib(JMinecraftVersionList.Version versionInfo) {
         if (!hasDistantHorizonsMod(versionInfo)) {
@@ -938,13 +1148,37 @@ createLibraryInfo(libItem);
             return null;
         }
 
-        // Extract library to app's Documents directory (persistent, signable)
-        File extractDir = new File(DIR_APP_DATA, "dh_natives");
+        // Extract library to the hidden app data directory (persistent, so the
+        // patched + re-signed copy survives the next launch)
+        String hiddenHome = System.getenv("POJAV_HIDDEN_HOME");
+        if (hiddenHome == null || hiddenHome.isEmpty()) {
+            hiddenHome = DIR_APP_DATA + "/.amethyst";
+        }
+        File extractDir = new File(hiddenHome, "dh_natives");
         if (!extractDir.exists()) {
             extractDir.mkdirs();
         }
 
-        File targetLib = new File(extractDir, ZSTD_LIB_NAME);
+        // The jar ships libzstd-jni_dh-<version>.dylib; zstd-jni looks the
+        // library up by that exact name, so it has to be kept.
+        String libName;
+        try (JarFile jar = new JarFile(dhJarPath)) {
+            ZipEntry entry = findLibEntry(jar, ZSTD_LIB_KEYWORD);
+            if (entry == null) {
+                System.err.println("[DH Fix] No zstd-jni library found in DH jar");
+                return null;
+            }
+            libName = entry.getName();
+            int slash = libName.lastIndexOf('/');
+            if (slash >= 0) {
+                libName = libName.substring(slash + 1);
+            }
+        } catch (IOException e) {
+            System.err.println("[DH Fix] Could not read DH jar: " + e.getMessage());
+            return null;
+        }
+
+        File targetLib = new File(extractDir, libName);
         if (targetLib.exists()) {
             System.out.println("[DH Fix] Library already exists at: " + targetLib.getAbsolutePath());
         } else {
@@ -954,13 +1188,7 @@ createLibraryInfo(libItem);
             }
         }
 
-        // Sign the library with ad-hoc signature (required for iOS)
-        if (!signLibrary(targetLib)) {
-            System.err.println("[DH Fix] Failed to sign library");
-            return null;
-        }
-
-        System.out.println("[DH Fix] Successfully prepared DH native library at: " + extractDir.getAbsolutePath());
+        System.out.println("[DH Fix] DH native library ready at: " + targetLib.getAbsolutePath());
         return extractDir.getAbsolutePath();
     }
 
@@ -995,16 +1223,7 @@ createLibraryInfo(libItem);
 
     private static boolean extractNativeLibFromJar(String jarPath, File targetLib) {
         try (JarFile jar = new JarFile(jarPath)) {
-            // Try primary name first
-            ZipEntry entry = jar.getEntry(ZSTD_LIB_NAME);
-            if (entry == null) {
-                // Try alternative name (maybe in different path)
-                entry = findLibEntry(jar, ZSTD_LIB_NAME_ALT);
-            }
-            if (entry == null) {
-                // Search for any zstd-jni library
-                entry = findLibEntry(jar, "zstd-jni");
-            }
+            ZipEntry entry = findLibEntry(jar, ZSTD_LIB_KEYWORD);
             if (entry == null) {
                 System.err.println("[DH Fix] No zstd-jni library found in DH jar");
                 return false;
@@ -1040,56 +1259,5 @@ createLibraryInfo(libItem);
             }
         }
         return fallback;
-    }
-
-    private static boolean signLibrary(File libFile) {
-        // iOS has no /usr/bin/codesign. The app bundles an arm64 iOS ldid
-        // at <bundle>/ldid (signed ad-hoc at package time), which we fall
-        // back to. On TXM devices (A12+) an UNSIGNED dylib will not dlopen
-        // ("code signature invalid") even inside the app container, so
-        // signing is mandatory, not optional.
-        String ldidPath = null;
-        if (DIR_BUNDLE != null) {
-            File bundledLdid = new File(DIR_BUNDLE, "ldid");
-            if (bundledLdid.isFile()) {
-                ldidPath = bundledLdid.getAbsolutePath();
-            }
-        }
-
-        if (ldidPath == null) {
-            if (runSignTool(new String[]{"codesign", "--force", "--sign", "-", libFile.getAbsolutePath()},
-                    "codesign", libFile.getName())) {
-                return true;
-            }
-            System.err.println("[DH Fix] codesign unavailable and no bundled ldid at " + DIR_BUNDLE + "/ldid");
-            return false;
-        }
-        return runSignTool(new String[]{ldidPath, "-S", libFile.getAbsolutePath()}, "ldid", libFile.getName());
-    }
-
-    private static boolean runSignTool(String[] command, String toolName, String libName) {
-        try {
-            ProcessBuilder pb = new ProcessBuilder(command);
-            pb.redirectErrorStream(true);
-            Process process = pb.start();
-            int exitCode = process.waitFor();
-            if (exitCode == 0) {
-                System.out.println("[DH Fix] Successfully signed library (" + toolName + "): " + libName);
-                return true;
-            }
-            StringBuilder output = new StringBuilder();
-            try (InputStream is = process.getInputStream()) {
-                byte[] buffer = new byte[1024];
-                int len;
-                while ((len = is.read(buffer)) > 0) {
-                    output.append(new String(buffer, 0, len));
-                }
-            }
-            System.err.println("[DH Fix] " + toolName + " failed (exit " + exitCode + "): " + output);
-            return false;
-        } catch (Exception e) {
-            System.err.println("[DH Fix] " + toolName + " unavailable (" + e.getMessage() + ")");
-            return false;
-        }
     }
 }

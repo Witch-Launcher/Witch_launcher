@@ -7,6 +7,10 @@
 #import "HapticManager.h"
 #import "InstalledModsManager.h"
 #import "LauncherPreferences.h"
+#import "AppSheet.h"
+#import "DownloadProgressOverlay.h"
+#import "ErrorPresenter.h"
+#import "ModpackExporter.h"
 #import "utils.h"
 
 @interface ProfileTabbedPageViewController ()
@@ -18,6 +22,8 @@
 @property (nonatomic) ProfileOverviewVC *overviewVC;
 @property (nonatomic) NSInteger selectedIndex;
 @property (nonatomic) NSArray<NSLayoutConstraint *> *chromeConstraints;
+@property (nonatomic) BOOL modpackExportInProgress;
+@property (nonatomic) UIBarButtonItem *exportBarButtonItem;
 @end
 
 // A rail tab: SF-symbol icon centered above the label in a vertical stack.
@@ -104,8 +110,15 @@
     NSString *name = self.profile[@"name"];
     self.navigationItem.title = ([name isKindOfClass:[NSString class]] && name.length > 0) ? name : @"Profile";
     self.navigationItem.leftBarButtonItem = [[UIBarButtonItem alloc] initWithTitle:localize(@"Done", nil) style:UIBarButtonItemStyleDone target:self action:@selector(doneTapped)];
+    UIBarButtonItem *exportItem = [[UIBarButtonItem alloc] initWithImage:[UIImage systemImageNamed:@"square.and.arrow.up"]
+                                                                  style:UIBarButtonItemStylePlain
+                                                                 target:self
+                                                                 action:@selector(exportModpackTapped)];
+    exportItem.accessibilityLabel = localize(@"modpack.export_title", nil);
+    self.exportBarButtonItem = exportItem;
     self.navigationItem.rightBarButtonItems = @[
         [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemSave target:self action:@selector(saveTapped)],
+        exportItem,
         [[UIBarButtonItem alloc] initWithImage:[UIImage systemImageNamed:@"rectangle.3.group"] style:UIBarButtonItemStylePlain target:self action:@selector(cycleTabPosition)],
     ];
     self.view.backgroundColor = ThemeManager.shared.contentBackgroundColor;
@@ -342,6 +355,110 @@
     [_overviewVC saveProfile];
     NSString *name = self.profile[@"name"];
     if ([name isKindOfClass:[NSString class]] && name.length > 0) self.navigationItem.title = name;
+}
+
+#pragma mark - Modpack export
+
+- (void)exportModpackTapped {
+    if (self.modpackExportInProgress) return;
+    [HapticManager.shared play:HapticTypeLight];
+    __weak typeof(self) weakSelf = self;
+    [AppSheet showOptionsWithTitle:localize(@"modpack.export_title", nil)
+                           message:localize(@"modpack.export_message", nil)
+                           options:@[
+        @{@"title": localize(@"modpack.export_modrinth", nil),
+          @"subtitle": localize(@"modpack.export_modrinth_desc", nil),
+          @"icon": @"shippingbox"},
+        @{@"title": localize(@"modpack.export_curseforge", nil),
+          @"subtitle": localize(@"modpack.export_curseforge_desc", nil),
+          @"icon": @"flame"},
+    ]
+                     selectedIndex:NSNotFound
+                         selection:^(NSInteger index) {
+        __strong typeof(weakSelf) self = weakSelf;
+        if (!self) return;
+        ModpackExportFormat format = index == 0 ? ModpackExportFormatModrinth : ModpackExportFormatCurseForge;
+        [self promptModpackExportWithFormat:format];
+    }];
+}
+
+- (void)promptModpackExportWithFormat:(ModpackExportFormat)format {
+    NSString *profileName = [self.profile[@"name"] isKindOfClass:[NSString class]] ? self.profile[@"name"] : @"";
+    NSString *formatName = format == ModpackExportFormatModrinth ? @"Modrinth (.mrpack)" : @"CurseForge (.zip)";
+    NSString *message = [NSString stringWithFormat:localize(@"modpack.export_prompt_message", nil), formatName];
+    __weak typeof(self) weakSelf = self;
+
+    [AppSheet showPrompt3WithTitle:localize(@"modpack.export_title", nil)
+                           message:message
+                      placeholder1:localize(@"modpack.export_name", nil)
+                      placeholder2:localize(@"modpack.export_version", nil)
+                      placeholder3:localize(@"modpack.export_author", nil)
+                      initialText1:profileName
+                      initialText2:@"1.0.0"
+                      initialText3:@""
+                         onConfirm:^(NSString *name, NSString *version, NSString *author) {
+        __strong typeof(weakSelf) self = weakSelf;
+        if (!self) return;
+        NSString *cleanName = [name stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
+        if (cleanName.length == 0) cleanName = profileName.length > 0 ? profileName : @"Modpack";
+        [self beginModpackExportWithFormat:format
+                                      name:cleanName
+                                   version:version
+                                    author:author];
+    }];
+}
+
+- (void)beginModpackExportWithFormat:(ModpackExportFormat)format
+                                name:(NSString *)name
+                             version:(NSString *)version
+                              author:(NSString *)author {
+    self.modpackExportInProgress = YES;
+    self.exportBarButtonItem.enabled = NO;
+    DownloadProgressOverlay *overlay = [DownloadProgressOverlay showBlurredInView:self.view
+                                                                           title:localize(@"modpack.export_title", nil)
+                                                                         blurred:YES];
+    __weak typeof(self) weakSelf = self;
+    [ModpackExporter exportProfile:self.profile
+                           format:format
+                             name:name
+                          version:version
+                           author:author
+                         progress:^(double fraction, NSString *message) {
+        [overlay updateProgress:(float)fraction message:message];
+    }
+                       completion:^(NSString *path, NSError *error) {
+        __strong typeof(weakSelf) self = weakSelf;
+        self.modpackExportInProgress = NO;
+        self.exportBarButtonItem.enabled = YES;
+        if (error) {
+            [overlay dismiss];
+            [ErrorPresenter showError:localize(@"modpack.export_failed", nil)
+                              message:error.localizedDescription];
+            return;
+        }
+        [overlay finishWithMessage:localize(@"modpack.export_done", nil)];
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.8 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            [overlay dismiss];
+            if (self && path.length > 0) [self shareExportedModpackAtPath:path];
+        });
+    }];
+}
+
+- (void)shareExportedModpackAtPath:(NSString *)path {
+    UIActivityViewController *activity = [[UIActivityViewController alloc]
+        initWithActivityItems:@[[NSURL fileURLWithPath:path]]
+        applicationActivities:nil];
+    UIPopoverPresentationController *popover = activity.popoverPresentationController;
+    if (popover) {
+        UIBarButtonItem *anchor = self.exportBarButtonItem;
+        if (anchor) {
+            popover.barButtonItem = anchor;
+        } else {
+            popover.sourceView = self.view;
+            popover.sourceRect = CGRectMake(CGRectGetMidX(self.view.bounds), CGRectGetMidY(self.view.bounds), 0, 0);
+        }
+    }
+    [self presentViewController:activity animated:YES completion:nil];
 }
 
 @end

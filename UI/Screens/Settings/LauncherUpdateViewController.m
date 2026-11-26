@@ -1,10 +1,12 @@
 #import "LauncherUpdateViewController.h"
 #import "WitchUpdateService.h"
+#import "LauncherPreferences.h"
 #import "ThemeManager.h"
 #import "AmethystBlurView.h"
 #import "HapticManager.h"
 #import "ErrorPresenter.h"
 #import "AppSheet.h"
+#import "utils.h"
 
 typedef NS_ENUM(NSInteger, UpdateSection) {
     UpdateSectionInfo = 0,
@@ -27,7 +29,7 @@ typedef NS_ENUM(NSInteger, UpdateSection) {
 
 - (void)viewDidLoad {
     [super viewDidLoad];
-    self.title = @"Cập nhật Launcher";
+    self.title = localize(@"launcher_update.title", nil);
     // Opaque base under the frost: without this the previous screen shows
     // through the pushed page.
     self.view.backgroundColor = ThemeManager.shared.contentBackgroundColor;
@@ -109,7 +111,7 @@ typedef NS_ENUM(NSInteger, UpdateSection) {
         [self setBusy:NO];
         [self->_tableView.refreshControl endRefreshing];
         if (tagError && listError) {
-            [ErrorPresenter showNetworkError:tagError message:@"Không kiểm tra được cập nhật."];
+            [ErrorPresenter showNetworkError:tagError message:localize(@"launcher_update.error.check", nil)];
             return;
         }
         // Merge: channel tag release first, then the rest (dedupe by tag).
@@ -127,7 +129,7 @@ typedef NS_ENUM(NSInteger, UpdateSection) {
         }
         self->_releases = merged;
         [self->_tableView reloadData];
-        if (tagError) [ErrorPresenter showNetworkError:tagError message:@"Không tải được bản mới nhất của kênh."];
+        if (tagError) [ErrorPresenter showNetworkError:tagError message:localize(@"launcher_update.error.latest", nil)];
     });
     (void)tagInfo;
 }
@@ -140,14 +142,14 @@ typedef NS_ENUM(NSInteger, UpdateSection) {
 
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section {
     if (section == UpdateSectionInfo) return 1;
-    if (section == UpdateSectionOptions) return 2;
+    if (section == UpdateSectionOptions) return 3;
     return _releases.count;
 }
 
 - (NSString *)tableView:(UITableView *)tableView titleForHeaderInSection:(NSInteger)section {
-    if (section == UpdateSectionInfo) return @"Thiết bị";
-    if (section == UpdateSectionOptions) return @"Tùy chọn";
-    return _releases.count > 0 ? [NSString stringWithFormat:@"Các bản phát hành (%lu)", (unsigned long)_releases.count] : @"Các bản phát hành";
+    if (section == UpdateSectionInfo) return localize(@"launcher_update.section.device", nil);
+    if (section == UpdateSectionOptions) return localize(@"launcher_update.section.options", nil);
+    return _releases.count > 0 ? [NSString stringWithFormat:localize(@"launcher_update.releases_count", nil), (unsigned long)_releases.count] : localize(@"launcher_update.releases", nil);
 }
 
 - (UITableViewCell *)cardCellForTableView:(UITableView *)tableView {
@@ -169,8 +171,8 @@ typedef NS_ENUM(NSInteger, UpdateSection) {
     if (indexPath.section == UpdateSectionInfo) {
         UITableViewCell *cell = [self cardCellForTableView:tableView];
         NSString *cur = WitchUpdateService.shared.currentVersion;
-        cell.textLabel.text = [NSString stringWithFormat:@"Đang chạy: v%@", cur];
-        cell.detailTextLabel.text = [NSString stringWithFormat:@"%@ • Kênh: %@",
+        cell.textLabel.text = [NSString stringWithFormat:localize(@"launcher_update.running", nil), cur];
+        cell.detailTextLabel.text = [NSString stringWithFormat:localize(@"launcher_update.channel_line", nil),
                                      WitchUpdateService.shared.isBetaBuild ? @"Beta build" : @"Release build",
                                      [WitchUpdateService.shared channelDisplayName:self.selectedChannel]];
         cell.imageView.image = [UIImage systemImageNamed:@"app.badge"];
@@ -181,12 +183,23 @@ typedef NS_ENUM(NSInteger, UpdateSection) {
         UITableViewCell *cell = [self cardCellForTableView:tableView];
         cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
         if (indexPath.row == 0) {
-            cell.textLabel.text = @"Kênh cập nhật";
+            cell.textLabel.text = localize(@"launcher_update.channel.title", nil);
             cell.detailTextLabel.text = [WitchUpdateService.shared channelDisplayName:self.selectedChannel];
             cell.imageView.image = [UIImage systemImageNamed:@"antenna.radiowaves.left.and.right"];
+        } else if (indexPath.row == 1) {
+            cell.textLabel.text = localize(@"launcher_update.auto_check", nil);
+            cell.detailTextLabel.text = localize(@"launcher_update.auto_check_detail", nil);
+            cell.accessoryType = UITableViewCellAccessoryNone;
+            cell.selectionStyle = UITableViewCellSelectionStyleNone;
+            UISwitch *toggle = [UISwitch new];
+            toggle.onTintColor = ThemeManager.shared.accentColor;
+            toggle.on = getPrefBool(@"witch.update_auto_check");
+            [toggle addTarget:self action:@selector(autoCheckChanged:) forControlEvents:UIControlEventValueChanged];
+            cell.accessoryView = toggle;
+            cell.imageView.image = [UIImage systemImageNamed:@"arrow.triangle.2.circlepath"];
         } else {
-            cell.textLabel.text = @"Bản phân phối";
-            cell.detailTextLabel.text = (self.selectedVariant == WitchAppVariantSlimmed) ? @"Simple (nhẹ)" : @"Full (đầy đủ)";
+            cell.textLabel.text = localize(@"launcher_update.variant.title", nil);
+            cell.detailTextLabel.text = (self.selectedVariant == WitchAppVariantSlimmed) ? localize(@"launcher_update.variant.slim", nil) : localize(@"launcher_update.variant.full", nil);
             cell.imageView.image = [UIImage systemImageNamed:@"archivebox"];
         }
         cell.imageView.tintColor = ThemeManager.shared.accentColor;
@@ -195,14 +208,14 @@ typedef NS_ENUM(NSInteger, UpdateSection) {
     WitchReleaseInfo *info = _releases[indexPath.row];
     UITableViewCell *cell = [self cardCellForTableView:tableView];
     cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
-    NSString *title = info.tagName.length > 0 ? info.tagName : (info.name.length > 0 ? info.name : @"Bản phát hành");
+    NSString *title = info.tagName.length > 0 ? info.tagName : (info.name.length > 0 ? info.name : localize(@"launcher_update.release.fallback", nil));
     BOOL isCurrent = [self isReleaseCurrent:info];
     cell.textLabel.text = isCurrent ? [@"► " stringByAppendingString:title] : title;
     cell.textLabel.textColor = isCurrent ? ThemeManager.shared.accentColor : ThemeManager.shared.primaryTextColor;
     NSMutableArray *parts = [NSMutableArray array];
-    if (isCurrent) [parts addObject:@"Đang dùng"];
+    if (isCurrent) [parts addObject:localize(@"launcher_update.in_use", nil)];
     if (info.publishedAt.length > 0) [parts addObject:[self shortDate:info.publishedAt]];
-    [parts addObject:[NSString stringWithFormat:@"%lu file", (unsigned long)info.assets.count]];
+    [parts addObject:[NSString stringWithFormat:localize(@"launcher_update.files", nil), (unsigned long)info.assets.count]];
     cell.detailTextLabel.text = [parts componentsJoinedByString:@" • "];
     cell.imageView.image = [UIImage systemImageNamed:isCurrent ? @"checkmark.circle.fill" : @"arrow.down.circle"];
     cell.imageView.tintColor = isCurrent ? ThemeManager.shared.successColor : ThemeManager.shared.accentColor;
@@ -231,7 +244,7 @@ typedef NS_ENUM(NSInteger, UpdateSection) {
     [tableView deselectRowAtIndexPath:indexPath animated:YES];
     if (indexPath.section == UpdateSectionOptions) {
         if (indexPath.row == 0) [self showChannelPicker];
-        else [self showVariantPicker];
+        else if (indexPath.row == 2) [self showVariantPicker];
         return;
     }
     if (indexPath.section == UpdateSectionReleases) {
@@ -239,16 +252,20 @@ typedef NS_ENUM(NSInteger, UpdateSection) {
     }
 }
 
+- (void)autoCheckChanged:(UISwitch *)sender {
+    setPrefBool(@"witch.update_auto_check", sender.on);
+}
+
 #pragma mark - Pickers (custom sheets, no UIKit alerts)
 
 - (void)showChannelPicker {
-    NSArray *titles = @[@"Tự động", @"Beta (pre-release)", @"Ổn định (release)"];
+    NSArray *titles = @[localize(@"launcher_update.channel.auto", nil), localize(@"launcher_update.channel.beta", nil), localize(@"launcher_update.channel.stable", nil)];
     NSMutableArray *opts = [NSMutableArray array];
     for (NSInteger i = 0; i < 3; i++) {
         [opts addObject:@{@"title": titles[i], @"icon": @"antenna.radiowaves.left.and.right"}];
     }
     __weak typeof(self) weakSelf = self;
-    [AppSheet showOptionsWithTitle:@"Kênh cập nhật" message:@"Tự động: Beta build theo pre-release, Release build theo release." options:opts selectedIndex:self.selectedChannel selection:^(NSInteger idx) {
+    [AppSheet showOptionsWithTitle:localize(@"launcher_update.channel.title", nil) message:localize(@"launcher_update.channel.auto_detail", nil) options:opts selectedIndex:self.selectedChannel selection:^(NSInteger idx) {
         __strong typeof(weakSelf) strongSelf = weakSelf;
         if (!strongSelf) return;
         strongSelf.selectedChannel = (WitchUpdateChannel)idx;
@@ -260,11 +277,11 @@ typedef NS_ENUM(NSInteger, UpdateSection) {
 
 - (void)showVariantPicker {
     NSArray *opts = @[
-        @{@"title": @"Full (đầy đủ)", @"subtitle": @"Kèm JDK + LWJGL", @"icon": @"archivebox.fill"},
-        @{@"title": @"Simple (nhẹ)", @"subtitle": @"Không kèm runtime", @"icon": @"archivebox"},
+        @{@"title": localize(@"launcher_update.variant.full", nil), @"subtitle": localize(@"launcher_update.variant.full_subtitle", nil), @"icon": @"archivebox.fill"},
+        @{@"title": localize(@"launcher_update.variant.slim", nil), @"subtitle": localize(@"launcher_update.variant.slim_subtitle", nil), @"icon": @"archivebox"},
     ];
     __weak typeof(self) weakSelf = self;
-    [AppSheet showOptionsWithTitle:@"Bản phân phối" message:nil options:opts selectedIndex:self.selectedVariant selection:^(NSInteger idx) {
+    [AppSheet showOptionsWithTitle:localize(@"launcher_update.variant.title", nil) message:nil options:opts selectedIndex:self.selectedVariant selection:^(NSInteger idx) {
         __strong typeof(weakSelf) strongSelf = weakSelf;
         if (!strongSelf) return;
         strongSelf.selectedVariant = (WitchAppVariant)idx;
@@ -274,7 +291,7 @@ typedef NS_ENUM(NSInteger, UpdateSection) {
 
 - (void)showReleaseAssets:(WitchReleaseInfo *)info {
     if (info.assets.count == 0) {
-        [ErrorPresenter showInfo:@"Trống" message:@"Bản này không có file cài đặt."];
+        [ErrorPresenter showInfo:localize(@"launcher_update.empty.title", nil) message:localize(@"launcher_update.empty.message", nil)];
         return;
     }
     NSMutableArray *opts = [NSMutableArray array];
@@ -294,11 +311,11 @@ typedef NS_ENUM(NSInteger, UpdateSection) {
     BOOL isTipa = [[asset.name.pathExtension lowercaseString] isEqualToString:@"tipa"];
     NSMutableArray *opts = [NSMutableArray array];
     if (ts || isTipa) {
-        [opts addObject:@{@"title": @"Tải & Cài qua TrollStore", @"subtitle": asset.name, @"icon": @"arrow.down.circle.fill"}];
+        [opts addObject:@{@"title": localize(@"launcher_update.asset.trollstore", nil), @"subtitle": asset.name, @"icon": @"arrow.down.circle.fill"}];
     } else {
-        [opts addObject:@{@"title": @"Cài qua SideStore", @"subtitle": @"Mở SideStore để cài (giữ nguyên dữ liệu)", @"icon": @"arrow.down.circle.fill"}];
+        [opts addObject:@{@"title": localize(@"launcher_update.asset.sidestore", nil), @"subtitle": localize(@"launcher_update.asset.sidestore_subtitle", nil), @"icon": @"arrow.down.circle.fill"}];
     }
-    [opts addObject:@{@"title": @"Chỉ tải về máy", @"subtitle": @"Lưu file rồi tự cài qua Share", @"icon": @"tray.and.arrow.down"}];
+    [opts addObject:@{@"title": localize(@"launcher_update.asset.download_only", nil), @"subtitle": localize(@"launcher_update.asset.download_only_subtitle", nil), @"icon": @"tray.and.arrow.down"}];
     __weak typeof(self) weakSelf = self;
     [AppSheet showOptionsWithTitle:asset.name message:nil options:opts selectedIndex:NSNotFound selection:^(NSInteger idx) {
         if (idx == 0 && !(ts || isTipa)) {
@@ -315,12 +332,12 @@ typedef NS_ENUM(NSInteger, UpdateSection) {
 - (void)downloadAsset:(WitchReleaseAsset *)asset {
     if (_isDownloading) return;
     _isDownloading = YES;
-    [ErrorPresenter showToast:[NSString stringWithFormat:@"Đang tải %@…", asset.name] success:YES];
+    [ErrorPresenter showToast:[NSString stringWithFormat:localize(@"launcher_update.downloading", nil), asset.name] success:YES];
     __weak typeof(self) weakSelf = self;
     [WitchUpdateService.shared downloadAsset:asset progress:nil completion:^(NSURL *fileURL, NSError *error) {
         weakSelf.isDownloading = NO;
         if (error || !fileURL) {
-            [ErrorPresenter showNetworkError:error message:@"Tải thất bại."];
+            [ErrorPresenter showNetworkError:error message:localize(@"launcher_update.download_failed", nil)];
             return;
         }
         [WitchUpdateService.shared installFileAtURL:fileURL fromViewController:weakSelf];

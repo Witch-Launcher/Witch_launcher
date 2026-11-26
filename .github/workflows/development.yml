@@ -16,7 +16,7 @@ concurrency:
 jobs:
   build:
     name: Development build
-    runs-on: macos-14
+    runs-on: macos-26
     timeout-minutes: 360
     steps:
       - name: Checkout repository
@@ -56,17 +56,31 @@ jobs:
       - name: Set up Xcode Version
         run: |
           ls -d /Applications/Xcode*.app || true
-          # Prefer the newest installed Xcode (iOS 26 SDK is required for the
-          # BGContinuedProcessingTask APIs in SceneDelegate.m); fall back to
-          # 15.4 when nothing newer is present.
-          LATEST_XCODE=$(ls -d /Applications/Xcode*.app 2>/dev/null | sort -V | tail -1)
-          if [ -n "$LATEST_XCODE" ]; then
-            echo "Selected $LATEST_XCODE"
-            sudo xcode-select -s "$LATEST_XCODE"
-          else
-            sudo xcode-select -s /Applications/Xcode_15.4.app
+          # The prebuilt StikJIT.xcframework carries a serialized swiftinterface
+          # from a specific toolchain; Swift refuses it from a newer compiler
+          # ("SDK is not supported by the compiler"). Pick the Xcode whose
+          # swiftc version matches the interface, else the newest one (iOS 26
+          # SDK is required for BGContinuedProcessingTask in SceneDelegate.m).
+          IFACE=$(find third_party/stikjit/StikJIT.xcframework -name '*.private.swiftinterface' | head -1)
+          REQ_SWIFT=$(sed -n 's/.*swift-compiler-version: Apple Swift version \([0-9.]*\).*/\1/p' "$IFACE" | head -1)
+          echo "StikJIT interface built with Swift ${REQ_SWIFT:-unknown}"
+          SELECTED=""
+          for X in $(ls -d /Applications/Xcode*.app 2>/dev/null | sort -V -r); do
+            V=$("$X/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc" --version 2>/dev/null | sed -n 's/.*Apple Swift version \([0-9.]*\).*/\1/p' | head -1)
+            echo "  $X -> Swift ${V:-?}"
+            if [ -n "$REQ_SWIFT" ] && [ "$V" = "$REQ_SWIFT" ]; then
+              SELECTED="$X"; break
+            fi
+          done
+          if [ -z "$SELECTED" ]; then
+            SELECTED=$(ls -d /Applications/Xcode*.app 2>/dev/null | sort -V | tail -1)
+          fi
+          if [ -n "$SELECTED" ]; then
+            echo "Selected $SELECTED"
+            sudo xcode-select -s "$SELECTED"
           fi
           xcodebuild -version
+          swiftc --version
           xcrun --sdk iphoneos --show-sdk-version
 
       # provision the stable zulu jdk 8 runtime environment as structured in the upstream core
@@ -106,7 +120,7 @@ jobs:
         run: |
           brew untap aws/tap 2>/dev/null || true
           brew update
-          brew install make wget ldid autoconf pkg-config
+          brew install make wget ldid autoconf pkg-config xcodegen
           sudo mkdir -p /usr/local/bin
           # map the gmake binary symlink seamlessly across the target build runner paths
           sudo ln -sf /opt/homebrew/bin/gmake /usr/local/bin/gmake
@@ -145,6 +159,11 @@ jobs:
           WITCH_PROXY_TOKEN: ${{ secrets.WITCH_PROXY_TOKEN }}
           WITCH_CURSEFORGE_API_KEY: ${{ secrets.WITCH_CURSEFORGE_API_KEY }}
           WITCH_ENCRYPTION_KEY: ${{ secrets.WITCH_ENCRYPTION_KEY }}
+          WITCH_GOOGLE_DRIVE_CLIENT_ID: ${{ secrets.WITCH_GOOGLE_DRIVE_CLIENT_ID }}
+          WITCH_MS_OAUTH_CLIENT_ID: ${{ secrets.WITCH_MS_OAUTH_CLIENT_ID }}
+          WITCH_DROPBOX_APP_KEY: ${{ secrets.WITCH_DROPBOX_APP_KEY }}
+          WITCH_PLUGIN_OFFICIAL_KEY_ID: ${{ secrets.WITCH_PLUGIN_OFFICIAL_KEY_ID }}
+          WITCH_PLUGIN_OFFICIAL_PUBLIC_KEY: ${{ secrets.WITCH_PLUGIN_OFFICIAL_PUBLIC_KEY }}
         run: |
           mkdir -p Natives/Config
           if [ -n "$WITCH_ENCRYPTION_KEY" ]; then
@@ -164,6 +183,26 @@ jobs:
           sed -E 's/enc_v1:[A-Za-z0-9+\/=]{20,}/enc_v1:***/g' Natives/Config/WitchConfig.h || cat Natives/Config/WitchConfig.h
           echo "--- end masked ---"
 
+      # Fetch the prebuilt iOS arm64 JREs instead of compiling OpenJDK from
+      # source. github.com/<repo>/releases/download/... currently answers 504
+      # to plain HTTP clients, so use gh (api.github.com + GITHUB_TOKEN) and
+      # hand the tarballs to `make jre`, which prefers local files.
+      # Cached after the first successful fetch.
+      - name: Prefetch iOS JRE tarballs
+        if: steps.cache-jres.outputs.cache-hit != 'true'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          mkdir -p depends
+          for v in 8 17 21 25; do
+            gh release download jre-runtimes-20261108 \
+              --repo Witch-Launcher/JDK-Java_iOS \
+              --pattern "jre${v}-ios-aarch64.tar.xz" \
+              --dir depends --skip-existing
+          done
+          ls -la depends/*.tar.xz
+
       # Fetch the official prebuilt iOS arm64 JREs instead of compiling
       # OpenJDK from source: far faster and immune to the cross-build
       # configure flakiness (freetype/cups/flags) seen on CI runners.
@@ -180,6 +219,11 @@ jobs:
       # Trigger gmake compilation pipelines with inline stderr filtering and execute post-build binary optimization
       - name: Build sideload IPA & TrollStore tIPA
         shell: bash
+        env:
+          WITCH_GOOGLE_DRIVE_CLIENT_ID: ${{ secrets.WITCH_GOOGLE_DRIVE_CLIENT_ID }}
+          WITCH_DROPBOX_APP_KEY: ${{ secrets.WITCH_DROPBOX_APP_KEY }}
+          WITCH_PLUGIN_OFFICIAL_KEY_ID: ${{ secrets.WITCH_PLUGIN_OFFICIAL_KEY_ID }}
+          WITCH_PLUGIN_OFFICIAL_PUBLIC_KEY: ${{ secrets.WITCH_PLUGIN_OFFICIAL_PUBLIC_KEY }}
         run: |
           JDK_BASE_PATH="${{ steps.setup-java.outputs.path }}"
           export PATH="$JDK_BASE_PATH/bin:/opt/homebrew/bin:$PATH"
@@ -196,10 +240,27 @@ jobs:
 
           SIGN_FLAGS="CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY= APP_ICON=AppIcon-Development"
 
-          # WARNING MITIGATION: Filter runtime stderr streams to suppress repetitive upstream vtool signature warnings
-          gmake -j$(sysctl -n hw.ncpu) dsym package PLATFORM=2 $SIGN_FLAGS 2> >(grep -v "vtool warning: code signature will be invalid" >&2)
-          
-          gmake -j$(sysctl -n hw.ncpu) dsym package PLATFORM=2 TROLLSTORE_JIT_ENT=1 $SIGN_FLAGS 2> >(grep -v "vtool warning: code signature will be invalid" >&2)
+          # Keep the live log filtered (vtool signature warnings are noise) but
+          # also capture the raw stream, so a failure can print the unfiltered
+          # tail (make reports recipe errors on stderr, which a process
+          # substitution can swallow when the step is killed).
+          run_build() {
+            local log="$1"; shift
+            set -o pipefail
+            if ! "$@" 2>&1 | tee "$log" | { grep -v "vtool warning: code signature will be invalid" || true; }; then
+              echo "::error::command failed: $*"
+              echo "----- raw tail ($log) -----"
+              tail -n 200 "$log"
+              echo "--------------------------"
+              return 1
+            fi
+          }
+
+          run_build /tmp/witch-build-sideload.log \
+            gmake -j$(sysctl -n hw.ncpu) dsym package PLATFORM=2 $SIGN_FLAGS
+
+          run_build /tmp/witch-build-trollstore.log \
+            gmake -j$(sysctl -n hw.ncpu) dsym package PLATFORM=2 TROLLSTORE_JIT_ENT=1 $SIGN_FLAGS
 
       - name: List artifacts
         if: always()
@@ -302,22 +363,7 @@ jobs:
           echo "--- resolved ---"
           grep -E '^(APP_VERSION|SHORT_SHA|BUILD_DATE|BUILD_TAG)=' "$GITHUB_OUTPUT" | tail -n 8 || true
 
-      - name: Generate checksums
-        shell: bash
-        run: |
-          cd downloaded || exit 0
-          shopt -s globstar nullglob
-          FILES=(**/*.ipa **/*.tipa *.ipa *.tipa)
-          if [ ${#FILES[@]} -eq 0 ]; then
-            echo "No ipa/tipa found under downloaded/ — listing tree:"
-            find . -maxdepth 4 -type f | head -n 50
-            exit 0
-          fi
-          sha256sum "${FILES[@]}" | tee ../checksums.txt
-          echo "--- checksums.txt ---"
-          cat ../checksums.txt
-
-      - name: "Generate release notes (verbose EN - what fixed + who fixed)"
+      - name: "Generate release notes (concise EN)"
         env:
           GITHUB_EVENT_BEFORE: ${{ github.event.before }}
         shell: bash
@@ -327,14 +373,11 @@ jobs:
             --sha "${{ github.sha }}" \
             --branch "${{ github.ref_name }}" \
             --repo "$GITHUB_REPOSITORY" \
-            --run-url "https://github.com/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" \
             --version "${{ steps.version.outputs.APP_VERSION }}" \
-            --pusher "${{ github.event.pusher.name }}" \
-            --runner "macos-14" \
-            --artifacts-dir ./downloaded \
+            --base-version "${{ steps.version.outputs.BASE_VERSION }}" \
             --out RELEASE_NOTES.md
-          echo "--- RELEASE_NOTES.md (head) ---"
-          head -n 60 RELEASE_NOTES.md
+          echo "--- RELEASE_NOTES.md ---"
+          cat RELEASE_NOTES.md
 
       - name: Reset rolling pre-release
         env:
@@ -347,7 +390,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: pre-release
-          name: Witch v${{ steps.version.outputs.APP_VERSION }} — Pre-release (beta)
+          name: Witch Launcher Beta ${{ steps.version.outputs.BASE_VERSION }}
           body_path: RELEASE_NOTES.md
           prerelease: true
           draft: false
@@ -355,10 +398,8 @@ jobs:
           files: |
             downloaded/**/*.ipa
             downloaded/**/*.tipa
-            checksums.txt
-            RELEASE_NOTES.md
 
-      - name: Notify Discord (English, no mentions, verbose summary)
+      - name: Notify Discord (compact summary, no mentions)
         if: always()
         env:
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
@@ -369,10 +410,8 @@ jobs:
             --sha "${{ github.sha }}" \
             --before "${{ github.event.before }}" \
             --pusher "${{ github.event.pusher.name }}" \
-            --version "${{ steps.version.outputs.APP_VERSION }}" \
+            --version "${{ steps.version.outputs.BASE_VERSION }}" \
             --channel "pre-release" \
             --status "${{ job.status }}" \
             --run-url "https://github.com/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" \
-            --release-url "https://github.com/$GITHUB_REPOSITORY/releases/tag/pre-release" \
-            --notes-file RELEASE_NOTES.md \
-            --artifacts-dir ./downloaded || true
+            --release-url "https://github.com/$GITHUB_REPOSITORY/releases/tag/pre-release" || true

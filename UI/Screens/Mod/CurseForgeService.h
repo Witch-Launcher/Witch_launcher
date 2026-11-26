@@ -38,11 +38,21 @@ extern NSString * const kCurseForgeAPIKeyPrefKey;
 - (void)loadUnifiedProjectDetails:(NSString *)projectId
                        completion:(void(^)(NSDictionary *project, NSError *error))completion;
 
+/// Load one file's metadata (fileName, downloadUrl, fileLength, ...). Needed
+/// by the modpack installer, whose manifest only stores projectID/fileID.
+- (void)loadFileMetadataForProject:(NSString *)projectId
+                            fileId:(NSNumber *)fileId
+                        completion:(void(^)(NSDictionary * _Nullable file, NSError * _Nullable error))completion;
+
 /// Resolve the direct CDN download URL for a file (needed when the file list
 /// has no downloadUrl). Completion returns the URL string or an error.
 - (void)resolveDownloadURLForProject:(NSString *)projectId
                               fileId:(NSNumber *)fileId
                           completion:(void(^)(NSString * _Nullable url, NSError * _Nullable error))completion;
+
+/// CurseForge's public CDN layout, used when the API hides downloadUrl.
+/// Returns nil when the file id or name is missing.
++ (nullable NSString *)cdnURLForFileId:(nullable NSNumber *)fileId fileName:(nullable NSString *)fileName;
 
 /// Plain file downloader (same contract as ModrinthService).
 - (NSURLSessionDownloadTask *)downloadFile:(NSString *)urlString

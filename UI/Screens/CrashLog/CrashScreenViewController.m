@@ -35,19 +35,31 @@ static const NSUInteger kMaxSearchHits = 2000;
 @property (nonatomic) BOOL showingFullLog;
 @property (nonatomic, strong) CrashLogAnalyzerResult *analysis;
 
-@property (nonatomic, strong) UIView *leftPanel;
+@property (nonatomic, strong) UIImageView *backgroundImageView;
+@property (nonatomic, strong) UIView *backgroundDimView;
+@property (nonatomic, strong) UIStackView *rootStack;
+@property (nonatomic, strong) UIView *summaryPanel;
+@property (nonatomic, strong) UIStackView *summaryStack;
+@property (nonatomic, strong) UIView *summarySpacer;
+@property (nonatomic, strong) UIView *contentPanel;
+@property (nonatomic, strong) UIStackView *contentStack;
+@property (nonatomic, strong) UIView *toolbarCard;
+@property (nonatomic, strong) UIStackView *toolbarStack;
+
 @property (nonatomic, strong) UIImageView *iconView;
 @property (nonatomic, strong) UILabel *titleLabel;
 @property (nonatomic, strong) UILabel *codeLabel;
 @property (nonatomic, strong) UILabel *categoryLabel;
 @property (nonatomic, strong) UILabel *versionLabel;
+@property (nonatomic, strong) UIButton *closeButton;
 
-@property (nonatomic, strong) UIStackView *buttonRow;
+@property (nonatomic, strong) UIStackView *actionGrid;
+@property (nonatomic, strong) UIStackView *buttonRowAI;
+@property (nonatomic, strong) UIStackView *buttonRowFile;
 @property (nonatomic, strong) CustomButton *shareButton;
 @property (nonatomic, strong) CustomButton *toggleButton;
 @property (nonatomic, strong) CustomButton *aiChatButton;
 @property (nonatomic, strong) CustomButton *sendButton;
-@property (nonatomic, strong) CustomButton *closeButton;
 
 @property (nonatomic, strong) UISearchBar *logSearchBar;
 @property (nonatomic, strong) UILabel *matchLabel;
@@ -60,6 +72,11 @@ static const NSUInteger kMaxSearchHits = 2000;
 @property (nonatomic, strong) UITableView *logTable;
 @property (nonatomic, strong) UIActivityIndicatorView *loadingIndicator;
 
+@property (nonatomic, strong) NSLayoutConstraint *summaryWidthConstraint;
+@property (nonatomic, strong) NSLayoutConstraint *summaryHeightConstraint;
+@property (nonatomic) BOOL horizontalLayout;
+@property (nonatomic) CGSize lastLayoutSize;
+
 // Log engine state. Heavy objects live here; UI only holds a window.
 @property (nonatomic) LogViewMode viewMode;
 @property (nonatomic, copy) NSString *currentPath;
@@ -69,6 +86,7 @@ static const NSUInteger kMaxSearchHits = 2000;
 @property (nonatomic) BOOL indexing;
 @property (nonatomic, copy) NSArray<NSString *> *excerptLines;
 @property (nonatomic, copy) NSArray<NSString *> *filteredExcerpt; // excerpt search
+@property (nonatomic) NSUInteger excerptStartLine;
 @property (nonatomic, strong) NSMutableDictionary<NSNumber *, NSString *> *lineCache;
 @property (nonatomic) NSUInteger totalLines;
 @property (nonatomic) NSUInteger windowBase; // base line of cached window
@@ -81,6 +99,80 @@ static const NSUInteger kMaxSearchHits = 2000;
 @property (atomic) NSUInteger searchSeq;
 @end
 
+#pragma mark - Log cell
+
+// A fixed-height cell keeps 100k-line logs smooth. Two lines are enough to
+// scan a crash; long lines can be copied from the context menu.
+@interface CrashLogCell : UITableViewCell
+@property (nonatomic, strong) UILabel *numberLabel;
+@property (nonatomic, strong) UILabel *logLabel;
+@property (nonatomic, strong) UIView *separator;
+@property (nonatomic, strong) UIFont *numberFont;
+@property (nonatomic, strong) UIFont *logFont;
+- (void)applyTheme:(ThemeManager *)theme;
+- (void)setNumber:(NSUInteger)number text:(NSString *)text showNumber:(BOOL)showNumber;
+@end
+
+@implementation CrashLogCell
+
+- (instancetype)initWithStyle:(UITableViewCellStyle)style reuseIdentifier:(NSString *)reuseIdentifier {
+    self = [super initWithStyle:style reuseIdentifier:reuseIdentifier];
+    if (self) {
+        self.selectionStyle = UITableViewCellSelectionStyleNone;
+        self.backgroundColor = UIColor.clearColor;
+        self.contentView.backgroundColor = UIColor.clearColor;
+
+        _numberLabel = [[UILabel alloc] init];
+        _numberLabel.textAlignment = NSTextAlignmentRight;
+        _numberLabel.numberOfLines = 1;
+        _numberLabel.lineBreakMode = NSLineBreakByTruncatingTail;
+        [self.contentView addSubview:_numberLabel];
+
+        _logLabel = [[UILabel alloc] init];
+        _logLabel.numberOfLines = 2;
+        _logLabel.lineBreakMode = NSLineBreakByTruncatingTail;
+        [self.contentView addSubview:_logLabel];
+
+        _separator = [[UIView alloc] init];
+        [self.contentView addSubview:_separator];
+
+        _numberFont = [UIFont monospacedDigitSystemFontOfSize:10.5 weight:UIFontWeightRegular];
+        _logFont = [UIFont monospacedSystemFontOfSize:12.0 weight:UIFontWeightRegular];
+        _numberLabel.font = _numberFont;
+        _logLabel.font = _logFont;
+    }
+    return self;
+}
+
+- (void)applyTheme:(ThemeManager *)theme {
+    _numberLabel.textColor = [theme.secondaryTextColor colorWithAlphaComponent:0.85];
+    _logLabel.textColor = theme.primaryTextColor;
+    _separator.backgroundColor = [theme.separatorColor colorWithAlphaComponent:0.45];
+}
+
+- (void)setNumber:(NSUInteger)number text:(NSString *)text showNumber:(BOOL)showNumber {
+    _numberLabel.hidden = !showNumber;
+    _numberLabel.text = showNumber ? [NSString stringWithFormat:@"%lu", (unsigned long)number] : nil;
+    _logLabel.text = text ?: @"";
+    [self setNeedsLayout];
+}
+
+- (void)layoutSubviews {
+    [super layoutSubviews];
+    CGRect bounds = self.contentView.bounds;
+    CGFloat inset = 12.0;
+    CGFloat numberWidth = 48.0;
+    CGFloat logX = _numberLabel.hidden ? inset : inset + numberWidth + 8.0;
+    CGFloat logWidth = MAX(0, CGRectGetWidth(bounds) - logX - inset);
+    CGFloat textY = 5.0;
+    CGFloat textH = MAX(0, CGRectGetHeight(bounds) - 10.0);
+    _numberLabel.frame = _numberLabel.hidden ? CGRectZero : CGRectMake(inset, textY, numberWidth, textH);
+    _logLabel.frame = CGRectMake(logX, textY, logWidth, textH);
+    _separator.frame = CGRectMake(inset, CGRectGetHeight(bounds) - 0.5, MAX(0, CGRectGetWidth(bounds) - inset * 2), 0.5);
+}
+
+@end
+
 @implementation CrashScreenViewController
 
 - (instancetype)initWithExitCode:(int)code {
@@ -89,6 +181,7 @@ static const NSUInteger kMaxSearchHits = 2000;
         _exitCode = code;
         _showingFullLog = NO;
         _viewMode = LogViewModeExcerpt;
+        _excerptStartLine = 0;
         _lineCache = [NSMutableDictionary dictionary];
     }
     return self;
@@ -113,9 +206,27 @@ static const NSUInteger kMaxSearchHits = 2000;
     [super viewDidLoad];
     [self setupViews];
     [self updateColors];
+    [self updateLayoutForSize:self.view.bounds.size];
     [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(updateColors) name:ThemeDidChangeNotification object:nil];
     [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(clearLineCache) name:UIApplicationDidReceiveMemoryWarningNotification object:nil];
     [self runAnalysis];
+}
+
+- (void)viewWillTransitionToSize:(CGSize)size withTransitionCoordinator:(id<UIViewControllerTransitionCoordinator>)coordinator {
+    [super viewWillTransitionToSize:size withTransitionCoordinator:coordinator];
+    [self updateLayoutForSize:size];
+    [coordinator animateAlongsideTransition:^(id<UIViewControllerTransitionCoordinatorContext> context) {
+        [self.view layoutIfNeeded];
+    } completion:nil];
+}
+
+- (void)viewDidLayoutSubviews {
+    [super viewDidLayoutSubviews];
+    CGSize size = self.view.bounds.size;
+    if (fabs(size.width - self.lastLayoutSize.width) > 0.5 ||
+        fabs(size.height - self.lastLayoutSize.height) > 0.5) {
+        [self updateLayoutForSize:size];
+    }
 }
 
 - (void)dealloc {
@@ -127,92 +238,237 @@ static const NSUInteger kMaxSearchHits = 2000;
 #pragma mark - Setup
 
 - (void)setupViews {
-    self.view.backgroundColor = ThemeManager.shared.backgroundColor;
+    ThemeManager *theme = ThemeManager.shared;
+    self.view.backgroundColor = theme.backgroundColor;
+    self.view.clipsToBounds = YES;
 
-    _leftPanel = [[UIView alloc] init];
-    _leftPanel.translatesAutoresizingMaskIntoConstraints = NO;
-    [self.view addSubview:_leftPanel];
+    _backgroundImageView = [[UIImageView alloc] init];
+    _backgroundImageView.translatesAutoresizingMaskIntoConstraints = NO;
+    _backgroundImageView.contentMode = UIViewContentModeScaleAspectFill;
+    _backgroundImageView.clipsToBounds = YES;
+    _backgroundImageView.hidden = YES;
+    [self.view addSubview:_backgroundImageView];
+
+    _backgroundDimView = [[UIView alloc] init];
+    _backgroundDimView.translatesAutoresizingMaskIntoConstraints = NO;
+    _backgroundDimView.userInteractionEnabled = NO;
+    [self.view addSubview:_backgroundDimView];
+
+    _rootStack = [[UIStackView alloc] init];
+    _rootStack.translatesAutoresizingMaskIntoConstraints = NO;
+    _rootStack.axis = UILayoutConstraintAxisVertical;
+    _rootStack.alignment = UIStackViewAlignmentFill;
+    _rootStack.distribution = UIStackViewDistributionFill;
+    _rootStack.spacing = 10;
+    [self.view addSubview:_rootStack];
+
+    [NSLayoutConstraint activateConstraints:@[
+        [_backgroundImageView.topAnchor constraintEqualToAnchor:self.view.topAnchor],
+        [_backgroundImageView.bottomAnchor constraintEqualToAnchor:self.view.bottomAnchor],
+        [_backgroundImageView.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor],
+        [_backgroundImageView.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor],
+        [_backgroundDimView.topAnchor constraintEqualToAnchor:self.view.topAnchor],
+        [_backgroundDimView.bottomAnchor constraintEqualToAnchor:self.view.bottomAnchor],
+        [_backgroundDimView.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor],
+        [_backgroundDimView.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor],
+    ]];
+
+    UILayoutGuide *safe = self.view.safeAreaLayoutGuide;
+    [NSLayoutConstraint activateConstraints:@[
+        [_rootStack.topAnchor constraintEqualToAnchor:safe.topAnchor constant:12],
+        [_rootStack.leadingAnchor constraintEqualToAnchor:safe.leadingAnchor constant:16],
+        [_rootStack.trailingAnchor constraintEqualToAnchor:safe.trailingAnchor constant:-16],
+        [_rootStack.bottomAnchor constraintEqualToAnchor:safe.bottomAnchor constant:-12],
+    ]];
+
+    // Summary card: compact on top in portrait, a proper sidebar in landscape.
+    _summaryPanel = [[UIView alloc] init];
+    _summaryPanel.translatesAutoresizingMaskIntoConstraints = NO;
+    _summaryPanel.backgroundColor = theme.cardBackgroundColor;
+    _summaryPanel.layer.cornerRadius = 18;
+    _summaryPanel.layer.borderWidth = 1;
+    _summaryPanel.layer.borderColor = [theme.separatorColor colorWithAlphaComponent:0.55].CGColor;
+    _summaryPanel.clipsToBounds = YES;
+    [_rootStack addArrangedSubview:_summaryPanel];
+
+    _summaryStack = [[UIStackView alloc] init];
+    _summaryStack.translatesAutoresizingMaskIntoConstraints = NO;
+    _summaryStack.axis = UILayoutConstraintAxisVertical;
+    _summaryStack.spacing = 8;
+    _summaryStack.alignment = UIStackViewAlignmentFill;
+    [_summaryPanel addSubview:_summaryStack];
 
     _iconView = [[UIImageView alloc] initWithImage:[UIImage systemImageNamed:@"exclamationmark.triangle.fill"]];
     _iconView.translatesAutoresizingMaskIntoConstraints = NO;
     _iconView.contentMode = UIViewContentModeScaleAspectFit;
-    [_leftPanel addSubview:_iconView];
+    [_iconView setContentHuggingPriority:UILayoutPriorityRequired forAxis:UILayoutConstraintAxisHorizontal];
 
     _titleLabel = [[UILabel alloc] init];
-    _titleLabel.translatesAutoresizingMaskIntoConstraints = NO;
-    _titleLabel.font = [UIFont systemFontOfSize:17 weight:UIFontWeightBold];
+    _titleLabel.font = [UIFont systemFontOfSize:20 weight:UIFontWeightBold];
     _titleLabel.text = localize(@"crash.screen.title", nil);
-    [_leftPanel addSubview:_titleLabel];
+    _titleLabel.numberOfLines = 2;
+    [_titleLabel setContentCompressionResistancePriority:UILayoutPriorityDefaultHigh forAxis:UILayoutConstraintAxisVertical];
+
+    _closeButton = [UIButton buttonWithType:UIButtonTypeSystem];
+    _closeButton.translatesAutoresizingMaskIntoConstraints = NO;
+    [_closeButton setImage:[UIImage systemImageNamed:@"xmark.circle.fill"] forState:UIControlStateNormal];
+    _closeButton.accessibilityLabel = localize(@"crash.screen.close", nil);
+    [_closeButton addTarget:self action:@selector(actionClose) forControlEvents:UIControlEventTouchUpInside];
+    [_closeButton.widthAnchor constraintEqualToConstant:32].active = YES;
+    [_closeButton.heightAnchor constraintEqualToConstant:32].active = YES;
+
+    UIStackView *headerRow = [[UIStackView alloc] initWithArrangedSubviews:@[_iconView, _titleLabel, _closeButton]];
+    headerRow.translatesAutoresizingMaskIntoConstraints = NO;
+    headerRow.axis = UILayoutConstraintAxisHorizontal;
+    headerRow.alignment = UIStackViewAlignmentCenter;
+    headerRow.spacing = 10;
+    [_summaryStack addArrangedSubview:headerRow];
+    [_iconView.widthAnchor constraintEqualToConstant:32].active = YES;
+    [_iconView.heightAnchor constraintEqualToConstant:32].active = YES;
 
     _codeLabel = [[UILabel alloc] init];
-    _codeLabel.translatesAutoresizingMaskIntoConstraints = NO;
-    _codeLabel.font = [UIFont monospacedDigitSystemFontOfSize:42 weight:UIFontWeightHeavy];
-    [_leftPanel addSubview:_codeLabel];
+    _codeLabel.font = [UIFont monospacedDigitSystemFontOfSize:36 weight:UIFontWeightHeavy];
+    _codeLabel.adjustsFontSizeToFitWidth = YES;
+    _codeLabel.minimumScaleFactor = 0.65;
+    _codeLabel.numberOfLines = 1;
+    [_summaryStack addArrangedSubview:_codeLabel];
 
     _categoryLabel = [[UILabel alloc] init];
-    _categoryLabel.translatesAutoresizingMaskIntoConstraints = NO;
-    _categoryLabel.font = [UIFont systemFontOfSize:15 weight:UIFontWeightMedium];
-    _categoryLabel.numberOfLines = 0;
-    [_leftPanel addSubview:_categoryLabel];
+    _categoryLabel.font = [UIFont systemFontOfSize:14.5 weight:UIFontWeightMedium];
+    _categoryLabel.numberOfLines = 2;
+    [_summaryStack addArrangedSubview:_categoryLabel];
 
     _versionLabel = [[UILabel alloc] init];
-    _versionLabel.translatesAutoresizingMaskIntoConstraints = NO;
-    _versionLabel.font = [UIFont systemFontOfSize:12 weight:UIFontWeightRegular];
+    _versionLabel.font = [UIFont systemFontOfSize:11.5 weight:UIFontWeightRegular];
+    _versionLabel.numberOfLines = 1;
+    _versionLabel.lineBreakMode = NSLineBreakByTruncatingTail;
     NSString *ver = NSBundle.mainBundle.infoDictionary[@"CFBundleShortVersionString"] ?: @"1.0";
     _versionLabel.text = [NSString stringWithFormat:@"Witch v%@", ver];
-    [_leftPanel addSubview:_versionLabel];
+    [_summaryStack addArrangedSubview:_versionLabel];
 
-    _buttonRow = [[UIStackView alloc] init];
-    _buttonRow.translatesAutoresizingMaskIntoConstraints = NO;
-    _buttonRow.axis = UILayoutConstraintAxisHorizontal;
-    _buttonRow.spacing = 10;
-    _buttonRow.alignment = UIStackViewAlignmentCenter;
-    [self.view addSubview:_buttonRow];
+    // 2x2 action grid: every crash action stays visible on narrow phones
+    // without a horizontally scrolling strip that hid the toggles.
+    _aiChatButton = [[CustomButton alloc] initWithStyle:CustomButtonStylePrimary title:localize(@"crash.screen.ai_chat", nil)];
+    [_aiChatButton addTarget:self action:@selector(actionAIChat) forControlEvents:UIControlEventTouchUpInside];
+
+    _sendButton = [[CustomButton alloc] initWithStyle:CustomButtonStyleSecondary title:localize(@"crash.screen.send", nil)];
+    [_sendButton addTarget:self action:@selector(actionSendToDiscord) forControlEvents:UIControlEventTouchUpInside];
 
     _shareButton = [[CustomButton alloc] initWithStyle:CustomButtonStyleSecondary title:localize(@"crash.screen.share", nil)];
     [_shareButton addTarget:self action:@selector(actionShare) forControlEvents:UIControlEventTouchUpInside];
-    [_buttonRow addArrangedSubview:_shareButton];
 
     _toggleButton = [[CustomButton alloc] initWithStyle:CustomButtonStyleSecondary title:localize(@"crash.screen.toggle_full", nil)];
     [_toggleButton addTarget:self action:@selector(actionToggleLog) forControlEvents:UIControlEventTouchUpInside];
-    [_buttonRow addArrangedSubview:_toggleButton];
 
-    _aiChatButton = [[CustomButton alloc] initWithStyle:CustomButtonStyleSecondary title:localize(@"crash.screen.ai_chat", nil)];
-    [_aiChatButton addTarget:self action:@selector(actionAIChat) forControlEvents:UIControlEventTouchUpInside];
-    [_buttonRow addArrangedSubview:_aiChatButton];
+    _buttonRowAI = [[UIStackView alloc] initWithArrangedSubviews:@[_aiChatButton, _sendButton]];
+    _buttonRowAI.axis = UILayoutConstraintAxisHorizontal;
+    _buttonRowAI.spacing = 8;
+    _buttonRowAI.distribution = UIStackViewDistributionFillEqually;
 
-    _sendButton = [[CustomButton alloc] initWithStyle:CustomButtonStylePrimary title:localize(@"crash.screen.send", nil)];
-    [_sendButton addTarget:self action:@selector(actionSendToDiscord) forControlEvents:UIControlEventTouchUpInside];
-    [_buttonRow addArrangedSubview:_sendButton];
+    _buttonRowFile = [[UIStackView alloc] initWithArrangedSubviews:@[_shareButton, _toggleButton]];
+    _buttonRowFile.axis = UILayoutConstraintAxisHorizontal;
+    _buttonRowFile.spacing = 8;
+    _buttonRowFile.distribution = UIStackViewDistributionFillEqually;
 
-    _closeButton = [[CustomButton alloc] initWithStyle:CustomButtonStyleDestructive title:localize(@"crash.screen.close", nil)];
-    [_closeButton addTarget:self action:@selector(actionClose) forControlEvents:UIControlEventTouchUpInside];
-    [_buttonRow addArrangedSubview:_closeButton];
+    _actionGrid = [[UIStackView alloc] initWithArrangedSubviews:@[_buttonRowAI, _buttonRowFile]];
+    _actionGrid.translatesAutoresizingMaskIntoConstraints = NO;
+    _actionGrid.axis = UILayoutConstraintAxisVertical;
+    _actionGrid.spacing = 8;
+    _actionGrid.distribution = UIStackViewDistributionFillEqually;
+    [_summaryStack addArrangedSubview:_actionGrid];
+    [_actionGrid.heightAnchor constraintEqualToConstant:84].active = YES;
+
+    for (UIButton *button in @[_aiChatButton, _sendButton, _shareButton, _toggleButton]) {
+        [button.heightAnchor constraintEqualToConstant:38].active = YES;
+    }
+
+    _summarySpacer = [[UIView alloc] init];
+    _summarySpacer.translatesAutoresizingMaskIntoConstraints = NO;
+    [_summarySpacer setContentHuggingPriority:UILayoutPriorityDefaultLow forAxis:UILayoutConstraintAxisVertical];
+    [_summarySpacer.heightAnchor constraintGreaterThanOrEqualToConstant:0].active = YES;
+    [_summaryStack addArrangedSubview:_summarySpacer];
+
+    [NSLayoutConstraint activateConstraints:@[
+        [_summaryStack.topAnchor constraintEqualToAnchor:_summaryPanel.topAnchor constant:14],
+        [_summaryStack.leadingAnchor constraintEqualToAnchor:_summaryPanel.leadingAnchor constant:14],
+        [_summaryStack.trailingAnchor constraintEqualToAnchor:_summaryPanel.trailingAnchor constant:-14],
+        [_summaryStack.bottomAnchor constraintEqualToAnchor:_summaryPanel.bottomAnchor constant:-14],
+
+    ]];
+
+    _summaryWidthConstraint = [_summaryPanel.widthAnchor constraintEqualToConstant:280];
+    _summaryHeightConstraint = [_summaryPanel.heightAnchor constraintEqualToAnchor:_summaryStack.heightAnchor constant:28];
+    _summaryHeightConstraint.active = YES;
+
+    // Main content: file picker + search + virtualized log table.
+    _contentPanel = [[UIView alloc] init];
+    _contentPanel.translatesAutoresizingMaskIntoConstraints = NO;
+    [_rootStack addArrangedSubview:_contentPanel];
+
+    _contentStack = [[UIStackView alloc] init];
+    _contentStack.translatesAutoresizingMaskIntoConstraints = NO;
+    _contentStack.axis = UILayoutConstraintAxisVertical;
+    _contentStack.spacing = 10;
+    _contentStack.alignment = UIStackViewAlignmentFill;
+    _contentStack.distribution = UIStackViewDistributionFill;
+    [_contentPanel addSubview:_contentStack];
+    [NSLayoutConstraint activateConstraints:@[
+        [_contentStack.topAnchor constraintEqualToAnchor:_contentPanel.topAnchor],
+        [_contentStack.leadingAnchor constraintEqualToAnchor:_contentPanel.leadingAnchor],
+        [_contentStack.trailingAnchor constraintEqualToAnchor:_contentPanel.trailingAnchor],
+        [_contentStack.bottomAnchor constraintEqualToAnchor:_contentPanel.bottomAnchor],
+    ]];
+
+    _toolbarCard = [[UIView alloc] init];
+    _toolbarCard.translatesAutoresizingMaskIntoConstraints = NO;
+    _toolbarCard.backgroundColor = theme.cardBackgroundColor;
+    _toolbarCard.layer.cornerRadius = 14;
+    _toolbarCard.layer.borderWidth = 1;
+    _toolbarCard.layer.borderColor = [theme.separatorColor colorWithAlphaComponent:0.55].CGColor;
+    _toolbarCard.clipsToBounds = YES;
+    [_contentStack addArrangedSubview:_toolbarCard];
+
+    _toolbarStack = [[UIStackView alloc] init];
+    _toolbarStack.translatesAutoresizingMaskIntoConstraints = NO;
+    _toolbarStack.axis = UILayoutConstraintAxisVertical;
+    _toolbarStack.spacing = 6;
+    _toolbarStack.alignment = UIStackViewAlignmentFill;
+    [_toolbarCard addSubview:_toolbarStack];
+    [NSLayoutConstraint activateConstraints:@[
+        [_toolbarStack.topAnchor constraintEqualToAnchor:_toolbarCard.topAnchor constant:10],
+        [_toolbarStack.leadingAnchor constraintEqualToAnchor:_toolbarCard.leadingAnchor constant:10],
+        [_toolbarStack.trailingAnchor constraintEqualToAnchor:_toolbarCard.trailingAnchor constant:-10],
+        [_toolbarStack.bottomAnchor constraintEqualToAnchor:_toolbarCard.bottomAnchor constant:-10],
+    ]];
 
     _fileSegments = [[UISegmentedControl alloc] initWithItems:@[
         localize(@"crash.screen.file.log", nil),
         localize(@"crash.screen.file.crash", nil),
         localize(@"crash.screen.file.hserr", nil),
     ]];
-    _fileSegments.translatesAutoresizingMaskIntoConstraints = NO;
     _fileSegments.selectedSegmentIndex = 0;
     [ThemeManager.shared styleSegmentedControl:_fileSegments];
     [_fileSegments addTarget:self action:@selector(actionSwitchFile) forControlEvents:UIControlEventValueChanged];
-    [self.view addSubview:_fileSegments];
+    [_toolbarStack addArrangedSubview:_fileSegments];
+    [_fileSegments.heightAnchor constraintEqualToConstant:32].active = YES;
 
     _logSearchBar = [[UISearchBar alloc] init];
-    _logSearchBar.translatesAutoresizingMaskIntoConstraints = NO;
-    _logSearchBar.placeholder = localize(@"crash.screen.search_placeholder", nil);
     _logSearchBar.searchBarStyle = UISearchBarStyleMinimal;
+    _logSearchBar.placeholder = localize(@"crash.screen.search_placeholder", nil);
+    _logSearchBar.autocapitalizationType = UITextAutocapitalizationTypeNone;
+    _logSearchBar.autocorrectionType = UITextAutocorrectionTypeNo;
+    _logSearchBar.spellCheckingType = UITextSpellCheckingTypeNo;
+    _logSearchBar.enablesReturnKeyAutomatically = NO;
     _logSearchBar.delegate = self;
-    [self.view addSubview:_logSearchBar];
+    [_toolbarStack addArrangedSubview:_logSearchBar];
+    [_logSearchBar.heightAnchor constraintEqualToConstant:44].active = YES;
 
     _navRow = [[UIStackView alloc] init];
-    _navRow.translatesAutoresizingMaskIntoConstraints = NO;
     _navRow.axis = UILayoutConstraintAxisHorizontal;
     _navRow.spacing = 8;
     _navRow.alignment = UIStackViewAlignmentCenter;
-    [self.view addSubview:_navRow];
+    [_toolbarStack addArrangedSubview:_navRow];
+    [_navRow.heightAnchor constraintEqualToConstant:30].active = YES;
 
     _topButton = [[CustomButton alloc] initWithStyle:CustomButtonStyleSecondary title:localize(@"crash.screen.top", nil)];
     [_topButton addTarget:self action:@selector(actionGoTop) forControlEvents:UIControlEventTouchUpInside];
@@ -226,12 +482,24 @@ static const NSUInteger kMaxSearchHits = 2000;
     [_goButton addTarget:self action:@selector(actionGoLine) forControlEvents:UIControlEventTouchUpInside];
     [_navRow addArrangedSubview:_goButton];
 
+    UIView *navSpacer = [[UIView alloc] init];
+    [navSpacer setContentHuggingPriority:UILayoutPriorityDefaultLow forAxis:UILayoutConstraintAxisHorizontal];
+    [navSpacer setContentCompressionResistancePriority:UILayoutPriorityDefaultLow forAxis:UILayoutConstraintAxisHorizontal];
+    [_navRow addArrangedSubview:navSpacer];
+
     _matchLabel = [[UILabel alloc] init];
-    _matchLabel.translatesAutoresizingMaskIntoConstraints = NO;
-    _matchLabel.font = [UIFont systemFontOfSize:12];
-    _matchLabel.textColor = ThemeManager.shared.secondaryTextColor;
+    _matchLabel.font = [UIFont monospacedDigitSystemFontOfSize:11 weight:UIFontWeightRegular];
     _matchLabel.textAlignment = NSTextAlignmentRight;
-    [self.view addSubview:_matchLabel];
+    _matchLabel.numberOfLines = 1;
+    _matchLabel.lineBreakMode = NSLineBreakByTruncatingHead;
+    [_matchLabel setContentHuggingPriority:UILayoutPriorityRequired forAxis:UILayoutConstraintAxisHorizontal];
+    [_matchLabel setContentCompressionResistancePriority:UILayoutPriorityRequired forAxis:UILayoutConstraintAxisHorizontal];
+    [_navRow addArrangedSubview:_matchLabel];
+
+    for (UIButton *button in @[_topButton, _bottomButton, _goButton]) {
+        [button.heightAnchor constraintEqualToConstant:30].active = YES;
+        [button.widthAnchor constraintGreaterThanOrEqualToConstant:62].active = YES;
+    }
 
     _logTable = [[UITableView alloc] initWithFrame:CGRectZero style:UITableViewStylePlain];
     _logTable.translatesAutoresizingMaskIntoConstraints = NO;
@@ -239,83 +507,48 @@ static const NSUInteger kMaxSearchHits = 2000;
     _logTable.dataSource = self;
     _logTable.prefetchDataSource = self;
     _logTable.separatorStyle = UITableViewCellSeparatorStyleNone;
-    _logTable.backgroundColor = [UIColor colorWithWhite:0.08 alpha:1.0];
-    _logTable.layer.cornerRadius = 10;
-    _logTable.layer.masksToBounds = YES;
-    _logTable.estimatedRowHeight = 20;
-    _logTable.rowHeight = UITableViewAutomaticDimension;
-    [_logTable registerClass:[UITableViewCell class] forCellReuseIdentifier:@"LogCell"];
-    [self.view addSubview:_logTable];
+    _logTable.backgroundColor = theme.cardBackgroundColor;
+    _logTable.layer.cornerRadius = 14;
+    _logTable.clipsToBounds = YES;
+    _logTable.rowHeight = 40;
+    _logTable.estimatedRowHeight = 40;
+    _logTable.keyboardDismissMode = UIScrollViewKeyboardDismissModeOnDrag;
+    [_logTable registerClass:[CrashLogCell class] forCellReuseIdentifier:@"LogCell"];
+    [_contentStack addArrangedSubview:_logTable];
+    [_logTable.heightAnchor constraintGreaterThanOrEqualToConstant:100].active = YES;
+    [_logTable setContentHuggingPriority:1 forAxis:UILayoutConstraintAxisVertical];
+    [_logTable setContentCompressionResistancePriority:1 forAxis:UILayoutConstraintAxisVertical];
 
     _loadingIndicator = [[UIActivityIndicatorView alloc] initWithActivityIndicatorStyle:UIActivityIndicatorViewStyleLarge];
     _loadingIndicator.translatesAutoresizingMaskIntoConstraints = NO;
     _loadingIndicator.hidesWhenStopped = YES;
-    _loadingIndicator.color = ThemeManager.shared.accentColor;
     [self.view addSubview:_loadingIndicator];
+    [NSLayoutConstraint activateConstraints:@[
+        [_loadingIndicator.centerXAnchor constraintEqualToAnchor:_logTable.centerXAnchor],
+        [_loadingIndicator.centerYAnchor constraintEqualToAnchor:_logTable.centerYAnchor],
+    ]];
 
-    [self layoutViews];
     [self updateNavVisibility];
 }
 
-- (void)layoutViews {
-    UILayoutGuide *safe = self.view.safeAreaLayoutGuide;
+- (void)updateLayoutForSize:(CGSize)size {
+    if (size.width < 1 || size.height < 1) return;
+    self.lastLayoutSize = size;
+    BOOL horizontal = size.width > size.height;
+    self.horizontalLayout = horizontal;
 
-    [NSLayoutConstraint activateConstraints:@[
-        [_leftPanel.leadingAnchor constraintEqualToAnchor:safe.leadingAnchor constant:16],
-        [_leftPanel.topAnchor constraintEqualToAnchor:safe.topAnchor constant:16],
-        [_leftPanel.bottomAnchor constraintEqualToAnchor:safe.bottomAnchor constant:-16],
-        [_leftPanel.widthAnchor constraintEqualToConstant:220],
+    _rootStack.axis = horizontal ? UILayoutConstraintAxisHorizontal : UILayoutConstraintAxisVertical;
+    _rootStack.spacing = horizontal ? 14 : 10;
 
-        [_iconView.topAnchor constraintEqualToAnchor:_leftPanel.topAnchor constant:8],
-        [_iconView.leadingAnchor constraintEqualToAnchor:_leftPanel.leadingAnchor constant:4],
-        [_iconView.widthAnchor constraintEqualToConstant:40],
-        [_iconView.heightAnchor constraintEqualToConstant:40],
+    _summaryWidthConstraint.constant = MIN(300, MAX(260, size.width * 0.3));
+    _summaryWidthConstraint.active = horizontal;
+    _summaryHeightConstraint.active = !horizontal;
+    // The spacer soaks up slack in the landscape sidebar. Keep it out of the
+    // vertical layout, otherwise its low hugging leaves the summary height
+    // ambiguous and the panel keeps the tall height from the rotated state.
+    _summarySpacer.hidden = !horizontal;
 
-        [_titleLabel.leadingAnchor constraintEqualToAnchor:_iconView.trailingAnchor constant:10],
-        [_titleLabel.centerYAnchor constraintEqualToAnchor:_iconView.centerYAnchor],
-        [_titleLabel.trailingAnchor constraintLessThanOrEqualToAnchor:_leftPanel.trailingAnchor],
-
-        [_codeLabel.topAnchor constraintEqualToAnchor:_iconView.bottomAnchor constant:28],
-        [_codeLabel.leadingAnchor constraintEqualToAnchor:_leftPanel.leadingAnchor constant:4],
-        [_codeLabel.trailingAnchor constraintLessThanOrEqualToAnchor:_leftPanel.trailingAnchor],
-
-        [_categoryLabel.topAnchor constraintEqualToAnchor:_codeLabel.bottomAnchor constant:10],
-        [_categoryLabel.leadingAnchor constraintEqualToAnchor:_leftPanel.leadingAnchor constant:4],
-        [_categoryLabel.trailingAnchor constraintEqualToAnchor:_leftPanel.trailingAnchor],
-
-        [_versionLabel.bottomAnchor constraintEqualToAnchor:_leftPanel.bottomAnchor constant:-4],
-        [_versionLabel.leadingAnchor constraintEqualToAnchor:_leftPanel.leadingAnchor constant:4],
-        [_versionLabel.trailingAnchor constraintLessThanOrEqualToAnchor:_leftPanel.trailingAnchor],
-
-        [_buttonRow.topAnchor constraintEqualToAnchor:safe.topAnchor constant:16],
-        [_buttonRow.trailingAnchor constraintEqualToAnchor:safe.trailingAnchor constant:-16],
-        [_buttonRow.leadingAnchor constraintGreaterThanOrEqualToAnchor:_leftPanel.trailingAnchor constant:16],
-
-        [_fileSegments.topAnchor constraintEqualToAnchor:_buttonRow.bottomAnchor constant:8],
-        [_fileSegments.leadingAnchor constraintEqualToAnchor:_leftPanel.trailingAnchor constant:16],
-        [_fileSegments.trailingAnchor constraintEqualToAnchor:safe.trailingAnchor constant:-16],
-
-        [_logSearchBar.topAnchor constraintEqualToAnchor:_fileSegments.bottomAnchor constant:4],
-        [_logSearchBar.leadingAnchor constraintEqualToAnchor:_leftPanel.trailingAnchor constant:16],
-        [_logSearchBar.trailingAnchor constraintEqualToAnchor:safe.trailingAnchor constant:-16],
-        [_logSearchBar.heightAnchor constraintEqualToConstant:36],
-
-        [_navRow.topAnchor constraintEqualToAnchor:_logSearchBar.bottomAnchor constant:2],
-        [_navRow.leadingAnchor constraintEqualToAnchor:_leftPanel.trailingAnchor constant:16],
-        [_navRow.heightAnchor constraintEqualToConstant:26],
-
-        [_matchLabel.centerYAnchor constraintEqualToAnchor:_navRow.centerYAnchor],
-        [_matchLabel.trailingAnchor constraintEqualToAnchor:safe.trailingAnchor constant:-16],
-        [_matchLabel.leadingAnchor constraintGreaterThanOrEqualToAnchor:_navRow.trailingAnchor constant:8],
-
-        [_logTable.topAnchor constraintEqualToAnchor:_navRow.bottomAnchor constant:4],
-        [_logTable.leadingAnchor constraintEqualToAnchor:_leftPanel.trailingAnchor constant:16],
-        [_logTable.trailingAnchor constraintEqualToAnchor:safe.trailingAnchor constant:-16],
-        [_logTable.bottomAnchor constraintEqualToAnchor:safe.bottomAnchor constant:-16],
-
-        [_loadingIndicator.centerXAnchor constraintEqualToAnchor:self.view.centerXAnchor],
-        [_loadingIndicator.centerYAnchor constraintEqualToAnchor:self.view.centerYAnchor],
-    ]];
+    [self.view setNeedsLayout];
 }
 
 - (void)updateNavVisibility {
@@ -325,19 +558,46 @@ static const NSUInteger kMaxSearchHits = 2000;
     _fileSegments.hidden = NO;
 }
 
+- (void)updateBackground {
+    ThemeManager *theme = ThemeManager.shared;
+    _backgroundImageView.image = theme.blurredBackgroundImage ?: theme.backgroundImage;
+    _backgroundImageView.hidden = !theme.hasCustomBackground;
+    _backgroundDimView.backgroundColor = theme.hasCustomBackground
+        ? [theme.backgroundColor colorWithAlphaComponent:0.62]
+        : theme.backgroundColor;
+}
+
 - (void)updateColors {
     ThemeManager *theme = ThemeManager.shared;
     self.view.backgroundColor = theme.backgroundColor;
-    _leftPanel.backgroundColor = theme.cardBackgroundColor;
+    [self updateBackground];
+
+    _summaryPanel.backgroundColor = theme.cardBackgroundColor;
+    _summaryPanel.layer.borderColor = [theme.separatorColor colorWithAlphaComponent:0.55].CGColor;
+    _toolbarCard.backgroundColor = theme.cardBackgroundColor;
+    _toolbarCard.layer.borderColor = [theme.separatorColor colorWithAlphaComponent:0.55].CGColor;
+    _logTable.backgroundColor = theme.cardBackgroundColor;
+
     _iconView.tintColor = theme.errorColor;
     _titleLabel.textColor = theme.primaryTextColor;
     _codeLabel.textColor = theme.errorColor;
     _categoryLabel.textColor = theme.secondaryTextColor;
     _versionLabel.textColor = theme.secondaryTextColor;
+    _matchLabel.textColor = theme.secondaryTextColor;
+    _closeButton.tintColor = theme.secondaryTextColor;
     _loadingIndicator.color = theme.accentColor;
+
     [theme styleSegmentedControl:_fileSegments];
-    _logTable.backgroundColor = [UIColor colorWithWhite:0.08 alpha:1.0];
-    [_logTable reloadData];
+    _logSearchBar.tintColor = theme.accentColor;
+    UITextField *searchField = _logSearchBar.searchTextField;
+    searchField.textColor = theme.primaryTextColor;
+    searchField.backgroundColor = [theme.separatorColor colorWithAlphaComponent:0.32];
+    searchField.attributedPlaceholder = [[NSAttributedString alloc] initWithString:localize(@"crash.screen.search_placeholder", nil)
+                                                                       attributes:@{NSForegroundColorAttributeName: theme.secondaryTextColor}];
+
+    for (UITableViewCell *cell in _logTable.visibleCells) {
+        if ([cell isKindOfClass:[CrashLogCell class]]) [(CrashLogCell *)cell applyTheme:theme];
+    }
 }
 
 - (void)clearLineCache {
@@ -364,6 +624,14 @@ static const NSUInteger kMaxSearchHits = 2000;
 
     self.codeLabel.text = [NSString stringWithFormat:localize(@"crash.screen.code", nil), self.exitCode];
     self.categoryLabel.text = localize(categoryLocalizedKey(analysis.category), nil);
+    NSString *ver = NSBundle.mainBundle.infoDictionary[@"CFBundleShortVersionString"] ?: @"1.0";
+    if (analysis.totalBytes > 0) {
+        NSString *size = [NSByteCountFormatter stringFromByteCount:(long long)analysis.totalBytes
+                                                        countStyle:NSByteCountFormatterCountStyleFile];
+        self.versionLabel.text = [NSString stringWithFormat:@"Witch v%@ · %@", ver, size];
+    } else {
+        self.versionLabel.text = [NSString stringWithFormat:@"Witch v%@", ver];
+    }
     [self updateFileSegments];
     // Default to the first AVAILABLE file (not always latestlog): if the game
     // never wrote latestlog but did write a crash report, show the crash.
@@ -458,15 +726,20 @@ static const NSUInteger kMaxSearchHits = 2000;
     self.indexing = NO;
     self.windowLoading = NO;
     self.windowLoadQueued = NO;
+    self.excerptStartLine = 0;
     [self.lineCache removeAllObjects];
     self.hitLines = nil;
     self.hitTexts = nil;
+    self.filteredExcerpt = nil;
+    self.searchQuery = nil;
     self.logSearchBar.text = @"";
     [self updateNavVisibility];
     if (!path.length || ![[NSFileManager defaultManager] fileExistsAtPath:path]) {
         NSString *name = [self displayNameForSegment:seg];
         NSString *base = localize(@"ai.no_log_file", nil);
         self.excerptLines = @[[NSString stringWithFormat:@"%@ (%@)", base, name]];
+        self.filteredExcerpt = nil;
+        self.reader = nil;
         self.matchLabel.text = @"0";
         [self.logTable reloadData];
         return;
@@ -485,6 +758,7 @@ static const NSUInteger kMaxSearchHits = 2000;
             typeof(self) strong = weakSelf;
             if (!strong || ![strong.currentPath isEqualToString:wantPath]) return;
             strong.excerptLines = tail.count > 0 ? tail : @[localize(@"ai.no_log_file", nil)];
+            strong.excerptStartLine = tail.count > 0 ? start : 0;
             strong.filteredExcerpt = nil;
             strong.matchLabel.text = [NSString stringWithFormat:localize(@"crash.lines", nil),
                                       (unsigned long)strong.excerptLines.count];
@@ -634,10 +908,11 @@ static const NSUInteger kMaxSearchHits = 2000;
         NSArray<NSIndexPath *> *visible = [strong.logTable indexPathsForVisibleRows] ?: @[];
         NSMutableArray<NSIndexPath *> *missing = [NSMutableArray array];
         for (NSIndexPath *ip in visible) {
-            if (!strong.lineCache[@((NSUInteger)ip.row)]) [missing addObject:ip];
+            NSString *line = strong.lineCache[@((NSUInteger)ip.row)];
+            if (!line) [missing addObject:ip];
             else {
-                UITableViewCell *cell = [strong.logTable cellForRowAtIndexPath:ip];
-                [strong configureCell:cell line:strong.lineCache[@((NSUInteger)ip.row)] number:(NSUInteger)ip.row];
+                CrashLogCell *cell = (CrashLogCell *)[strong.logTable cellForRowAtIndexPath:ip];
+                [cell setNumber:(NSUInteger)ip.row + 1 text:line showNumber:YES];
             }
         }
         if (missing.count > 0) [strong.logTable reloadRowsAtIndexPaths:missing withRowAnimation:UITableViewRowAnimationNone];
@@ -689,41 +964,65 @@ static const NSUInteger kMaxSearchHits = 2000;
     }
 }
 
-- (void)configureCell:(UITableViewCell *)cell line:(NSString *)line number:(NSInteger)number {
-    if (self.viewMode == LogViewModeFull || self.viewMode == LogViewModeResults) {
-        cell.textLabel.text = [NSString stringWithFormat:@"%ld  %@", (long)number + 1, line];
-    } else {
-        cell.textLabel.text = line;
+- (nullable NSString *)lineTextAtIndexPath:(NSIndexPath *)indexPath {
+    if (indexPath.row < 0) return nil;
+    switch (self.viewMode) {
+        case LogViewModeExcerpt: {
+            NSArray<NSString *> *lines = self.filteredExcerpt ?: self.excerptLines;
+            return indexPath.row < (NSInteger)lines.count ? lines[indexPath.row] : nil;
+        }
+        case LogViewModeResults:
+            return indexPath.row < (NSInteger)self.hitTexts.count ? self.hitTexts[indexPath.row] : nil;
+        case LogViewModeFull:
+            return self.lineCache[@((NSUInteger)indexPath.row)];
     }
+    return nil;
 }
 
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {
-    UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:@"LogCell" forIndexPath:indexPath];
-    cell.textLabel.numberOfLines = 0;
-    cell.textLabel.font = [UIFont fontWithName:@"Menlo-Regular" size:12];
-    cell.textLabel.textColor = [UIColor colorWithWhite:0.9 alpha:1.0];
-    cell.selectionStyle = UITableViewCellSelectionStyleNone;
-    cell.backgroundColor = [UIColor clearColor];
-    cell.contentView.backgroundColor = [UIColor clearColor];
+    CrashLogCell *cell = (CrashLogCell *)[tableView dequeueReusableCellWithIdentifier:@"LogCell" forIndexPath:indexPath];
+    [cell applyTheme:ThemeManager.shared];
 
     if (self.viewMode == LogViewModeExcerpt) {
-        NSArray *lines = self.filteredExcerpt ?: self.excerptLines;
-        cell.textLabel.text = (indexPath.row < (NSInteger)lines.count) ? lines[indexPath.row] : @"";
+        NSArray<NSString *> *lines = self.filteredExcerpt ?: self.excerptLines;
+        if (indexPath.row < (NSInteger)lines.count) {
+            BOOL filtered = (self.filteredExcerpt != nil);
+            NSUInteger number = filtered ? 0 : self.excerptStartLine + (NSUInteger)indexPath.row + 1;
+            [cell setNumber:number text:lines[indexPath.row] showNumber:!filtered];
+        } else {
+            [cell setNumber:0 text:@"" showNumber:NO];
+        }
     } else if (self.viewMode == LogViewModeResults) {
         if (indexPath.row < (NSInteger)self.hitLines.count) {
-            NSUInteger num = [self.hitLines[indexPath.row] unsignedIntegerValue];
-            [self configureCell:cell line:self.hitTexts[indexPath.row] number:(NSInteger)num];
+            NSUInteger number = [self.hitLines[indexPath.row] unsignedIntegerValue];
+            [cell setNumber:number + 1 text:self.hitTexts[indexPath.row] showNumber:YES];
+        } else {
+            [cell setNumber:0 text:@"" showNumber:NO];
         }
     } else {
         NSString *line = self.lineCache[@((NSUInteger)indexPath.row)];
         if (line) {
-            [self configureCell:cell line:line number:indexPath.row];
+            [cell setNumber:(NSUInteger)indexPath.row + 1 text:line showNumber:YES];
         } else {
-            cell.textLabel.text = @"…";
+            [cell setNumber:(NSUInteger)indexPath.row + 1 text:@"…" showNumber:YES];
             [self requestWindowAround:(NSUInteger)indexPath.row];
         }
     }
     return cell;
+}
+
+- (UIContextMenuConfiguration *)tableView:(UITableView *)tableView contextMenuConfigurationForRowAtIndexPath:(NSIndexPath *)indexPath point:(CGPoint)point {
+    NSString *line = [self lineTextAtIndexPath:indexPath];
+    if (line.length == 0) return nil;
+    return [UIContextMenuConfiguration configurationWithIdentifier:nil previewProvider:nil actionProvider:^UIMenu * _Nullable(NSArray<UIMenuElement *> * _Nonnull suggestedActions) {
+        UIAction *copy = [UIAction actionWithTitle:localize(@"Copy", nil)
+                                            image:[UIImage systemImageNamed:@"doc.on.doc"]
+                                       identifier:nil
+                                          handler:^(__kindof UIAction * _Nonnull action) {
+            UIPasteboard.generalPasteboard.string = line;
+        }];
+        return [UIMenu menuWithTitle:@"" children:@[copy]];
+    }];
 }
 
 - (void)tableView:(UITableView *)tableView prefetchRowsAtIndexPaths:(NSArray<NSIndexPath *> *)indexPaths {
@@ -738,6 +1037,7 @@ static const NSUInteger kMaxSearchHits = 2000;
     if (self.viewMode == LogViewModeResults && indexPath.row < (NSInteger)self.hitLines.count) {
         NSUInteger line = [self.hitLines[indexPath.row] unsignedIntegerValue];
         self.viewMode = LogViewModeFull;
+        [self updateNavVisibility];
         [self.logTable reloadData];
         [self jumpToLine:line];
     }
@@ -791,6 +1091,8 @@ static const NSUInteger kMaxSearchHits = 2000;
         }
         self.filteredExcerpt = nil;
         self.hitLines = nil;
+        self.hitTexts = nil;
+        [self updateNavVisibility];
         [self.logTable reloadData];
         if (self.viewMode == LogViewModeFull) [self updatePositionLabel];
         else self.matchLabel.text = [NSString stringWithFormat:localize(@"crash.lines", nil),
@@ -842,7 +1144,12 @@ static const NSUInteger kMaxSearchHits = 2000;
             typeof(self) strong = weakSelf;
             if (!strong || strong.searchSeq != seq || ![strong.currentPath isEqualToString:wantPath]) return;
             if (nums.count == 0) {
+                strong.viewMode = LogViewModeResults;
+                strong.hitLines = @[];
+                strong.hitTexts = @[];
                 strong.matchLabel.text = localize(@"crash.screen.no_match", nil);
+                [strong updateNavVisibility];
+                [strong.logTable reloadData];
                 return;
             }
             strong.viewMode = LogViewModeResults;
@@ -851,6 +1158,7 @@ static const NSUInteger kMaxSearchHits = 2000;
             strong.matchLabel.text = [NSString stringWithFormat:localize(@"crash.screen.hits", nil),
                                       (unsigned long)nums.count,
                                       nums.count >= kMaxSearchHits ? @"+" : @""];
+            [strong updateNavVisibility];
             [strong.logTable reloadData];
             [strong.logTable scrollToRowAtIndexPath:[NSIndexPath indexPathForRow:0 inSection:0]
                                    atScrollPosition:UITableViewScrollPositionTop animated:NO];
@@ -867,7 +1175,10 @@ static const NSUInteger kMaxSearchHits = 2000;
     [self updateFileSegments];
     WitchAIChatViewController *vc = [[WitchAIChatViewController alloc] initWithAnalysis:self.analysis exitCode:self.exitCode];
     UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:vc];
-    nav.modalPresentationStyle = UIModalPresentationFormSheet;
+    // OverFullScreen on iPhone: the chat's backdrop is the themed translucent
+    // color, so the crash screen must stay underneath it.
+    nav.modalPresentationStyle = UIDevice.currentDevice.userInterfaceIdiom == UIUserInterfaceIdiomPad
+        ? UIModalPresentationFormSheet : UIModalPresentationOverFullScreen;
     [self presentViewController:nav animated:YES completion:nil];
 }
 

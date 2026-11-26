@@ -28,3 +28,7 @@ extern __thread basic_render_window_t* currentBundle;
 static inline basic_render_window_t* br_get_current() {
     return currentBundle;
 }
+
+// Bumps the final-present counter used by pojavSwapCount() for renderers whose
+// final presentation is a CALayer (Zink/Mesa), not a CAMetalLayer drawable.
+void pojavNoteFinalPresent(void);

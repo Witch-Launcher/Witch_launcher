@@ -7,7 +7,9 @@
 #import "MemSampler.h"
 
 #include <dlfcn.h>
+#include <errno.h>
 #include <libgen.h>
+#include <sys/sysctl.h>
 #include <pthread.h>
 #include <signal.h>
 #include <stdlib.h>
@@ -188,7 +190,58 @@ static const char *signedMoltenVKPath(const char *requested) {
     return NULL;
 }
 
+static BOOL pathIsUnderRoot(const char *path, const char *root) {
+    if (!path || !root) return NO;
+    size_t rootLen = strlen(root);
+    while (rootLen > 1 && root[rootLen - 1] == '/') rootLen--;
+    return strncmp(path, root, rootLen) == 0 && (path[rootLen] == '/' || path[rootLen] == '\0');
+}
+
+// Makes sure a dylib that lives in the app container can be loaded by dyld.
+// Mods extract macOS binaries (Distant Horizons' zstd/lz4/sqlite natives,
+// for example) into the container; dyld does not load those, and the kernel
+// refuses the executable mapping of the untouched file. The launcher patches
+// the platform and rebuilds the ad-hoc signature instead (see
+// dyld_patch_platform.m).
+//
+// Only files inside HOME/TMP are touched - the app's own libraries keep the
+// signature they were signed with.
+void PLPrepareContainerDylib(const char *path) {
+    if (!path) return;
+    const char *home = getenv("HOME");
+    const char *tmp = getenv("TMPDIR");
+    char homeReal[PATH_MAX], tmpReal[PATH_MAX], fullpath[PATH_MAX];
+    if (!realpath(path, fullpath)) return;
+    BOOL underHome = home && realpath(home, homeReal) && pathIsUnderRoot(fullpath, homeReal);
+    BOOL underTmp = tmp && realpath(tmp, tmpReal) && pathIsUnderRoot(fullpath, tmpReal);
+    if (!underHome && !underTmp) return;
+    PLPatchMachOPlatformForFile(path);
+}
+
+// LabyMod's voice chat downloads macos-aarch64-librnnoise.dylib, built for
+// Apple silicon macOS (ARMv8.3+). On A11 and older the first call dies with
+// SIGILL and takes the whole JVM down. Refuse the load there so the addon
+// falls back to no noise suppression instead of crashing the game.
+static BOOL cpuSupportsArmv83(void) {
+    static int supported = -1;
+    if (supported < 0) {
+        int value = 0;
+        size_t size = sizeof(value);
+        supported = (sysctlbyname("hw.optional.armv8_3", &value, &size, NULL, 0) == 0 && value != 0) ? 1 : 0;
+    }
+    return supported == 1;
+}
+
 void* hooked_dlopen(const char* path, int mode) {
+    if (path && strstr(path, "librnnoise") && !cpuSupportsArmv83()) {
+        static BOOL logged = NO;
+        if (!logged) {
+            logged = YES;
+            NSLog(@"[RNNoise] skipping %s: macOS build needs ARMv8.3, this CPU lacks it (noise suppression disabled)", path);
+        }
+        errno = ENOTSUP;
+        return NULL;
+    }
     const char *mvk = signedMoltenVKPath(path);
     if (mvk) {
         // Java-level error messages print the originally requested path, so
@@ -205,15 +258,20 @@ void* hooked_dlopen(const char* path, int mode) {
     if (DeviceHasJITFlags(JIT_FLAG_FORCE_MIRRORED)) {
         shouldUseDyldBypass26PPL = hwRedirectOrig[0] && !DeviceHasJITFlags(JIT_FLAG_HAS_TXM);
     }
-    // Only patch Mach-O and use dyld bypass dylib is in the home dir
-    // or tmp dir: LiveContainer makes a symlink to its own tmp dir so checking home dir alone would fail
+    // Only patch Mach-O and use the dyld bypass when the dylib is in the
+    // home or tmp dir. Canonicalize both roots: on iOS TMPDIR/HOME can be
+    // "/var/mobile/..." while realpath() returns "/private/var/mobile/...",
+    // so a raw substring check misses every extracted mod dylib.
     const char *home = getenv("HOME");
     const char *tmp = getenv("TMPDIR");
-    char fullpath[PATH_MAX];
-    BOOL shouldUseDyldBypass = path && realpath(path, fullpath) && (strstr(fullpath, home) || strstr(fullpath, tmp));
+    char homeReal[PATH_MAX], tmpReal[PATH_MAX], fullpath[PATH_MAX];
+    BOOL haveFullPath = path && realpath(path, fullpath);
+    BOOL underHome = haveFullPath && home && realpath(home, homeReal) && pathIsUnderRoot(fullpath, homeReal);
+    BOOL underTmp = haveFullPath && tmp && realpath(tmp, tmpReal) && pathIsUnderRoot(fullpath, tmpReal);
+    BOOL shouldUseDyldBypass = haveFullPath && (underHome || underTmp);
     shouldUseDyldBypass26PPL &= shouldUseDyldBypass;
     if (shouldUseDyldBypass) {
-        PLPatchMachOPlatformForFile(path);
+        PLPrepareContainerDylib(path);
     }
     if (shouldUseDyldBypass26PPL) {
         __attribute__((musttail)) return hooked_dlopen_26_ppl(path, mode);
@@ -276,6 +334,8 @@ void *hooked_dlopen_26_ppl(const char *path, int mode) {
     // restore old thread states
     thread_set_state(thread, ARM_DEBUG_STATE64, (thread_state_t)&origDebugState, ARM_DEBUG_STATE64_COUNT);
     thread_swap_exception_ports(thread, mask, handler, behavior, flavor, &mask, &masksCnt, &handler, &behavior, &flavor);
+    // mach_thread_self() hands us a send right that is never released.
+    mach_port_deallocate(mach_task_self(), thread);
     
     return result;
 }
@@ -315,6 +375,8 @@ int hooked_open(const char *path, int oflag, ...) {
 }
 
 void init_hookFunctions() {
+    extern void PLInstallGLSyncShim(void);
+    PLInstallGLSyncShim();
     struct rebinding rebindings[] = (struct rebinding[]){
         {"abort", hooked_abort, (void *)&orig_abort},
         {"__assert_rtn", hooked___assert_rtn, NULL},

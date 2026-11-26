@@ -41,12 +41,47 @@ static NSString * const kCachePrefix = @"witch.modcheck.v1.";
     return all[@"result"];
 }
 
+// NSUserDefaults refuses NSNull and other non-plist leaves; API payloads can
+// embed them, so strip recursively before persisting (CFPrefs aborts the app
+// otherwise: _CFPrefsValidateValueForKey failed).
+static id ModUpdatePlistSafe(id value) {
+    if (!value || [value isKindOfClass:[NSNull class]]) return nil;
+    if ([value isKindOfClass:[NSString class]] || [value isKindOfClass:[NSNumber class]] ||
+        [value isKindOfClass:[NSDate class]] || [value isKindOfClass:[NSData class]]) {
+        return value;
+    }
+    if ([value isKindOfClass:[NSArray class]]) {
+        NSMutableArray *arr = [NSMutableArray arrayWithCapacity:[value count]];
+        for (id v in value) {
+            id safe = ModUpdatePlistSafe(v);
+            if (safe) [arr addObject:safe];
+        }
+        return arr;
+    }
+    if ([value isKindOfClass:[NSDictionary class]]) {
+        NSMutableDictionary *dict = [NSMutableDictionary dictionaryWithCapacity:[value count]];
+        for (id k in value) {
+            if (![k isKindOfClass:[NSString class]]) continue;
+            id safe = ModUpdatePlistSafe(value[k]);
+            if (safe) dict[k] = safe;
+        }
+        return dict;
+    }
+    return nil;
+}
+
 - (void)storeResult:(NSDictionary *)result forKey:(NSString *)key {
+    NSDictionary *safe = ModUpdatePlistSafe(result ?: @{});
     NSDictionary *payload = @{
         @"checked_at": @([[NSDate date] timeIntervalSince1970]),
-        @"result": result ?: @{}
+        @"result": [safe isKindOfClass:[NSDictionary class]] ? safe : @{}
     };
-    [[NSUserDefaults standardUserDefaults] setObject:payload forKey:key];
+    @try {
+        [[NSUserDefaults standardUserDefaults] setObject:payload forKey:key];
+    } @catch (NSException *e) {
+        // Cache is best-effort; never let a prefs type mismatch kill the app.
+        NSLog(@"[ModUpdateChecker] cache store failed for %@: %@", key, e.reason);
+    }
 }
 
 - (void)invalidateAllCaches {

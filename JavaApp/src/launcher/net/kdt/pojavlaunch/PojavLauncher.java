@@ -4,6 +4,7 @@ import java.beans.Beans;
 import java.io.*;
 import java.lang.reflect.Field;
 import java.net.URL;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.StandardCopyOption;
 import java.util.*;
@@ -42,7 +43,13 @@ public class PojavLauncher {
         // Ensure JNA uses a writable directory with valid code signing support
         String pojavHome = System.getenv("POJAV_HOME");
         if (pojavHome != null) {
-            String jnaTmpDir = pojavHome + "/jna_tmp";
+            // Native launcher exports the hidden home (POJAV_HOME/.amethyst);
+            // fall back to the same layout when built/run standalone.
+            String hiddenHome = System.getenv("POJAV_HIDDEN_HOME");
+            if (hiddenHome == null || hiddenHome.isEmpty()) {
+                hiddenHome = pojavHome + "/.amethyst";
+            }
+            String jnaTmpDir = hiddenHome + "/jna_tmp";
             new File(jnaTmpDir).mkdirs();
             System.setProperty("jna.tmpdir", jnaTmpDir);
             System.setProperty("jna.nosys", "true");
@@ -83,6 +90,14 @@ public class PojavLauncher {
             // Try to initialize Caciocavallo17
             Class.forName("com.github.caciocavallosilano.cacio.ctc.CTCPreloadClassLoader");
         } catch (ClassNotFoundException e) {}
+
+        // CTCPreloadClassLoader's static initializer clears the AWT
+        // SurfaceManagerFactory, so it has to be (re)installed afterwards or
+        // every Swing repaint fails with "No SurfaceManagerFactory set." and
+        // windows (e.g. the jar/mod installer) stay black.
+        net.kdt.pojavlaunch.cacioinitagent.CacioInitAgent.install();
+
+        startMemoryProbe();
 
         String runJar = System.getProperty("pojav.runJar");
         if (runJar != null) {
@@ -241,24 +256,16 @@ public class PojavLauncher {
     // Fix: overwrite the affected class files INSIDE every jar under the game
     // directory with the launcher's own shim bytecode (bundled under
     // /macosfix/), so no classloading order can pick the real ones anymore.
-    // Same approach as patchInstanceLwjgl(); jars whose entries already match
-    // are skipped, so repeat launches don't rewrite anything.
+    // Same approach as patchInstanceLwjglNatives(); jars whose entries already
+    // match are skipped, so repeat launches don't rewrite anything.
+    // MacosUtil is version dependent (26.x Mojang names + IS_MACOS, 1.19-1.21
+    // srg m_xxxxxx_ names) and the game dir is shared by every installed
+    // version, so a stub must satisfy all of them: MacosUtilStub.unionStub
+    // keeps the installed class's own API, adds the other known one and
+    // neutralises every body.
     private static void patchMacPlatformShims() {
-        Map<String, byte[]> replacements = new HashMap<>();
-        byte[] macosUtil = readResourceBytes("/macosfix/MacosUtil.class");
-        if (macosUtil == null) {
-            System.out.println("[MacShims] MacosUtil.class resource missing, skipping");
-            return;
-        }
-        replacements.put("com/mojang/blaze3d/platform/MacosUtil.class", macosUtil);
         byte[] glfwNativeCocoa = readResourceBytes("/macosfix/GLFWNativeCocoa.class");
-        if (glfwNativeCocoa != null) {
-            replacements.put("org/lwjgl/glfw/GLFWNativeCocoa.class", glfwNativeCocoa);
-            byte[] functions = readResourceBytes("/macosfix/GLFWNativeCocoa$Functions.class");
-            if (functions != null) {
-                replacements.put("org/lwjgl/glfw/GLFWNativeCocoa$Functions.class", functions);
-            }
-        }
+        byte[] functions = readResourceBytes("/macosfix/GLFWNativeCocoa$Functions.class");
         List<File> jars = new ArrayList<>();
         try {
             Files.walk(new File(Tools.DIR_GAME_NEW).toPath())
@@ -269,14 +276,303 @@ public class PojavLauncher {
             return;
         }
         int patched = 0;
+        int macosUtilPatched = 0;
         for (File jar : jars) {
             try {
-                if (replaceJarEntries(jar, replacements)) patched++;
+                Map<String, byte[]> replacements = new HashMap<>();
+                if (glfwNativeCocoa != null) {
+                    replacements.put("org/lwjgl/glfw/GLFWNativeCocoa.class", glfwNativeCocoa);
+                    if (functions != null) {
+                        replacements.put("org/lwjgl/glfw/GLFWNativeCocoa$Functions.class", functions);
+                    }
+                }
+                byte[] existing = readJarEntry(jar, MACOS_UTIL_ENTRY);
+                if (existing != null) {
+                    byte[] replacement = MacosUtilStub.unionStub(existing);
+                    if (!Arrays.equals(existing, replacement)) {
+                        replacements.put(MACOS_UTIL_ENTRY, replacement);
+                        macosUtilPatched++;
+                    }
+                }
+                if (!replacements.isEmpty() && replaceJarEntries(jar, replacements)) patched++;
             } catch (Exception e) {
                 System.err.println("[MacShims] failed on " + jar + ": " + e);
             }
         }
-        System.out.println("[MacShims] patched " + patched + " jar(s) under " + Tools.DIR_GAME_NEW);
+        System.out.println("[MacShims] patched " + patched + " jar(s) under " + Tools.DIR_GAME_NEW
+                + " (MacosUtil rewritten in " + macosUtilPatched + ")");
+    }
+
+    private static final String MACOS_UTIL_ENTRY = "com/mojang/blaze3d/platform/MacosUtil.class";
+
+    // MC 26.x's NativeLibrariesBootstrap extracts every LWJGL native jar it
+    // finds on the game classpath into <tmp>/lwjgl_mobile/<lwjgl version>/<arch>
+    // and loads from there. LabyMod downloads its own LWJGL 3.4.3 natives
+    // (macOS binaries) at runtime - AFTER this method runs - and the extraction
+    // fails twice over: "Incompatible Java and native library versions
+    // detected" (Java is 3.4.1-snapshot) and dlopen of a non-iOS dylib
+    // (platform 1 instead of 2, error = null) for libopenal.
+    // Fix: (a) pre-seed the extraction cache with the app's iOS 3.4.1 dylibs so
+    // a bootstrap that skips existing files never sees the wrong ones, and
+    // (b) keep a daemon watchdog that rewrites the dylibs inside the jars as
+    // soon as LabyMod downloads them, so the extraction itself is correct.
+    private static void patchInstanceLwjglNatives() {
+        String version = lwjglVersion();
+        if (!version.startsWith("3.4") && !version.startsWith("4.")) {
+            // LWJGL 3.3 (MC 1.20.x) loads straight from org.lwjgl.librarypath,
+            // which already points at the app's iOS natives.
+            return;
+        }
+        File dir = lwjglNativesDir();
+        if (dir == null) {
+            System.out.println("[LWJGLNatives] no natives directory found");
+            return;
+        }
+        int patched = patchLwjglNativeJars(dir);
+        seedLwjglExtractCache(dir);
+        startLwjglNativesWatchdog(dir);
+        startLwjglPathKeeper();
+        System.out.println("[LWJGLNatives] patched " + patched + " native jar(s) from " + dir);
+    }
+
+    // LabyMod's thin-lwjgl clears org.lwjgl.librarypath / java.library.path
+    // while it swaps in its own natives, and MC 26.x's
+    // NativeLibrariesBootstrap then falls back to extracting native jars into
+    // <tmp>/lwjgl_mobile. That dlopens a SECOND copy of libSDL3.dylib, while
+    // SDL_SetMainReady() was called on the app bundle copy - so SDL_Init()
+    // fails with "Application didn't initialize properly, did you include
+    // SDL_main.h". Keep both properties pinned to the value the launcher
+    // started with, so the bootstrap loads the very images already prepared.
+    private static void startLwjglPathKeeper() {
+        final String lwjglPath = System.getProperty("org.lwjgl.librarypath");
+        final String javaPath = System.getProperty("java.library.path");
+        if (lwjglPath == null && javaPath == null) return;
+        Thread thread = new Thread(new Runnable() {
+            public void run() {
+                long deadline = System.currentTimeMillis() + 10 * 60 * 1000L;
+                int restores = 0;
+                while (System.currentTimeMillis() < deadline) {
+                    try {
+                        Thread.sleep(100);
+                    } catch (InterruptedException e) {
+                        return;
+                    }
+                    try {
+                        boolean restored = false;
+                        if (lwjglPath != null
+                                && !lwjglPath.equals(System.getProperty("org.lwjgl.librarypath"))) {
+                            System.setProperty("org.lwjgl.librarypath", lwjglPath);
+                            restored = true;
+                        }
+                        if (javaPath != null
+                                && !javaPath.equals(System.getProperty("java.library.path"))) {
+                            System.setProperty("java.library.path", javaPath);
+                            restored = true;
+                        }
+                        if (restored && restores++ < 3) {
+                            System.out.println("[LWJGLNatives] restored library paths");
+                        }
+                    } catch (Throwable ignored) {
+                        // keep watching
+                    }
+                }
+            }
+        }, "LWJGLPathKeeper");
+        thread.setDaemon(true);
+        thread.start();
+    }
+
+    private static String lwjglVersion() {
+        try {
+            // Reflection: the launcher sources do not compile against LWJGL.
+            return String.valueOf(Class.forName("org.lwjgl.VERSION")
+                    .getField("VERSION").get(null));
+        } catch (Throwable t) {
+            return "3.4.1-snapshot";
+        }
+    }
+
+    private static File lwjglNativesDir() {
+        String path = System.getProperty("org.lwjgl.librarypath");
+        if (path == null || path.isEmpty()) path = System.getProperty("java.library.path");
+        if (path == null || path.isEmpty()) return null;
+        for (String part : path.split(":")) {
+            if (part.isEmpty()) continue;
+            File candidate = new File(part);
+            if (candidate.isDirectory()) return candidate;
+        }
+        return null;
+    }
+
+    // The shared libraries dir plus every installed version's labymod-neo
+    // libraries dir (where LabyMod downloads its LWJGL jars).
+    private static List<File> lwjglLibraryRoots() {
+        List<File> roots = new ArrayList<File>();
+        roots.add(new File(Tools.DIR_HOME_LIBRARY, "org/lwjgl"));
+        File[] versionIds = new File(Tools.DIR_HOME_VERSION).listFiles();
+        if (versionIds != null) {
+            for (File id : versionIds) {
+                roots.add(new File(id, "labymod-neo/libraries/org/lwjgl"));
+            }
+        }
+        return roots;
+    }
+
+    // jar path -> "size:mtime" of the last successful pass, so the watchdog
+    // does not re-read every dylib of every jar on each tick.
+    private static final Map<String, String> LWJGL_NATIVE_SEEN = new HashMap<String, String>();
+
+    private static int patchLwjglNativeJars(File nativesDir) {
+        int patched = 0;
+        for (File root : lwjglLibraryRoots()) {
+            if (!root.isDirectory()) continue;
+            List<File> jars = new ArrayList<File>();
+            try {
+                Files.walk(root.toPath())
+                    .filter(p -> {
+                        String n = p.getFileName().toString();
+                        return n.startsWith("lwjgl-") && n.endsWith("-natives-macos-arm64.jar");
+                    })
+                    .forEach(p -> jars.add(p.toFile()));
+            } catch (IOException e) {
+                continue;
+            }
+            for (File jar : jars) {
+                String key = jar.getAbsolutePath();
+                String stamp = jar.length() + ":" + jar.lastModified();
+                synchronized (LWJGL_NATIVE_SEEN) {
+                    if (stamp.equals(LWJGL_NATIVE_SEEN.get(key))) continue;
+                }
+                try {
+                    Map<String, byte[]> replacements = new HashMap<String, byte[]>();
+                    List<String> entryNames = new ArrayList<String>();
+                    try (ZipFile zip = new ZipFile(jar)) {
+                        // The .sha1 entries come before the dylibs in the archive,
+                        // so collect every name first.
+                        Enumeration<? extends ZipEntry> names = zip.entries();
+                        while (names.hasMoreElements()) entryNames.add(names.nextElement().getName());
+                        Enumeration<? extends ZipEntry> entries = zip.entries();
+                        while (entries.hasMoreElements()) {
+                            ZipEntry entry = entries.nextElement();
+                            String name = entry.getName();
+                            if (!name.endsWith(".dylib")) continue;
+                            // LWJGL 3.4 puts them at macos/arm64/org/lwjgl/<lib>/x.dylib,
+                            // 3.3 at the jar root: match by file name in both cases.
+                            String base = name.substring(name.lastIndexOf('/') + 1);
+                            File source = new File(nativesDir, base);
+                            if (!source.isFile()) continue;
+                            byte[] wanted = Files.readAllBytes(source.toPath());
+                            if (Arrays.equals(wanted, readZipEntry(zip, entry))) continue;
+                            replacements.put(name, wanted);
+                            // META-INF/.../<lib>.dylib.sha1 holds the expected digest;
+                            // a stale one would make the extractor reject/redo the file.
+                            for (String candidate : entryNames) {
+                                if (candidate.equals(name + ".sha1")
+                                        || candidate.endsWith("/" + base + ".sha1")) {
+                                    replacements.put(candidate,
+                                            (sha1Hex(wanted) + "\n").getBytes(StandardCharsets.UTF_8));
+                                }
+                            }
+                        }
+                    }
+                    if (!replacements.isEmpty() && replaceJarEntries(jar, replacements)) patched++;
+                    synchronized (LWJGL_NATIVE_SEEN) {
+                        LWJGL_NATIVE_SEEN.put(key, jar.length() + ":" + jar.lastModified());
+                    }
+                } catch (Exception e) {
+                    // Jar is still being downloaded (partial zip) - retry next tick.
+                }
+            }
+        }
+        return patched;
+    }
+
+    // Copy the app's iOS dylibs into <tmp>/lwjgl_mobile/<version>/<arch>/ so a
+    // bootstrap that reuses existing files gets the right ones; size mismatch
+    // means a stale (macOS 3.4.3) file and it is overwritten.
+    private static void seedLwjglExtractCache(File nativesDir) {
+        File[] sources = nativesDir.listFiles((d, n) -> n.endsWith(".dylib"));
+        if (sources == null || sources.length == 0) return;
+        File tmp = new File(System.getProperty("java.io.tmpdir"), "lwjgl_mobile");
+        List<File> versionDirs = new ArrayList<File>();
+        File[] found = tmp.listFiles(File::isDirectory);
+        if (found != null) {
+            Collections.addAll(versionDirs, found);
+        }
+        if (versionDirs.isEmpty()) {
+            versionDirs.add(new File(tmp, lwjglVersion()));
+        }
+        for (File versionDir : versionDirs) {
+            File[] archDirs = versionDir.listFiles(File::isDirectory);
+            if (archDirs == null || archDirs.length == 0) {
+                archDirs = new File[] { new File(versionDir, "arm64") };
+            }
+            for (File archDir : archDirs) {
+                if (!archDir.isDirectory() && !archDir.mkdirs()) continue;
+                for (File source : sources) {
+                    File target = new File(archDir, source.getName());
+                    // SDL3 must never live in the extraction cache: the native
+                    // launcher already dlopen'ed the bundle copy and called
+                    // SDL_SetMainReady() on it, and MC's bootstrap loads every
+                    // dylib it finds here - a second image from tmp ignores the
+                    // flag and SDL_Init() fails with "Application didn't
+                    // initialize properly". LWJGL then resolves SDL through
+                    // org.lwjgl.librarypath (the bundle dir) and dyld reuses
+                    // the instance that was primed.
+                    if (source.getName().startsWith("libSDL3")) {
+                        if (target.isFile()) target.delete();
+                        continue;
+                    }
+                    if (target.isFile() && target.length() == source.length()) continue;
+                    try {
+                        Files.copy(source.toPath(), target.toPath(), StandardCopyOption.REPLACE_EXISTING);
+                    } catch (IOException ignored) {
+                        // read-only or vanished; nothing we can do
+                    }
+                }
+            }
+        }
+    }
+
+    private static String sha1Hex(byte[] data) {
+        try {
+            byte[] digest = java.security.MessageDigest.getInstance("SHA-1").digest(data);
+            StringBuilder hex = new StringBuilder(digest.length * 2);
+            for (byte b : digest) {
+                hex.append(Character.forDigit((b >> 4) & 0xf, 16));
+                hex.append(Character.forDigit(b & 0xf, 16));
+            }
+            return hex.toString();
+        } catch (Exception e) {
+            return "";
+        }
+    }
+
+    private static void startLwjglNativesWatchdog(final File nativesDir) {
+        Thread thread = new Thread(new Runnable() {
+            public void run() {
+                long deadline = System.currentTimeMillis() + 5 * 60 * 1000L;
+                while (System.currentTimeMillis() < deadline) {
+                    try {
+                        Thread.sleep(400);
+                    } catch (InterruptedException e) {
+                        return;
+                    }
+                    try {
+                        int patched = patchLwjglNativeJars(nativesDir);
+                        if (patched > 0) {
+                            seedLwjglExtractCache(nativesDir);
+                            System.out.println("[LWJGLNatives] watchdog patched " + patched
+                                    + " native jar(s)");
+                        }
+                    } catch (Throwable ignored) {
+                        // keep watching
+                    }
+                }
+            }
+        }, "LWJGLNativesWatch");
+        thread.setDaemon(true);
+        thread.start();
     }
 
     private static boolean isJarSignatureFile(String name) {
@@ -345,15 +641,18 @@ public class PojavLauncher {
 
     private static byte[] readJarEntry(File jar, String entryName) throws IOException {
         try (ZipFile zip = new ZipFile(jar)) {
-            ZipEntry entry = zip.getEntry(entryName);
-            if (entry == null) return null;
-            try (InputStream in = zip.getInputStream(entry)) {
-                ByteArrayOutputStream out = new ByteArrayOutputStream();
-                byte[] buf = new byte[65536];
-                int n;
-                while ((n = in.read(buf)) > 0) out.write(buf, 0, n);
-                return out.toByteArray();
-            }
+            return readZipEntry(zip, zip.getEntry(entryName));
+        }
+    }
+
+    private static byte[] readZipEntry(ZipFile zip, ZipEntry entry) throws IOException {
+        if (entry == null) return null;
+        try (InputStream in = zip.getInputStream(entry)) {
+            ByteArrayOutputStream out = new ByteArrayOutputStream();
+            byte[] buf = new byte[65536];
+            int n;
+            while ((n = in.read(buf)) > 0) out.write(buf, 0, n);
+            return out.toByteArray();
         }
     }
 
@@ -453,6 +752,43 @@ public class PojavLauncher {
         return true;
     }
 
+    private static void startMemoryProbe() {
+        if (!"1".equals(System.getenv("WITCH_MEM_PROBE"))) {
+            return;
+        }
+        Thread probe = new Thread(() -> {
+            try {
+                while (true) {
+                    Runtime rt = Runtime.getRuntime();
+                    long total = rt.totalMemory();
+                    long free = rt.freeMemory();
+                    long max = rt.maxMemory();
+                    StringBuilder direct = new StringBuilder();
+                    for (java.lang.management.BufferPoolMXBean pool
+                            : java.lang.management.ManagementFactory
+                                .getPlatformMXBeans(java.lang.management.BufferPoolMXBean.class)) {
+                        direct.append(pool.getName()).append('=')
+                              .append(pool.getMemoryUsed() / 1048576L).append("MB/")
+                              .append(pool.getTotalCapacity() / 1048576L).append("MB ");
+                    }
+                    System.out.println("[JVM-Mem] heap used=" + ((total - free) / 1048576L)
+                            + "MB committed=" + (total / 1048576L)
+                            + "MB max=" + (max / 1048576L)
+                            + "MB pools=" + direct.toString().trim());
+                    System.out.flush();
+                    Thread.sleep(10000L);
+                }
+            } catch (InterruptedException e) {
+                // probe thread stopped
+            } catch (Throwable t) {
+                System.err.println("[JVM-Mem] probe failed: " + t);
+                System.err.flush();
+            }
+        }, "witch-mem-probe");
+        probe.setDaemon(true);
+        probe.start();
+    }
+
     public static void launchMinecraft(String[] args) throws Throwable {
         // Args for Spiral Knights
         System.setProperty("appdir", "./spiral");
@@ -492,16 +828,42 @@ public class PojavLauncher {
         MCOptionUtils.set("fullscreen", "false");
         MCOptionUtils.set("overrideWidth", size[0]);
         MCOptionUtils.set("overrideHeight", size[1]);
+        // Frame pacing (launcher Settings > Game). Defaults are off, which
+        // means no lock: VSync disabled and maxFps raised to Minecraft's
+        // unlimited value so nothing throttles the render loop below the
+        // hardware/display ceiling. Exported by init_loadCustomEnv().
+        String vsyncPref = System.getenv("AMETHYST_VSYNC");
+        if (vsyncPref != null) {
+            MCOptionUtils.set("enableVsync", "1".equals(vsyncPref) ? "true" : "false");
+        }
+        String maxFpsPref = System.getenv("AMETHYST_MAX_FPS");
+        if (maxFpsPref != null && maxFpsPref.matches("\\d+")) {
+            int fps = Integer.parseInt(maxFpsPref);
+            // 0 = Off = unlimited; Minecraft's own cap for "unlimited" is 260.
+            MCOptionUtils.set("maxFps", String.valueOf(fps > 0 ? Math.min(fps, 260) : 260));
+        }
+        // Uncapped present: the render loop is allowed to run faster than the
+        // panel refresh. VSync has to be off for that, whatever the setting
+        // above says.
+        String uncappedPref = System.getenv("AMETHYST_UNCAPPED");
+        if ("1".equals(uncappedPref)) {
+            MCOptionUtils.set("enableVsync", "false");
+        }
         // Default settings for performance
         MCOptionUtils.setDefault("mipmapLevels", "0");
         MCOptionUtils.setDefault("particles", "1");
         MCOptionUtils.setDefault("renderDistance", "2");
         MCOptionUtils.setDefault("simulationDistance", "5");
-        // MoltenVK renderer = direct Vulkan → MoltenVK → Metal, no GL. Force the
-        // game's preferredGraphicsBackend to "vulkan" (values: default/vulkan/opengl)
-        // so MC 26.x doesn't fall back to its OpenGL backend.
-        if ("libMoltenVK.dylib".equals(System.getenv("AMETHYST_RENDERER"))) {
+        // RenderPearl selects its backend from options.txt. MoltenVK must use
+        // Vulkan, while every GL renderer (TGLMT, LTW, gl4es...) must use
+        // OpenGL. Without this a previous MoltenVK run leaves
+        // "preferredGraphicsBackend: vulkan" behind and MC 26.2/26.3 keeps
+        // using Vulkan/MoltenVK after switching back to TGLMT.
+        String renderer = System.getenv("AMETHYST_RENDERER");
+        if ("libMoltenVK.dylib".equals(renderer)) {
             MCOptionUtils.set("preferredGraphicsBackend", "vulkan");
+        } else if (renderer != null && !renderer.isEmpty()) {
+            MCOptionUtils.set("preferredGraphicsBackend", "opengl");
         }
         MCOptionUtils.save();
 
@@ -554,6 +916,11 @@ public class PojavLauncher {
             patchMacPlatformShims();
         } catch (Throwable t) {
             System.err.println("[MacShims] patch failed: " + t);
+        }
+        try {
+            patchInstanceLwjglNatives();
+        } catch (Throwable t) {
+            System.err.println("[LWJGLNatives] patch failed: " + t);
         }
         try {
             ensureLaunchWrapperLibrary();

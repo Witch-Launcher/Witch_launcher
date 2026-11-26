@@ -56,6 +56,9 @@ extern NSString *const kCursorTypeSDLConstant;
 /// Get the composited image for a cursor type (custom overlay on default shape).
 + (UIImage *)imageForType:(NSString *)typeId;
 
+/// Get the cursor image rendered at its exact display size.
++ (nullable UIImage *)imageForType:(NSString *)typeId displaySize:(CGSize)displaySize;
+
 /// Get the localized display name for a cursor type.
 + (NSString *)localizedNameForType:(NSString *)typeId;
 

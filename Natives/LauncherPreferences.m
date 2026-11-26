@@ -176,6 +176,18 @@ NSString* getSelectedJavaHome(NSString* defaultJRETag, int minVersion) {
 }
 
 #pragma mark Renderer
+BOOL isExperimentalMetalRendererEnabled(void) {
+    // Enabled by default now; set WITCH_ENABLE_METAL_RENDERERS=0/false/no to
+    // opt out.
+    const char *value = getenv("WITCH_ENABLE_METAL_RENDERERS");
+    if (!value) return YES;
+    NSString *flag = [[NSString stringWithUTF8String:value] lowercaseString];
+    return !(flag.length > 0 &&
+        ([flag isEqualToString:@"0"] ||
+         [flag isEqualToString:@"false"] ||
+         [flag isEqualToString:@"no"]));
+}
+
 NSArray* getRendererKeys(BOOL containsDefault) {
     NSMutableArray *array = @[
         @"auto",
@@ -188,6 +200,13 @@ NSArray* getRendererKeys(BOOL containsDefault) {
         @ RENDERER_NAME_MOBILEGL,
         @ RENDERER_NAME_TGLMT
     ].mutableCopy;
+
+    // Both Metal paths are shown by default now (see
+    // isExperimentalMetalRendererEnabled); the env flag only hides them.
+    if (isExperimentalMetalRendererEnabled()) {
+        [array addObject:@ RENDERER_NAME_METAL];
+        [array addObject:@ RENDERER_NAME_METAL_MACOS];
+    }
 
     if (containsDefault) {
         [array insertObject:@"(default)" atIndex:0];
@@ -207,7 +226,7 @@ NSArray* getRendererNames(BOOL containsDefault) {
     if ([tglmtName hasPrefix:@"preference.title"]) {
         tglmtName = @"TGLMT (Metal) - exports OpenGL 4.6 Core via Metal, A11+";
     }
-    NSString *names[] = {
+    [array addObjectsFromArray:@[
         localize(@"preference.title.renderer.debug.auto", nil),
         localize(@"preference.title.renderer.debug.gl4es", nil),
         localize(@"preference.title.renderer.debug.angle", nil),
@@ -217,11 +236,19 @@ NSArray* getRendererNames(BOOL containsDefault) {
         localize(@"preference.title.renderer.debug.vulkan", nil),
         localize(@"preference.title.renderer.debug.mobilegl", nil),
         tglmtName
-    };
-    for (int i = 0; i < sizeof(names)/sizeof(names[0]); i++) {
-        if (names[i]) {
-            [array addObject:names[i]];
+    ]];
+
+    if (isExperimentalMetalRendererEnabled()) {
+        NSString *metalName = localize(@"preference.title.renderer.debug.metal", nil);
+        if ([metalName hasPrefix:@"preference.title"]) {
+            metalName = @"Metal - direct Metal rendering on the single iOS CAMetalLayer (requires a Metal mod)";
         }
+        NSString *metalMacOSName = localize(@"preference.title.renderer.debug.metal_macos", nil);
+        if ([metalMacOSName hasPrefix:@"preference.title"]) {
+            metalMacOSName = @"Metal (macOS port) - Metal mods ported from macOS to iOS";
+        }
+        [array addObject:metalName];
+        [array addObject:metalMacOSName];
     }
     return array;
 }

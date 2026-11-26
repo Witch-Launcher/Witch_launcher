@@ -9,13 +9,73 @@
 #import "config.h"
 #import "CustomControlsViewController.h"
 #import "AmethystBlurView.h"
+#import "UIView+LiquidGlass.h"
 #import "AppSheet.h"
+#import "FontManager.h"
 #import <PhotosUI/PhotosUI.h>
 #import <UniformTypeIdentifiers/UniformTypeIdentifiers.h>
 
+
+static NSArray<NSString *> *WitchSplashVideoExtensions(void) {
+    return @[@"mp4", @"mov", @"m4v"];
+}
+
+static NSArray<NSString *> *WitchSplashImageExtensions(void) {
+    return @[@"png", @"jpg", @"jpeg", @"heic"];
+}
+
+static NSArray<NSString *> *WitchSplashAllowedExtensions(void) {
+    return [WitchSplashVideoExtensions() arrayByAddingObjectsFromArray:WitchSplashImageExtensions()];
+}
+
+static NSString *WitchSplashDirectoryPath(void) {
+    NSString *documents = [NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES) firstObject];
+    return [documents stringByAppendingPathComponent:@"Splash"];
+}
+
+static NSString *WitchSplashMediaKindInDirectory(NSString *directory) {
+    NSFileManager *fm = [NSFileManager defaultManager];
+    NSArray<NSString *> *names = [fm contentsOfDirectoryAtPath:directory error:nil];
+    if (![names isKindOfClass:[NSArray class]]) return nil;
+    BOOL video = NO, image = NO;
+    for (NSString *name in names) {
+        if ([name hasPrefix:@"."]) continue;
+        NSString *ext = name.pathExtension.lowercaseString;
+        if ([WitchSplashVideoExtensions() containsObject:ext]) video = YES;
+        if ([WitchSplashImageExtensions() containsObject:ext]) image = YES;
+    }
+    if (video) return @"video";
+    if (image) return @"image";
+    return nil;
+}
+
+static NSString *WitchSplashBundleMediaKind(void) {
+    NSBundle *bundle = NSBundle.mainBundle;
+    for (NSString *ext in WitchSplashVideoExtensions()) {
+        if ([bundle pathForResource:@"splash" ofType:ext inDirectory:@"Splash"].length > 0) return @"video";
+    }
+    for (NSString *ext in WitchSplashImageExtensions()) {
+        if ([bundle pathForResource:@"splash" ofType:ext inDirectory:@"Splash"].length > 0) return @"image";
+    }
+    return nil;
+}
+
+// Preferences whose slider is shown in percent while the preference itself
+// holds a factor (0.25..1.0 etc). Without the conversion the slider wrote
+// e.g. 70 into the preference and the launcher clamped it back to the
+// default - the FidelityFX render scale could never be changed.
+static BOOL isPercentPrefKey(NSString *key) {
+    if (!key) return NO;
+    return [key isEqualToString:@"fsr3.resolution_scale"]
+        || [key isEqualToString:@"fsr3.sharpness"];
+}
+
 @interface SettingsViewController () <UITableViewDelegate, UITableViewDataSource, UIScrollViewDelegate, UIColorPickerViewControllerDelegate, UINavigationControllerDelegate, UIImagePickerControllerDelegate, PHPickerViewControllerDelegate, UIDocumentPickerDelegate, UISearchBarDelegate>
+@property (nonatomic) BOOL importingFont;
+@property (nonatomic) BOOL splashPicking;
 @property (nonatomic) NSArray *sections;
 @property (nonatomic) UIScrollView *tabBarScroll;
+@property (nonatomic) UIView *tabBarGlassHost;
 @property (nonatomic) NSLayoutConstraint *tabWidthConstraint;
 @property (nonatomic) NSArray<NSLayoutConstraint *> *chromeConstraints;
 @property (nonatomic) BOOL chromeIsPortrait;
@@ -29,7 +89,9 @@
 // Search
 @property (nonatomic, strong) UISearchBar *settingsSearchBar;
 @property (nonatomic, strong) UITableView *searchResultsTable;
+@property (nonatomic, strong) UIView *searchBackdrop;
 @property (nonatomic, strong) NSArray *searchResults; // array of @{@"tab":title, @"tabIndex":@, @"item":dict, @"row":@}
+@property (nonatomic) BOOL searchActive;
 @end
 
 @implementation SettingsViewController
@@ -41,6 +103,12 @@
     [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(updateColors) name:ThemeDidChangeNotification object:nil];
     [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(creditsDidUpdate) name:CreditsDidUpdateNotification object:nil];
     [self updateColors];
+}
+
+- (void)viewWillDisappear:(BOOL)animated {
+    [super viewWillDisappear:animated];
+    // Fallback for keyboard/VoiceOver adjustments that never send touch-up.
+    [ThemeManager.shared applyUIScaleToAllWindows];
 }
 
 - (void)buildSections {
@@ -68,6 +136,7 @@
                 @{@"key": @"Dark", @"name": localize(@"theme.dark", nil)},
                 @{@"key": @"Light", @"name": localize(@"theme.light", nil)},
             ], @"default": @"System"},
+            @{@"type": @"switch", @"label": localize(@"preference.title.auto_hide_launching", nil), @"key": @"general.auto_hide_launching"},
             @{@"type": @"picker", @"label": localize(@"preference.title.screen_orientation", nil), @"key": @"general.orientation_lock", @"options": @[
                 @{@"key": @"off", @"name": localize(@"orientation.off", nil)},
                 @{@"key": @"portrait", @"name": localize(@"orientation.portrait", nil)},
@@ -75,21 +144,49 @@
             ], @"default": @"off"},
             @{@"type": @"navigate", @"label": localize(@"preference.title.game_directory", nil), @"vc": @"LauncherPrefGameDirViewController"},
             @{@"type": @"navigate", @"label": localize(@"preference.title.manage_runtime", nil) , @"vc": @"LauncherPrefManageJREViewController"},
-            @{@"type": @"navigate", @"label": @"Cập nhật Launcher (Beta/Stable)", @"vc": @"LauncherUpdateViewController"},
-            @{@"type": @"navigate", @"label": @"Tải Runtime JDK/LWJGL", @"vc": @"RuntimeDownloadViewController"},
-            @{@"type": @"picker", @"label": @"Kênh cập nhật", @"key": @"launcher.update_channel", @"options": @[
-                @{@"key": @"0", @"name": @"Tự động"},
+            @{@"type": @"navigate", @"label": localize(@"settings.launcher_update", nil), @"vc": @"LauncherUpdateViewController"},
+            @{@"type": @"navigate", @"label": localize(@"settings.runtime_download", nil), @"vc": @"RuntimeDownloadViewController"},
+            @{@"type": @"navigate", @"label": localize(@"settings.storage", nil), @"vc": @"StorageManagerViewController"},
+            @{@"type": @"navigate", @"label": localize(@"Backup & Restore", nil), @"vc": @"BackupSettingsViewController"},
+            @{@"type": @"navigate", @"label": localize(@"Plugins", nil), @"vc": @"PluginsViewController"},
+            @{@"type": @"navigate", @"label": localize(@"perf.title", nil), @"vc": @"PerfSettingsViewController"},
+            @{@"type": @"navigate", @"label": localize(@"f3.title", nil), @"vc": @"F3SettingsViewController"},
+            @{@"type": @"picker", @"label": localize(@"launcher_update.channel.title", nil), @"key": @"launcher.update_channel", @"options": @[
+                @{@"key": @"0", @"name": localize(@"launcher_update.channel.auto", nil)},
                 @{@"key": @"1", @"name": @"Beta (pre-release)"},
-                @{@"key": @"2", @"name": @"Ổn định (release)"},
+                @{@"key": @"2", @"name": localize(@"launcher_update.channel.stable", nil)},
             ], @"default": @"0"},
+            @{@"type": @"switch", @"label": localize(@"launcher_update.auto_check", nil), @"key": @"witch.update_auto_check"},
         ]},
         @{@"title": localize(@"Game", nil), @"items": @[
             header(@"settings.group.display"),
             @{@"type": @"picker", @"label": localize(@"preference.title.renderer", nil), @"key": @"video.renderer", @"options": rendererOptions, @"default": @"auto"},
+            @{@"type": @"picker", @"label": localize(@"preference.title.angle_backend", nil), @"key": @"video.angle_backend", @"options": @[
+                @{@"key": @"metal", @"name": localize(@"preference.title.angle_backend.metal", nil)},
+                @{@"key": @"vulkan", @"name": localize(@"preference.title.angle_backend.vulkan", nil)},
+            ], @"default": @"metal"},
+            @{@"type": @"picker", @"label": localize(@"preference.title.graphics_backend_forcing", nil), @"key": @"video.graphics_backend_forcing", @"options": @[
+                @{@"key": @"auto", @"name": localize(@"preference.gbf.auto", nil)},
+                @{@"key": @"vulkan", @"name": localize(@"preference.gbf.vulkan", nil)},
+                @{@"key": @"opengl", @"name": localize(@"preference.gbf.opengl", nil)},
+                @{@"key": @"none", @"name": localize(@"preference.gbf.none", nil)},
+            ], @"default": @"auto"},
             @{@"type": @"slider", @"label": localize(@"preference.title.resolution", nil), @"key": @"video.resolution", @"min": @25, @"max": @150, @"suffix": @"%"},
-            @{@"type": @"switch", @"label": localize(@"preference.title.max_framerate", nil), @"key": @"video.max_framerate"},
+            @{@"type": @"switch", @"label": localize(@"preference.title.vsync", nil), @"key": @"video.vsync"},
+            @{@"type": @"picker", @"label": localize(@"preference.title.max_framerate", nil), @"key": @"video.max_framerate", @"default": @"0", @"options": @[
+                @{@"key": @"0", @"name": localize(@"orientation.off", nil)},
+                @{@"key": @"30", @"name": @"30"},
+                @{@"key": @"60", @"name": @"60"},
+                @{@"key": @"90", @"name": @"90"},
+                @{@"key": @"120", @"name": @"120"},
+                @{@"key": @"144", @"name": @"144"},
+                @{@"key": @"240", @"name": @"240"},
+                @{@"key": @"260", @"name": @"260"},
+            ]},
+            @{@"type": @"switch", @"label": localize(@"preference.title.uncapped", nil), @"key": @"video.uncapped"},
             @{@"type": @"switch", @"label": localize(@"preference.title.performance_hud", nil), @"key": @"video.performance_hud"},
             @{@"type": @"switch", @"label": localize(@"preference.title.fullscreen_airplay", nil), @"key": @"video.fullscreen_airplay"},
+            @{@"type": @"navigate", @"label": localize(@"jit.title", nil), @"vc": @"WitchJITSettingsViewController"},
             header(@"settings.group.java"),
             @{@"type": @"picker", @"label": localize(@"preference.title.lwjgl_version", nil), @"key": @"java.lwjgl_version", @"options": lwjglItems, @"default": @"(auto)"},
             @{@"type": @"slider", @"label": localize(@"preference.title.allocated_memory", nil), @"key": @"java.allocated_memory", @"min": @256, @"max": @((NSProcessInfo.processInfo.physicalMemory / 1048576) * 0.85), @"suffix": @"MB"},
@@ -103,16 +200,26 @@
         @{@"title": localize(@"Controls", nil), @"items": @[
             header(@"settings.group.mouse"),
             @{@"type": @"switch", @"label": localize(@"preference.title.virtmouse_enable", nil), @"key": @"control.virtmouse_enable"},
-            @{@"type": @"slider", @"label": localize(@"preference.title.mouse_scale", nil), @"key": @"control.mouse_scale", @"min": @30, @"max": @200, @"suffix": @"%"},
+            @{@"type": @"slider", @"label": localize(@"preference.title.mouse_scale", nil), @"key": @"control.mouse_scale", @"min": @30, @"max": @500, @"suffix": @"%"},
             @{@"type": @"slider", @"label": localize(@"preference.title.mouse_speed", nil), @"key": @"control.mouse_speed", @"min": @10, @"max": @300, @"suffix": @"%"},
             header(@"settings.group.touch"),
+            @{@"type": @"slider", @"label": localize(@"preference.title.camera_sensitivity", nil), @"key": @"control.camera_sensitivity", @"min": @10, @"max": @300, @"suffix": @"%"},
             @{@"type": @"slider", @"label": localize(@"preference.title.button_scale", nil), @"key": @"control.button_scale", @"min": @30, @"max": @200, @"suffix": @"%"},
             @{@"type": @"switch", @"label": localize(@"preference.title.slideable_hotbar", nil), @"key": @"control.slideable_hotbar"},
             @{@"type": @"switch", @"label": localize(@"preference.title.gesture_mouse", nil), @"key": @"control.gesture_mouse"},
             @{@"type": @"switch", @"label": localize(@"preference.title.gesture_hotbar", nil), @"key": @"control.gesture_hotbar"},
+            @{@"type": @"switch", @"label": localize(@"preference.title.gesture_hold", nil), @"key": @"control.gesture_hold"},
+            @{@"type": @"switch", @"label": localize(@"preference.title.doubletap_offhand", nil), @"key": @"control.doubletap_offhand"},
             @{@"type": @"slider", @"label": localize(@"preference.title.press_duration", nil), @"key": @"control.press_duration", @"min": @100, @"max": @1000, @"suffix": @"ms"},
             @{@"type": @"switch", @"label": localize(@"preference.title.recording_hide", nil), @"key": @"control.recording_hide"},
             @{@"type": @"switch", @"label": localize(@"preference.title.disable_haptics", nil), @"key": @"control.disable_haptics"},
+            header(@"settings.group.keyboard"),
+            @{@"type": @"switch", @"label": localize(@"preference.title.keyboard_editing_toolbar", nil), @"key": @"control.keyboard_editing_toolbar"},
+            @{@"type": @"picker", @"label": localize(@"preference.title.keyboard_input_mode", nil), @"key": @"control.keyboard_input_mode", @"options": @[
+                @{@"key": @"auto", @"name": localize(@"preference.keyboard_input_mode.auto", nil)},
+                @{@"key": @"vi", @"name": localize(@"preference.keyboard_input_mode.vi", nil)},
+                @{@"key": @"en", @"name": localize(@"preference.keyboard_input_mode.en", nil)},
+            ], @"default": @"auto"},
             header(@"settings.group.gyro"),
             @{@"type": @"switch", @"label": localize(@"preference.title.gyroscope_enable", nil), @"key": @"control.gyroscope_enable"},
             @{@"type": @"switch", @"label": localize(@"preference.title.gyroscope_invert_x_axis", nil), @"key": @"control.gyroscope_invert_x_axis"},
@@ -158,8 +265,11 @@
             header(@"settings.group.moltenvk"),
             @{@"type": @"picker", @"label": localize(@"preference.title.moltenvk_version", nil), @"key": @"video.moltenvk_version", @"options": @[@"1.2", @"1.4"], @"default": @"1.4"},
             header(@"settings.group.mobileglues"),
-            @{@"type": @"switch", @"label": localize(@"preference.title.enable_angle", nil), @"key": @"mobileglues.enable_angle"},
-            @{@"type": @"picker", @"label": localize(@"preference.title.angle_backend", nil), @"key": @"mobileglues.angle_backend", @"options": @[@"metal", @"vulkan"], @"default": @"metal"},
+            @{@"type": @"picker", @"label": localize(@"preference.title.mobileglues_backend", nil), @"key": @"mobileglues.angle_backend", @"options": @[
+                @{@"key": @"tgles", @"name": @"TGLES"},
+                @{@"key": @"metal", @"name": @"ANGLE Metal"},
+                @{@"key": @"vulkan", @"name": @"ANGLE Vulkan"},
+            ], @"default": @"vulkan"},
             @{@"type": @"picker", @"label": localize(@"preference.title.enable_no_error", nil), @"key": @"mobileglues.enable_no_error", @"options": @[@"0", @"1", @"2"], @"default": @"2"},
             @{@"type": @"switch", @"label": localize(@"preference.title.enable_ext_timer_query", nil), @"key": @"mobileglues.enable_ext_timer_query"},
             @{@"type": @"switch", @"label": localize(@"preference.title.enable_ext_compute_shader", nil), @"key": @"mobileglues.enable_ext_compute_shader"},
@@ -170,10 +280,39 @@
             @{@"type": @"switch", @"label": localize(@"preference.title.angle_depth_clear_fix_mode", nil), @"key": @"mobileglues.angle_depth_clear_fix_mode"},
             @{@"type": @"picker", @"label": localize(@"preference.title.custom_gl_version", nil), @"key": @"mobileglues.custom_gl_version", @"options": glVersions, @"default": @"0"},
             @{@"type": @"picker", @"label": localize(@"preference.title.fsr1_setting", nil), @"key": @"mobileglues.fsr1_setting", @"options": @[@"0", @"1", @"2", @"3", @"4", @"5"], @"default": @"0"},
+            header(@"settings.group.fsr"),
+            @{@"type": @"picker", @"label": localize(@"preference.title.fsr3_upscaler", nil), @"key": @"fsr3.upscaler", @"default": @"0", @"options": @[
+                @{@"key": @"0", @"name": localize(@"preference.title.fsr3_upscaler.off", nil)},
+                @{@"key": @"1", @"name": localize(@"preference.title.fsr3_upscaler.fsr1", nil)},
+                @{@"key": @"2", @"name": localize(@"preference.title.fsr3_upscaler.fsr2", nil)},
+                @{@"key": @"3", @"name": localize(@"preference.title.fsr3_upscaler.fsr3", nil)},
+            ]},
+            @{@"type": @"slider", @"label": localize(@"preference.title.fsr3_resolution_scale", nil), @"key": @"fsr3.resolution_scale", @"min": @25, @"max": @100, @"suffix": @"%"},
+            @{@"type": @"slider", @"label": localize(@"preference.title.fsr3_sharpness", nil), @"key": @"fsr3.sharpness", @"min": @0, @"max": @100, @"suffix": @"%"},
+            @{@"type": @"switch", @"label": localize(@"preference.title.fsr3_jitter", nil), @"key": @"fsr3.jitter"},
+            header(@"settings.group.fsr_hint"),
+            header(@"settings.group.fg"),
+            @{@"type": @"switch", @"label": localize(@"preference.title.fsr3_framegen", nil), @"key": @"fsr3.framegen"},
+            @{@"type": @"picker", @"label": localize(@"preference.title.fsr3_framegen_multiplier", nil), @"key": @"fsr3.framegen_multiplier", @"default": @"2", @"options": @[
+                @{@"key": @"2", @"name": @"x2"},
+                @{@"key": @"3", @"name": @"x3"},
+                @{@"key": @"4", @"name": @"x4"},
+                @{@"key": @"6", @"name": @"x6"},
+            ]},
+            @{@"type": @"picker", @"label": localize(@"preference.title.fsr3_probe", nil), @"key": @"fsr3.probe", @"default": @"0", @"options": @[
+                @{@"key": @"0", @"name": localize(@"preference.title.fsr3_probe.ref", nil)},
+                @{@"key": @"2", @"name": localize(@"preference.title.fsr3_probe.of_every_frame", nil)},
+                @{@"key": @"1", @"name": localize(@"preference.title.fsr3_probe.of_off", nil)},
+                @{@"key": @"4", @"name": localize(@"preference.title.fsr3_probe.no_fi", nil)},
+                @{@"key": @"8", @"name": localize(@"preference.title.fsr3_probe.no_present", nil)},
+                @{@"key": @"12", @"name": localize(@"preference.title.fsr3_probe.bypass", nil)},
+                @{@"key": @"16", @"name": localize(@"preference.title.fsr3_probe.of_only", nil)},
+            ]},
+            header(@"settings.group.fg_hint"),
             header(@"settings.group.ltw"),
-            @{@"type": @"picker", @"label": localize(@"preference.title.ltw_angle_backend", nil), @"key": @"video.ltw_angle_backend", @"options": @[@"metal", @"vulkan"], @"default": @"metal"},
+            @{@"type": @"picker", @"label": localize(@"preference.title.ltw_angle_backend", nil), @"key": @"video.ltw_angle_backend", @"options": @[@"metal", @"vulkan"], @"default": @"vulkan"},
             header(@"settings.group.zink"),
-            @{@"type": @"picker", @"label": localize(@"preference.title.zink_mesa_version", nil), @"key": @"zink.mesa_version", @"options": @[@"25.0.7", @"26.2.2"], @"default": @"26.2.2"},
+            @{@"type": @"picker", @"label": localize(@"preference.title.zink_mesa_version", nil), @"key": @"zink.mesa_version", @"options": @[@"25.0.7", @"26.2.2"], @"default": @"25.0.7"},
             @{@"type": @"picker", @"label": localize(@"preference.title.optimization_level", nil), @"key": @"zink.optimization_level", @"options": zinkOptLevels, @"default": @"-1"},
             @{@"type": @"picker", @"label": localize(@"preference.title.zink_gl_override", nil), @"key": @"zink.gl_override", @"options": @[@"0", @"3.3", @"4.0", @"4.1", @"4.3", @"4.6"], @"default": @"0"},
             @{@"type": @"switch", @"label": localize(@"preference.title.zink_enable_gl_thread", nil), @"key": @"zink.enable_gl_thread"},
@@ -216,6 +355,7 @@
             header(@"settings.group.witch"),
             @{@"type": @"switch", @"label": localize(@"preference.title.witch_enabled", nil), @"key": @"witch.server_enabled", @"default": @YES},
             @{@"type": @"text", @"label": localize(@"preference.title.witch_base_url", nil), @"key": @"witch.proxy_base_url", @"placeholder": localize(@"preference.detail.witch_base_url", nil)},
+            @{@"type": @"text", @"label": localize(@"preference.title.witch_plugin_repo", nil), @"key": @"witch.plugins.repo", @"placeholder": @"owner/repo"},
             @{@"type": @"text", @"label": localize(@"preference.title.witch_token", nil), @"key": @"witch.proxy_token", @"placeholder": @"Bearer token"},
             @{@"type": @"text", @"label": localize(@"preference.title.witch_hmac", nil), @"key": @"witch.proxy_hmac", @"placeholder": @"HMAC secret"},
             header(@"settings.group.curseforge"),
@@ -253,14 +393,23 @@
             @{@"type": @"color", @"label": localize(@"appearance.right_panel_color", nil), @"key": @"amethyst_rightpanel_bg_color"},
             @{@"type": @"color", @"label": localize(@"appearance.content_card_color", nil), @"key": @"amethyst_card_bg_color"},
             @{@"type": @"image", @"label": localize(@"appearance.background", nil)},
+            @{@"type": @"switch", @"label": localize(@"appearance.launch_splash", nil), @"key": @"appearance.launch_splash"},
+            @{@"type": @"splash", @"label": localize(@"appearance.splash_background", nil)},
+            @{@"type": @"slider", @"label": localize(@"appearance.splash_blur", nil), @"key": @"appearance.splash_blur", @"min": @0, @"max": @100, @"suffix": @"%"},
+            @{@"type": @"switch", @"label": localize(@"preference.title.log_auto_scroll", nil), @"key": @"general.log_auto_scroll"},
+            @{@"type": @"slider", @"label": localize(@"preference.title.log_scroll_speed", nil), @"key": @"general.log_scroll_speed", @"min": @25, @"max": @300, @"suffix": @"%"},
+            @{@"type": @"font", @"label": localize(@"appearance.launcher_font", nil)},
+            @{@"type": @"slider", @"label": localize(@"appearance.ui_scale", nil), @"key": @"amethyst_ui_scale", @"min": @50, @"max": @150, @"suffix": @"%"},
+            @{@"type": @"label", @"label": localize(@"appearance.ui_scale_hint", nil)},
             @{@"type": @"slider", @"label": localize(@"appearance.ui_opacity", nil), @"key": @"amethyst_ui_opacity", @"min": @0, @"max": @100, @"suffix": @"%"},
             @{@"type": @"slider", @"label": localize(@"appearance.background_blur", nil), @"key": @"amethyst_bg_blur", @"min": @0, @"max": @20, @"suffix": @""},
             @{@"type": @"slider", @"label": localize(@"appearance.ui_panels_blur", nil), @"key": @"amethyst_settings_blur", @"min": @0, @"max": @100, @"suffix": @"%"},
             @{@"type": @"slider", @"label": localize(@"appearance.top_bar_blur", nil), @"key": @"amethyst_topbar_blur", @"min": @0, @"max": @100, @"suffix": @"%"},
             @{@"type": @"slider", @"label": localize(@"appearance.left_bar_blur", nil), @"key": @"amethyst_sidebar_blur", @"min": @0, @"max": @100, @"suffix": @"%"},
             @{@"type": @"slider", @"label": localize(@"appearance.right_panel_blur", nil), @"key": @"amethyst_rightpanel_blur", @"min": @0, @"max": @100, @"suffix": @"%"},
-            @{@"type": @"slider", @"label": localize(@"appearance.bar_border_thickness", nil), @"key": @"amethyst_bar_border_width", @"min": @0, @"max": @4, @"suffix": @" pt"},
+            @{@"type": @"slider", @"label": localize(@"appearance.bar_border_thickness", nil), @"key": @"amethyst_ui_border_width", @"min": @0, @"max": @4, @"suffix": @" pt"},
             @{@"type": @"switch", @"label": localize(@"appearance.ui_border", nil), @"key": @"amethyst_ui_border_enabled"},
+            @{@"type": @"color", @"label": localize(@"appearance.border_color", nil), @"key": @"amethyst_ui_border_color"},
             @{@"type": @"slider", @"label": localize(@"appearance.border_radius", nil), @"key": @"amethyst_ui_border_radius", @"min": @0, @"max": @24, @"suffix": @" pt"},
             @{@"type": @"slider", @"label": localize(@"appearance.shell_gap", nil), @"key": @"amethyst_shell_gap", @"min": @0, @"max": @12, @"suffix": @" pt"},
             @{@"type": @"slider", @"label": localize(@"appearance.shell_inner_gap", nil), @"key": @"amethyst_shell_inner_gap", @"min": @0, @"max": @12, @"suffix": @" pt"},
@@ -279,6 +428,7 @@
             @{@"type": @"text", @"label": localize(@"preference.title.debug_mirror_mapped_code_cache", nil), @"key": @"debug.debug_mirror_mapped_code_cache", @"placeholder": @"-1"},
             @{@"type": @"switch", @"label": localize(@"preference.title.debug_hide_home_indicator", nil), @"key": @"debug.debug_hide_home_indicator"},
             @{@"type": @"switch", @"label": localize(@"preference.title.debug_auto_correction", nil), @"key": @"debug.debug_auto_correction"},
+            @{@"type": @"switch", @"label": localize(@"preference.title.overlay_log_in_game", nil), @"key": @"general.overlay_log_in_game"},
             @{@"type": @"switch", @"label": localize(@"preference.title.debug_render_log", nil), @"key": @"debug.debug_render_log"},
             @{@"type": @"switch", @"label": localize(@"preference.title.debug_mem_sample_log", nil), @"key": @"debug.mem_sample_log"},
             header(@"settings.group.dev_server"),
@@ -299,7 +449,7 @@
         }
     }
     NSMutableArray *appearanceItems = [_sections[appearanceIndex][@"items"] mutableCopy];
-    if (@available(iOS 16, *)) {
+    if (@available(iOS 26.0, *)) {
         [appearanceItems insertObject:@{@"type": @"switch", @"label": @"Liquid Glass", @"key": @"general.liquid_glass"} atIndex:0];
     }
     NSMutableDictionary *appearanceSection = [_sections[appearanceIndex] mutableCopy];
@@ -431,17 +581,24 @@
 - (void)setup {
     self.view.clipsToBounds = YES;
     self.navigationItem.title = localize(@"Settings", nil);
-    self.navigationItem.rightBarButtonItem = [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemDone target:self action:@selector(dismissSettings)];
+    UIBarButtonItem *doneItem = [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemDone target:self action:@selector(dismissSettings)];
+    // Search lives in the navigation bar so the page gets the full height
+    // below it; tapping the magnifier floats the field in on demand.
+    UIBarButtonItem *searchItem = [[UIBarButtonItem alloc] initWithImage:[UIImage systemImageNamed:@"magnifyingglass"] style:UIBarButtonItemStylePlain target:self action:@selector(toggleSearch)];
+    searchItem.accessibilityLabel = localize(@"Search settings...", nil);
+    self.navigationItem.rightBarButtonItems = @[doneItem, searchItem];
     self.navigationItem.leftBarButtonItem = [[UIBarButtonItem alloc] initWithTitle:localize(@"preference.title.reset_settings", nil) style:UIBarButtonItemStylePlain target:self action:@selector(resetSettings)];
 
-    // Settings search bar (flat list, grouped by tab)
+    // Settings search (flat list, grouped by tab). Hidden until the nav-bar
+    // magnifier is tapped; the pages below use the reclaimed height.
     _settingsSearchBar = [[UISearchBar alloc] init];
     _settingsSearchBar.translatesAutoresizingMaskIntoConstraints = NO;
     _settingsSearchBar.placeholder = localize(@"Search settings...", nil);
     _settingsSearchBar.searchBarStyle = UISearchBarStyleMinimal;
     _settingsSearchBar.delegate = self;
     _settingsSearchBar.showsCancelButton = NO;
-    [self.view addSubview:_settingsSearchBar];
+    _settingsSearchBar.hidden = YES;
+    [ThemeManager.shared styleSearchBar:_settingsSearchBar];
 
     _searchResultsTable = [[UITableView alloc] initWithFrame:CGRectZero style:UITableViewStyleGrouped];
     _searchResultsTable.translatesAutoresizingMaskIntoConstraints = NO;
@@ -450,11 +607,20 @@
     _searchResultsTable.backgroundColor = [UIColor clearColor];
     _searchResultsTable.hidden = YES;
     [_searchResultsTable registerClass:[UITableViewCell class] forCellReuseIdentifier:@"SearchCell"];
-    [self.view addSubview:_searchResultsTable];
+
+    _searchBackdrop = [[UIView alloc] initWithFrame:CGRectZero];
+    _searchBackdrop.translatesAutoresizingMaskIntoConstraints = NO;
+    _searchBackdrop.backgroundColor = [UIColor colorWithWhite:0 alpha:0.22];
+    _searchBackdrop.hidden = YES;
+    [_searchBackdrop addGestureRecognizer:[[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(hideSearch)]];
 
     [self setupTabBar];
     [self setupPages];
     [self setupBackgroundBlur];
+    // Added last so the search chrome sits above the tab rail and pages.
+    [self.view addSubview:_searchBackdrop];
+    [self.view addSubview:_searchResultsTable];
+    [self.view addSubview:_settingsSearchBar];
 
     _tabWidthConstraint = [_tabBarScroll.widthAnchor constraintEqualToConstant:132];
     _chromeIsPortrait = NO;
@@ -465,11 +631,17 @@
 // landscape keeps the left rail. Same floating-card language either way.
 - (void)rebuildChromeConstraints {
     if (_chromeConstraints) [NSLayoutConstraint deactivateConstraints:_chromeConstraints];
+    UILayoutGuide *safe = self.view.safeAreaLayoutGuide;
     NSMutableArray *c = [NSMutableArray arrayWithObjects:
-        [_settingsSearchBar.topAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.topAnchor constant:4],
+        [_settingsSearchBar.topAnchor constraintEqualToAnchor:safe.topAnchor constant:4],
         [_settingsSearchBar.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor constant:8],
         [_settingsSearchBar.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor constant:-8],
         [_settingsSearchBar.heightAnchor constraintEqualToConstant:36],
+
+        [_searchBackdrop.topAnchor constraintEqualToAnchor:self.view.topAnchor],
+        [_searchBackdrop.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor],
+        [_searchBackdrop.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor],
+        [_searchBackdrop.bottomAnchor constraintEqualToAnchor:self.view.bottomAnchor],
 
         [_searchResultsTable.topAnchor constraintEqualToAnchor:_settingsSearchBar.bottomAnchor constant:4],
         [_searchResultsTable.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor],
@@ -478,22 +650,22 @@
         nil];
     if (_chromeIsPortrait) {
         [c addObjectsFromArray:@[
-            [_pageScroll.topAnchor constraintEqualToAnchor:_settingsSearchBar.bottomAnchor constant:4],
+            [_pageScroll.topAnchor constraintEqualToAnchor:safe.topAnchor constant:4],
             [_pageScroll.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor],
             [_pageScroll.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor],
             [_pageScroll.bottomAnchor constraintEqualToAnchor:_tabBarScroll.topAnchor constant:-8],
             [_tabBarScroll.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor constant:8],
             [_tabBarScroll.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor constant:-8],
-            [_tabBarScroll.bottomAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.bottomAnchor constant:-8],
+            [_tabBarScroll.bottomAnchor constraintEqualToAnchor:safe.bottomAnchor constant:-8],
             [_tabBarScroll.heightAnchor constraintEqualToConstant:56],
         ]];
     } else {
         [c addObjectsFromArray:@[
-            [_tabBarScroll.topAnchor constraintEqualToAnchor:_settingsSearchBar.bottomAnchor constant:8],
+            [_tabBarScroll.topAnchor constraintEqualToAnchor:safe.topAnchor constant:8],
             [_tabBarScroll.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor constant:8],
-            [_tabBarScroll.bottomAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.bottomAnchor constant:-8],
+            [_tabBarScroll.bottomAnchor constraintEqualToAnchor:safe.bottomAnchor constant:-8],
             _tabWidthConstraint,
-            [_pageScroll.topAnchor constraintEqualToAnchor:_settingsSearchBar.bottomAnchor constant:4],
+            [_pageScroll.topAnchor constraintEqualToAnchor:safe.topAnchor constant:4],
             [_pageScroll.leadingAnchor constraintEqualToAnchor:_tabBarScroll.trailingAnchor constant:8],
             [_pageScroll.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor],
             [_pageScroll.bottomAnchor constraintEqualToAnchor:self.view.bottomAnchor],
@@ -510,18 +682,37 @@
 }
 
 - (void)setupTabBar {
+    // The glass lives on a sibling host, not inside the scroll view: Liquid
+    // Glass is a fixed navigation layer, not scrolling content.
+    _tabBarGlassHost = [[UIView alloc] initWithFrame:CGRectZero];
+    _tabBarGlassHost.translatesAutoresizingMaskIntoConstraints = NO;
+    _tabBarGlassHost.userInteractionEnabled = NO;
+    _tabBarGlassHost.backgroundColor = ThemeManager.shared.cardBackgroundColor;
+    _tabBarGlassHost.layer.cornerRadius = 16;
+    _tabBarGlassHost.clipsToBounds = YES;
+    [_tabBarGlassHost lg_enableLiquidGlassWithTint:nil cornerRadius:16.0 maskedCorners:kCALayerMinXMinYCorner | kCALayerMaxXMinYCorner | kCALayerMinXMaxYCorner | kCALayerMaxXMaxYCorner];
+    [self.view addSubview:_tabBarGlassHost];
+
     _tabBarScroll = [[UIScrollView alloc] initWithFrame:CGRectZero];
     _tabBarScroll.translatesAutoresizingMaskIntoConstraints = NO;
     _tabBarScroll.showsHorizontalScrollIndicator = NO;
     _tabBarScroll.showsVerticalScrollIndicator = NO;
-    _tabBarScroll.alwaysBounceHorizontal = YES;
-    // Floating rail card, same language as the profile/main bars.
-    _tabBarScroll.backgroundColor = ThemeManager.shared.cardBackgroundColor;
+    // Horizontal drag is only meaningful for the portrait bottom rail; the
+    // landscape side rail is vertical and locks its X axis below.
+    _tabBarScroll.alwaysBounceHorizontal = NO;
+    // The host supplies the material; the scroll view only carries buttons.
+    _tabBarScroll.backgroundColor = [UIColor clearColor];
     _tabBarScroll.layer.cornerRadius = 16;
     _tabBarScroll.clipsToBounds = YES;
     _tabBarScroll.layer.borderWidth = 1;
     _tabBarScroll.layer.borderColor = [ThemeManager.shared.accentColor colorWithAlphaComponent:0.25].CGColor;
     [self.view addSubview:_tabBarScroll];
+    [NSLayoutConstraint activateConstraints:@[
+        [_tabBarGlassHost.topAnchor constraintEqualToAnchor:_tabBarScroll.topAnchor],
+        [_tabBarGlassHost.bottomAnchor constraintEqualToAnchor:_tabBarScroll.bottomAnchor],
+        [_tabBarGlassHost.leadingAnchor constraintEqualToAnchor:_tabBarScroll.leadingAnchor],
+        [_tabBarGlassHost.trailingAnchor constraintEqualToAnchor:_tabBarScroll.trailingAnchor],
+    ]];
 
     _tabButtons = [NSMutableArray array];
     for (NSUInteger i = 0; i < _sections.count; i++) {
@@ -550,6 +741,8 @@
 - (void)layoutTabButtons {
     if (_chromeIsPortrait) {
         // Bottom rail: fixed 120pt pills in a smooth horizontal strip.
+        _tabBarScroll.alwaysBounceHorizontal = YES;
+        _tabBarScroll.directionalLockEnabled = NO;
         CGFloat x = 8;
         for (NSUInteger i = 0; i < _tabButtons.count; i++) {
             UIButton *btn = _tabButtons[i];
@@ -559,6 +752,10 @@
         _tabBarScroll.contentSize = CGSizeMake(x + 8, 56);
         return;
     }
+    // Landscape side rail: vertical list only — lock the X axis so the rail
+    // can't be dragged/rubber-banded sideways.
+    _tabBarScroll.alwaysBounceHorizontal = NO;
+    _tabBarScroll.directionalLockEnabled = YES;
     CGFloat sideWidth = _tabBarScroll.bounds.size.width;
     if (sideWidth < 1) sideWidth = _tabWidthConstraint.constant;
     CGFloat y = 8;
@@ -660,6 +857,9 @@
 - (void)updateColors {
     ThemeManager *theme = ThemeManager.shared;
     self.view.backgroundColor = theme.contentBackgroundColor;
+    [_tabBarGlassHost lg_setLiquidGlassBaseColor:theme.cardBackgroundColor];
+    [_tabBarGlassHost lg_refreshLiquidGlass];
+    [ThemeManager.shared styleSearchBar:_settingsSearchBar];
     [_panelBlur applyCurrentIntensity];
     [self refreshTableBackdrops];
     for (UIButton *btn in _tabButtons) {
@@ -734,6 +934,52 @@
     [_tabBarScroll scrollRectToVisible:CGRectInset(btn.frame, 0, -40) animated:YES];
 }
 
+#pragma mark - Search mode
+
+- (void)toggleSearch {
+    if (self.searchActive) [self hideSearch];
+    else [self showSearch];
+}
+
+- (void)showSearch {
+    if (self.searchActive) return;
+    self.searchActive = YES;
+    self.searchResults = nil;
+    [_searchResultsTable reloadData];
+    _searchBackdrop.hidden = NO;
+    _searchResultsTable.hidden = YES;
+    _tabBarScroll.hidden = YES;
+    _tabBarGlassHost.hidden = YES;
+    _pageScroll.hidden = YES;
+    _settingsSearchBar.hidden = NO;
+    _settingsSearchBar.alpha = 0;
+    _settingsSearchBar.transform = CGAffineTransformMakeTranslation(0, -6);
+    [UIView animateWithDuration:0.2 delay:0 options:UIViewAnimationOptionCurveEaseOut animations:^{
+        self->_settingsSearchBar.alpha = 1;
+        self->_settingsSearchBar.transform = CGAffineTransformIdentity;
+    } completion:^(BOOL finished) {
+        if (self.searchActive) [self->_settingsSearchBar becomeFirstResponder];
+    }];
+}
+
+- (void)hideSearch {
+    if (!self.searchActive) return;
+    self.searchActive = NO;
+    [_settingsSearchBar resignFirstResponder];
+    _settingsSearchBar.text = @"";
+    [self searchBar:_settingsSearchBar textDidChange:@""];
+    _searchBackdrop.hidden = YES;
+    _searchResultsTable.hidden = YES;
+    [UIView animateWithDuration:0.18 delay:0 options:UIViewAnimationOptionCurveEaseIn animations:^{
+        self->_settingsSearchBar.alpha = 0;
+        self->_settingsSearchBar.transform = CGAffineTransformMakeTranslation(0, -6);
+    } completion:^(BOOL finished) {
+        if (self.searchActive) return;
+        self->_settingsSearchBar.hidden = YES;
+        self->_settingsSearchBar.transform = CGAffineTransformIdentity;
+    }];
+}
+
 #pragma mark - Settings Search (flat list grouped by tab)
 
 - (void)searchBar:(UISearchBar *)searchBar textDidChange:(NSString *)searchText {
@@ -747,8 +993,13 @@
     if (query.length == 0) {
         self.searchResults = nil;
         self.searchResultsTable.hidden = YES;
-        _tabBarScroll.hidden = NO;
-        _pageScroll.hidden = NO;
+        // While search mode is open the pages stay covered by the backdrop;
+        // they only come back when search is dismissed.
+        if (!self.searchActive) {
+            _tabBarScroll.hidden = NO;
+            _tabBarGlassHost.hidden = NO;
+            _pageScroll.hidden = NO;
+        }
         return;
     }
     NSMutableArray *results = [NSMutableArray array];
@@ -768,6 +1019,7 @@
     self.searchResults = results;
     self.searchResultsTable.hidden = NO;
     _tabBarScroll.hidden = YES;
+    _tabBarGlassHost.hidden = YES;
     _pageScroll.hidden = YES;
     [self.searchResultsTable reloadData];
 }
@@ -777,12 +1029,7 @@
 }
 
 - (void)searchBarCancelButtonClicked:(UISearchBar *)searchBar {
-    if (searchBar == _settingsSearchBar) {
-        searchBar.text = @"";
-        [self searchBar:searchBar textDidChange:@""];
-        [searchBar resignFirstResponder];
-        searchBar.showsCancelButton = NO;
-    }
+    if (searchBar == _settingsSearchBar) [self hideSearch];
 }
 
 - (void)searchBarTextDidBeginEditing:(UISearchBar *)searchBar {
@@ -917,6 +1164,7 @@
             slider.maximumTrackTintColor = ThemeManager.shared.separatorColor;
             slider.thumbTintColor = ThemeManager.shared.accentColor;
             [slider addTarget:self action:@selector(sliderChanged:) forControlEvents:UIControlEventValueChanged];
+            [slider addTarget:self action:@selector(sliderTouchEnded:) forControlEvents:UIControlEventTouchUpInside | UIControlEventTouchUpOutside | UIControlEventTouchCancel];
             [cell.contentView addSubview:slider];
 
             [NSLayoutConstraint activateConstraints:@[
@@ -933,6 +1181,14 @@
                 [slider.bottomAnchor constraintEqualToAnchor:cell.contentView.bottomAnchor constant:-4],
             ]];
         } else if ([type isEqualToString:@"picker"]) {
+            cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleValue1 reuseIdentifier:cellId];
+            cell.textLabel.font = [UIFont systemFontOfSize:15];
+            cell.detailTextLabel.font = [UIFont systemFontOfSize:14];
+            cell.backgroundColor = ThemeManager.shared.cardBackgroundColor;
+            cell.textLabel.textColor = ThemeManager.shared.primaryTextColor;
+            cell.detailTextLabel.textColor = ThemeManager.shared.accentColor;
+            cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
+        } else if ([type isEqualToString:@"font"]) {
             cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleValue1 reuseIdentifier:cellId];
             cell.textLabel.font = [UIFont systemFontOfSize:15];
             cell.detailTextLabel.font = [UIFont systemFontOfSize:14];
@@ -999,6 +1255,14 @@
             cell.backgroundColor = ThemeManager.shared.cardBackgroundColor;
             cell.textLabel.textColor = ThemeManager.shared.primaryTextColor;
             cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
+        } else if ([type isEqualToString:@"splash"]) {
+            cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleValue1 reuseIdentifier:cellId];
+            cell.textLabel.font = [UIFont systemFontOfSize:15];
+            cell.detailTextLabel.font = [UIFont systemFontOfSize:14];
+            cell.backgroundColor = ThemeManager.shared.cardBackgroundColor;
+            cell.textLabel.textColor = ThemeManager.shared.primaryTextColor;
+            cell.detailTextLabel.textColor = ThemeManager.shared.accentColor;
+            cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
         } else if ([type isEqualToString:@"credit"]) {
             cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleValue1 reuseIdentifier:cellId];
             cell.textLabel.font = [UIFont systemFontOfSize:15];
@@ -1033,7 +1297,7 @@
 
     cell.textLabel.text = nil;
     cell.detailTextLabel.text = nil;
-    if ([type isEqualToString:@"switch"] || [type isEqualToString:@"picker"] || [type isEqualToString:@"navigate"] || [type isEqualToString:@"color"] || [type isEqualToString:@"image"] || [type isEqualToString:@"export"] || [type isEqualToString:@"import"] || [type isEqualToString:@"credit"] || [type isEqualToString:@"author"] || [type isEqualToString:@"link"] || [type isEqualToString:@"label"]) {
+    if ([type isEqualToString:@"switch"] || [type isEqualToString:@"picker"] || [type isEqualToString:@"navigate"] || [type isEqualToString:@"color"] || [type isEqualToString:@"image"] || [type isEqualToString:@"splash"] || [type isEqualToString:@"export"] || [type isEqualToString:@"import"] || [type isEqualToString:@"credit"] || [type isEqualToString:@"author"] || [type isEqualToString:@"link"] || [type isEqualToString:@"label"] || [type isEqualToString:@"font"]) {
         cell.textLabel.text = item[@"label"];
     }
 
@@ -1052,6 +1316,12 @@
             }
         }
         cell.detailTextLabel.text = display;
+        cell.accessoryView = nil;
+    } else if ([type isEqualToString:@"splash"]) {
+        cell.detailTextLabel.text = [self splashMediaStatus];
+        cell.accessoryView = nil;
+    } else if ([type isEqualToString:@"font"]) {
+        cell.detailTextLabel.text = [FontManager shared].displayName;
         cell.accessoryView = nil;
     } else if ([type isEqualToString:@"switch"]) {
         UISwitch *sw = (UISwitch *)cell.accessoryView;
@@ -1075,6 +1345,8 @@
             val = ThemeManager.shared.backgroundBlurIntensity;
         } else if ([item[@"key"] isEqualToString:@"amethyst_ui_opacity"]) {
             val = ThemeManager.shared.uiOpacity * 100.0;
+        } else if ([item[@"key"] isEqualToString:@"amethyst_ui_scale"]) {
+            val = ThemeManager.shared.uiScale * 100.0;
         } else if ([item[@"key"] hasPrefix:@"amethyst_"] && [item[@"key"] hasSuffix:@"_blur"]) {
             // UI panel blur keys live in NSUserDefaults (AmethystBlurView reads
             // them from there), NOT in the launcher preference plist that
@@ -1082,9 +1354,10 @@
             // settings/topbar/sidebar/rightpanel blur.
             val = [[NSUserDefaults standardUserDefaults] floatForKey:item[@"key"]];
         } else if ([item[@"key"] isEqualToString:@"amethyst_ui_border_radius"] ||
+                   [item[@"key"] isEqualToString:@"amethyst_ui_border_width"] ||
                    [item[@"key"] isEqualToString:@"amethyst_shell_gap"] ||
                    [item[@"key"] isEqualToString:@"amethyst_shell_inner_gap"] ||
-                   [item[@"key"] isEqualToString:@"amethyst_bar_border_width"]) {
+                   [item[@"key"] isEqualToString:@"appearance.splash_blur"]) {
             val = [[NSUserDefaults standardUserDefaults] floatForKey:item[@"key"]];
         } else {
             val = getPrefFloat(item[@"key"]);
@@ -1093,8 +1366,16 @@
                 val = roundf((NSProcessInfo.processInfo.physicalMemory / 1048576) * autoRatio);
                 setPrefFloat(@"java.allocated_memory", val);
             }
+            // The FidelityFX sliders are shown in percent but the preference
+            // holds a factor (0.25..1.0 etc.). Without the conversion the
+            // slider wrote e.g. 70 into the preference, the launcher clamped
+            // it back to 1.0 and the render scale never changed.
+            if (isPercentPrefKey(item[@"key"])) {
+                val = val * 100.0f;
+            }
         }
-        if (val == 0 && ![item[@"key"] isEqualToString:@"amethyst_bg_blur"] && ![item[@"key"] isEqualToString:@"amethyst_ui_opacity"] && !([item[@"key"] hasPrefix:@"amethyst_"] && [item[@"key"] hasSuffix:@"_blur"]) && ![item[@"key"] isEqualToString:@"general.widget_bg_opacity"] && ![item[@"key"] isEqualToString:@"amethyst_ui_border_radius"] && ![item[@"key"] isEqualToString:@"amethyst_shell_gap"] && ![item[@"key"] isEqualToString:@"amethyst_shell_inner_gap"] && ![item[@"key"] isEqualToString:@"amethyst_bar_border_width"] && ![item[@"key"] isEqualToString:@"amethyst_ui_border_enabled"] && !disabled) val = [item[@"min"] floatValue] + ([item[@"max"] floatValue] - [item[@"min"] floatValue]) / 2;
+        if (val == 0 && [item[@"key"] isEqualToString:@"control.camera_sensitivity"]) val = 100;
+        if (val == 0 && ![item[@"key"] isEqualToString:@"amethyst_bg_blur"] && ![item[@"key"] isEqualToString:@"amethyst_ui_opacity"] && !([item[@"key"] hasPrefix:@"amethyst_"] && [item[@"key"] hasSuffix:@"_blur"]) && ![item[@"key"] isEqualToString:@"general.widget_bg_opacity"] && ![item[@"key"] isEqualToString:@"amethyst_ui_border_radius"] && ![item[@"key"] isEqualToString:@"amethyst_shell_gap"] && ![item[@"key"] isEqualToString:@"amethyst_shell_inner_gap"] && ![item[@"key"] isEqualToString:@"amethyst_ui_border_width"] && ![item[@"key"] isEqualToString:@"amethyst_ui_border_enabled"] && ![item[@"key"] isEqualToString:@"appearance.splash_blur"] && !isPercentPrefKey(item[@"key"]) && !disabled) val = [item[@"min"] floatValue] + ([item[@"max"] floatValue] - [item[@"min"] floatValue]) / 2;
         sl.minimumValue = [item[@"min"] floatValue];
         sl.maximumValue = [item[@"max"] floatValue];
         sl.value = val;
@@ -1146,6 +1427,9 @@
     if ([key isEqualToString:@"amethyst_secondary_text_color"]) {
         return theme.secondaryTextColor;
     }
+    if ([key isEqualToString:@"amethyst_ui_border_color"]) {
+        return theme.uiBorderColor;
+    }
     return [UIColor clearColor];
 }
 
@@ -1158,11 +1442,15 @@
         // Direct inline edit: dialog-based types open right here, no page jump.
         if ([type isEqualToString:@"picker"]) {
             [self showPickerForItem:item fromTable:_searchResultsTable];
+        } else if ([type isEqualToString:@"font"]) {
+            [self showFontMenu];
         } else if ([type isEqualToString:@"color"]) {
             if ([item[@"key"] isEqualToString:@"amethyst_reset_appearance"]) [self resetAppearance];
             else [self showColorPickerForKey:item[@"key"] label:item[@"label"]];
         } else if ([type isEqualToString:@"image"]) {
             [self showImagePicker];
+        } else if ([type isEqualToString:@"splash"]) {
+            [self showSplashPicker];
         } else if ([type isEqualToString:@"export"]) {
             [self exportAppearance];
         } else if ([type isEqualToString:@"import"]) {
@@ -1209,6 +1497,10 @@
         }
     } else if ([type isEqualToString:@"image"]) {
         [self showImagePicker];
+    } else if ([type isEqualToString:@"splash"]) {
+        [self showSplashPicker];
+    } else if ([type isEqualToString:@"font"]) {
+        [self showFontMenu];
     } else if ([type isEqualToString:@"export"]) {
         [self exportAppearance];
     } else if ([type isEqualToString:@"import"]) {
@@ -1217,6 +1509,50 @@
 }
 
 #pragma mark - Actions
+
+- (void)showFontMenu {
+    FontManager *fm = [FontManager shared];
+    NSMutableArray *opts = [NSMutableArray array];
+    [opts addObject:@{@"title": localize(@"appearance.font_pick", nil), @"icon": @"textformat.size"}];
+    if (fm.isEnabled) {
+        [opts addObject:@{@"title": localize(@"appearance.font_default", nil), @"icon": @"arrow.counterclockwise"}];
+    }
+    [opts addObject:@{@"title": localize(@"Done", nil), @"icon": @"checkmark"}];
+    __weak typeof(self) weakSelf = self;
+    [AppSheet showOptionsWithTitle:localize(@"appearance.launcher_font", nil)
+                           message:fm.isEnabled ? fm.displayName : nil
+                           options:opts
+                     selectedIndex:(fm.isEnabled ? 1 : 0)
+                         selection:^(NSInteger idx) {
+        if (idx == 0) {
+            [weakSelf presentFontPicker];
+        } else if (idx == 1 && fm.isEnabled) {
+            [fm useSystemFont];
+            [HapticManager.shared play:HapticTypeLight];
+            [weakSelf reloadTables];
+        }
+    }];
+}
+
+- (void)presentFontPicker {
+    self.importingFont = YES;
+    if (@available(iOS 14.0, *)) {
+        NSMutableArray<UTType *> *types = [NSMutableArray array];
+        UTType *ttf = [UTType typeWithIdentifier:@"public.truetype-font"];
+        UTType *otf = [UTType typeWithIdentifier:@"public.opentype-font"];
+        if (ttf) [types addObject:ttf];
+        if (otf) [types addObject:otf];
+        if (types.count == 0) [types addObject:UTTypeData];
+        UIDocumentPickerViewController *picker = [[UIDocumentPickerViewController alloc] initForOpeningContentTypes:types];
+        picker.delegate = self;
+        picker.allowsMultipleSelection = NO;
+        [self presentViewController:picker animated:YES completion:nil];
+    } else {
+        UIDocumentPickerViewController *picker = [[UIDocumentPickerViewController alloc] initWithDocumentTypes:@[@"public.data"] inMode:UIDocumentPickerModeImport];
+        picker.delegate = self;
+        [self presentViewController:picker animated:YES completion:nil];
+    }
+}
 
 - (void)showCreditForItem:(NSDictionary *)item {
     NSMutableArray *opts = [NSMutableArray array];
@@ -1254,7 +1590,7 @@
         nowOn = !getPrefBool(key);
         setPrefBool(key, nowOn);
         if ([key isEqualToString:@"general.liquid_glass"]) {
-            [[NSNotificationCenter defaultCenter] postNotificationName:@"LiquidGlassDidChangeNotification" object:nil];
+            [[NSNotificationCenter defaultCenter] postNotificationName:LiquidGlassDidChangeNotification object:nil];
         }
     }
     [HapticManager.shared play:HapticTypeLight];
@@ -1267,10 +1603,8 @@
 - (void)jumpToSearchResult:(NSDictionary *)entry {
     NSInteger tabIdx = [entry[@"tabIndex"] integerValue];
     NSInteger row = [entry[@"row"] integerValue];
-    // Hide search and jump to tab
-    _settingsSearchBar.text = @"";
-    [self searchBar:_settingsSearchBar textDidChange:@""];
-    [_settingsSearchBar resignFirstResponder];
+    // Close search mode and jump to the tab.
+    [self hideSearch];
     [self setPage:tabIdx animated:YES];
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.35 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         UITableView *targetTable = self.pageTables[tabIdx];
@@ -1306,8 +1640,9 @@
     setPrefBool(item[@"key"], sender.on);
     if ([item[@"key"] isEqualToString:@"amethyst_ui_border_enabled"]) {
         // UI border lives in NSUserDefaults (ThemeManager reads it from there).
+        // The setter posts a targeted shell notification plus one coalesced
+        // full broadcast; an extra direct post here caused a double relayout.
         ThemeManager.shared.uiBorderEnabled = sender.on;
-        [[NSNotificationCenter defaultCenter] postNotificationName:ThemeDidChangeNotification object:nil];
     } else if ([item[@"key"] isEqualToString:@"java.auto_ram"]) {
         if (!sender.on) {
             CGFloat autoRatio = getEntitlementValue(@"com.apple.private.memorystatus") ? 0.4 : 0.25;
@@ -1316,7 +1651,7 @@
         }
         [self reloadTables];
     } else if ([item[@"key"] isEqualToString:@"general.liquid_glass"]) {
-        [[NSNotificationCenter defaultCenter] postNotificationName:@"LiquidGlassDidChangeNotification" object:nil];
+        [[NSNotificationCenter defaultCenter] postNotificationName:LiquidGlassDidChangeNotification object:nil];
     }
 }
 
@@ -1347,21 +1682,25 @@
         ThemeManager.shared.backgroundBlurIntensity = val;
     } else if ([item[@"key"] isEqualToString:@"amethyst_ui_opacity"]) {
         ThemeManager.shared.uiOpacity = val / 100.0;
+    } else if ([item[@"key"] isEqualToString:@"amethyst_ui_scale"]) {
+        ThemeManager.shared.uiScale = val / 100.0;
     } else if ([item[@"key"] isEqualToString:@"amethyst_ui_border_radius"]) {
+        // Setter persists, posts the targeted shell notification and
+        // schedules one coalesced full broadcast — no extra debounce needed.
         ThemeManager.shared.uiBorderCornerRadius = val;
+    } else if ([item[@"key"] isEqualToString:@"amethyst_ui_border_width"]) {
+        // Shell outline thickness: ThemeManager stores it and broadcasts, and
+        // updateShellBorderPath reads it back — dragging updates live.
+        ThemeManager.shared.uiBorderWidth = val;
         [[NSUserDefaults standardUserDefaults] synchronize];
-        [self broadcastThemeDebounced];
-    } else if ([item[@"key"] isEqualToString:@"amethyst_bar_border_width"]) {
-        // NOTE: layout reads this from NSUserDefaults (updateShellBorderPath),
-        // NOT the launcher plist — route it there or drags never take effect.
-        [[NSUserDefaults standardUserDefaults] setFloat:val forKey:@"amethyst_bar_border_width"];
-        [[NSUserDefaults standardUserDefaults] synchronize];
-        [self broadcastThemeDebounced];
     } else if ([item[@"key"] isEqualToString:@"amethyst_shell_gap"] ||
                [item[@"key"] isEqualToString:@"amethyst_shell_inner_gap"]) {
         [[NSUserDefaults standardUserDefaults] setFloat:val forKey:item[@"key"]];
         [[NSUserDefaults standardUserDefaults] synchronize];
         [self broadcastThemeDebounced];
+    } else if ([item[@"key"] isEqualToString:@"appearance.splash_blur"]) {
+        [[NSUserDefaults standardUserDefaults] setFloat:val forKey:item[@"key"]];
+        [[NSUserDefaults standardUserDefaults] synchronize];
     } else if ([item[@"key"] hasPrefix:@"amethyst_"] && [item[@"key"] hasSuffix:@"_blur"]) {
         // Save UI panel blur to NSUserDefaults — the store AmethystBlurView
         // actually reads. setPrefFloat would write the launcher plist and the
@@ -1371,17 +1710,22 @@
         [self refreshTableBackdrops];
         [[NSNotificationCenter defaultCenter] postNotificationName:AmethystBlurIntensityDidChangeNotification object:nil];
     } else {
-        setPrefFloat(item[@"key"], val);
+        if (isPercentPrefKey(item[@"key"])) {
+            // Percent slider, factor preference (see isPercentPrefKey).
+            setPrefFloat(item[@"key"], val / 100.0f);
+        } else {
+            setPrefFloat(item[@"key"], val);
+        }
         if ([item[@"key"] isEqualToString:@"video.resolution"]) {
             [[NSNotificationCenter defaultCenter] postNotificationName:@"ResolutionDidChangeNotification" object:nil];
-        } else if ([item[@"key"] isEqualToString:@"control.mouse_scale"] || [item[@"key"] isEqualToString:@"control.button_scale"] || [item[@"key"] isEqualToString:@"control.mouse_speed"]) {
+        } else if ([item[@"key"] isEqualToString:@"control.mouse_scale"] || [item[@"key"] isEqualToString:@"control.button_scale"] || [item[@"key"] isEqualToString:@"control.mouse_speed"] || [item[@"key"] isEqualToString:@"control.camera_sensitivity"]) {
             // Live update virtual mouse / button scale without relaunch
             [[NSNotificationCenter defaultCenter] postNotificationName:@"ControlScaleDidChangeNotification" object:nil];
             [[NSNotificationCenter defaultCenter] postNotificationName:@"MouseScaleDidChangeNotification" object:nil];
         }
         // Any *_blur slider drives realtime frosted surfaces; let them refresh.
         BOOL isBlurSlider = [item[@"key"] hasPrefix:@"amethyst_"] && [item[@"key"] hasSuffix:@"_blur"];
-        BOOL isBorderWidth = [item[@"key"] isEqualToString:@"amethyst_bar_border_width"];
+        BOOL isBorderWidth = [item[@"key"] isEqualToString:@"amethyst_ui_border_width"];
         if (isBorderWidth) {
             [self broadcastThemeDebounced];
         } else if (isBlurSlider) {
@@ -1390,6 +1734,19 @@
     }
     UILabel *valLabel = (UILabel *)[cell.contentView viewWithTag:101];
     valLabel.text = [NSString stringWithFormat:@"%.0f%@", val, item[@"suffix"] ?: @""];
+}
+
+- (void)sliderTouchEnded:(UISlider *)sender {
+    UITableViewCell *cell = (UITableViewCell *)sender.superview.superview;
+    UITableView *table = [self tableForCell:cell];
+    NSIndexPath *ip = [table indexPathForCell:cell];
+    if (!ip) return;
+    NSDictionary *item = [self itemAtIndexPath:ip inTable:table];
+    if ([item[@"key"] isEqualToString:@"amethyst_ui_scale"]) {
+        // Scaling the window while the finger is still on this slider makes
+        // the track move under the touch. Apply once the drag settles.
+        [ThemeManager.shared applyUIScaleToAllWindows];
+    }
 }
 
 // Coalesce rapid slider drags into one theme broadcast (a full shell
@@ -1584,6 +1941,20 @@
     NSURL *url = urls.firstObject;
     if (!url) return;
 
+    if (self.importingFont) {
+        self.importingFont = NO;
+        NSError *ferr = nil;
+        if ([[FontManager shared] importFontAtURL:url error:&ferr]) {
+            [HapticManager.shared play:HapticTypeSuccess];
+            showDialog(localize(@"appearance.launcher_font", nil), localize(@"appearance.font_imported", nil));
+            [self reloadTables];
+        } else {
+            NSLog(@"[FontManager] import failed for %@: %@", url, ferr);
+            showDialog(localize(@"Error", nil), ferr.localizedDescription ?: localize(@"appearance.font_failed", nil));
+        }
+        return;
+    }
+
     BOOL accessing = [url startAccessingSecurityScopedResource];
     NSData *data = [NSData dataWithContentsOfURL:url options:0 error:nil];
     if (accessing) [url stopAccessingSecurityScopedResource];
@@ -1660,8 +2031,7 @@
         NSData *png = [[NSData alloc] initWithBase64EncodedString:imgB64 options:0];
         UIImage *image = [UIImage imageWithData:png];
         if (image) {
-            NSArray *paths = NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES);
-            NSString *imgPath = [paths.firstObject stringByAppendingPathComponent:@"amethyst_bg.png"];
+            NSString *imgPath = amethyst_hidden_path(@"amethyst_bg.png");
             [UIImagePNGRepresentation(image) writeToFile:imgPath atomically:YES];
             [[NSUserDefaults standardUserDefaults] setObject:imgPath forKey:@"amethyst_bg_image"];
             theme.backgroundImage = image;
@@ -1677,7 +2047,7 @@
     id liquidGlass = dict[@"general.liquid_glass"];
     if ([liquidGlass isKindOfClass:[NSNumber class]]) {
         setPrefBool(@"general.liquid_glass", [liquidGlass boolValue]);
-        [[NSNotificationCenter defaultCenter] postNotificationName:@"LiquidGlassDidChangeNotification" object:nil];
+        [[NSNotificationCenter defaultCenter] postNotificationName:LiquidGlassDidChangeNotification object:nil];
     }
 
     [theme applyThemeToAllWindows];
@@ -1734,6 +2104,141 @@
     }];
 }
 
+- (void)showSplashPicker {
+    [AppSheet showOptionsWithTitle:localize(@"appearance.splash_background", nil)
+                           message:[self splashMediaStatus]
+                           options:@[
+        @{@"title": localize(@"Choose Image from Library", nil), @"icon": @"photo"},
+        @{@"title": localize(@"Choose Video from Library", nil), @"icon": @"video"},
+        @{@"title": localize(@"Remove Background", nil), @"icon": @"trash", @"destructive": @YES},
+        @{@"title": localize(@"Done", nil), @"icon": @"checkmark"},
+    ] selectedIndex:NSNotFound selection:^(NSInteger idx) {
+        if (idx == 0) {
+            self.splashPicking = YES;
+            [self openPhotoLibraryWithFilter:[PHPickerFilter imagesFilter]];
+        } else if (idx == 1) {
+            self.splashPicking = YES;
+            [self openPhotoLibraryWithFilter:[PHPickerFilter videosFilter]];
+        } else if (idx == 2) {
+            [self clearSplashMedia];
+        }
+    }];
+}
+
+- (NSString *)splashMediaStatus {
+    NSString *directory = WitchSplashDirectoryPath();
+    NSString *kind = WitchSplashMediaKindInDirectory(directory);
+    if (!kind) kind = WitchSplashBundleMediaKind();
+    if ([kind isEqualToString:@"video"]) return localize(@"splash.status_video", nil);
+    if ([kind isEqualToString:@"image"]) return localize(@"splash.status_image", nil);
+    return localize(@"splash.status_none", nil);
+}
+
+- (void)clearSplashMedia {
+    NSFileManager *fm = [NSFileManager defaultManager];
+    NSString *directory = WitchSplashDirectoryPath();
+    NSArray<NSString *> *names = [fm contentsOfDirectoryAtPath:directory error:nil];
+    for (NSString *name in names) {
+        if ([name hasPrefix:@"."]) continue;
+        [fm removeItemAtPath:[directory stringByAppendingPathComponent:name] error:nil];
+    }
+    [HapticManager.shared play:HapticTypeLight];
+    [self reloadTables];
+}
+
+- (void)saveSplashMediaFromURL:(NSURL *)url preferredExtension:(NSString *)preferredExtension {
+    NSFileManager *fm = [NSFileManager defaultManager];
+    NSString *directory = WitchSplashDirectoryPath();
+    [fm createDirectoryAtPath:directory withIntermediateDirectories:YES attributes:nil error:nil];
+    NSArray<NSString *> *contents = [fm contentsOfDirectoryAtPath:directory error:nil];
+    for (NSString *name in contents) {
+        if ([name hasPrefix:@"."]) continue;
+        [fm removeItemAtPath:[directory stringByAppendingPathComponent:name] error:nil];
+    }
+    NSString *ext = url.pathExtension.lowercaseString;
+    if (![WitchSplashAllowedExtensions() containsObject:ext]) {
+        ext = preferredExtension;
+    }
+    NSString *dest = [directory stringByAppendingPathComponent:[@"splash" stringByAppendingPathExtension:ext]];
+    BOOL access = [url startAccessingSecurityScopedResource];
+    NSError *copyError = nil;
+    BOOL ok = [fm copyItemAtURL:url toURL:[NSURL fileURLWithPath:dest] error:&copyError];
+    if (!ok) {
+        NSData *data = [NSData dataWithContentsOfURL:url options:0 error:&copyError];
+        if (data) {
+            ok = [data writeToFile:dest atomically:YES];
+        }
+    }
+    if (access) [url stopAccessingSecurityScopedResource];
+    dispatch_async(dispatch_get_main_queue(), ^{
+        if (!ok) {
+            NSLog(@"[saveSplashMedia] copy failed: %@ (source: %@)", copyError, url);
+            showDialog(localize(@"Error", nil), localize(@"Could not copy the video. Please try another file.", nil));
+            return;
+        }
+        [HapticManager.shared play:HapticTypeSuccess];
+        [self reloadTables];
+    });
+}
+
+- (void)saveSplashImage:(UIImage *)image {
+    NSString *directory = WitchSplashDirectoryPath();
+    NSFileManager *fm = [NSFileManager defaultManager];
+    [fm createDirectoryAtPath:directory withIntermediateDirectories:YES attributes:nil error:nil];
+    NSArray<NSString *> *contents = [fm contentsOfDirectoryAtPath:directory error:nil];
+    for (NSString *name in contents) {
+        if ([name hasPrefix:@"."]) continue;
+        [fm removeItemAtPath:[directory stringByAppendingPathComponent:name] error:nil];
+    }
+    NSString *dest = [directory stringByAppendingPathComponent:@"splash.png"];
+    [UIImagePNGRepresentation(image) writeToFile:dest atomically:YES];
+    [HapticManager.shared play:HapticTypeSuccess];
+    [self reloadTables];
+}
+
+- (void)handleSplashResults:(NSArray<PHPickerResult *> *)results {
+    PHPickerResult *result = results.firstObject;
+    NSItemProvider *provider = result.itemProvider;
+    if (!provider) return;
+    if ([provider hasItemConformingToTypeIdentifier:UTTypeMovie.identifier]) {
+        [provider loadFileRepresentationForTypeIdentifier:UTTypeMovie.identifier
+                                        completionHandler:^(NSURL *url, NSError *error) {
+            if (url) {
+                [self saveSplashMediaFromURL:url preferredExtension:@"mp4"];
+                return;
+            }
+            dispatch_async(dispatch_get_main_queue(), ^{
+                showDialog(localize(@"Error", nil), localize(@"Could not copy the video. Please try another file.", nil));
+            });
+        }];
+        return;
+    }
+    if ([provider hasItemConformingToTypeIdentifier:UTTypeImage.identifier]) {
+        [provider loadFileRepresentationForTypeIdentifier:UTTypeImage.identifier
+                                        completionHandler:^(NSURL *url, NSError *error) {
+            if (url) {
+                [self saveSplashMediaFromURL:url preferredExtension:@"png"];
+                return;
+            }
+            [provider loadObjectOfClass:[UIImage class]
+                    completionHandler:^(id<NSItemProviderReading> object, NSError *loadError) {
+                UIImage *image = [object isKindOfClass:[UIImage class]] ? (UIImage *)object : nil;
+                if (image) {
+                    dispatch_async(dispatch_get_main_queue(), ^{ [self saveSplashImage:image]; });
+                } else {
+                    dispatch_async(dispatch_get_main_queue(), ^{
+                        showDialog(localize(@"Error", nil), localize(@"Could not copy the video. Please try another file.", nil));
+                    });
+                }
+            }];
+        }];
+        return;
+    }
+    dispatch_async(dispatch_get_main_queue(), ^{
+        showDialog(localize(@"Error", nil), localize(@"Could not copy the video. Please try another file.", nil));
+    });
+}
+
 - (void)openPhotoLibraryWithFilter:(PHPickerFilter *)filter {
     if (@available(iOS 14, *)) {
         PHPickerConfiguration *config = [[PHPickerConfiguration alloc] init];
@@ -1754,13 +2259,18 @@
 - (void)picker:(PHPickerViewController *)picker didFinishPicking:(NSArray<PHPickerResult *> *)results {
     [picker dismissViewControllerAnimated:YES completion:nil];
     if (results.count == 0) return;
+    if (self.splashPicking) {
+        self.splashPicking = NO;
+        [self handleSplashResults:results];
+        return;
+    }
 
     PHPickerResult *result = results.firstObject;
     NSItemProvider *provider = result.itemProvider;
     if ([provider hasItemConformingToTypeIdentifier:UTTypeMovie.identifier]) {
         [provider loadFileRepresentationForTypeIdentifier:UTTypeMovie.identifier completionHandler:^(NSURL *url, NSError *error) {
             if (error || !url) return;
-            NSString *destPath = [NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES).firstObject stringByAppendingPathComponent:@"amethyst_bg.mp4"];
+            NSString *destPath = amethyst_hidden_path(@"amethyst_bg.mp4");
             NSFileManager *fm = [NSFileManager defaultManager];
             [fm removeItemAtPath:destPath error:nil];
             BOOL access = [url startAccessingSecurityScopedResource];
@@ -1796,6 +2306,17 @@
 
 - (void)imagePickerController:(UIImagePickerController *)picker didFinishPickingMediaWithInfo:(NSDictionary<UIImagePickerControllerInfoKey,id> *)info {
     [picker dismissViewControllerAnimated:YES completion:nil];
+    if (self.splashPicking) {
+        self.splashPicking = NO;
+        NSURL *videoURL = info[UIImagePickerControllerMediaURL];
+        if (videoURL) {
+            [self saveSplashMediaFromURL:videoURL preferredExtension:@"mp4"];
+            return;
+        }
+        UIImage *image = info[UIImagePickerControllerOriginalImage];
+        if (image) [self saveSplashImage:image];
+        return;
+    }
     if (picker.mediaTypes.count > 1 || [picker.mediaTypes.firstObject isEqualToString:UTTypeMovie.identifier]) {
         NSURL *videoURL = info[UIImagePickerControllerMediaURL];
         if (videoURL) {
@@ -1814,9 +2335,7 @@
 }
 
 - (void)saveBackgroundImage:(UIImage *)image {
-    NSArray *paths = NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES);
-    NSString *docsPath = paths.firstObject;
-    NSString *imgPath = [docsPath stringByAppendingPathComponent:@"amethyst_bg.png"];
+    NSString *imgPath = amethyst_hidden_path(@"amethyst_bg.png");
     [UIImagePNGRepresentation(image) writeToFile:imgPath atomically:YES];
 
     ThemeManager.shared.backgroundImage = image;
@@ -1825,9 +2344,7 @@
 }
 
 - (void)saveBackgroundVideo:(NSURL *)videoURL {
-    NSArray *paths = NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES);
-    NSString *docsPath = paths.firstObject;
-    NSString *destPath = [docsPath stringByAppendingPathComponent:@"amethyst_bg.mp4"];
+    NSString *destPath = amethyst_hidden_path(@"amethyst_bg.mp4");
 
     NSFileManager *fm = [NSFileManager defaultManager];
     [fm removeItemAtPath:destPath error:nil];
@@ -1857,10 +2374,9 @@
     ThemeManager.shared.backgroundImage = nil;
     ThemeManager.shared.backgroundVideoURL = nil;
 
-    NSArray *paths = NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES);
-    NSString *imgPath = [paths.firstObject stringByAppendingPathComponent:@"amethyst_bg.png"];
+    NSString *imgPath = amethyst_hidden_path(@"amethyst_bg.png");
     [[NSFileManager defaultManager] removeItemAtPath:imgPath error:nil];
-    NSString *videoPath = [paths.firstObject stringByAppendingPathComponent:@"amethyst_bg.mp4"];
+    NSString *videoPath = amethyst_hidden_path(@"amethyst_bg.mp4");
     [[NSFileManager defaultManager] removeItemAtPath:videoPath error:nil];
 
     [ThemeManager.shared broadcastThemeChange];

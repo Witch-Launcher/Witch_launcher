@@ -1,5 +1,6 @@
 #import "AmethystBlurView.h"
 #import "ThemeManager.h"
+#import "UIView+LiquidGlass.h"
 
 NSString * const AmethystBlurIntensityDidChangeNotification = @"AmethystBlurIntensityDidChangeNotification";
 
@@ -7,9 +8,11 @@ static NSString * const kDefaultBlurPrefKey = @"amethyst_settings_blur";
 
 @interface AmethystBlurView ()
 @property (nonatomic, copy) NSString *prefKey;
+@property (nonatomic) BOOL glassEligible;
 @property (nonatomic, strong) UIView *effectWrap;             // scales frost strength
 @property (nonatomic, strong) UIVisualEffectView *effectView; // REALTIME system gaussian
 @property (nonatomic, strong) UIView *tintView;               // readability tint
+- (void)updateGlassCornerConfiguration;
 @end
 
 @implementation AmethystBlurView
@@ -19,9 +22,14 @@ static NSString * const kDefaultBlurPrefKey = @"amethyst_settings_blur";
 }
 
 - (instancetype)initWithPrefKey:(NSString *)key {
+    return [self initWithPrefKey:key glassEligible:NO];
+}
+
+- (instancetype)initWithPrefKey:(NSString *)key glassEligible:(BOOL)glassEligible {
     self = [super initWithFrame:CGRectZero];
     if (self) {
         _prefKey = key ?: kDefaultBlurPrefKey;
+        _glassEligible = glassEligible;
         self.translatesAutoresizingMaskIntoConstraints = NO;
         self.userInteractionEnabled = NO;
 
@@ -63,6 +71,7 @@ static NSString * const kDefaultBlurPrefKey = @"amethyst_settings_blur";
         [self applyCurrentIntensity];
         [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(applyCurrentIntensity) name:ThemeDidChangeNotification object:nil];
         [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(applyCurrentIntensity) name:AmethystBlurIntensityDidChangeNotification object:nil];
+        [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(applyCurrentIntensity) name:LiquidGlassDidChangeNotification object:nil];
     }
     return self;
 }
@@ -81,9 +90,16 @@ static NSString * const kDefaultBlurPrefKey = @"amethyst_settings_blur";
 - (CGFloat)intensity { return [AmethystBlurView intensityForKey:_prefKey]; }
 
 + (UIBlurEffect *)materialForIntensity:(CGFloat)t {
-    // One adaptive material; perceived strength is driven by the wrap alpha.
+    UIBlurEffectStyle style;
+    if (t <= 1.0 / 3.0) {
+        style = UIBlurEffectStyleSystemUltraThinMaterial;
+    } else if (t <= 2.0 / 3.0) {
+        style = UIBlurEffectStyleSystemThinMaterial;
+    } else {
+        style = UIBlurEffectStyleSystemMaterial;
+    }
     if (@available(iOS 13.0, *)) {
-        return [UIBlurEffect effectWithStyle:UIBlurEffectStyleSystemThinMaterial];
+        return [UIBlurEffect effectWithStyle:style];
     }
     return [UIBlurEffect effectWithStyle:UIBlurEffectStyleLight];
 }
@@ -103,39 +119,70 @@ static NSString * const kDefaultBlurPrefKey = @"amethyst_settings_blur";
 
 - (void)applyCurrentIntensity {
     CGFloat t = [self intensity];
-    BOOL on = t > 0.001f;
+    BOOL glass = self.glassEligible && [UIView lg_isEnabled];
+    BOOL on = glass || t > 0.001f;
 
-    // Linear scaling: 1% → wrapper alpha 0.01 (barely-there frost),
-    // 100% → full material. Discrete material buckets would make any
-    // nonzero value look like ~90% blur, which is exactly the bug.
     _effectWrap.hidden = !on;
-    _effectWrap.alpha = t;
 
     if (on) {
-        UIBlurEffect *newEffect = [AmethystBlurView materialForIntensity:t];
-        if (![_effectView.effect isEqual:newEffect]) {
-            [_effectView setEffect:newEffect];
+        if (glass) {
+            // UIGlassEffect must not be alpha-scaled: the system needs the
+            // effect view at full opacity to sample and refract the backdrop.
+            _effectWrap.alpha = 1.0;
+            UIVisualEffect *effect = [UIView lg_makeEffectWithTint:nil];
+            if (effect) {
+                _effectView.effect = effect;
+            }
+            [self updateGlassCornerConfiguration];
+        } else {
+            // buckets; the full material at all times so the blur is a real
+            // gaussian sampling of the backdrop, never a dimming overlay.
+            _effectWrap.alpha = 1.0;
+            UIBlurEffect *newEffect = [AmethystBlurView materialForIntensity:t];
+            if (![_effectView.effect isEqual:newEffect]) {
+                [_effectView setEffect:newEffect];
+            }
         }
     }
 
     // Readability tint follows light/dark and scales down with intensity so
-    // low slider values stay virtually invisible.
-    BOOL dark = ThemeManager.shared.isDarkMode;
-    UIColor *base = dark ? [UIColor colorWithWhite:0 alpha:1] : [UIColor colorWithWhite:1 alpha:1];
-    _tintView.backgroundColor = base;
-    _tintView.alpha = on ? (0.12 * t) : 0.0;
+    // low slider values stay virtually invisible. Glass already supplies its
+    // own material, so it needs much less extra tint than the blur fallback.
+    // No extra tint: the blur must stay translucent and show what is behind,
+    // never dim or darken it.
+    _tintView.alpha = 0.0;
+}
+
+- (void)layoutSubviews {
+    [super layoutSubviews];
+    if (self.glassEligible && [UIView lg_isEnabled]) {
+        [self updateGlassCornerConfiguration];
+    }
+}
+
+- (void)updateGlassCornerConfiguration {
+    if (@available(iOS 26.0, *)) {
+        UIView *host = self.superview;
+        [UIView lg_configureGlassEffectView:_effectView
+                                cornerRadius:host.layer.cornerRadius
+                               maskedCorners:host.layer.maskedCorners];
+    }
 }
 
 + (void)installInView:(UIView *)containerView {
-    [self installInView:containerView prefKey:nil];
+    [self installInView:containerView prefKey:nil glassEligible:NO];
 }
 
 + (void)installInView:(UIView *)containerView prefKey:(NSString *)key {
+    [self installInView:containerView prefKey:key glassEligible:NO];
+}
+
++ (void)installInView:(UIView *)containerView prefKey:(NSString *)key glassEligible:(BOOL)glassEligible {
     if (!containerView) return;
     for (UIView *existing in containerView.subviews) {
         if ([existing isKindOfClass:AmethystBlurView.class]) return;
     }
-    AmethystBlurView *blur = [[AmethystBlurView alloc] initWithPrefKey:key];
+    AmethystBlurView *blur = [[AmethystBlurView alloc] initWithPrefKey:key glassEligible:glassEligible];
     [containerView insertSubview:blur atIndex:0];
     [NSLayoutConstraint activateConstraints:@[
         [blur.topAnchor constraintEqualToAnchor:containerView.topAnchor],

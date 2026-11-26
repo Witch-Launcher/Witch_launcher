@@ -19,6 +19,7 @@
 @property (nonatomic) float progress;
 @property (nonatomic) float stageTarget;
 @property (nonatomic) BOOL isFinished;
+@property (nonatomic) BOOL cancelRequested;
 @end
 
 @implementation InstallerProgressViewController
@@ -134,6 +135,15 @@
     // surface machinery used by the regular JavaGUIViewController jar runner.
     setenv("POJAV_SKIP_JNI_GLFW", "1", 1);
 
+    // A marker left behind by an earlier cancelled or killed install makes the
+    // Java-side watcher halt every new installer immediately. Clear it before
+    // this run starts and only honour the marker created by this screen.
+    self.cancelRequested = NO;
+    BOOL hadStaleMarker = [[NSFileManager defaultManager] removeItemAtPath:[self cancelMarkerPath] error:nil];
+    if (hadStaleMarker) {
+        NSLog(@"[Installer] Cleared stale cancel marker at %@", [self cancelMarkerPath]);
+    }
+
     NSString *latestlogPath = [NSString stringWithFormat:@"%s/latestlog.txt", getenv("POJAV_HOME") ?: ""];
     self.logOffset = [[[NSFileManager defaultManager] attributesOfItemAtPath:latestlogPath error:nil][NSFileSize] unsignedLongLongValue];
     self.progress = 0.02;
@@ -232,6 +242,7 @@
         return;
     }
     self.cancelBtn.enabled = NO;
+    self.cancelRequested = YES;
     self.statusLabel.text = localize(@"installer.status_cancelling", nil);
     NSString *marker = [self cancelMarkerPath];
     [[NSFileManager defaultManager] createDirectoryAtPath:[marker stringByDeletingLastPathComponent]
@@ -247,10 +258,8 @@
     [self.logTimer invalidate];
     self.logTimer = nil;
 
-    BOOL cancelled = [[NSFileManager defaultManager] fileExistsAtPath:[self cancelMarkerPath]];
-    if (cancelled) {
-        [[NSFileManager defaultManager] removeItemAtPath:[self cancelMarkerPath] error:nil];
-    }
+    BOOL cancelled = self.cancelRequested;
+    [[NSFileManager defaultManager] removeItemAtPath:[self cancelMarkerPath] error:nil];
 
     self.progress = 1.0;
     self.progressView.progress = 1.0;

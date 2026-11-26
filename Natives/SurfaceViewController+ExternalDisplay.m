@@ -35,6 +35,9 @@
     [self.touchView.subviews[0] removeFromSuperview];
     [self.touchView addSubview:self.surfaceView]; 
     [self.touchView addSubview:self.mousePointerView];
+    // Drop the host root view controller so the external window does not
+    // retain a stale view tree while it is hidden.
+    secondWindow.rootViewController = nil;
     [self updateSavedResolution];
 }
 

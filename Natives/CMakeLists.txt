@@ -29,6 +29,7 @@ include_directories(
   "external/ballpa1n"
   "external/ballpa1n/wrapped"
   "external/mach"
+  "PluginKit"
   "../UI"
   "../UI/Common"
   "../UI/Common/MMMarkdown"
@@ -43,9 +44,13 @@ include_directories(
   "../UI/Screens/Shader"
   "../UI/Screens/Server"
    "../UI/Screens/Settings"
+   "../UI/Screens/Plugins"
    "../UI/Screens/Account"
    "../UI/Screens/Download"
    "../UI/Screens/FileBrowser"
+  "../UI/Screens/Backup"
+   "../UI/Screens/Perf"
+   "../UI/Screens/JITMemory"
    "../UI/Screens/ProfileSettings"
    "../UI/Screens/AI"
   "installer/modpack"
@@ -248,6 +253,8 @@ add_executable(Witch
   external/fishhook/fishhook.c
   UIKit+hook.m
   MemSampler.m
+  WitchMemoryPressure.m
+  PerfRecorder.m
 
   authenticator/BaseAuthenticator.m
   authenticator/LocalAuthenticator.m
@@ -255,6 +262,7 @@ add_executable(Witch
   authenticator/ElyAuthenticator.m
 
   ctxbridges/gl_bridge.m
+  ctxbridges/gl_sync_shim.m
   ctxbridges/osm_bridge.m
   ctxbridges/vk_bridge.m
   ctxbridges/mesa_egl_bridge.m
@@ -268,6 +276,7 @@ add_executable(Witch
   customcontrols/ControlLayout.m
   customcontrols/ControlSubButton.m
   customcontrols/CustomControlsUtils.m
+  customcontrols/ControlLayoutConverter.m
   customcontrols/NSPredicateUtilitiesExternal.m
 
   external/DBNumberedSlider/Classes/DBNumberedSlider.m
@@ -283,6 +292,7 @@ add_executable(Witch
   input/ControllerInput.m
   input/GyroInput.m
   input/KeyboardInput.m
+  input/TelexComposer.m
   input/TelexInput.m
 
   AccountListViewController.m
@@ -307,6 +317,12 @@ add_executable(Witch
   SceneDelegate.m
   SceneExternalDelegate.m
   SurfaceViewController.m
+  SurfaceViewController+HangDetect.m
+  SurfaceViewController+LaunchSplash.m
+  LaunchSplashView.m
+  WitchLogOverlay.m
+  WitchScrollingLogView.m
+  GameLaunchChecks.m
   SurfaceViewController+ExternalDisplay.m
   SurfaceViewController+LogView.m
   SurfaceViewController+Navigation.m
@@ -320,9 +336,19 @@ egl_bridge.m
     input_bridge_v3.m
     ios_uikit_bridge.m
     utils.m
+    WitchBranchDefaults.m
+    PluginKit/WitchPlugin.m
+    PluginKit/WitchPluginManager.m
+    PluginKit/WitchPluginRuntime.m
+    PluginKit/WitchPluginRisk.m
+    PluginKit/WitchPluginSandbox.m
+    PluginKit/WitchPluginTheme.m
+    PluginKit/WitchPluginUpdateService.m
+    PluginKit/WitchPluginVersion.m
 
    # UI
    ../UI/Common/ThemeManager.m
+   ../UI/Common/FontManager.m
    ../UI/Common/MarkdownRenderer.m
    ../UI/Common/MMMarkdown/MMDocument.m
    ../UI/Common/MMMarkdown/MMElement.m
@@ -344,10 +370,12 @@ egl_bridge.m
     ../UI/Common/AmethystProjectCell.m
     ../UI/Common/UIView+LiquidGlass.m
     ../UI/Common/AmethystBlurView.m
+    ../UI/Common/LinearProgressView.m
    ../UI/Common/BlurredDialog.m
    ../UI/Common/AppErrorDialog.m
    ../UI/Common/ErrorPresenter.m
    ../UI/Common/AppSheet.m
+   ../UI/Common/AmethystNoticePanel.m
     ../UI/Root/AmethystRootViewController.m
    ../UI/Root/TopBarView.m
    ../UI/Root/SidebarViewController.m
@@ -356,9 +384,11 @@ egl_bridge.m
    ../UI/Managers/VersionDirectoryManager.m
    ../UI/Managers/DownloadManager.m
     ../UI/Managers/CursorManager.m
+    ../UI/Managers/CursorShapeRenderer.m
     ../UI/Managers/CursorTypeManager.m
     ../UI/Managers/WindowsCursorParser.m
     ../UI/Managers/InstalledModsManager.m
+   ../UI/Managers/ModpackExporter.m
    ../UI/Managers/DependencyResolver.m
    ../UI/Managers/ProfileAvatarManager.m
    ../UI/Managers/ModIconReader.m
@@ -366,6 +396,11 @@ egl_bridge.m
    ../UI/Managers/ModUpdateChecker.m
    ../UI/Managers/WitchUpdateService.m
    ../UI/Managers/WitchRuntimeService.m
+   ../UI/Managers/WitchJREPatcher.c
+   ../UI/Managers/WitchJITHelperClient.m
+   ../UI/Managers/WitchJITCoordinator.m
+   ../UI/Managers/WitchVPNHelper.m
+   ../UI/Screens/JITMemory/WitchJITSettingsViewController.m
     ../UI/Screens/MainMenu/MainMenuViewController.m
      WitchAIService.m
      WitchLogReporter.m
@@ -388,13 +423,27 @@ egl_bridge.m
    ../UI/Screens/Shader/ShaderListViewController.m
    ../UI/Screens/Server/ServerListViewController.m
    ../UI/Screens/Settings/SettingsViewController.m
+   ../UI/Screens/Settings/StorageManagerViewController.m
    ../UI/Screens/Settings/CreditsService.m
     ../UI/Screens/Settings/CursorSettingsViewController.m
     ../UI/Screens/Settings/CursorTypeDetailViewController.m
     ../UI/Screens/Settings/CursorHitboxEditorViewController.m
    ../UI/Screens/Settings/LauncherUpdateViewController.m
    ../UI/Screens/Settings/RuntimeDownloadViewController.m
+   ../UI/Screens/Settings/F3SettingsViewController.m
+   ../UI/Screens/Plugins/PluginsViewController.m
+   ../UI/Screens/Plugins/PluginDetailViewController.m
+   ../UI/Screens/Plugins/PluginSettingsViewController.m
+   ../UI/Screens/Plugins/PluginInstallFlow.m
+   ../UI/Screens/Plugins/PluginRiskBadgeView.m
    ../UI/Screens/Account/AccountViewController.m
+   ../UI/Screens/Account/Skin3DView.m
+   ../UI/Screens/Account/SkinTextureManager.m
+   ../UI/Screens/Perf/PerfSettingsViewController.m
+   ../UI/Screens/Perf/PerfHistoryViewController.m
+   ../UI/Screens/Perf/PerfChartViewController.m
+   ../UI/Screens/Perf/PerfChartRenderer.m
+   ../UI/Screens/Perf/PerfSessionStore.m
    ../UI/Screens/ProfileSettings/ProfileSettingsViewController.m
    ../UI/Screens/ProfileSettings/ProfileTabbedPageViewController.m
    ../UI/Screens/ProfileSettings/ProfileOverviewVC.m
@@ -402,18 +451,53 @@ egl_bridge.m
    ../UI/Screens/ProfileSettings/ProfileWorldsVC.m
    ../UI/Screens/ProfileSettings/ProfileItemCell.m
    ../UI/Screens/Download/DownloadHubViewController.m
+   ../UI/Screens/Download/DownloadTasksViewController.m
    ../UI/Screens/Download/VersionBrowserViewController.m
     ../UI/Screens/Download/MapListViewController.m
     ../UI/Screens/Download/ResourcePackListViewController.m
     ../UI/Screens/FileBrowser/FileBrowserViewController.m
+   ../UI/Screens/Backup/BackupConfig.m
+   ../UI/Screens/Backup/BackupRecord.m
+   ../UI/Screens/Backup/BackupStore.m
+   ../UI/Screens/Backup/BackupKeychain.m
+   ../UI/Screens/Backup/BackupOAuth.m
+   ../UI/Screens/Backup/BackupHTTP.m
+   ../UI/Screens/Backup/BackupDestinations.m
+   ../UI/Screens/Backup/BackupManager.m
+   ../UI/Screens/Backup/BackupScheduler.m
+   ../UI/Screens/Backup/BackupSettingsViewController.m
+   ../UI/Screens/Backup/BackupHistoryViewController.m
+   ../UI/Screens/Backup/BackupScopeViewController.m
 )
 
 if("${CMAKE_HOST_SYSTEM_NAME}" MATCHES "Linux|^GNU$|Android")
 target_sources(Witch PUBLIC non_darwin_utils.m)
 endif()
 
+# FidelityFX SDK (FSR1 / FSR2 / FSR3Upscaler / FrameInterpolation), Vulkan backend.
+# Bridge code lives in Natives/upscaler/ and talks to the SDK through the public host API.
+# Prefer the MoltenVK copy of Vulkan-Headers, fall back to the vendored
+# compat copy so CI does not need the (large) MoltenVK submodule checked out.
+if(EXISTS "${CMAKE_CURRENT_LIST_DIR}/external/MoltenVK/External/Vulkan-Headers/include/vulkan/vulkan.h")
+  set(FFX_VULKAN_HEADERS_INCLUDE "${CMAKE_CURRENT_LIST_DIR}/external/MoltenVK/External/Vulkan-Headers/include")
+else()
+  set(FFX_VULKAN_HEADERS_INCLUDE "${CMAKE_CURRENT_LIST_DIR}/external/vulkan-headers-compat/include")
+endif()
+add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/external/FidelityFX-SDK/ios ffx_fsr3)
+target_sources(Witch PRIVATE upscaler/ffx_bridge.cpp)
+target_include_directories(Witch PRIVATE
+  ${CMAKE_CURRENT_LIST_DIR}/upscaler
+  ${CMAKE_CURRENT_LIST_DIR}/external/FidelityFX-SDK/sdk/include
+  ${CMAKE_CURRENT_LIST_DIR}/external/FidelityFX-SDK/sdk/src/components/fsr3upscaler
+  ${CMAKE_CURRENT_LIST_DIR}/external/FidelityFX-SDK/sdk/src/components/opticalflow
+  ${FFX_VULKAN_HEADERS_INCLUDE}
+)
+
 target_link_libraries(Witch
   PUBLIC AFNetworking
+  ffx_fsr3_vk
+  "-liconv"
+  "-lc++"
   TouchControllerBridge
   lzma
   z
@@ -431,8 +515,10 @@ target_link_libraries(Witch
   "-framework GameController"
   "-framework IOSurface"
   "-framework IOKit"
+  "-framework JavaScriptCore"
   "-framework PhotosUI"
   "-framework QuartzCore"
+  "-framework SceneKit"
   "-framework Security"
   "-framework Metal"
   "-framework MetalKit"

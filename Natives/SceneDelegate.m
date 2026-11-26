@@ -12,6 +12,10 @@
 #import "WitchLogSnapshot.h"
 #import "AppSheet.h"
 #import "ErrorPresenter.h"
+#import "PluginsViewController.h"
+#import "WitchJITCoordinator.h"
+#import "BackupManager.h"
+#import "BackupScheduler.h"
 
 extern UIWindow *mainWindow;
 
@@ -76,6 +80,15 @@ static NSString *const kMinecraftGPUBackgroundTaskPrefix = @"com.witch.zad626.mi
     mainWindow = self.window;
     launchInitialViewController(self.window);
     [self.window makeKeyAndVisible];
+    for (UIOpenURLContext *context in connectionOptions.URLContexts) {
+        NSURL *url = context.URL;
+        if (!url) continue;
+        if ([WitchJITCoordinator handleIncomingPairingURL:url]) continue;
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.4 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            [PluginsViewController handleIncomingURL:url presenter:currentVC()];
+        });
+        break;
+    }
     // Kiểm tra crash ra màn hình chính ở lần trước (flag còn lại + latestlog/.ips)
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         [self checkForPreviousCrashAndPrompt];
@@ -96,6 +109,17 @@ static NSString *const kMinecraftGPUBackgroundTaskPrefix = @"com.witch.zad626.mi
 }
 
 
+
+- (void)scene:(UIScene *)scene openURLContexts:(NSSet<UIOpenURLContext *> *)URLContexts {
+    for (UIOpenURLContext *context in URLContexts) {
+        NSURL *url = context.URL;
+        if (!url) continue;
+        if ([WitchJITCoordinator handleIncomingPairingURL:url]) continue;
+        [PluginsViewController handleIncomingURL:url presenter:currentVC()];
+        break;
+    }
+}
+
 - (void)sceneDidDisconnect:(UIScene *)scene {
     // Called as the scene is being released by the system.
     // This occurs shortly after the scene enters the background, or when its session is discarded.
@@ -113,6 +137,8 @@ static NSString *const kMinecraftGPUBackgroundTaskPrefix = @"com.witch.zad626.mi
     // so input never stays "stuck" after returning to the game.
     CallbackBridge_nativeSetWindowFocused(YES, NO);
     touchcontroller_onTouchCancel();
+    [[BackupManager shared] backupIfNeededForTrigger:@"open" completion:nil];
+    [BackupScheduler scheduleNext];
 }
 
 
@@ -219,7 +245,8 @@ static NSString *const kMinecraftGPUBackgroundTaskPrefix = @"com.witch.zad626.mi
                     [wait dismissViewControllerAnimated:YES completion:^{
                         WitchAIChatViewController *vc = [[WitchAIChatViewController alloc] initWithAnalysis:analysis exitCode:1];
                         UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:vc];
-                        nav.modalPresentationStyle = UIModalPresentationFormSheet;
+                        nav.modalPresentationStyle = UIDevice.currentDevice.userInterfaceIdiom == UIUserInterfaceIdiomPad
+                            ? UIModalPresentationFormSheet : UIModalPresentationOverFullScreen;
                         [self.window.rootViewController presentViewController:nav animated:YES completion:nil];
                     }];
                 });

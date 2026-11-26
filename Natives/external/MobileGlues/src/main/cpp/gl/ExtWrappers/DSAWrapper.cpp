@@ -11,6 +11,7 @@
 #include "../texture.h"
 #include "../pixel.h"
 #include "../mg.h"
+#include "../framebuffer.h"
 
 #define DEBUG 0
 
@@ -462,9 +463,22 @@ void temporarilyBindFramebuffer(GLuint framebufferID, GLenum target = GL_DRAW_FR
     GLint prev = 0;
     glGetIntegerv(bindingQuery, &prev);
     // Push prev even when it is already bound: restore always pops once, and rebinding the same object is a no-op.
-    framebufferBindingStack[target].push_back(static_cast<GLuint>(prev));
+framebufferBindingStack[target].push_back(static_cast<GLuint>(prev));
     LOG_D("[DSA] [TempBind] target=0x%X, prev=%u -> bind=%u", target, prev, framebufferID);
     CHECK_GL_ERROR;
+    // Bind through the tracking layer, not raw GLES. The named entry points
+    // carry a source that MC 26.x only ever names framebuffer parameters
+    // against: every glNamedFramebuffer* went through DSA, and the raw bind
+    // below left the layer's shadow bindings (current draw/read fbo) pointing
+    // at whatever the application still had bound. Everything that consults
+    // the shadow on the driver call inside -- glDrawBuffers' shuffle and its
+    // all_none flags above all -- then ran against the wrong framebuffer: it
+    // moved the wrong fbo's attachments physically, and recorded a pass's
+    // draw-buffer state on a target the application never named. With MC 26
+    // configuring every render pass through glNamedFramebufferDrawBuffers this
+    // was per-frame, every pass: attachments shuffling around explains stretched
+    // bands in the post chain and a GUI layer that never lands where the
+    // present reads it.
     glBindFramebuffer(target, framebufferID);
     CHECK_GL_ERROR_NO_INIT;
 }

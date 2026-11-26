@@ -1,6 +1,6 @@
 #import "AppSheet.h"
 #import "ThemeManager.h"
-#import "AmethystBlurView.h"
+#import "UIView+LiquidGlass.h"
 #import "HapticManager.h"
 #import "utils.h"
 #import <objc/runtime.h>
@@ -10,6 +10,7 @@ typedef NS_ENUM(NSUInteger, AppSheetMode) {
     AppSheetModeConfirm,
     AppSheetModePrompt,
     AppSheetModePrompt2,
+    AppSheetModePrompt3,
 };
 
 @interface AppSheetHostVC : UIViewController <UITableViewDelegate, UITableViewDataSource, UITextFieldDelegate>
@@ -23,12 +24,17 @@ typedef NS_ENUM(NSUInteger, AppSheetMode) {
 @property (nonatomic, copy) void(^onConfirmAction)(void);
 @property (nonatomic, copy) void(^onPromptConfirm)(NSString *);
 @property (nonatomic, copy) void(^onPrompt2Confirm)(NSString *, NSString *);
+@property (nonatomic, copy) void(^onPrompt3Confirm)(NSString *, NSString *, NSString *);
 @property (nonatomic) NSString *confirmTitle;
 @property (nonatomic) BOOL destructive;
 @property (nonatomic) NSString *placeholder;
 @property (nonatomic) NSString *placeholder2;
+@property (nonatomic) NSString *placeholder3;
 @property (nonatomic) NSString *initialText;
+@property (nonatomic) NSString *initialText2;
+@property (nonatomic) NSString *initialText3;
 @property (nonatomic) UITextField *textField2;
+@property (nonatomic) UITextField *textField3;
 @property (nonatomic) UIView *dimView;
 @property (nonatomic) UIView *cardView;
 @property (nonatomic) NSLayoutConstraint *cardBottomConstraint;
@@ -36,6 +42,7 @@ typedef NS_ENUM(NSUInteger, AppSheetMode) {
 @property (nonatomic) NSLayoutConstraint *tableHeightConstraint;
 @property (nonatomic) UITextField *textField;
 @property (nonatomic) BOOL didAnimateEntrance;
+@property (nonatomic) BOOL didScrollToSelection;
 @end
 
 @implementation AppSheetHostVC
@@ -54,14 +61,14 @@ typedef NS_ENUM(NSUInteger, AppSheetMode) {
 
     _cardView = [[UIView alloc] init];
     _cardView.translatesAutoresizingMaskIntoConstraints = NO;
-    _cardView.backgroundColor = [theme.cardBackgroundColor colorWithAlphaComponent:0.96];
+    _cardView.backgroundColor = [theme.cardBackgroundColor colorWithAlphaComponent:1.0];
     _cardView.layer.cornerRadius = 22;
     _cardView.layer.maskedCorners = kCALayerMinXMinYCorner | kCALayerMaxXMinYCorner;
     _cardView.clipsToBounds = YES;
     _cardView.layer.borderWidth = 1;
     _cardView.layer.borderColor = [theme.accentColor colorWithAlphaComponent:0.30].CGColor;
+    [_cardView lg_enableLiquidGlassWithTint:nil cornerRadius:22.0 maskedCorners:kCALayerMinXMinYCorner | kCALayerMaxXMinYCorner];
     [self.view addSubview:_cardView];
-    [AmethystBlurView installInView:_cardView];
 
     UIView *grabber = [[UIView alloc] init];
     grabber.translatesAutoresizingMaskIntoConstraints = NO;
@@ -128,7 +135,7 @@ typedef NS_ENUM(NSUInteger, AppSheetMode) {
         _tableView.backgroundColor = [UIColor clearColor];
         _tableView.separatorStyle = UITableViewCellSeparatorStyleNone;
         _tableView.rowHeight = 54;
-        _tableView.showsVerticalScrollIndicator = NO;
+        _tableView.showsVerticalScrollIndicator = YES;
         [_cardView addSubview:_tableView];
         UIView *cancelBtn = [self makeButtonWithTitle:localize(@"Cancel", nil) primary:NO destructive:NO action:@selector(dismissCancelled)];
         [_cardView addSubview:cancelBtn];
@@ -173,7 +180,7 @@ typedef NS_ENUM(NSUInteger, AppSheetMode) {
             [okBtn.leadingAnchor constraintEqualToAnchor:row.centerXAnchor constant:6],
             [okBtn.trailingAnchor constraintEqualToAnchor:row.trailingAnchor],
         ]];
-    } else if (_mode == AppSheetModePrompt || _mode == AppSheetModePrompt2) {
+    } else if (_mode == AppSheetModePrompt || _mode == AppSheetModePrompt2 || _mode == AppSheetModePrompt3) {
         _textField = [[UITextField alloc] init];
         _textField.translatesAutoresizingMaskIntoConstraints = NO;
         _textField.font = [UIFont systemFontOfSize:16];
@@ -204,7 +211,7 @@ typedef NS_ENUM(NSUInteger, AppSheetMode) {
             [_textField.heightAnchor constraintEqualToConstant:46],
             nil];
         UIView *belowField = _textField;
-        if (_mode == AppSheetModePrompt2) {
+        if (_mode == AppSheetModePrompt2 || _mode == AppSheetModePrompt3) {
             _textField2 = [[UITextField alloc] init];
             _textField2.translatesAutoresizingMaskIntoConstraints = NO;
             _textField2.font = [UIFont systemFontOfSize:16];
@@ -214,6 +221,7 @@ typedef NS_ENUM(NSUInteger, AppSheetMode) {
             _textField2.leftView = [[UIView alloc] initWithFrame:CGRectMake(0, 0, 12, 0)];
             _textField2.leftViewMode = UITextFieldViewModeAlways;
             _textField2.placeholder = _placeholder2;
+            _textField2.text = _initialText2;
             _textField2.returnKeyType = UIReturnKeyDone;
             _textField2.delegate = self;
             [_cardView addSubview:_textField2];
@@ -224,6 +232,28 @@ typedef NS_ENUM(NSUInteger, AppSheetMode) {
                 [_textField2.heightAnchor constraintEqualToConstant:46],
             ]];
             belowField = _textField2;
+        }
+        if (_mode == AppSheetModePrompt3) {
+            _textField3 = [[UITextField alloc] init];
+            _textField3.translatesAutoresizingMaskIntoConstraints = NO;
+            _textField3.font = [UIFont systemFontOfSize:16];
+            _textField3.textColor = theme.primaryTextColor;
+            _textField3.backgroundColor = [theme.separatorColor colorWithAlphaComponent:0.35];
+            _textField3.layer.cornerRadius = 12;
+            _textField3.leftView = [[UIView alloc] initWithFrame:CGRectMake(0, 0, 12, 0)];
+            _textField3.leftViewMode = UITextFieldViewModeAlways;
+            _textField3.placeholder = _placeholder3;
+            _textField3.text = _initialText3;
+            _textField3.returnKeyType = UIReturnKeyDone;
+            _textField3.delegate = self;
+            [_cardView addSubview:_textField3];
+            [pc addObjectsFromArray:@[
+                [_textField3.topAnchor constraintEqualToAnchor:_textField2.bottomAnchor constant:8],
+                [_textField3.leadingAnchor constraintEqualToAnchor:_cardView.leadingAnchor constant:16],
+                [_textField3.trailingAnchor constraintEqualToAnchor:_cardView.trailingAnchor constant:-16],
+                [_textField3.heightAnchor constraintEqualToConstant:46],
+            ]];
+            belowField = _textField3;
         }
         [pc addObjectsFromArray:@[
             [row.topAnchor constraintEqualToAnchor:belowField.bottomAnchor constant:12],
@@ -252,14 +282,17 @@ typedef NS_ENUM(NSUInteger, AppSheetMode) {
 }
 
 // The option list never takes more than ~45% of the safe-area height;
-// the rest scrolls inside the table so 3 options and 60 options both
-// keep the Cancel button on screen.
+// the rest scrolls inside the table so 3 options and 900 options both
+// keep the Cancel button on screen. Round down to whole rows so the
+// bottom row is never sliced in half (which looked like a clipped list).
 - (CGFloat)cappedOptionsHeight {
     CGFloat safeH = self.view.safeAreaLayoutGuide.layoutFrame.size.height;
     if (safeH < 1) safeH = UIScreen.mainScreen.bounds.size.height;
-    CGFloat maxH = safeH * 0.45;
-    CGFloat want = _options.count * 54;
-    return MAX(MIN(want, maxH), 0);
+    CGFloat rowHeight = 54;
+    CGFloat maxRows = floor((safeH * 0.45) / rowHeight);
+    if (maxRows < 1) maxRows = 1;
+    CGFloat rows = MIN((CGFloat)_options.count, maxRows);
+    return rows * rowHeight;
 }
 
 - (void)viewDidLayoutSubviews {
@@ -306,9 +339,21 @@ typedef NS_ENUM(NSUInteger, AppSheetMode) {
         self->_cardView.transform = CGAffineTransformIdentity;
         self->_dimView.alpha = 1;
     } completion:nil];
-    if (_mode == AppSheetModePrompt || _mode == AppSheetModePrompt2) {
+    if (_mode == AppSheetModePrompt || _mode == AppSheetModePrompt2 || _mode == AppSheetModePrompt3) {
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.35 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
             [self->_textField becomeFirstResponder];
+        });
+    }
+    // Open long lists at the current selection instead of always at row 0.
+    // Runs after the entrance layout so the table has a content size.
+    if (_mode == AppSheetModeOptions && !_didScrollToSelection &&
+        _selectedIndex != NSNotFound && _selectedIndex >= 0 &&
+        _selectedIndex < (NSInteger)_options.count) {
+        _didScrollToSelection = YES;
+        NSIndexPath *ip = [NSIndexPath indexPathForRow:_selectedIndex inSection:0];
+        dispatch_async(dispatch_get_main_queue(), ^{
+            [self->_tableView layoutIfNeeded];
+            [self->_tableView scrollToRowAtIndexPath:ip atScrollPosition:UITableViewScrollPositionMiddle animated:NO];
         });
     }
 }
@@ -378,13 +423,17 @@ typedef NS_ENUM(NSUInteger, AppSheetMode) {
     [HapticManager.shared play:HapticTypeMedium];
     NSString *text = _textField.text ?: @"";
     NSString *text2 = _textField2.text ?: @"";
+    NSString *text3 = _textField3.text ?: @"";
     void (^cb)(NSString *) = _onPromptConfirm;
     void (^cb2)(NSString *, NSString *) = _onPrompt2Confirm;
-    BOOL isTwo = (_mode == AppSheetModePrompt2);
+    void (^cb3)(NSString *, NSString *, NSString *) = _onPrompt3Confirm;
+    AppSheetMode mode = _mode;
     [_textField resignFirstResponder];
     [_textField2 resignFirstResponder];
+    [_textField3 resignFirstResponder];
     [self dismissWithCompletion:^{
-        if (isTwo) { if (cb2) cb2(text, text2); }
+        if (mode == AppSheetModePrompt3) { if (cb3) cb3(text, text2, text3); }
+        else if (mode == AppSheetModePrompt2) { if (cb2) cb2(text, text2); }
         else if (cb) cb(text);
     }];
 }
@@ -460,9 +509,11 @@ typedef NS_ENUM(NSUInteger, AppSheetMode) {
     }
     window = [[UIWindow alloc] initWithWindowScene:scene];
     window.windowLevel = UIWindowLevelAlert;
+    window.overrideUserInterfaceStyle = ThemeManager.shared.interfaceStyle;
     window.backgroundColor = [UIColor clearColor];
     window.rootViewController = host;
     window.hidden = NO;
+    [ThemeManager.shared applyUIScaleToAllWindows];
     objc_setAssociatedObject(host, "appSheetWindow", window, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     return window;
 }
@@ -487,6 +538,10 @@ typedef NS_ENUM(NSUInteger, AppSheetMode) {
 }
 
 + (void)showConfirmWithTitle:(NSString *)title message:(NSString *)message confirmTitle:(NSString *)confirmTitle destructive:(BOOL)destructive onConfirm:(void(^)(void))onConfirm {
+    [self showConfirmWithTitle:title message:message confirmTitle:confirmTitle destructive:destructive onConfirm:onConfirm onCancel:nil];
+}
+
++ (void)showConfirmWithTitle:(NSString *)title message:(NSString *)message confirmTitle:(NSString *)confirmTitle destructive:(BOOL)destructive onConfirm:(void(^)(void))onConfirm onCancel:(void(^)(void))onCancel {
     dispatch_async(dispatch_get_main_queue(), ^{
         [HapticManager.shared play:HapticTypeWarning];
         AppSheetHostVC *host = [[AppSheetHostVC alloc] init];
@@ -496,6 +551,7 @@ typedef NS_ENUM(NSUInteger, AppSheetMode) {
         host.confirmTitle = confirmTitle;
         host.destructive = destructive;
         host.onConfirmAction = onConfirm;
+        host.onCancel = onCancel;
         [self presentHost:host];
     });
 }
@@ -524,6 +580,24 @@ typedef NS_ENUM(NSUInteger, AppSheetMode) {
         host.placeholder = placeholder1;
         host.placeholder2 = placeholder2;
         host.onPrompt2Confirm = onConfirm;
+        [self presentHost:host];
+    });
+}
+
++ (void)showPrompt3WithTitle:(NSString *)title message:(NSString *)message placeholder1:(NSString *)placeholder1 placeholder2:(NSString *)placeholder2 placeholder3:(NSString *)placeholder3 initialText1:(NSString *)text1 initialText2:(NSString *)text2 initialText3:(NSString *)text3 onConfirm:(void(^)(NSString *, NSString *, NSString *))onConfirm {
+    dispatch_async(dispatch_get_main_queue(), ^{
+        AppSheetHostVC *host = [[AppSheetHostVC alloc] init];
+        host.mode = AppSheetModePrompt3;
+        host.sheetTitle = title;
+        host.sheetMessage = message;
+        host.confirmTitle = @"OK";
+        host.placeholder = placeholder1;
+        host.placeholder2 = placeholder2;
+        host.placeholder3 = placeholder3;
+        host.initialText = text1;
+        host.initialText2 = text2;
+        host.initialText3 = text3;
+        host.onPrompt3Confirm = onConfirm;
         [self presentHost:host];
     });
 }

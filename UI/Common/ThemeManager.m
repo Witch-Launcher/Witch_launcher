@@ -1,7 +1,12 @@
 #import "ThemeManager.h"
 #import <CoreImage/CoreImage.h>
+#import <PhotosUI/PhotosUI.h>
+#import "utils.h"
+#import "AmethystBlurView.h"
+#import "WitchPluginTheme.h"
 
 NSString * const ThemeDidChangeNotification = @"ThemeDidChangeNotification";
+NSString * const ShellBorderDidChangeNotification = @"ShellBorderDidChangeNotification";
 
 @interface ThemeManager ()
 @property (nonatomic) UITraitCollection *currentTraitCollection;
@@ -27,11 +32,20 @@ NSString * const ThemeDidChangeNotification = @"ThemeDidChangeNotification";
         _colorOverrides = [NSMutableDictionary dictionary];
         _backgroundBlurIntensity = 0;
         _uiOpacity = 1.0;
+        _uiScale = 1.0;
         // Manual Dark/Light must stick on windows created later (sheets,
         // pickers, dialogs) — they default to Unspecified (follow system).
         [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(windowBecameKey:) name:UIWindowDidBecomeKeyNotification object:nil];
+        // Keep nav bars (Done/Save/title) on the current theme whenever any
+        // appearance value changes; the selector only restyles bars, so the
+        // broadcast cannot recurse.
+        [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(applyNavigationBarTheme) name:ThemeDidChangeNotification object:nil];
+        // The "UI panels blur" slider posts this dedicated notification while
+        // it is dragged; nav bars should follow the frost change live too.
+        [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(applyNavigationBarTheme) name:AmethystBlurIntensityDidChangeNotification object:nil];
         [[NSUserDefaults standardUserDefaults] registerDefaults:@{
             @"amethyst_ui_opacity": @1.0,
+            @"amethyst_ui_scale": @1.0,
             @"amethyst_ui_border_enabled": @NO,
             @"amethyst_ui_border_width": @1.0,
             @"amethyst_ui_border_radius": @10.0,
@@ -64,6 +78,8 @@ NSString * const ThemeDidChangeNotification = @"ThemeDidChangeNotification";
 
     _backgroundBlurIntensity = [defaults floatForKey:@"amethyst_bg_blur"];
     _uiOpacity = [defaults floatForKey:@"amethyst_ui_opacity"];
+    _uiScale = [defaults floatForKey:@"amethyst_ui_scale"];
+    if (_uiScale < 0.5 || _uiScale > 1.5) _uiScale = 1.0;
     _uiBorderEnabled = [defaults boolForKey:@"amethyst_ui_border_enabled"];
     _uiBorderWidth = [defaults floatForKey:@"amethyst_ui_border_width"];
     _uiBorderCornerRadius = [defaults floatForKey:@"amethyst_ui_border_radius"];
@@ -110,6 +126,7 @@ NSString * const ThemeDidChangeNotification = @"ThemeDidChangeNotification";
 - (UIColor *)colorOverrideForKey:(NSString *)key darkMode:(BOOL)dark {
     UIColor *color = _colorOverrides[[self modePrefKeyFor:key dark:dark]];
     if (!color) color = _colorOverrides[key];
+    if (!color) color = [WitchPluginTheme colorForKey:key dark:dark];
     return color;
 }
 
@@ -158,7 +175,7 @@ NSString * const ThemeDidChangeNotification = @"ThemeDidChangeNotification";
     _uiBorderEnabled = uiBorderEnabled;
     [[NSUserDefaults standardUserDefaults] setBool:uiBorderEnabled forKey:@"amethyst_ui_border_enabled"];
     [[NSUserDefaults standardUserDefaults] synchronize];
-    [self broadcastThemeChange];
+    [self notifyShellBorderChange];
 }
 
 - (UIColor *)uiBorderColor {
@@ -166,23 +183,227 @@ NSString * const ThemeDidChangeNotification = @"ThemeDidChangeNotification";
 }
 
 - (void)setUiBorderWidth:(CGFloat)uiBorderWidth {
-    _uiBorderWidth = MAX(0.5, MIN(uiBorderWidth, 4.0));
+    _uiBorderWidth = MAX(0.0, MIN(uiBorderWidth, 4.0));
     [[NSUserDefaults standardUserDefaults] setFloat:_uiBorderWidth forKey:@"amethyst_ui_border_width"];
     [[NSUserDefaults standardUserDefaults] synchronize];
-    [self broadcastThemeChange];
+    [self notifyShellBorderChange];
 }
 
 - (void)setUiBorderCornerRadius:(CGFloat)uiBorderCornerRadius {
     _uiBorderCornerRadius = MAX(0, MIN(uiBorderCornerRadius, 28.0));
     [[NSUserDefaults standardUserDefaults] setFloat:_uiBorderCornerRadius forKey:@"amethyst_ui_border_radius"];
     [[NSUserDefaults standardUserDefaults] synchronize];
-    [self broadcastThemeChange];
+    [self notifyShellBorderChange];
 }
 
 - (void)setUiOpacity:(CGFloat)uiOpacity {
     _uiOpacity = uiOpacity;
     [[NSUserDefaults standardUserDefaults] setFloat:uiOpacity forKey:@"amethyst_ui_opacity"];
     [self broadcastThemeChange];
+}
+
+- (void)setUiScale:(CGFloat)uiScale {
+    _uiScale = MAX(0.5, MIN(uiScale, 1.5));
+    [[NSUserDefaults standardUserDefaults] setFloat:_uiScale forKey:@"amethyst_ui_scale"];
+}
+
+// Browser-zoom scale for the launcher shell: the root view is laid out on a
+// virtual canvas of (window / scale) and then scaled to exactly fill the
+// window, so the shell always covers the screen edge-to-edge while every
+// control inside gets smaller/larger. A bare transform alone shrinks the
+// rendered shell toward its center and leaves the window background visible
+// around it, which is the bug this replaces. Returns YES when something
+// changed (so callers can skip redundant layout passes).
+- (BOOL)applyUIScaleToRootView:(UIView *)rootView inWindow:(UIWindow *)window {
+    if (!rootView || !window) return NO;
+    CGFloat scale = _uiScale;
+    if (scale <= 0) scale = 1.0;
+
+    CGRect winBounds = window.bounds;
+    CGFloat w = MAX(winBounds.size.width, 1.0);
+    CGFloat h = MAX(winBounds.size.height, 1.0);
+    CGPoint center = CGPointMake(CGRectGetMidX(winBounds), CGRectGetMidY(winBounds));
+    CGAffineTransform wantTransform = (fabs(scale - 1.0) < 0.001)
+        ? CGAffineTransformIdentity
+        : CGAffineTransformMakeScale(scale, scale);
+    CGSize wantBounds = (fabs(scale - 1.0) < 0.001)
+        ? CGSizeMake(w, h)
+        : CGSizeMake(w / scale, h / scale);
+
+    BOOL unchanged = CGAffineTransformEqualToTransform(rootView.transform, wantTransform) &&
+        fabs(rootView.bounds.size.width - wantBounds.width) < 0.5 &&
+        fabs(rootView.bounds.size.height - wantBounds.height) < 0.5 &&
+        fabs(rootView.center.x - center.x) < 0.5 &&
+        fabs(rootView.center.y - center.y) < 0.5;
+    if (unchanged) return NO;
+
+    // Clear the transform before touching bounds/center so the frame math
+    // happens in plain, untransformed points.
+    rootView.transform = CGAffineTransformIdentity;
+    rootView.bounds = CGRectMake(0, 0, wantBounds.width, wantBounds.height);
+    rootView.center = center;
+    rootView.transform = wantTransform;
+    return YES;
+}
+
+// Browser-zoom for one presented sheet/page view: same math as the root
+// shell, but the virtual canvas comes from the view's own frame (the
+// system-sized sheet card), so the card keeps its position and size while
+// the contents inside zoom. Skips frames that are not laid out yet.
+- (void)applyUIScaleToPresentedView:(UIView *)presentedView scale:(CGFloat)scale {
+    if (!presentedView) return;
+    CGRect frame = presentedView.frame;
+    if (frame.size.width < 0.5 || frame.size.height < 0.5) return;
+    CGFloat w = frame.size.width;
+    CGFloat h = frame.size.height;
+    CGPoint center = CGPointMake(CGRectGetMidX(frame), CGRectGetMidY(frame));
+    CGAffineTransform wantTransform = (fabs(scale - 1.0) < 0.001)
+        ? CGAffineTransformIdentity
+        : CGAffineTransformMakeScale(scale, scale);
+    CGSize wantBounds = (fabs(scale - 1.0) < 0.001)
+        ? CGSizeMake(w, h)
+        : CGSizeMake(w / scale, h / scale);
+
+    BOOL unchanged = CGAffineTransformEqualToTransform(presentedView.transform, wantTransform) &&
+        fabs(presentedView.bounds.size.width - wantBounds.width) < 0.5 &&
+        fabs(presentedView.bounds.size.height - wantBounds.height) < 0.5 &&
+        fabs(presentedView.center.x - center.x) < 0.5 &&
+        fabs(presentedView.center.y - center.y) < 0.5;
+    if (unchanged) return;
+
+    presentedView.transform = CGAffineTransformIdentity;
+    presentedView.bounds = CGRectMake(0, 0, wantBounds.width, wantBounds.height);
+    presentedView.center = center;
+    presentedView.transform = wantTransform;
+}
+
+// System-provided presentations keep their own look and physical size —
+// alerts, the document/photo pickers and the share sheet render (and hit-test)
+// through system machinery, so a zoom transform desynchronizes touches from
+// what is on screen (e.g. the Files picker's Open button stops responding).
+static BOOL KeepsSystemSizeWhenScaled(UIViewController *vc) {
+    if ([vc isKindOfClass:UIAlertController.class]) return YES;
+    if ([vc isKindOfClass:[UIDocumentPickerViewController class]]) return YES;
+    if ([vc isKindOfClass:[PHPickerViewController class]]) return YES;
+    if ([vc isKindOfClass:[UIImagePickerController class]]) return YES;
+    if ([vc isKindOfClass:[UIActivityViewController class]]) return YES;
+    // The virtual controls editor maps raw screen coordinates into the game,
+    // so it must stay 1:1 like the Minecraft surface.
+    Class controlsEditorClass = NSClassFromString(@"CustomControlsViewController");
+    return controlsEditorClass && [vc isKindOfClass:controlsEditorClass];
+}
+
+static void WalkPresentedForScale(UIViewController *from, CGFloat scale, ThemeManager *tm) {
+    UIViewController *presented = from.presentedViewController;
+    if (!presented) return;
+    if (!KeepsSystemSizeWhenScaled(presented)) {
+        [tm applyUIScaleToPresentedView:presented.view scale:scale];
+        // Sheets can present further pages on top of themselves.
+        WalkPresentedForScale(presented, scale, tm);
+    }
+}
+
+- (void)applyUIScaleToAllWindows {
+    Class rootClass = NSClassFromString(@"AmethystRootViewController");
+    Class appSheetHostClass = NSClassFromString(@"AppSheetHostVC");
+    Class gameClass = NSClassFromString(@"SurfaceViewController");
+    CGFloat scale = _uiScale;
+    if (scale <= 0) scale = 1.0;
+
+    void (^apply)(UIWindow *) = ^(UIWindow *window) {
+        if (![window isKindOfClass:[UIWindow class]]) return;
+        // Zoom the launcher shell, AppSheet picker windows and every sheet or
+        // page presented inside them (Settings, profile pages, pickers...).
+        // The Minecraft surface and system keyboards stay at 100%, so game
+        // coordinates never change.
+        UIViewController *root = window.rootViewController;
+        BOOL zoomable = (rootClass && root && [root isKindOfClass:rootClass]) ||
+            (root && [root conformsToProtocol:NSProtocolFromString(@"WitchRootHost")]) ||
+            (appSheetHostClass && root && [root isKindOfClass:appSheetHostClass]);
+        if (zoomable) {
+            [self applyUIScaleToRootView:root.view inWindow:window];
+            WalkPresentedForScale(root, scale, self);
+            return;
+        }
+        // In-game: the same window swaps its root to the game controller. The
+        // surface itself stays 1:1, but the settings/perf sheets presented on
+        // top of it still follow the launcher's UI scale.
+        BOOL gameRoot = gameClass && root && [root isKindOfClass:gameClass];
+        if (gameRoot) {
+            WalkPresentedForScale(root, scale, self);
+        }
+    };
+
+    for (UIScene *scene in UIApplication.sharedApplication.connectedScenes) {
+        if (![scene isKindOfClass:[UIWindowScene class]]) continue;
+        for (UIWindow *window in ((UIWindowScene *)scene).windows) apply(window);
+    }
+    for (UIWindow *window in UIApplication.sharedApplication.windows) apply(window);
+}
+
+- (UINavigationBarAppearance *)navigationBarAppearance {
+    UINavigationBarAppearance *appearance = [[UINavigationBarAppearance alloc] init];
+    // Frost follows the user's "UI panels blur" slider: > 0 keeps the system
+    // translucent material (content scrolls under and blurs through it),
+    // 0 makes the bar fully opaque. Both are tinted with the top-bar color.
+    BOOL frost = [AmethystBlurView blurEnabledForKey:@"amethyst_settings_blur"];
+    if (frost) {
+        [appearance configureWithDefaultBackground];
+    } else {
+        [appearance configureWithOpaqueBackground];
+    }
+    appearance.backgroundColor = self.topBarBackgroundColor;
+    appearance.titleTextAttributes = @{NSForegroundColorAttributeName: self.primaryTextColor};
+    appearance.largeTitleTextAttributes = @{NSForegroundColorAttributeName: self.primaryTextColor};
+    appearance.shadowColor = [self.separatorColor colorWithAlphaComponent:0.6];
+    appearance.shadowImage = [UIImage new];
+    return appearance;
+}
+
+static void WalkNavBarsForTheme(UIView *view, UINavigationBarAppearance *appearance, UIColor *tint) {
+    for (UIView *sub in view.subviews) {
+        if ([sub isKindOfClass:[UINavigationBar class]]) {
+            UINavigationBar *bar = (UINavigationBar *)sub;
+            bar.standardAppearance = appearance;
+            bar.scrollEdgeAppearance = appearance;
+            bar.compactAppearance = appearance;
+            bar.tintColor = tint;
+        } else {
+            WalkNavBarsForTheme(sub, appearance, tint);
+        }
+    }
+}
+
+- (void)applyNavigationBarTheme {
+    if (@available(iOS 13.0, *)) {
+        UINavigationBarAppearance *appearance = [self navigationBarAppearance];
+        UIColor *tint = self.accentColor;
+
+        // Future bars pick this up from the proxy (tintColor is not an
+        // appearance selector, so the tint travels via the window's tint).
+        [UINavigationBar appearance].standardAppearance = appearance;
+        [UINavigationBar appearance].scrollEdgeAppearance = appearance;
+        [UINavigationBar appearance].compactAppearance = appearance;
+
+        // ...while bars already on screen are updated directly, because the
+        // proxy is only re-resolved for views entering a window. Root-class
+        // windows also take the accent as their tint, so every control and
+        // future nav bar inside (sheets included) inherits it.
+        Class rootClass = NSClassFromString(@"AmethystRootViewController");
+        void (^apply)(UIWindow *) = ^(UIWindow *window) {
+            WalkNavBarsForTheme(window, appearance, tint);
+            if (window.rootViewController &&
+                ((rootClass && [window.rootViewController isKindOfClass:rootClass]) ||
+                 [window.rootViewController conformsToProtocol:NSProtocolFromString(@"WitchRootHost")])) {
+                window.tintColor = tint;
+            }
+        };
+        for (UIScene *scene in UIApplication.sharedApplication.connectedScenes) {
+            if (![scene isKindOfClass:[UIWindowScene class]]) continue;
+            for (UIWindow *window in ((UIWindowScene *)scene).windows) apply(window);
+        }
+        for (UIWindow *window in UIApplication.sharedApplication.windows) apply(window);
+    }
 }
 
 - (void)updateBackgroundBlur {
@@ -371,6 +592,33 @@ NSString * const ThemeDidChangeNotification = @"ThemeDidChangeNotification";
     [seg setTitleTextAttributes:@{NSForegroundColorAttributeName: selText, NSFontAttributeName: selectedFont} forState:UIControlStateSelected];
 }
 
+// Theme a UISearchBar so it never shows the system's opaque white/gray
+// chrome (iOS 26 paints Minimal-style bars with a heavy glass fill that
+// covers the launcher theme). The bar itself goes transparent and the field
+// uses the same translucent fill recipe as AppSheet text inputs, so search
+// rows blend with any background and follow the user's colors.
+- (void)styleSearchBar:(UISearchBar *)bar {
+    if (!bar) return;
+    bar.backgroundColor = [UIColor clearColor];
+    bar.barTintColor = [UIColor clearColor];
+    bar.backgroundImage = [UIImage new];
+    bar.tintColor = self.accentColor;
+    if (@available(iOS 13.0, *)) {
+        UITextField *field = bar.searchTextField;
+        field.backgroundColor = [self.separatorColor colorWithAlphaComponent:0.35];
+        field.textColor = self.primaryTextColor;
+        if (field.leftView) field.leftView.tintColor = self.secondaryTextColor;
+    }
+    NSString *placeholder = bar.placeholder;
+    if (placeholder.length > 0) {
+        if (@available(iOS 13.0, *)) {
+            bar.searchTextField.attributedPlaceholder =
+                [[NSAttributedString alloc] initWithString:placeholder
+                attributes:@{NSForegroundColorAttributeName: self.secondaryTextColor}];
+        }
+    }
+}
+
 - (void)applyAccentColor:(UIColor *)color {
     [self applyAccentColor:color darkMode:self.isDarkMode];
 }
@@ -421,19 +669,40 @@ NSString * const ThemeDidChangeNotification = @"ThemeDidChangeNotification";
     for (UIWindow *window in UIApplication.sharedApplication.windows) {
         window.overrideUserInterfaceStyle = _interfaceStyle;
     }
+    [self applyUIScaleToAllWindows];
+    [self applyNavigationBarTheme];
     [self broadcastThemeChange];
 }
 
 - (void)windowBecameKey:(NSNotification *)note {
-    if (_interfaceStyle == UIUserInterfaceStyleUnspecified) return;
     UIWindow *window = note.object;
     if ([window isKindOfClass:[UIWindow class]]) {
-        window.overrideUserInterfaceStyle = _interfaceStyle;
+        if (_interfaceStyle != UIUserInterfaceStyleUnspecified) {
+            window.overrideUserInterfaceStyle = _interfaceStyle;
+        }
+        [self applyUIScaleToAllWindows];
+        // Newly presented sheets create their nav bar just before becoming
+        // key; give it the themed appearance here so it never flashes the
+        // default system look.
+        [self applyNavigationBarTheme];
     }
 }
 
 - (void)broadcastThemeChange {
     [[NSNotificationCenter defaultCenter] postNotificationName:ThemeDidChangeNotification object:nil];
+}
+
+- (void)notifyShellBorderChange {
+    // Cheap path: only the root shell redraws the outline right now.
+    [[NSNotificationCenter defaultCenter] postNotificationName:ShellBorderDidChangeNotification object:nil];
+    // Everything else (panels, cells) gets one full broadcast once the
+    // slider settles, instead of one per drag tick.
+    [NSObject cancelPreviousPerformRequestsWithTarget:self selector:@selector(fireCoalescedThemeBroadcast) object:nil];
+    [self performSelector:@selector(fireCoalescedThemeBroadcast) withObject:nil afterDelay:0.3];
+}
+
+- (void)fireCoalescedThemeBroadcast {
+    [self broadcastThemeChange];
 }
 
 - (BOOL)shouldApplyBorderToView:(UIView *)view {
@@ -466,6 +735,7 @@ NSString * const ThemeDidChangeNotification = @"ThemeDidChangeNotification";
     [defaults removeObjectForKey:@"amethyst_bg_video"];
     [defaults removeObjectForKey:@"amethyst_bg_blur"];
     [defaults removeObjectForKey:@"amethyst_ui_opacity"];
+    [defaults removeObjectForKey:@"amethyst_ui_scale"];
     [defaults removeObjectForKey:@"amethyst_settings_blur"];
 
     _backgroundImage = nil;
@@ -473,13 +743,14 @@ NSString * const ThemeDidChangeNotification = @"ThemeDidChangeNotification";
     _backgroundVideoURL = nil;
     _backgroundBlurIntensity = 0;
     _uiOpacity = 1.0;
+    _uiScale = 1.0;
 
-    NSArray *paths = NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES);
-    NSString *imgPath = [paths.firstObject stringByAppendingPathComponent:@"amethyst_bg.png"];
+    NSString *imgPath = amethyst_hidden_path(@"amethyst_bg.png");
     [[NSFileManager defaultManager] removeItemAtPath:imgPath error:nil];
-    NSString *videoPath = [paths.firstObject stringByAppendingPathComponent:@"amethyst_bg.mp4"];
+    NSString *videoPath = amethyst_hidden_path(@"amethyst_bg.mp4");
     [[NSFileManager defaultManager] removeItemAtPath:videoPath error:nil];
 
+    [self applyUIScaleToAllWindows];
     [self broadcastThemeChange];
 }
 

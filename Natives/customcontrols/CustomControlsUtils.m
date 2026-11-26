@@ -7,6 +7,38 @@
 #include "../glfw_keycodes.h"
 #include "../utils.h"
 
+#define CONTROL_LAYOUT_VERSION 7
+
+// Makes sure the given key holds a mutable array, creating it when missing
+// and keeping the existing entries otherwise.
+static void EnsureMutableArray(NSMutableDictionary* dict, NSString* key) {
+    id value = dict[key];
+    if ([value isKindOfClass:NSMutableArray.class]) {
+        return;
+    }
+    if ([value isKindOfClass:NSArray.class]) {
+        dict[key] = [value mutableCopy];
+    } else {
+        dict[key] = [NSMutableArray new];
+    }
+}
+
+// The keycode array is indexed from 0 to 3 everywhere, so it must always
+// hold at least 4 entries.
+static void EnsureKeycodes(NSMutableDictionary* properties) {
+    id keycodes = properties[@"keycodes"];
+    if (![keycodes isKindOfClass:NSArray.class]) {
+        return;
+    }
+    NSMutableArray *mutable = [keycodes isKindOfClass:NSMutableArray.class] ? keycodes : [keycodes mutableCopy];
+    while (mutable.count < 4) {
+        [mutable addObject:@0];
+    }
+    if (mutable != keycodes) {
+        properties[@"keycodes"] = mutable;
+    }
+}
+
 NSMutableDictionary* createButton(NSString* name, int* keycodes, NSString* dynamicX, NSString* dynamicY, CGFloat width, CGFloat height) {
     NSMutableDictionary *dict = [[NSMutableDictionary alloc] init];
     dict[@"name"] = name;
@@ -71,14 +103,27 @@ void convertV3_4Layout(NSMutableDictionary* dict) {
     }
 
     // Add default values
-    for (NSString *key in @[@"mControlDataList", @"mDrawerDataList"]) {
-        for (NSMutableDictionary *button in (NSMutableArray *)dict[key]) {
-            button[@"displayInGame"] = @YES;
-            button[@"displayInMenu"] = @YES;
-        }
+    for (NSMutableDictionary *button in (NSMutableArray *)dict[@"mControlDataList"]) {
+        button[@"displayInGame"] = @YES;
+        button[@"displayInMenu"] = @YES;
     }
 
-    dict[@"version"] = @(7);
+    // A drawer is a wrapper around its own properties, so the flags belong
+    // inside the properties and not next to them.
+    for (NSMutableDictionary *drawerData in (NSMutableArray *)dict[@"mDrawerDataList"]) {
+        NSMutableDictionary *properties = drawerData[@"properties"];
+        if (![properties isKindOfClass:NSDictionary.class]) {
+            properties = [NSMutableDictionary new];
+            drawerData[@"properties"] = properties;
+        } else if (![properties isKindOfClass:NSMutableDictionary.class]) {
+            properties = [properties mutableCopy];
+            drawerData[@"properties"] = properties;
+        }
+        properties[@"displayInGame"] = @YES;
+        properties[@"displayInMenu"] = @YES;
+    }
+
+    dict[@"version"] = @(CONTROL_LAYOUT_VERSION);
 }
 
 void convertV2Layout(NSMutableDictionary* dict) {
@@ -158,9 +203,10 @@ void convertV1Layout(NSMutableDictionary* dict) {
 
         // set final keycode array
         btnDict[@"keycodes"] = keycodes;
-
-        btnDict[@"mDrawerDataList"] = [[NSMutableArray alloc] init];
     }
+
+    // The drawer list belongs to the root layout, not to each button
+    dict[@"mDrawerDataList"] = [[NSMutableArray alloc] init];
 
     dict[@"scaledAt"] = @(100);
     dict[@"version"] = @(2);
@@ -187,6 +233,12 @@ BOOL convertLayoutIfNecessary(NSMutableDictionary* dict) {
         case 7:
             break;
         default:
+            if (version > CONTROL_LAYOUT_VERSION) {
+                // A newer layout is loaded as-is: the known fields are already
+                // in the current format and the unknown ones are kept.
+                NSLog(@"[CustomControls] Loading control layout with version %d, newer than the supported version %d", version, CONTROL_LAYOUT_VERSION);
+                break;
+            }
             showDialog(localize(@"custom_controls.control_menu.save.error.json", nil), [NSString stringWithFormat:localize(@"custom_controls.error.incompatible", nil), version]);
             return NO;
     }
@@ -194,7 +246,7 @@ BOOL convertLayoutIfNecessary(NSMutableDictionary* dict) {
 }
 
 void generateAndSaveDefaultControl() {
-    NSString *defaultPath = [NSString stringWithFormat:@"%s/controlmap/default.json", getenv("POJAV_HOME")];
+    NSString *defaultPath = amethyst_control_path(@"default.json");
     if ([NSFileManager.defaultManager fileExistsAtPath:defaultPath]) {
         return;
     }
@@ -336,7 +388,7 @@ void generateAndSaveDefaultControl() {
 }
 
 void generateAndSaveDefaultControlForGamepad() {
-    NSString *gamepadPath = [NSString stringWithFormat:@"%s/controlmap/gamepads/default.json", getenv("POJAV_HOME")];
+    NSString *gamepadPath = amethyst_control_path(@"gamepads/default.json");
     if ([NSFileManager.defaultManager fileExistsAtPath:gamepadPath]) {
         return;
     }
@@ -452,11 +504,18 @@ void generateAndSaveDefaultControlForGamepad() {
 void loadControlObject(UIView* targetView, NSMutableDictionary* controlDictionary) {
     NSMutableString *errorString = [[NSMutableString alloc] init];
 
+    // The lists are always inserted into by the editor, so they must exist
+    // and be mutable on the root layout dictionary.
+    EnsureMutableArray(controlDictionary, @"mControlDataList");
+    EnsureMutableArray(controlDictionary, @"mDrawerDataList");
+    EnsureMutableArray(controlDictionary, @"mJoystickDataList");
+
     if (convertLayoutIfNecessary(controlDictionary)) {
         NSMutableArray *controlDataList = controlDictionary[@"mControlDataList"];
         //setPrefObject(@"internal.internal_current_button_scale", controlDictionary[@"scaledAt"]);
         for (NSMutableDictionary *buttonDict in controlDataList) {
             //APPLY_SCALE(buttonDict[@"strokeWidth"]);
+            EnsureKeycodes(buttonDict);
             @try {
                 ControlButton *button = [ControlButton buttonWithProperties:buttonDict];
                 [targetView addSubview:button];
@@ -480,6 +539,7 @@ void loadControlObject(UIView* targetView, NSMutableDictionary* controlDictionar
             //NSLog(@"DBG Added drawer=%@", drawer);
 
             for (NSMutableDictionary *subButton in drawerData[@"buttonProperties"]) {
+                EnsureKeycodes(subButton);
                 ControlSubButton *subView = [ControlSubButton buttonWithProperties:subButton];
                 [drawer addButton:subView];
                 [targetView addSubview:subView];
@@ -488,9 +548,6 @@ void loadControlObject(UIView* targetView, NSMutableDictionary* controlDictionar
         }
 
         NSMutableArray *joystickDataList = controlDictionary[@"mJoystickDataList"];
-        if (!joystickDataList) {
-            controlDictionary[@"mJoystickDataList"] = [NSMutableArray new];
-        }
         for (NSMutableDictionary *joystickDict in joystickDataList) {
             @try {
                 ControlJoystick *button = [ControlJoystick buttonWithProperties:joystickDict];
@@ -550,6 +607,7 @@ void initKeycodeTable(NSMutableArray* keyCodeMap, NSMutableArray* keyValueMap) {
 
     addkey(COMMA)
     addkey(PERIOD)
+    addkey(APOSTROPHE)
 
     // Alt keys
     addkey(LEFT_ALT)
@@ -588,6 +646,10 @@ void initKeycodeTable(NSMutableArray* keyCodeMap, NSMutableArray* keyValueMap) {
     addkey(F1) addkey(F2) addkey(F3) addkey(F4)
     addkey(F5) addkey(F6) addkey(F7) addkey(F8)
     addkey(F9) addkey(F10) addkey(F11) addkey(F12)
+    addkey(F13) addkey(F14) addkey(F15) addkey(F16)
+    addkey(F17) addkey(F18) addkey(F19) addkey(F20)
+    addkey(F21) addkey(F22) addkey(F23) addkey(F24)
+    addkey(F25)
 
     // Num keys
     addkey(NUM_LOCK)
@@ -603,12 +665,14 @@ void initKeycodeTable(NSMutableArray* keyCodeMap, NSMutableArray* keyValueMap) {
     addkey(NUMPAD_ENTER)
     addkey(NUMPAD_EQUAL)
 
-    //addkey(APOSTROPHE)
-    //addkey(WORLD_1) addkey(WORLD_2)
-    //addkey(END)
-    //addkey(SCROLL_LOCK) 
-    //addkey(PRINT_SCREEN)
-    //addkey(LEFT_SUPER) addkey(RIGHT_ENTER)
-    //addkey(MENU)
+    //addkey(POUND)
+    //addkey(AT) //@
+
+    addkey(WORLD_1) addkey(WORLD_2)
+    addkey(END)
+    addkey(SCROLL_LOCK)
+    addkey(PRINT_SCREEN)
+    addkey(LEFT_SUPER) addkey(RIGHT_SUPER)
+    addkey(MENU)
 #undef addkey
 }

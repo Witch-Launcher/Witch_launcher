@@ -1,0 +1,95 @@
+// Witch patch: synthetic motion vector field for frame generation, computed
+// on the GPU. This is the exact same camera reprojection math as the
+// launcher's CPU implementation (see ffx_bridge.cpp), but as a single
+// dispatch writing straight into the R16G16_SFLOAT device image the FidelityFX
+// frame-interpolation passes sample. The CPU loop at full render resolution
+// cost 400-860 ms per frame on A11; this dispatch costs a few ms.
+//
+// Convention (matches FidelityFX):
+//   The texture stores the NDC displacement (current position - previous
+//   position, y up). The SDK turns it into a UV delta with
+//   motionVectorScale = (-0.5*width, +0.5*height):
+//       prevUv = curUv + mv * motionVectorScale / targetSize
+//   so the field has to hold the BACKWARD mapping: where the content of the
+//   current pixel was in the previous frame.
+//
+// The render target is bottom-up (RenderPearl renders OpenGL-style and the
+// present blit flips Y), so FidelityFX's ndcY = +1 sits at the screen
+// bottom. The camera ray of a pixel therefore uses -ndcY on the up axis.
+//
+// Regenerate the SPIR-V header: ./generate_synth_mvs.sh
+
+#version 450
+
+layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
+
+layout(set = 0, binding = 0, rg16f) uniform image2D outMvs;
+
+layout(push_constant) uniform PushConstants {
+    vec4 prevPos;
+    vec4 prevRight;
+    vec4 prevUp;
+    vec4 prevFwd;
+    vec4 pos;
+    vec4 right;
+    vec4 up;
+    vec4 fwd;
+    vec4 misc;   // x=tanHalfFovX, y=tanHalfFovY, z=referenceDepth, w=havePrevPose (0/1)
+    vec4 dims;   // x=width, y=height, z=motion vector scale (1 = normal, 0 = off), w=eyeHeight (0 = constant depth)
+} pc;
+
+void main()
+{
+    uvec2 gid = gl_GlobalInvocationID.xy;
+    if (gid.x >= uint(pc.dims.x) || gid.y >= uint(pc.dims.y)) {
+        return;
+    }
+
+    const float ndcX = (2.0 * (float(gid.x) + 0.5) / pc.dims.x) - 1.0;
+    const float ndcY = 1.0 - (2.0 * (float(gid.y) + 0.5) / pc.dims.y);
+
+    // Reference distance of this pixel. With the eye height known (the player
+    // stands on the ground) the ground plane gives the distance of the
+    // ground pixels, which is a far better estimate than one constant for
+    // the whole screen: the parallax error of a walking camera drops by 3-7x.
+    float refDepth = pc.misc.z;
+    if (pc.dims.w > 0.0) {
+        // Vertical component of the camera ray per unit of forward depth.
+        float rayY = pc.fwd.y - ndcY * pc.misc.y * pc.up.y;
+        // Looking down: the ground plane. Looking up: the sky and the distant
+        // terrain, which sit at the far plane.
+        refDepth = (rayY < -1e-4)
+            ? clamp(pc.dims.w / (-rayY), 0.5, 64.0)
+            : 64.0;
+    }
+
+    vec2 mv = vec2(0.0);
+    if (pc.misc.w > 0.5) {
+        // Ray of the CURRENT camera for this pixel, in tangent space:
+        //   dir = forward + ndcX*tanHalfFovX*right - ndcY*tanHalfFovY*up
+        // (the minus on the up axis comes from the bottom-up render target).
+        vec3 dir = pc.fwd.xyz
+                 + (ndcX * pc.misc.x) * pc.right.xyz
+                 - (ndcY * pc.misc.y) * pc.up.xyz;
+
+        // World point at the reference forward depth along that ray.
+        vec3 world = pc.pos.xyz + refDepth * dir;
+
+        // Project it into the PREVIOUS camera: that is where the content of
+        // this pixel came from.
+        vec3 rel = world - pc.prevPos.xyz;
+        float depthPrev = max(dot(rel, pc.prevFwd.xyz), 1e-3);
+        float latX = dot(rel, pc.prevRight.xyz);
+        float latY = dot(rel, pc.prevUp.xyz);
+        float ndcPrevX = (latX / depthPrev) / pc.misc.x;
+        float ndcPrevY = -(latY / depthPrev) / pc.misc.y;
+
+        // Motion vector: current position - previous position (NDC, y up).
+        mv = clamp(vec2(ndcX - ndcPrevX, ndcY - ndcPrevY), vec2(-2.0), vec2(2.0));
+    }
+    // The scale allows switching the synthetic motion vectors off (the
+    // frame interpolation then relies on the optical flow alone).
+    mv *= pc.dims.z;
+
+    imageStore(outMvs, ivec2(gid), vec4(mv, 0.0, 0.0));
+}

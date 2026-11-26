@@ -71,6 +71,14 @@ def main():
     parser.add_argument('--hmac', default=os.environ.get('WITCH_HMAC_SECRET', ''))
     parser.add_argument('--token', default=os.environ.get('WITCH_PROXY_TOKEN', ''))
     parser.add_argument('--curseforge-key', default=os.environ.get('WITCH_CURSEFORGE_API_KEY', ''))
+    parser.add_argument('--google-client-id', default=os.environ.get('WITCH_GOOGLE_DRIVE_CLIENT_ID', ''))
+    parser.add_argument('--ms-client-id', default=os.environ.get('WITCH_MS_OAUTH_CLIENT_ID', ''))
+    parser.add_argument('--dropbox-app-key', default=os.environ.get('WITCH_DROPBOX_APP_KEY', ''))
+    parser.add_argument('--plugin-key-id', default=os.environ.get('WITCH_PLUGIN_OFFICIAL_KEY_ID', ''))
+    parser.add_argument('--plugin-public-key', default=os.environ.get('WITCH_PLUGIN_OFFICIAL_PUBLIC_KEY', ''))
+    parser.add_argument('--ely-client-id', default=os.environ.get('WITCH_ELY_OAUTH_CLIENT_ID', ''))
+    parser.add_argument('--ely-client-secret', default=os.environ.get('WITCH_ELY_OAUTH_CLIENT_SECRET', ''))
+    parser.add_argument('--ely-redirect-uri', default=os.environ.get('WITCH_ELY_OAUTH_REDIRECT_URI', ''))
     parser.add_argument('--out', required=True)
     parser.add_argument('--print-masked', action='store_true', help='Print masked output (no plain)')
     parser.add_argument('--server-only', action='store_true', help='Server-only master key: header will NOT contain WITCH_ENCRYPTION_KEY, client holds only enc values and sends them directly')
@@ -93,6 +101,14 @@ def main():
 #define WITCH_DEFAULT_HMAC_SECRET @"{args.hmac}"
 #define WITCH_DEFAULT_PROXY_TOKEN @"{args.token}"
 #define WITCH_DEFAULT_CURSEFORGE_API_KEY @"{args.curseforge_key}"
+#define WITCH_GOOGLE_DRIVE_CLIENT_ID @"{args.google_client_id}"
+#define WITCH_MS_OAUTH_CLIENT_ID @"{args.ms_client_id}"
+#define WITCH_DROPBOX_APP_KEY @"{args.dropbox_app_key}"
+#define WITCH_PLUGIN_OFFICIAL_KEY_ID @"{args.plugin_key_id}"
+#define WITCH_PLUGIN_OFFICIAL_PUBLIC_KEY @"{args.plugin_public_key}"
+#define WITCH_ELY_OAUTH_CLIENT_ID @"{args.ely_client_id}"
+#define WITCH_ELY_OAUTH_CLIENT_SECRET @"{args.ely_client_secret}"
+#define WITCH_ELY_OAUTH_REDIRECT_URI @"{args.ely_redirect_uri}"
 """
         with open(out_path, 'w', encoding='utf-8') as f:
             f.write(content)
@@ -144,6 +160,14 @@ def main():
 #define WITCH_DEFAULT_HMAC_SECRET @"{args.hmac}"
 #define WITCH_DEFAULT_PROXY_TOKEN @"{enc_token}"
 #define WITCH_DEFAULT_CURSEFORGE_API_KEY @"{args.curseforge_key}"
+#define WITCH_GOOGLE_DRIVE_CLIENT_ID @"{args.google_client_id}"
+#define WITCH_MS_OAUTH_CLIENT_ID @"{args.ms_client_id}"
+#define WITCH_DROPBOX_APP_KEY @"{args.dropbox_app_key}"
+#define WITCH_PLUGIN_OFFICIAL_KEY_ID @"{args.plugin_key_id}"
+#define WITCH_PLUGIN_OFFICIAL_PUBLIC_KEY @"{args.plugin_public_key}"
+#define WITCH_ELY_OAUTH_CLIENT_ID @"{args.ely_client_id}"
+#define WITCH_ELY_OAUTH_CLIENT_SECRET @"{args.ely_client_secret}"
+#define WITCH_ELY_OAUTH_REDIRECT_URI @"{args.ely_redirect_uri}"
 """
     else:
         content = f"""#pragma once
@@ -157,6 +181,14 @@ def main():
 #define WITCH_DEFAULT_HMAC_SECRET @"{enc_hmac}"
 #define WITCH_DEFAULT_PROXY_TOKEN @"{enc_token}"
 #define WITCH_DEFAULT_CURSEFORGE_API_KEY @"{enc_cf}"
+#define WITCH_GOOGLE_DRIVE_CLIENT_ID @"{args.google_client_id}"
+#define WITCH_MS_OAUTH_CLIENT_ID @"{args.ms_client_id}"
+#define WITCH_DROPBOX_APP_KEY @"{args.dropbox_app_key}"
+#define WITCH_PLUGIN_OFFICIAL_KEY_ID @"{args.plugin_key_id}"
+#define WITCH_PLUGIN_OFFICIAL_PUBLIC_KEY @"{args.plugin_public_key}"
+#define WITCH_ELY_OAUTH_CLIENT_ID @"{args.ely_client_id}"
+#define WITCH_ELY_OAUTH_CLIENT_SECRET @"{args.ely_client_secret}"
+#define WITCH_ELY_OAUTH_REDIRECT_URI @"{args.ely_redirect_uri}"
 """
     with open(out_path, 'w', encoding='utf-8') as f:
         f.write(content)

@@ -13,15 +13,25 @@
 #include <sys/stat.h>
 #include <sys/sysctl.h>
 #include <sys/proc.h>
+#include <sys/ucontext.h>
 #include <signal.h>
 #include <setjmp.h>
+#include <pthread.h>
 #include <unistd.h>
 
 #include "utils.h"
+#include "config.h"
 #include "ZinkConfig.h"
 #include "MobileGLConfig.h"
 #include "TGLMTConfig.h"
 #include "MemSampler.h"
+
+// MetalBridgeKit.framework (vendored in Frameworks/, dlopened for the
+// metal_macos renderer). Runtime link only: its ObjC classes do not exist
+// until the dlopen below registers them, so the facade is reached strictly
+// through NSClassFromString — a static class reference (e.g.
+// MBProbe.frameworkVersion) would emit a strong _OBJC_CLASS_$_MBProbe that
+// dyld cannot bind before main() and abort the launch.
 
 #import "ios_uikit_bridge.h"
 #import "JavaLauncher.h"
@@ -72,21 +82,60 @@ static size_t availableMemoryMB(void) {
     return (size_t)(avail / (1024 * 1024));
 }
 
-// Caps the requested heap so Java + JVM overhead + native GL/Metal buffers
-// always fit under the real Jetsam kill allowance. Returns the capped value.
+// Direct ByteBuffers (LWJGL/Sodium/Iris) default to a cap equal to -Xmx when
+// MaxDirectMemorySize is absent, so heap + direct can silently use 2x -Xmx
+// before the JVM even starts counting native/GPU memory. Reserve part of the
+// budget for them and cap the rest explicitly.
+static const int kDirectMemoryReserveMB = 320;
+// JVM native arenas, CodeCache/JIT mirror, the launcher itself and the
+// GL/Metal driver's own allocations. Kept deliberately conservative: the
+// 2 GiB per-process Jetsam ceiling does not grow with physical RAM.
+static const int kNativeReserveMB = 512;
+
+static int maxDirectMemoryMB(int heapMB) {
+    int direct = heapMB / 3;
+    if (direct < 192) direct = 192;
+    if (direct > 384) direct = 384;
+    return direct;
+}
+
+// ParallelGC (see the -XX:+UseParallelGC flag below) reports
+// Runtime.maxMemory() as ~89% of -Xmx: the rest is kept back for the card
+// table and heap alignment. Size -Xmx up so the usable heap matches the
+// budget instead of silently losing 11% of it.
+static const double kHeapEffectiveRatio = 0.89;
+
+// Caps the requested heap so Java heap + direct buffers + JVM native/GPU
+// overhead fit under the real Jetsam kill allowance. Physical RAM alone is a
+// bad basis: 6 GB devices were still killed after ~30 minutes with 1.5-1.8 GB
+// heaps because direct memory scaled with -Xmx and the process ceiling did not.
 static int capAllocationToJetsamAllowance(int allocmem) {
-    if (getEntitlementValue(@"com.apple.private.memorystatus")) {
-        // updateJetsamControl() raised the task limit itself, no cap needed.
-        return allocmem;
-    }
+    double physicalMB = (double)NSProcessInfo.processInfo.physicalMemory / 1048576.0;
     size_t availableMem = availableMemoryMB();
+    // With the increased-memory-limit entitlement iOS raises this process's
+    // Jetsam allowance (~2 GB on a 3 GB device) and os_proc_available_memory()
+    // reports it, so trust that number. The old hard "50% of physical RAM"
+    // ceiling ignored the entitlement and left a 1.20.1 + Embeddium world load
+    // stuck in a Full-GC loop at 0-1 fps ("Preparing start region").
+    BOOL extended = getEntitlementValue(@"com.apple.developer.kernel.increased-memory-limit") ||
+                    getEntitlementValue(@"com.apple.private.memorystatus");
+    double budget;
     if (availableMem > 0) {
-        int byAllowance = (int)((double)availableMem * 0.6);
-        if (byAllowance < allocmem) {
-            NSLog(@"[JavaLauncher] RAM capped: %d MB -> %d MB (only %zu MB left before the Jetsam kill limit; add the memorystatus entitlement to raise it)",
-                  allocmem, byAllowance, availableMem);
-            return (int)MAX(384, byAllowance);
-        }
+        double physShare = extended ? 0.68 : 0.50;
+        budget = MIN((double)availableMem * 0.88, physicalMB * physShare);
+    } else {
+        // Unknown Jetsam allowance: fall back to a conservative share of RAM.
+        budget = physicalMB * (extended ? 0.45 : 0.35);
+    }
+    int effectiveHeap = (int)budget - kDirectMemoryReserveMB - kNativeReserveMB;
+    if (effectiveHeap < 384) effectiveHeap = 384;
+    int maxHeap = (int)((double)effectiveHeap / kHeapEffectiveRatio);
+    if (maxHeap > 1536) maxHeap = 1536;
+    if (allocmem > maxHeap) {
+        NSLog(@"[JavaLauncher] RAM capped: %d MB -> %d MB (usable heap %.0f MB, budget=%.0f MB, available=%zu MB, physical=%.0f MB, extended=%d; direct/native reservation=%d MB)",
+              allocmem, maxHeap, maxHeap * kHeapEffectiveRatio, budget, availableMem, physicalMB,
+              extended, kDirectMemoryReserveMB + kNativeReserveMB);
+        return maxHeap;
     }
     return allocmem;
 }
@@ -108,7 +157,7 @@ void init_loadDefaultEnv() {
 
     // Point fontconfig to the app's bundled config directory so X11FontManager
     // doesn't search the macOS Fontconfig.framework path (which doesn't exist on iOS).
-    NSString *fcDir = [NSString stringWithFormat:@"%s/fontconfig", getenv("POJAV_HOME")];
+    NSString *fcDir = amethyst_hidden_dir(@"fontconfig");
     [fm createDirectoryAtPath:[fcDir stringByAppendingPathComponent:@"conf.d"]
         withIntermediateDirectories:YES attributes:nil error:nil];
     // Create a minimal fonts.conf so fontconfig initializes without errors
@@ -156,7 +205,7 @@ void init_loadDefaultEnv() {
     setenv("MESA_GL_VERSION_OVERRIDE", "4.1", 1);
 
     // Suppress [mvk-info] log spam (swapchain creation, etc.)
-    setenv("MVK_CONFIG_LOG_LEVEL", "2", 1);
+    setenv("MVK_CONFIG_LOG_LEVEL", getPrefBool(@"general.debug_logging") ? "2" : "0", 1);
 
     // MoltenVK 1.4.1 argument buffers break chunk lightmap texelFetch on A11
     // (world renders dark). Disable to keep lighting correct.
@@ -167,6 +216,30 @@ void init_loadDefaultEnv() {
 }
 
 void init_loadCustomEnv() {
+    // Launcher-managed frame-pacing knobs, exported before the user's custom
+    // env block so an explicit AMETHYST_* line in java.env_variables wins.
+    // The JVM snapshots the environment at boot, so this must run before
+    // JLI_Launch (it does: called from the pre-JVM init path).
+    BOOL vsyncOn = getPrefBool(@"video.vsync");
+    setenv("AMETHYST_VSYNC", vsyncOn ? "1" : "0", 1);
+    NSString *maxFps = getPrefObject(@"video.max_framerate");
+    if (![maxFps isKindOfClass:[NSString class]] || maxFps.length == 0) maxFps = @"0";
+    setenv("AMETHYST_MAX_FPS", maxFps.UTF8String, 1);
+    NSLog(@"[JavaLauncher] Frame pacing: vsync=%@ maxFps=%@",
+          vsyncOn ? @"on" : @"off", maxFps);
+
+    // Uncapped present. MoltenVK normally blocks the render thread inside
+    // -[CAMetalLayer nextDrawable] until the display releases a drawable, and
+    // iOS releases them at the panel refresh rate - that block is what pins
+    // the game to 60 FPS on a 60 Hz screen. With this flag the layer stops
+    // blocking and frames that find no drawable are dropped instead, so the
+    // render loop runs at the speed the device can actually sustain.
+    // Only MoltenVK reads this, so the OpenGL/ANGLE path is unaffected.
+    BOOL uncapped = getPrefBool(@"video.uncapped");
+    setenv("WITCH_UNCAPPED_PRESENT", uncapped ? "1" : "0", 1);
+    setenv("AMETHYST_UNCAPPED", uncapped ? "1" : "0", 1);
+    NSLog(@"[JavaLauncher] Uncapped present: %@", uncapped ? @"on" : @"off");
+
     NSString *envvars = getPrefObject(@"java.env_variables");
     if (envvars == nil) return;
     NSLog(@"[JavaLauncher] Reading custom environment variables");
@@ -193,7 +266,7 @@ void init_loadMobileGluesConfig() {
         return;
     }
 
-    NSString *mgDirPath = [NSString stringWithFormat:@"%s/MG", getenv("POJAV_HOME")];
+    NSString *mgDirPath = amethyst_hidden_dir(@"MG");
     setenv("MG_DIR_PATH", mgDirPath.UTF8String, 1);
 
     NSMutableDictionary *config = [NSMutableDictionary dictionary];
@@ -206,14 +279,16 @@ void init_loadMobileGluesConfig() {
     id enableExtGL43 = getPrefObject(@"mobileglues.enable_ext_gl43");
     if (enableExtGL43) config[@"enableExtGL43"] = [enableExtGL43 boolValue] ? @1 : @0;
 
-    id enableAngle = getPrefObject(@"mobileglues.enable_angle");
-    if (enableAngle) config[@"enableANGLE"] = [enableAngle boolValue] ? @1 : @0;
-
     id angleBackend = getPrefObject(@"mobileglues.angle_backend");
-    if (angleBackend) {
-        NSString *backend = [angleBackend isKindOfClass:[NSString class]] ? (NSString *)angleBackend : @"metal";
-        config[@"angleBackend"] = backend;
-    }
+    NSString *backend = (angleBackend && [angleBackend isKindOfClass:[NSString class]])
+        ? (NSString *)angleBackend : @"vulkan";
+    BOOL angleEnabled = [backend isEqualToString:@"metal"] || [backend isEqualToString:@"vulkan"];
+    // ForceEnable (3), not EnableIfPossible (1): MG's hasVulkan12() probe
+    // returns false on iOS, so "if possible" always resolves to Disabled even
+    // when the launcher explicitly selected an ANGLE host. Disabled also flips
+    // MG into bufferCoherentAsFlush mode, which does not match an ANGLE host.
+    config[@"enableANGLE"] = angleEnabled ? @3 : @0;
+    config[@"angleBackend"] = angleEnabled ? backend : @"tgles";
 
     id enableNoError = getPrefObject(@"mobileglues.enable_no_error");
     if (enableNoError) config[@"enableNoError"] = @([enableNoError intValue]);
@@ -258,6 +333,15 @@ void init_loadMobileGluesConfig() {
 
     id fsr1Setting = getPrefObject(@"mobileglues.fsr1_setting");
     if (fsr1Setting) config[@"fsr1Setting"] = @([fsr1Setting intValue]);
+
+    // ANGLE hosts on iOS render the batched GUI pass incorrectly with the
+    // auto-selected indirect/multi-draw backends. Keep the default on the
+    // unrolled path (legacy MG: multidrawMode=DrawElements; current MG:
+    // multidrawOrder=unroll) unless the user explicitly picked another mode.
+    if (angleEnabled && (!multidrawMode || [multidrawMode intValue] == 0)) {
+        config[@"multidrawMode"] = @4;
+        config[@"multidrawOrder"] = @"unroll";
+    }
 
     NSError *error = nil;
     NSData *jsonData = [NSJSONSerialization dataWithJSONObject:config options:NSJSONWritingPrettyPrinted error:&error];
@@ -327,7 +411,7 @@ void init_loadLTWConfig() {
 
     // ANGLE backend selection for LTW: metal (MetalANGLE, ES 3.0) or vulkan (VulkanANGLE, ES 3.2)
     id angleBackend = getPrefObject(@"video.ltw_angle_backend");
-    NSString *backend = (angleBackend && [angleBackend isKindOfClass:[NSString class]]) ? (NSString *)angleBackend : @"metal";
+    NSString *backend = (angleBackend && [angleBackend isKindOfClass:[NSString class]]) ? (NSString *)angleBackend : @"vulkan";
     setenv("LTW_ANGLE_BACKEND", backend.UTF8String, 1);
     NSLog(@"[JavaLauncher] LTW ANGLE backend: %@", backend);
 }
@@ -365,21 +449,195 @@ static BOOL processIsDebugged(void) {
     return processIsCurrentlyDebugged();
 }
 
-// The JIT26 / mirror brk stubs (#0xf00d, #0x6a) are serviced by StikDebug's
-// exception server. When nothing services them the kernel raises SIGTRAP and
-// the default action kills the app (crash straight back to the home screen).
-// During the handshake window we catch SIGTRAP instead, ARMED as a bail-out:
-// a synchronous brk trap resumes AT the faulting instruction, so returning
-// from an empty handler would re-trap forever (black-screen spin, no dialog,
-// no further log). siglongjmp lands back at the armed setjmp point with the
-// call skipped, turning every unserviced brk into the diagnostic dialogs below.
+// The JIT26 / mirror brk stubs (#0xf00d, #0x6a) are serviced by the JIT
+// debugger's exception server (StikDebug, or the built-in StikJIT helper that
+// runs in its own extension process). When nothing services them the kernel
+// raises SIGTRAP and the default action kills the app: the process vanishes
+// and iOS drops the user back on the home screen with no crash log. That is
+// the "Built-in StikJIT kicks the app to the home screen" report.
+//
+// The guard therefore has to do three things:
+//
+//   (a) stay installed for the WHOLE launch, not only for the handshake
+//       window: the JVM keeps raising brks while it allocates its code cache,
+//       and the debugger can disappear mid-session (the built-in helper lives
+//       in a separate extension process, so the system killing that extension
+//       detaches the debugger and every later brk is unserviced);
+//   (b) CONSUME the trap instead of returning to the faulting instruction: a
+//       synchronous brk trap resumes AT the brk, so an empty handler re-traps
+//       forever (black screen, no dialog, no further log);
+//   (c) only longjmp on the thread that armed the guard: a trap raised on
+//       another thread must not unwind the arming thread's stack.
+//
+// Inside an armed call the guard longjmps back to the setjmp point, so the
+// call is skipped and the caller reports the failure (see the dialogs below).
+// Outside an armed call the brk instruction itself is skipped in place, so a
+// debugger that stopped servicing breakpoints cannot kill the process.
 static sigjmp_buf g_jitTrapJmp;
 static volatile sig_atomic_t g_jitTrapArmed = 0;
-static void onUnservicedBrk(int sig) {
-    (void)sig;
-    if (g_jitTrapArmed) {
+// The thread that armed the guard. A trap raised on a different thread must
+// not longjmp into the arming thread's stack.
+static pthread_t g_jitTrapOwner;
+static volatile sig_atomic_t g_jitTrapOwnerValid = 0;
+
+// arm64 `brk #imm` encoding: 1101 0100 001 imm16.
+#define WITCH_JIT_BRK_MASK 0xFFE0001Fu
+#define WITCH_JIT_BRK_OP 0xD4200000u
+
+// The interrupted PC is read and written through the public thread-state
+// accessors, so the code works on both the plain arm64 layout (where __pc is a
+// plain integer) and the opaque arm64e one (where the field is a signed
+// pointer). They need the full C level, which the project build provides.
+#if defined(__arm64__) && defined(__DARWIN_C_LEVEL) && (__DARWIN_C_LEVEL >= __DARWIN_C_FULL)
+#include <mach/arm/thread_status.h>
+#define WITCH_JIT_CAN_SKIP_TRAP 1
+#endif
+
+// Arms the guard for the calling thread: a trap raised on that thread inside
+// the guarded call longjmps back to the setjmp point, so the call is skipped.
+static void armJITTrap(void) {
+    g_jitTrapOwner = pthread_self();
+    g_jitTrapOwnerValid = 1;
+    g_jitTrapArmed = 1;
+}
+
+static void disarmJITTrap(void) {
+    g_jitTrapArmed = 0;
+    g_jitTrapOwnerValid = 0;
+}
+
+static void onUnservicedBrk(int sig, siginfo_t *info, void *ucontext) {
+    (void)info;
+    // Only the arming thread may longjmp out of the trap: unwinding a foreign
+    // stack would take the process down even harder than the trap it replaces.
+    if (g_jitTrapArmed && g_jitTrapOwnerValid &&
+        pthread_equal(pthread_self(), g_jitTrapOwner)) {
         siglongjmp(g_jitTrapJmp, 1);
+        return;
     }
+#ifdef WITCH_JIT_CAN_SKIP_TRAP
+    // Not inside a guarded call (or the trap came from another thread). When
+    // this is one of the launcher's own brk instructions, consume it: skip the
+    // faulting instruction so the process neither re-executes it forever nor
+    // dies with the default SIGTRAP action (which is what kicks the app back
+    // to the home screen).
+    ucontext_t *context = (ucontext_t *)ucontext;
+    if (context && context->uc_mcontext) {
+        uint64_t pc = (uint64_t)arm_thread_state64_get_pc(context->uc_mcontext->__ss);
+        uint32_t instruction = 0;
+        if (pc != 0 && memcpy(&instruction, (const void *)pc, sizeof(instruction)) == 0 &&
+            (instruction & WITCH_JIT_BRK_MASK) == WITCH_JIT_BRK_OP) {
+            arm_thread_state64_set_pc_fptr(context->uc_mcontext->__ss,
+                                            (int (*)(void))(uintptr_t)(pc + 4));
+            NSLog(@"[JavaLauncher] Consumed an unserviced JIT brk at %p (no script attached)", (void *)pc);
+            return;
+        }
+    }
+#endif
+    // Not one of ours: restore the default disposition so a real trap still
+    // terminates the process the way it normally would.
+    struct sigaction dfl = {0};
+    dfl.sa_handler = SIG_DFL;
+    sigemptyset(&dfl.sa_mask);
+    sigaction(sig, &dfl, NULL);
+}
+
+// Installs the JIT trap guard. The previous disposition is restored by
+// restoreJITTrapGuard, which the launch path registers as a scope cleanup so
+// every early return puts it back.
+static void installJITTrapGuard(void) {
+    struct sigaction sa = {0};
+    sa.sa_sigaction = onUnservicedBrk;
+    sigemptyset(&sa.sa_mask);
+    sa.sa_flags = SA_SIGINFO;
+    sigaction(SIGTRAP, &sa, NULL);
+}
+
+// Scope cleanup for the SIGTRAP disposition captured before the guard was
+// installed.
+static void restoreJITTrapGuard(struct sigaction *saved) {
+    if (!saved) return;
+    sigaction(SIGTRAP, saved, NULL);
+}
+
+// Without a debugger the JIT breakpoints must resolve to the default handler,
+// so an unserviced brk becomes a SIGTRAP the guard can consume. While a
+// debugger is attached the breakpoint port belongs to it and must not be
+// touched.
+static void resetJITBreakpointExceptionPort(void) {
+    if (processIsCurrentlyDebugged()) return;
+    kern_return_t result = task_set_exception_ports(mach_task_self(), EXC_MASK_BREAKPOINT, 0,
+                                                     EXCEPTION_DEFAULT, MACHINE_THREAD_STATE);
+    if (result != KERN_SUCCESS) {
+        NSLog(@"[JavaLauncher] Could not reset the breakpoint exception port (kern=%d)", (int)result);
+    }
+}
+
+// Send JIT26SetDetachAfterFirstBr (brk #0xf00d, command 3) under a SIGTRAP
+// guard. A stale assigned base script may not implement command 3; the brk
+// then either traps with the default disposition (debugger detached) or —
+// worse — the script logs "Unknown command 3" and leaves the thread stopped
+// forever. This guard catches the signal case; the callers below only send
+// command 3 once the script has proven it services brks (probe + extension).
+static void JIT26SetDetachAfterFirstBrGuarded(BOOL value) {
+    struct sigaction sa = {0};
+    struct sigaction oldSa;
+    sa.sa_sigaction = onUnservicedBrk;
+    sigemptyset(&sa.sa_mask);
+    sa.sa_flags = SA_SIGINFO;
+    sigaction(SIGTRAP, &sa, &oldSa);
+    armJITTrap();
+    if (sigsetjmp(g_jitTrapJmp, 1) == 0) {
+        JIT26SetDetachAfterFirstBr(value);
+    } else {
+        NSLog(@"[JavaLauncher] JIT26SetDetachAfterFirstBr(%d) brk was NOT serviced "
+              @"(script lacks command 3); continuing with the script's own detach policy",
+              value);
+    }
+    disarmJITTrap();
+    sigaction(SIGTRAP, &oldSa, NULL);
+}
+
+// Faults that reach the launcher before the JVM installs its own handlers
+// (HotSpot does that in os::signal_init, i.e. inside JLI_Launch) used to be
+// fatal with no trace at all: the process vanished and iOS dropped the user
+// back on the home screen. The handler logs the faulting address and the
+// interrupted PC, then restores the default disposition and returns, so the
+// faulting instruction runs again and the process dies exactly as before - but
+// the log now says what happened instead of leaving no trace at all.
+static void onFatalSignal(int sig, siginfo_t *info, void *ucontext) {
+    uintptr_t pc = 0;
+#ifdef WITCH_JIT_CAN_SKIP_TRAP
+    ucontext_t *context = (ucontext_t *)ucontext;
+    if (context && context->uc_mcontext) {
+        pc = (uintptr_t)arm_thread_state64_get_pc(context->uc_mcontext->__ss);
+    }
+#else
+    (void)ucontext;
+#endif
+    NSLog(@"[JavaLauncher] Fatal signal %d (code %d) pc=%p addr=%p - the JIT memory was not executable or the runtime faulted",
+          sig, info ? info->si_code : 0, (void *)pc, info ? info->si_addr : NULL);
+    struct sigaction dfl = {0};
+    dfl.sa_handler = SIG_DFL;
+    sigemptyset(&dfl.sa_mask);
+    sigaction(sig, &dfl, NULL);
+}
+
+// Cr4shed known issue: the crash reporter's handler exits after writing the
+// dump, so the JVM never sees the signal. Reset the fault dispositions to the
+// default before JLI_Launch so HotSpot can install its own handlers - but
+// through the diagnostic handler above, so a fault that happens before the
+// JVM is up still leaves a trace instead of a silent death.
+static void installFatalSignalDiagnostics(void) {
+    int fatalSignals[] = {SIGSEGV, SIGBUS, SIGILL, SIGFPE};
+    for (size_t i = 0; i < sizeof(fatalSignals) / sizeof(fatalSignals[0]); i++) {
+        struct sigaction sa = {0};
+        sa.sa_sigaction = onFatalSignal;
+        sigemptyset(&sa.sa_mask);
+        sa.sa_flags = SA_SIGINFO;
+        sigaction(fatalSignals[i], &sa, NULL);
+    }
+    signal(SIGPIPE, SIG_DFL);
 }
 
 static BOOL JIT26ProbeLooksValid(void *result) {
@@ -435,9 +693,9 @@ int launchJVMWithArgs(NSString *username, id launchTarget, int width, int height
     DeviceGetJITFlags(YES);
     BOOL requiresDebugJITMapping = DeviceNeedsDebugJITMapping();
     BOOL jit26AlwaysAttached = getPrefBool(@"debug.debug_always_attached_jit");
-    // Patched Java 21/25 runtimes always route code-cache allocation through
-    // brk #0xf00d / brk #0x6a on iOS 26.6+/27 — even on TXM devices where RX
-    // mappings work directly (see patch_libjvm_jit_alloc.py /
+    // Patched Java 8/17/21/25 runtimes always route code-cache allocation
+    // through brk #0xf00d / brk #0x6a on iOS 26.6+/27 — even on TXM devices
+    // where RX mappings work directly (see patch_libjvm_jit_alloc.py /
     // patch_libjvm_mirror_brk.py). The launcher must therefore run the full
     // JIT26 handshake (script upload + probe + exception ports) on every
     // iOS 26+ device, regardless of the TXM classification. Skipping it on
@@ -451,7 +709,23 @@ int launchJVMWithArgs(NSString *username, id launchTarget, int width, int height
     // enforcement happens at the mirror decision (classic path needs an attached
     // debugger, not a script — so script failures must NOT abort a classic launch).
     BOOL jitScriptAlive = YES;
+    // Whether the JIT script answered the probe brk at all. A brk that nobody
+    // services means no script is attached: the runtime's own code-cache brks
+    // would then be fatal (SIGTRAP with the default disposition kills the app),
+    // so the launch is refused with an actionable error instead.
+    BOOL jitScriptServiced = NO;
     BOOL preflightOK = NO;
+    // The JIT trap guard covers the WHOLE launch, on every iOS version: the
+    // patched runtime routes code-cache allocation through brk #0xf00d /
+    // #0x6a, and the debugger can disappear mid-session (the built-in
+    // StikJIT helper runs in its own extension process, so the system killing
+    // that extension detaches it). An unserviced brk then hits the default
+    // SIGTRAP action, which kills the app and drops the user back on the home
+    // screen with no crash log. The cleanup attribute restores the previous
+    // disposition on every exit path, including the early error returns.
+    struct sigaction jitTrapOriginalSa __attribute__((cleanup(restoreJITTrapGuard)));
+    sigaction(SIGTRAP, NULL, &jitTrapOriginalSa);
+    installJITTrapGuard();
     if (jit26Handshake) {
         // Ensure UniversalJIT26.js is synced to Documents, LCAppInfo.plist, and Clipboard
         init_setupUniversalJITScript(YES);
@@ -479,30 +753,40 @@ int launchJVMWithArgs(NSString *username, id launchTarget, int width, int height
             [PLLogOutputView handleExitCode:1];
             return 1;
         }
-        struct sigaction jitTrapSa = {0};
-        struct sigaction oldTrapSa;
-        jitTrapSa.sa_handler = onUnservicedBrk;
-        sigemptyset(&jitTrapSa.sa_mask);
-        jitTrapSa.sa_flags = 0;
-        sigaction(SIGTRAP, &jitTrapSa, &oldTrapSa);
-        JIT26SetDetachAfterFirstBr(NO);
-        // The first brk must be the base-script probe.  StikDebug attaches and
-        // starts the assigned Universal JIT script while servicing that brk;
-        // sending our extension first can leave an unattached debugger waiting
-        // forever on command 2 (the black screen seen before "probe returned").
+        // The FIRST brk must be the base-script probe: StikDebug attaches and
+        // starts the assigned Universal JIT script while servicing that brk,
+        // and a stale assigned script (from an older launcher) only knows the
+        // probe/extension commands. Sending JIT26SetDetachAfterFirstBr (cmd 3)
+        // here made such scripts log "Unknown command 3" and leave the thread
+        // stopped forever — the black-screen freeze users hit with StikDebug.
+        // The detach policy is applied later, after the extension re-registered
+        // commands 3/4 (see JIT26SetDetachAfterFirstBrGuarded callers).
         // Use the same brk #0xf00d path as patched libjvm (not legacy brk #0x69).
         void *volatile probeMapping = NULL;
-        g_jitTrapArmed = 1;
-        if (sigsetjmp(g_jitTrapJmp, 1) == 0) {
-            probeMapping = JIT26PrepareRegion(NULL, getpagesize());
-        } else {
-            NSLog(@"[JavaLauncher] JIT26 probe brk was NOT serviced on this thread "
-                  @"(debugger detached or has no script). Failing loudly instead of spinning.");
+        volatile int probeServiced = 0;
+        // The script may still be starting up when the game launches, so give
+        // it a couple of chances: an unserviced probe is fatal further down
+        // (the runtime's own code-cache brk would be unserviced too).
+        for (volatile int attempt = 0; attempt < 3 && !probeServiced; attempt++) {
+            if (attempt > 0) {
+                usleep(200 * 1000);
+            }
+            armJITTrap();
+            if (sigsetjmp(g_jitTrapJmp, 1) == 0) {
+                probeMapping = JIT26PrepareRegion(NULL, getpagesize());
+                probeServiced = 1;
+            } else {
+                NSLog(@"[JavaLauncher] JIT26 probe brk was NOT serviced on this thread "
+                      @"(debugger detached or has no script), attempt %d. Failing loudly instead of spinning.",
+                      attempt + 1);
+            }
+            disarmJITTrap();
         }
-        g_jitTrapArmed = 0;
+        jitScriptServiced = probeServiced ? YES : NO;
         NSLog(@"[JavaLauncher] JIT26 probe returned %p (txm=%d, flags=0x%X)", probeMapping,
             DeviceHasTXM(), (unsigned)DeviceGetJITFlags(NO));
-        JITReportLine(@"probe=%p valid=%d", probeMapping, JIT26ProbeLooksValid(probeMapping));
+        JITReportLine(@"probe=%p serviced=%d valid=%d", probeMapping, probeServiced,
+            JIT26ProbeLooksValid(probeMapping));
         // Soft-fail: a dead script only matters for the mirror path (enforced at
         // the mirror decision). The classic path needs attach, not a script.
         BOOL probeValid = JIT26ProbeLooksValid(probeMapping);
@@ -517,7 +801,7 @@ int launchJVMWithArgs(NSString *username, id launchTarget, int width, int height
         if (extensionScript.length > 0) {
             NSLog(@"[JavaLauncher] Loading UniversalJIT26Extension.js (%lu bytes)", (unsigned long)extensionScript.length);
             BOOL extensionDelivered = YES;
-            g_jitTrapArmed = 1;
+            armJITTrap();
             if (sigsetjmp(g_jitTrapJmp, 1) == 0) {
                 JIT26SendJITScript(extensionScript);
             } else {
@@ -525,7 +809,7 @@ int launchJVMWithArgs(NSString *username, id launchTarget, int width, int height
                 NSLog(@"[JavaLauncher] Extension brk was NOT serviced — the StikDebug script "
                       @"does not implement command 2 (0x68). Assign UniversalJIT26.js in StikDebug.");
             }
-            g_jitTrapArmed = 0;
+            disarmJITTrap();
             if (!extensionDelivered) {
                 init_setupUniversalJITScript(YES);
                 JITReportLine(@"extension=UNSERVICED");
@@ -541,8 +825,9 @@ int launchJVMWithArgs(NSString *username, id launchTarget, int width, int height
             NSLog(@"[JavaLauncher] UniversalJIT26Extension.js is missing or empty; using assigned base JIT script only");
         }
         } // end extension attempt (skipped entirely when probe already failed)
-        // ALWAYS restore the pre-handshake SIGTRAP disposition before continuing.
-        sigaction(SIGTRAP, &oldTrapSa, NULL);
+        // The trap guard stays installed from here on: the runtime keeps
+        // raising brks while it allocates its code cache, and an unserviced
+        // one must not kill the app (the handler consumes it instead).
         if (jitScriptAlive) {
         // Install the dyld LV bypass WHILE StikDebug is still attached. If we wait
         // until after detach-after-first-br, processIsCurrentlyDebugged() is false
@@ -551,22 +836,62 @@ int launchJVMWithArgs(NSString *username, id launchTarget, int width, int height
         NSLog(@"[JavaLauncher] DyldLVBypass init completed during JIT26 handshake");
         JITReportLine(@"dyld mmap_matches=%d mmap_ok=%d fcntl_matches=%d fcntl_ok=%d",
             g_dyldMmapMatches, g_dyldMmapOK, g_dyldFcntlMatches, g_dyldFcntlOK);
-        JIT26SetDetachAfterFirstBr(!jit26AlwaysAttached);
+        // Safe here: the probe above proved the script services brks and the
+        // extension just re-registered command 3 even for stale base scripts.
+        JIT26SetDetachAfterFirstBrGuarded(!jit26AlwaysAttached);
         init_jit_vm_remap_hook();
-        // make sure we don't get stuck in EXC_BAD_ACCESS
+        // Make sure we don't get stuck in EXC_BAD_ACCESS. The mask deliberately
+        // does NOT include EXC_MASK_BREAKPOINT: the JIT breakpoints are
+        // serviced by the debugger's exception server, and taking the
+        // breakpoint port away from it would turn every brk into a SIGTRAP
+        // that the guard above has to fake.
         task_set_exception_ports(mach_task_self(), EXC_MASK_BAD_ACCESS, 0, EXCEPTION_DEFAULT, MACHINE_THREAD_STATE);
         // Pre-flight: prove debugger-blessed memory is really executable. A failure
         // is RECORDED, not fatal here: the mirror decision below is the single
         // enforcement point (classic path may still work via native MAP_JIT bless).
-        preflightOK = JIT26ExecPreflight();
+        // Guarded: the preflight raises a brk, and a script that died in the
+        // meantime must not kill the launch (same reason as the mirror preflight).
+        armJITTrap();
+        if (sigsetjmp(g_jitTrapJmp, 1) == 0) {
+            preflightOK = JIT26ExecPreflight();
+        } else {
+            NSLog(@"[JavaLauncher] exec preflight brk was NOT serviced (script died mid-launch)");
+        }
+        disarmJITTrap();
         JITReportLine(@"preflight=%d", preflightOK);
         if (!preflightOK) {
             NSLog(@"[JavaLauncher] preflight failed — recording; mirror gate decides");
             jitScriptAlive = NO;
         }
         } // end script-dependent section (dyld bypass + preflight need a live script)
-        JITReportLine(@"script_alive=%d", jitScriptAlive);
+        JITReportLine(@"script_alive=%d serviced=%d", jitScriptAlive, jitScriptServiced);
+        // A brk that nobody serviced means the JIT script is not attached. The
+        // patched runtime routes its code-cache allocation through brk
+        // #0xf00d, so the JVM's first trap would be unserviced too and the
+        // kernel's default SIGTRAP action would kill the app - the user is
+        // kicked back to the home screen with no explanation. Refuse the
+        // launch with an actionable message instead.
+        if (!jitScriptServiced) {
+            UIKit_returnToSplitView();
+            showDialog(localize(@"Error", nil),
+                @"No JIT script serviced Witch's breakpoints, so the game cannot start.\n\n"
+                 @"1. Check that the debugger that provides JIT for Witch is still attached\n"
+                 @"2. With StikDebug, assign \"Universal JIT 26\" (UniversalJIT26.js) to Witch\n"
+                 @"3. Re-enable JIT for Witch, close and reopen Witch, then try again\n\n"
+                 "(Or pick another JIT method in Settings → Game → JIT.)\n\n"
+                 "Please send Documents/JITReport-latest.txt with your report.");
+            [PLLogOutputView handleExitCode:1];
+            return 1;
+        }
     }
+    // Without a debugger the JIT breakpoints have to resolve to the default
+    // handler, so a brk becomes a SIGTRAP that the guard consumes instead of
+    // hitting the default action. A port left behind by a debugger that died
+    // (the built-in helper lives in its own extension process, so the system
+    // killing it leaves the task with a dead exception port) would swallow
+    // the breakpoint - or kill the task with EXC_CRASH, which is another way
+    // to end up on the home screen with no log.
+    resetJITBreakpointExceptionPort();
     // iOS 26/27 still needs the LV bypass for JNA, renderer dylibs, and mods
     // extracted to Documents. StikDebug keeps us CS_DEBUGGED so the mirrored
     // dyld patches are legal — do not leave this off just because
@@ -616,8 +941,101 @@ int launchJVMWithArgs(NSString *username, id launchTarget, int width, int height
 
     // Setup AMETHYST_RENDERER
     NSString *renderer = [PLProfiles resolveKeyForCurrentProfile:@"renderer"];
+    if (!isExperimentalMetalRendererEnabled() &&
+        ([renderer isEqualToString:@ RENDERER_NAME_METAL] ||
+         [renderer isEqualToString:@ RENDERER_NAME_METAL_MACOS])) {
+        NSLog(@"[JavaLauncher] Experimental Metal renderer '%@' is disabled; falling back to auto (set WITCH_ENABLE_METAL_RENDERERS=1 to enable)", renderer);
+        renderer = @"auto";
+    }
     NSLog(@"[JavaLauncher] RENDERER is set to %@\n", renderer);
     setenv("AMETHYST_RENDERER", renderer.UTF8String, 1);
+    // MC 26.x graphics-API forcing policy (video.graphics_backend_forcing pref).
+    // Values match `--graphicsBackend` semantics: vulkan|opengl force that API,
+    // "none" appends nothing so MC honors its own in-game "Graphics Backend"
+    // option, auto keeps the legacy renderer-derived choice (Tools.java).
+    {
+        id gbfPref = getPrefObject(@"video.graphics_backend_forcing");
+        NSString *forcing = [gbfPref isKindOfClass:NSString.class] ? (NSString *)gbfPref : @"auto";
+        NSString *envValue = @"auto";
+        if ([forcing isEqualToString:@"vulkan"] || [forcing isEqualToString:@"opengl"]) {
+            envValue = forcing;
+        } else if ([forcing isEqualToString:@"none"]) {
+            envValue = @"none";
+        }
+        setenv("WITCH_FORCE_BACKEND", envValue.UTF8String, 1);
+        NSLog(@"[JavaLauncher] WITCH_FORCE_BACKEND → %@ (pref %@)", envValue, forcing);
+    }
+    if ([renderer isEqualToString:@ RENDERER_NAME_METAL_MACOS]) {
+        // Opt-in marker for mods that were ported from macOS and need the
+        // compatibility path. The plain "metal" renderer stays untouched.
+        setenv("WITCH_METAL_MACOS", "1", 1);
+        NSLog(@"[JavaLauncher] Metal macOS-port compatibility enabled");
+        // MetalBridgeKit re-implements the macOS-only Metal API surface the
+        // ported mod calls (managed storage, BC formats, tessellation patch,
+        // sparse pages, argument replay) on top of iOS public APIs. Load it
+        // RTLD_GLOBAL so its ObjC classes (MBProbe, ...) register in-process
+        // before the mod's own dlopen/dlsym pass, and publish absolute paths
+        // so the mod can reach the framework from any working directory.
+        NSString *bridgeFrameworks = NSBundle.mainBundle.privateFrameworksPath;
+        NSString *bridgeBundle = [bridgeFrameworks stringByAppendingPathComponent:@"MetalBridgeKit.framework"];
+        NSString *bridgeBinary = [bridgeBundle stringByAppendingPathComponent:@"MetalBridgeKit"];
+        if ([[NSFileManager defaultManager] fileExistsAtPath:bridgeBinary]) {
+            void *bridge = dlopen(bridgeBinary.UTF8String, RTLD_LAZY | RTLD_GLOBAL);
+            if (bridge != NULL) {
+                setenv("WITCH_METAL_BRIDGE_PATH", bridgeBinary.UTF8String, 1);
+                setenv("WITCH_METAL_BRIDGE_BUNDLE", bridgeBundle.UTF8String, 1);
+                Class probeClass = NSClassFromString(@"MBProbe");
+                if (probeClass && [probeClass respondsToSelector:@selector(frameworkVersion)]) {
+                    NSString *version = [probeClass performSelector:@selector(frameworkVersion)];
+                    NSLog(@"[MetalBridgeKit] Loaded %@ (v%@)", bridgeBinary, version);
+                } else {
+                    NSLog(@"[MetalBridgeKit] Loaded %@ (MBProbe class unavailable)", bridgeBinary);
+                }
+                // On-device verification of every service: set
+                // WITCH_METAL_PROBE=0 to skip it on slow devices.
+                const char *probeFlag = getenv("WITCH_METAL_PROBE");
+                if (!probeFlag || strcmp(probeFlag, "0") != 0) {
+                    Class probe = NSClassFromString(@"MBProbe");
+                    if (probe && [probe respondsToSelector:@selector(runAllServices)]) {
+                        NSString *report = [probe performSelector:@selector(runAllServices)];
+                        NSLog(@"[MetalBridgeKit] Service probes:\n%@", report);
+                    } else {
+                        NSLog(@"[MetalBridgeKit] MBProbe class unavailable");
+                    }
+                }
+            } else {
+                NSLog(@"[MetalBridgeKit] dlopen %@ failed: %s", bridgeBinary, dlerror());
+            }
+        } else {
+            NSLog(@"[MetalBridgeKit] Framework missing at %@ — the macOS Metal mod will not find its compatibility path", bridgeBundle);
+        }
+    }
+
+    // MobileGlues resolves every EGL/GLES symbol with dlsym(RTLD_DEFAULT) at
+    // load time, and MC 26.2's NativeLibrariesBootstrap dlopens it during JVM
+    // startup (opengl.libname) before any GLFW/SDL window hook can run — the
+    // old pojavInitOpenGL preload comes too late and the backend probe hangs.
+    // Pre-load the backend now, while still before JLI_Launch. GLFW-path
+    // games re-run the same idempotent preload from pojavInitOpenGL.
+    // Explicit renderers only: "auto" can still resolve to GL4ES from the
+    // game's context-version hint and must not inherit a MobileGlues backend.
+    if ([renderer isEqualToString:@ RENDERER_NAME_MOBILEGLUES] ||
+        [renderer isEqualToString:@ RENDERER_NAME_MOLTENVK]) {
+        PLPreloadMobileGluesBackend();
+    } else if ([renderer isEqualToString:@ RENDERER_NAME_LTW]) {
+        // libltw's constructor dlopens LIBGL_EGL when LWJGL loads it during JVM
+        // startup. MC 26.3 reaches that point before pojavInitOpenGL, so the
+        // backend and environment must be ready here or proc_init() aborts.
+        PLPreloadLTWBackend();
+    } else if ([renderer isEqualToString:@ RENDERER_NAME_MTL_ANGLE]) {
+        // libtinygl4angle_metal (Metal variant) and the canonical Vulkan pair
+        // are both dependencies of the two ANGLE images the app uses; the
+        // backend selected by the "ANGLE Backend" setting must be in the
+        // global scope before JLI_Launch (LWJGL loads libtinygl4angle during
+        // JVM startup, and the game resolves GL entry points through
+        // RTLD_DEFAULT). Idempotent — pojavInitOpenGL re-runs it.
+        PLPreloadTinyAngleBackend();
+    }
 
     // The TouchController mod (0.3.1-alpha13+) only activates its iOS
     // platform when TOUCH_CONTROLLER_PROXY_SOCKET is set. It must be set
@@ -648,6 +1066,7 @@ int launchJVMWithArgs(NSString *username, id launchTarget, int width, int height
         getenv("POJAV_HOME"), getPrefObject(@"general.game_directory"),
         [PLProfiles resolveKeyForCurrentProfile:@"gameDir"]]
         .stringByStandardizingPath;
+    setenv("POJAV_GAME_DIR_PROFILE", gameDir.UTF8String, 1);
     NSLog(@"[JavaLauncher] Looking for Java %d or later", minVersion);
     NSString *javaHome = getSelectedJavaHome(defaultJRETag, minVersion);
 
@@ -660,12 +1079,12 @@ int launchJVMWithArgs(NSString *username, id launchTarget, int width, int height
     }
 
     if (requiresDebugJITMapping && !RuntimeSupportsDebugJITMapping(javaHome)) {
-        NSLog(@"[JavaLauncher] Missing mirror marker: javaHome=%@ marker=.witch-mirror-mapping (txm=%d, flags=0x%X). Pick a bundled Java 21/25 runtime rebuilt with `make jre`.",
+        NSLog(@"[JavaLauncher] Missing mirror marker: javaHome=%@ marker=.witch-mirror-mapping (txm=%d, flags=0x%X). Pick a bundled Java 8/17/21/25 runtime rebuilt with `make jre`.",
             javaHome, DeviceHasTXM(), (unsigned)DeviceGetJITFlags(NO));
         UIKit_returnToSplitView();
         showDialog(localize(@"Error", nil),
             @"The selected Java runtime does not support JIT on this iOS version. "
-             "Open Settings and choose a bundled Java 21 or 25 runtime.");
+             "Open Settings and choose a bundled Java 8, 17, 21 or 25 runtime.");
         return 1;
     }
 
@@ -677,12 +1096,19 @@ int launchJVMWithArgs(NSString *username, id launchTarget, int width, int height
     // devices (iPhone 12/13 & co.) and hung them inside JLI_Launch.
     BOOL needsMirrorJITPrepare = jit26Handshake && RuntimeSupportsDebugJITMapping(javaHome);
     if (needsMirrorJITPrepare) {
-        // Java 21/25 patched runtimes use mirror_w/x on every iOS 26.6+/27 device.
-        // StikDebug must stay attached through vm_remap and follow-up prepare calls.
-        JIT26SetDetachAfterFirstBr(NO);
-        NSLog(@"[JavaLauncher] Mirror-capable runtime: debugger kept attached for JIT prepare");
-    } else if (requiresDebugJITMapping && !jit26AlwaysAttached) {
-        JIT26SetDetachAfterFirstBr(YES);
+        // Mirror-capable patched runtimes use mirror_w/x on every iOS 26.6+/27
+        // device. StikDebug must stay attached through vm_remap and follow-up
+        // prepare calls. Only send the detach-policy command when the script
+        // proved it services brks — with a dead script the brk would trap with
+        // the default disposition (crash) or freeze a stale script thread.
+        if (jitScriptAlive) {
+            JIT26SetDetachAfterFirstBrGuarded(NO);
+            NSLog(@"[JavaLauncher] Mirror-capable runtime: debugger kept attached for JIT prepare");
+        } else {
+            NSLog(@"[JavaLauncher] Mirror-capable runtime but script is dead; skipping detach-policy command (mirror gate will decide)");
+        }
+    } else if (requiresDebugJITMapping && !jit26AlwaysAttached && jitScriptAlive) {
+        JIT26SetDetachAfterFirstBrGuarded(YES);
     }
 
     if ([javaHome hasPrefix:@(getenv("POJAV_HOME"))]) {
@@ -712,31 +1138,25 @@ int launchJVMWithArgs(NSString *username, id launchTarget, int width, int height
         getEntitlementValue(@"com.apple.developer.kernel.increased-memory-limit"),
         getEntitlementValue(@"com.apple.developer.kernel.extended-virtual-addressing"),
         getEntitlementValue(@"com.apple.security.cs.disable-library-validation"));
-    if (getPrefBool(@"java.auto_ram")) {
+    BOOL manualAllocation = !getPrefBool(@"java.auto_ram");
+    if (!manualAllocation) {
         CGFloat autoRatio = getEntitlementValue(@"com.apple.private.memorystatus") ? 0.4 : 0.25;
         allocmem = roundf((NSProcessInfo.processInfo.physicalMemory / 1048576) * autoRatio);
-        // Auto sizing is derived from physical RAM, not from the process's
-        // Jetsam allowance, so it can over-allocate on sideloaded installs
-        // (no memorystatus entitlement) where the kill limit is fixed and
-        // low. Keep the allowance cap here to prevent launch-time Jetsam kills.
-        allocmem = capAllocationToJetsamAllowance(allocmem);
     } else {
-        // Manual allocation: honor the user's setting as-is. The JVM commits
-        // heap lazily (ParallelGC), so -Xmx is a ceiling, not a preallocation.
-        // Just warn when the requested heap exceeds the actual Jetsam kill
-        // allowance so the user knows a memory-heavy session may be killed.
+        // Manual allocation: the JVM commits heap lazily, so -Xmx is a
+        // ceiling, but a ceiling above the Jetsam budget still kills the
+        // process before the game can plateau. Clamp it, don't just warn.
         allocmem = getPrefInt(@"java.allocated_memory");
-        if (!getEntitlementValue(@"com.apple.private.memorystatus")) {
-            size_t availableMem = availableMemoryMB();
-            if (availableMem > 0 && (size_t)allocmem > availableMem) {
-                NSLog(@"[JavaLauncher] Warning: requested %d MB heap exceeds the Jetsam kill allowance (~%zu MB); the game may be killed when its memory usage approaches the limit", allocmem, availableMem);
-                showDialog(localize(@"Warning", nil),
-                    [NSString stringWithFormat:@"You requested %d MB RAM, but the kill limit (Jetsam) of a Sideloaded install is only about %zu MB. Memory above this force-closes the game mid-play. Use Auto RAM or set a value below %zu MB.",
-                        allocmem, availableMem, availableMem]);
-            }
-        }
     }
-    NSLog(@"[JavaLauncher] Max RAM allocation is set to %d MB", allocmem);
+    int requestedAlloc = allocmem;
+    allocmem = capAllocationToJetsamAllowance(allocmem);
+    if (manualAllocation && allocmem != requestedAlloc) {
+        showDialog(localize(@"Warning", nil),
+            [NSString stringWithFormat:@"Your %d MB RAM setting exceeds the safe budget for this device/install. Witch reduced it to %d MB so Minecraft is not force-closed by iOS (Jetsam) mid-play. Lower the render distance or use Auto RAM for more headroom.",
+                requestedAlloc, allocmem]);
+    }
+    int directmem = maxDirectMemoryMB(allocmem);
+    NSLog(@"[JavaLauncher] Max RAM allocation is set to %d MB (direct buffer cap %d MB)", allocmem, directmem);
     if (!validateVirtualMemorySpace(allocmem)) {
         UIKit_returnToSplitView();
         if (getEntitlementValue(@"com.apple.developer.kernel.increased-memory-limit")) {
@@ -757,6 +1177,12 @@ int launchJVMWithArgs(NSString *username, id launchTarget, int width, int height
     }
     margv[++margc] = "-Xms128M";
     margv[++margc] = [NSString stringWithFormat:@"-Xmx%dM", allocmem].UTF8String;
+    // Without this, HotSpot defaults the direct-buffer cap to Runtime.maxMemory()
+    // (sun/misc/VM.java: directMemory = maxMemory), so LWJGL/Sodium/Iris direct
+    // buffers can add another -Xmx of native memory on top of the Java heap.
+    // That is the main cause of the ~30-minute Jetsam kill on both 4 GB and
+    // 6 GB devices. Users can still override it from java.java_args.
+    margv[++margc] = [NSString stringWithFormat:@"-XX:MaxDirectMemorySize=%dM", directmem].UTF8String;
     // One line per GC ("700M->300M(768M)") in latestlog: the only way to
     // see the JVM's used/committed heap without rebuilding MC's logging.
     // Accepted by every JDK we ship (JDK8 natively, JDK9+ as an alias of
@@ -766,19 +1192,25 @@ int launchJVMWithArgs(NSString *username, id launchTarget, int width, int height
     // Add DH native library path if available
     NSString *javaLibraryPath = [NSBundle.mainBundle.bundlePath stringByAppendingPathComponent:@"Frameworks"];
     NSString *lwjglVersion = [VersionDirectoryManager resolveEffectiveLwjglVersion];
-    if ([lwjglVersion isEqualToString:@"3.4.1"]) {
-        javaLibraryPath = [NSString stringWithFormat:@"%@:%@",
-            [NSBundle.mainBundle.bundlePath stringByAppendingPathComponent:@"libs/lwjgl41_natives"],
-            javaLibraryPath];
-    } else if ([lwjglVersion isEqualToString:@"3.3.6"]) {
-        javaLibraryPath = [NSString stringWithFormat:@"%@:%@",
-            [NSBundle.mainBundle.bundlePath stringByAppendingPathComponent:@"libs/lwjgl36_natives"],
-            javaLibraryPath];
+    NSString *lwjglCode = [lwjglVersion isEqualToString:@"3.4.1"] ? @"41"
+        : ([lwjglVersion isEqualToString:@"3.3.6"] ? @"36" : @"33");
+    // User-installed LWJGL (Runtime Download screen) lives in
+    // POJAV_HOME/lwjgl/lwjgl<code>/{lwjgl.jar,natives,version.txt}. It only
+    // overrides the bundled copy when the full install marker exists.
+    NSString *externalLwjglDir = [NSString stringWithFormat:@"%s/lwjgl/lwjgl%@", getenv("POJAV_HOME"), lwjglCode];
+    NSString *externalLwjglJar = [externalLwjglDir stringByAppendingPathComponent:@"lwjgl.jar"];
+    NSString *externalLwjglNatives = [externalLwjglDir stringByAppendingPathComponent:@"natives"];
+    BOOL useExternalLwjgl =
+        [NSFileManager.defaultManager fileExistsAtPath:[externalLwjglDir stringByAppendingPathComponent:@"version.txt"]]
+        && [NSFileManager.defaultManager fileExistsAtPath:externalLwjglJar];
+    NSString *lwjglNativesDir;
+    if (useExternalLwjgl && [NSFileManager.defaultManager fileExistsAtPath:externalLwjglNatives]) {
+        lwjglNativesDir = externalLwjglNatives;
     } else {
-        javaLibraryPath = [NSString stringWithFormat:@"%@:%@",
-            [NSBundle.mainBundle.bundlePath stringByAppendingPathComponent:@"libs/lwjgl33_natives"],
-            javaLibraryPath];
+        lwjglNativesDir = [NSBundle.mainBundle.bundlePath stringByAppendingPathComponent:
+            [NSString stringWithFormat:@"libs/lwjgl%@_natives", lwjglCode]];
     }
+    javaLibraryPath = [NSString stringWithFormat:@"%@:%@", lwjglNativesDir, javaLibraryPath];
     if (dhNativeLibPath) {
         javaLibraryPath = [NSString stringWithFormat:@"%@:%@", javaLibraryPath, dhNativeLibPath];
     }
@@ -810,9 +1242,39 @@ int launchJVMWithArgs(NSString *username, id launchTarget, int width, int height
     margv[++margc] = "-Dorg.lwjgl.system.allocator=system";
     //margv[++margc] = "-Dorg.lwjgl.util.NoChecks=true";
     margv[++margc] = "-Dlog4j2.formatMsgNoLookups=true";
-    // Voxy on iOS: cap geometry buffer at 256MB (iPhone 8 has 2GB RAM; Voxy
-    // defaults to a 3.7GB SSBO allocation which fails with GL_OUT_OF_MEMORY)
-    margv[++margc] = "-Dvoxy.geometryBufferSizeOverrideMB=256";
+    // Netty's native transport (kqueue on Apple platforms) ships as an unsigned
+    // dylib inside the game jars. Opening the Multiplayer screen makes the
+    // server list pinger ask netty for an event loop group, which touches
+    // io.netty.channel.kqueue.KQueue -> the class initializer extracts
+    // libnetty_transport_native_kqueue_*.dylib into tmp/ and System.load()s it.
+    // That dylib is unsigned, so dyld cannot map it executable; the
+    // DyldLVBypass fallback then hands dyld a mapping without the file's
+    // bytes, and the first native call into the "loaded" library faults and
+    // kills the game (the launcher log ends right at the exec map of
+    // libnetty_transport_native_kqueue). Netty's documented switch keeps the
+    // native transport off, so it falls back to plain NIO - which is what
+    // Minecraft uses on every non-Linux platform anyway.
+    margv[++margc] = "-Dio.netty.transport.noNative=true";
+    // Voxy sizes its geometry SSBO from GL_MAX_SHADER_STORAGE_BLOCK_SIZE by
+    // rounding up to the next power of two and then doubling it. MobileGL
+    // advertises at most 512MB, so Voxy asks for 1GB even though Metal's
+    // maxBufferLength on A11 is ~747MB and the 2GB Jetsam budget cannot hold
+    // it. Use Voxy's supported override, but scale it with the device instead
+    // of pinning every iPhone to the 2GB-phone value.
+    size_t physMB = (size_t)(NSProcessInfo.processInfo.physicalMemory / (1024 * 1024));
+    size_t availMB = availableMemoryMB();
+    // Lower defaults: the old 256/384/512 MB + Sodium/Iris buffers alone
+    // exceed a 2 GiB Jetsam envelope. The user can still raise this via
+    // java.java_args if Voxy is installed and the device has headroom.
+    int voxyGeometryMB = 128;
+    if (physMB >= 4096 && (availMB == 0 || availMB >= 1800)) {
+        voxyGeometryMB = 256;
+    } else if (physMB >= 3072 && (availMB == 0 || availMB >= 1400)) {
+        voxyGeometryMB = 192;
+    }
+    NSLog(@"[JavaLauncher] Voxy geometry buffer: %d MB (physical=%zu MB, jetsam allowance=%zu MB)",
+          voxyGeometryMB, physMB, availMB);
+    margv[++margc] = [NSString stringWithFormat:@"-Dvoxy.geometryBufferSizeOverrideMB=%d", voxyGeometryMB].UTF8String;
 
     // Preset OpenGL libname
     const char *glLibName = getenv("AMETHYST_RENDERER");
@@ -852,11 +1314,67 @@ int launchJVMWithArgs(NSString *username, id launchTarget, int width, int height
             // (br_* table), không qua EGL.
             openglLibName = RENDERER_NAME_TGLMT;
             NSLog(@"[JavaLauncher] opengl.libname → %s (TGLMT native GL 4.6)", openglLibName);
+        } else if (strcmp(glLibName, RENDERER_NAME_METAL) == 0 ||
+                   strcmp(glLibName, RENDERER_NAME_METAL_MACOS) == 0) {
+            // MC 26.3's NativeLibrariesBootstrap calls GL.getFunctionProvider()
+            // before any backend is picked. A Metal mod replaces the GPU
+            // backend, so this library only has to export gl* symbols; no GL
+            // context, bridge table or swapchain is created for it.
+            openglLibName = RENDERER_NAME_TGLMT;
+            NSLog(@"[JavaLauncher] opengl.libname → %s (Metal/%s mod: symbol provider only)",
+                  openglLibName, glLibName);
         } else if (strcmp(glLibName, RENDERER_NAME_MOLTENVK) == 0) {
             // MoltenVK: use MobileGlues for GL entry points
             openglLibName = RENDERER_NAME_MOBILEGLUES;
             NSLog(@"[JavaLauncher] opengl.libname → %s (MoltenVK fallback)", openglLibName);
-        } else if ([ZinkConfig isZinkUsingEGL]) {
+        } else if (strcmp(glLibName, RENDERER_NAME_MOBILEGLUES) == 0) {
+            openglLibName = RENDERER_NAME_MOBILEGLUES;
+            id angleBackendPref = getPrefObject(@"mobileglues.angle_backend");
+            NSString *angleBackend = (angleBackendPref && [angleBackendPref isKindOfClass:[NSString class]])
+                ? (NSString *)angleBackendPref : @"tgles";
+            if ([angleBackend isEqualToString:@"metal"]) {
+                // MC 26.x drives the new DSA/vertex-attrib renderer. Legacy MG
+                // 1.3.5 predates those fixes and drops the whole GUI pass, so
+                // use the current MG there. Keep legacy for 1.21.x, where the
+                // current MG + ANGLE Metal combination was previously broken.
+                BOOL useLegacyMetal = YES;
+                if (versionId.length > 0) {
+                    NSInteger major = [[versionId componentsSeparatedByString:@"."].firstObject integerValue];
+                    if (major >= 26) useLegacyMetal = NO;
+                }
+                setenv("MOBILEGL_LEGACY_METAL", useLegacyMetal ? "1" : "0", 1);
+                NSString *legacyPath = [[NSBundle mainBundle].privateFrameworksPath
+                    stringByAppendingPathComponent:@ RENDERER_NAME_MOBILEGLUES_OLD];
+                if (useLegacyMetal && [fm fileExistsAtPath:legacyPath]) {
+                    openglLibName = RENDERER_NAME_MOBILEGLUES_OLD;
+                    NSLog(@"[JavaLauncher] opengl.libname → %s (MobileGlues legacy + ANGLE Metal)", openglLibName);
+                } else {
+                    NSLog(@"[JavaLauncher] opengl.libname → %s (MobileGlues current + ANGLE Metal, legacy=%d)",
+                          openglLibName, useLegacyMetal);
+                }
+            } else {
+                NSLog(@"[JavaLauncher] opengl.libname → %s (MobileGlues current, backend=%@)",
+                      openglLibName, angleBackend);
+            }
+        } else if (strcmp(glLibName, RENDERER_NAME_LTW) == 0) {
+            // LTW exports both the GL wrappers and eglGetProcAddress; loading it
+            // directly is what makes LD's gl* calls go through the LTW override
+            // chain. Do NOT let the global Zink/Mesa preference below hijack
+            // this with libEGL_Mesa26.dylib.
+            openglLibName = RENDERER_NAME_LTW;
+            NSLog(@"[JavaLauncher] opengl.libname → %s (LTW GL wrapper)", openglLibName);
+        } else if (strcmp(glLibName, RENDERER_NAME_MTL_ANGLE) == 0) {
+            // TinyANGLE: when the "ANGLE Backend" setting is metal (default),
+            // load the Metal variant of the binary (libtinygl4angle_metal
+            // links the Metal pair instead of the canonical Vulkan pair).
+            // The Metal pair is pre-loaded before JLI_Launch; this makes LWJGL
+            // load the same image that owns the GL entry points.
+            NSString *angleBackend = PLAngleBackend();
+            openglLibName = [angleBackend isEqualToString:@"metal"]
+                ? "libtinygl4angle_metal.dylib" : RENDERER_NAME_MTL_ANGLE;
+            NSLog(@"[JavaLauncher] opengl.libname → %s (TinyANGLE, ANGLE Backend=%@)",
+                  openglLibName, angleBackend);
+        } else if (strncmp(glLibName, "libOSMesa", 9) == 0 && [ZinkConfig isZinkUsingEGL]) {
             // Mesa 26.2.2 (EGL): LWJGL must resolve GL procs from libEGL.1.dylib
             openglLibName = "libEGL_Mesa26.dylib";
             NSLog(@"[JavaLauncher] opengl.libname → %s (Mesa 26.2.2 EGL mode)", openglLibName);
@@ -922,10 +1440,92 @@ int launchJVMWithArgs(NSString *username, id launchTarget, int width, int height
     // so the result is libspirv-cross-c-shared.0.dylib (not
     // liblibspirv-cross-c-shared.0.dylib.dylib).
     margv[++margc] = "-Dorg.lwjgl.spvc.libname=spirv-cross-c-shared.0";
+    margv[++margc] = "-Dmetallum.platform=ios-arm64";
 
     NSString *librariesPath = [NSString stringWithFormat:@"%@/libs", NSBundle.mainBundle.bundlePath];
     margv[++margc] = [NSString stringWithFormat:@"-javaagent:%@/cacio-init-agent.jar=", librariesPath].UTF8String;
     margv[++margc] = [NSString stringWithFormat:@"-javaagent:%@/patchjna_agent.jar=", librariesPath].UTF8String;
+
+    // FidelityFX (FSR 1 / FSR 2 / FSR 3 upscaler / frame generation). The agent
+    // jar is only attached when one of the features is enabled. The two are
+    // independent and can be combined: fsr3.upscaler (0=off 1=FSR1 2=FSR2
+    // 3=FSR3U) is mapped to the native upscaler modes (FSR1=2 FSR2=3 FSR3U=4),
+    // fsr3.framegen enables frame interpolation.
+    NSInteger fsr3Upscaler = getPrefInt(@"fsr3.upscaler");
+    BOOL fsr3Framegen = getPrefBool(@"fsr3.framegen");
+    if (fsr3Upscaler >= 1 && fsr3Upscaler <= 3) {
+        fsr3Upscaler += 1;  // UI value -> native Fsr3Native mode (FSR1=2 ...).
+    } else {
+        fsr3Upscaler = 0;
+    }
+    const BOOL fsr3Active = (fsr3Upscaler > 0 || fsr3Framegen);
+    setenv("WITCH_MVK_SUBGROUP_WORKGROUP", fsr3Active ? "1" : "0", 1);
+    if (fsr3Active) {
+        float fsr3Scale = getPrefFloat(@"fsr3.resolution_scale");
+        if (fsr3Scale <= 0.0f || fsr3Scale > 1.0f) {
+            fsr3Scale = 1.0f;
+        }
+        float fsr3Sharpness = getPrefFloat(@"fsr3.sharpness");
+        if (fsr3Sharpness < 0.0f || fsr3Sharpness > 1.0f) {
+            fsr3Sharpness = 0.6f;
+        }
+        // Frame generation multiplier: the number of frames displayed per real
+        // frame (2 = classic x2, one generated frame). Values other than
+        // 2/3/4/6 fall back to 2.
+        NSInteger fsr3FgMultiplier = getPrefInt(@"fsr3.framegen_multiplier");
+        if (fsr3FgMultiplier != 2 && fsr3FgMultiplier != 3 &&
+            fsr3FgMultiplier != 4 && fsr3FgMultiplier != 6) {
+            fsr3FgMultiplier = 2;
+        }
+        // Sub-pixel TAA jitter: the FidelityFX temporal accumulation can
+        // only resolve the aliasing when the scene is rendered at a different
+        // sub-pixel position every frame. The agent skews the game's
+        // projection matrix accordingly. Only useful for the modes with a
+        // temporal accumulation (FSR2 / FSR3 upscaler).
+        BOOL fsr3Jitter = getPrefBool(@"fsr3.jitter");
+        margv[++margc] = [NSString stringWithFormat:
+            @"-javaagent:%@/fsr3-agent.jar=mode=%ld&fg=%d&fgx=%ld&scale=%.3f&sharp=%.3f&probe=%ld&jitter=%d",
+            librariesPath, (long)fsr3Upscaler, fsr3Framegen ? 1 : 0,
+            (long)fsr3FgMultiplier, fsr3Scale, fsr3Sharpness,
+            (long)getPrefInt(@"fsr3.probe"), fsr3Jitter ? 1 : 0].UTF8String;
+    }
+
+    // F3 debug overlay metadata. The agent patches the game's debug screen at
+    // class-load time (obfuscation-proof "Java: %s" marker); the values are
+    // passed as system properties, one -D per enabled line. Gated per toggle
+    // so a disabled line can never appear in-game.
+    if (getPrefBool(@"f3.enabled")) {
+        margv[++margc] = [NSString stringWithFormat:@"-javaagent:%@/f3agent.jar=", librariesPath].UTF8String;
+        if (getPrefBool(@"f3.show_chip")) {
+            NSString *chip = WitchChipName();
+            if (chip.length > 0) {
+                margv[++margc] = [NSString stringWithFormat:@"-Dwitch.f3.chip=%@", chip].UTF8String;
+            }
+        }
+        if (getPrefBool(@"f3.show_ios")) {
+            NSString *ios = UIDevice.currentDevice.systemVersion;
+            if (ios.length > 0) {
+                margv[++margc] = [NSString stringWithFormat:@"-Dwitch.f3.ios=%@", ios].UTF8String;
+            }
+        }
+        NSDictionary *appInfo = NSBundle.mainBundle.infoDictionary;
+        if (getPrefBool(@"f3.show_launcher_name")) {
+            NSString *name = appInfo[@"CFBundleDisplayName"] ?: appInfo[@"CFBundleName"] ?: @"Witch";
+            margv[++margc] = [NSString stringWithFormat:@"-Dwitch.f3.launcher=%@", name].UTF8String;
+        }
+        if (getPrefBool(@"f3.show_launcher_version")) {
+            NSString *version = appInfo[@"CFBundleShortVersionString"] ?: @"?";
+            margv[++margc] = [NSString stringWithFormat:@"-Dwitch.f3.version=%@", version].UTF8String;
+        }
+        if (getPrefBool(@"f3.show_build")) {
+            NSString *build = appInfo[@"CFBundleVersion"] ?: @"?";
+            margv[++margc] = [NSString stringWithFormat:@"-Dwitch.f3.build=%@", build].UTF8String;
+        }
+        if (getPrefBool(@"f3.show_build_type")) {
+            NSString *buildType = CONFIG_RELEASE ? @"Release" : @"Development";
+            margv[++margc] = [NSString stringWithFormat:@"-Dwitch.f3.buildtype=%@", buildType].UTF8String;
+        }
+    }
     if(getPrefBool(@"general.cosmetica")) {
         margv[++margc] = [NSString stringWithFormat:@"-javaagent:%@/arc_dns_injector.jar=23.95.137.176", librariesPath].UTF8String;
     }
@@ -995,7 +1595,52 @@ int launchJVMWithArgs(NSString *username, id launchTarget, int width, int height
     }
     if (mirrorEnabled) {
         margv[++margc] = "-XX:+MirrorMappedCodeCache";
-        NSLog(@"[JavaLauncher] MirrorMappedCodeCache enabled on iOS %ld.%ld", (long)NSProcessInfo.processInfo.operatingSystemVersion.majorVersion, (long)NSProcessInfo.processInfo.operatingSystemVersion.minorVersion);
+        // The mirror maps RW+RX aliases of the CodeCache; the default
+        // ReservedCodeCacheSize (240 MB on JDK 17+) commits pages as JIT warms
+        // up. 128 MB is ample for Minecraft + Iris and leaves headroom under
+        // the 2 GiB Jetsam ceiling.
+        margv[++margc] = "-XX:ReservedCodeCacheSize=128m";
+        NSLog(@"[JavaLauncher] MirrorMappedCodeCache enabled on iOS %ld.%ld (code cache capped at 128 MB)", (long)NSProcessInfo.processInfo.operatingSystemVersion.majorVersion, (long)NSProcessInfo.processInfo.operatingSystemVersion.minorVersion);
+
+        // Big mirror preflight: reserve + PROVE the full-size mirror region
+        // before the JVM exists and offer it to the script, so libjvm's own
+        // CodeCache request (brk cmd 1, addr=0 at ~1.0 s) is served from this
+        // region instead of a fresh _M mapping. The small preflight earlier
+        // only proves 2 pages; on A13/A14/A15 TXM devices the JVM's own
+        // request can land at 0x7000_0000_0000 where the exec blessing is
+        // ineffective → SIGBUS in StubRoutines::call_stub (hs_err BUS_ADRALN
+        // pc=0x70075340bc / 0x70075380bc). The offered size must be >= what
+        // the JVM asks for: JDK 21 requests exactly 240 MB (0xF000000, served
+        // OK — iPhone13,4 run of 2026-10-18) but JDK 25 requests 240 MB +
+        // 16 KB (ReservedCodeCacheSize = 251674624 = 0xF004000,
+        // hs_err_pid9437) and the script refuses to serve an offer smaller
+        // than the request, so the old 240 MB offer made java-25 fall back to
+        // the dead high band. JIT26_MIRROR_REGION_SIZE (244 MB) covers every
+        // bundled runtime with margin; the script serves requests of at most
+        // the offered size from this region.
+        // Guarded: a stale/dead script that does not service the brk must not
+        // kill the launch — mirror gates above already required a live script,
+        // this only covers it dying in between.
+        {
+            struct sigaction bigSa = {0};
+            struct sigaction bigOldSa;
+            bigSa.sa_sigaction = onUnservicedBrk;
+            sigemptyset(&bigSa.sa_mask);
+            bigSa.sa_flags = SA_SIGINFO;
+            sigaction(SIGTRAP, &bigSa, &bigOldSa);
+            void *mirrorRegion = NULL;
+            CFAbsoluteTime bigStart = CFAbsoluteTimeGetCurrent();
+            armJITTrap();
+            if (sigsetjmp(g_jitTrapJmp, 1) == 0) {
+                JIT26MirrorRegionPreflight((size_t)JIT26_MIRROR_REGION_SIZE, &mirrorRegion);
+            } else {
+                NSLog(@"[JavaLauncher] mirror preflight brk was NOT serviced (script died mid-launch)");
+            }
+            disarmJITTrap();
+            sigaction(SIGTRAP, &bigOldSa, NULL);
+            NSLog(@"[JavaLauncher] mirror preflight done in %.2fs: region=%p",
+                  CFAbsoluteTimeGetCurrent() - bigStart, mirrorRegion);
+        }
     } else {
         NSLog(@"[JavaLauncher] MirrorMappedCodeCache disabled on iOS %ld.%ld (classic JIT26 path)", (long)NSProcessInfo.processInfo.operatingSystemVersion.majorVersion, (long)NSProcessInfo.processInfo.operatingSystemVersion.minorVersion);
     }
@@ -1006,7 +1651,7 @@ int launchJVMWithArgs(NSString *username, id launchTarget, int width, int height
     // JNA on iOS must load libjnidispatch from jna.boot.library.path
     // (jna.nosys=true), so pre-copy the bundled 5.13.0 dylib into jna_tmp.
     // POJAV_HOME/jna_tmp is what PojavLauncher.main points jna.boot.library.path at.
-    NSString *jnaTmpDir = [NSString stringWithFormat:@"%s/jna_tmp", getenv("POJAV_HOME")];
+    NSString *jnaTmpDir = amethyst_hidden_dir(@"jna_tmp");
     [fm createDirectoryAtPath:jnaTmpDir withIntermediateDirectories:YES attributes:nil error:nil];
     NSString *jnidispatchSrc = [NSBundle.mainBundle.bundlePath stringByAppendingPathComponent:@"Frameworks/libjnidispatch.dylib"];
     NSString *jnidispatchDst = [jnaTmpDir stringByAppendingPathComponent:@"libjnidispatch.dylib"];
@@ -1156,20 +1801,24 @@ int launchJVMWithArgs(NSString *username, id launchTarget, int width, int height
     NSLog(@"[Init] Found JLI lib");
 
     NSString *lwjglDirPath;
-    NSString *lwjglJarPath;
-    if ([lwjglVersion isEqualToString:@"3.4.1"]) {
+    if (useExternalLwjgl) {
+        lwjglDirPath = externalLwjglDir;
+    } else if ([lwjglVersion isEqualToString:@"3.4.1"]) {
         lwjglDirPath = [librariesPath stringByAppendingPathComponent:@"lwjgl41"];
-        lwjglJarPath = [lwjglDirPath stringByAppendingPathComponent:@"lwjgl.jar"];
     } else if ([lwjglVersion isEqualToString:@"3.3.6"]) {
         lwjglDirPath = [librariesPath stringByAppendingPathComponent:@"lwjgl36"];
-        lwjglJarPath = [lwjglDirPath stringByAppendingPathComponent:@"lwjgl.jar"];
     } else {
         lwjglDirPath = [librariesPath stringByAppendingPathComponent:@"lwjgl33"];
-        lwjglJarPath = [lwjglDirPath stringByAppendingPathComponent:@"lwjgl.jar"];
     }
     setenv("LWJGL_VERSION", lwjglVersion.UTF8String, 1);
 
-    NSString *classpath = [NSString stringWithFormat:@"%@/*:%@/*:%@", librariesPath, lwjglDirPath, lwjglJarPath];
+    // Do not append lwjglJarPath explicitly: lwjglDirPath/* already expands to
+    // every jar in that folder, so adding the same lwjgl.jar twice puts a
+    // duplicate entry in java.class.path. Forge's SecureJarHandler builds a
+    // union filesystem keyed by classpath entry and aborts the launch with
+    // "Duplicate key .../libs/lwjgl33/lwjgl.jar". Vanilla tolerated it, Forge
+    // did not.
+    NSString *classpath = [NSString stringWithFormat:@"%@/*:%@/*", librariesPath, lwjglDirPath];
     if (launchJar) {
         classpath = [classpath stringByAppendingFormat:@":%@", launchTarget];
         margv[++margc] = [NSString stringWithFormat:@"-Dpojav.runJar=%@", launchTarget].UTF8String;
@@ -1210,8 +1859,15 @@ int launchJVMWithArgs(NSString *username, id launchTarget, int width, int height
 
     if (needsMirrorJITPrepare) {
         // Mirror setup needs prepare_memory_region on RX *and* RW after vm_remap.
-        // StikDebug must stay attached through those extra brk calls.
-        JIT26SetDetachAfterFirstBr(NO);
+        // StikDebug must stay attached through those extra brk calls. With
+        // debug.debug_mirror_mapped_code_cache=0 (classic diagnosis path) the
+        // script may be dead here — never send cmd 3 to a dead script: the
+        // brk would crash (detached) or freeze the stale script thread.
+        if (jitScriptAlive) {
+            JIT26SetDetachAfterFirstBrGuarded(NO);
+        } else {
+            NSLog(@"[JavaLauncher] Mirror JIT prepare: script dead; skipping detach-policy command");
+        }
         task_set_exception_ports(mach_task_self(), EXC_MASK_ALL & ~EXC_MASK_BREAKPOINT, 0,
             EXCEPTION_DEFAULT, THREAD_STATE_NONE);
         rebind_jit_vm_hooks_after_libjvm_load();
@@ -1222,13 +1878,12 @@ int launchJVMWithArgs(NSString *username, id launchTarget, int width, int height
         NSLog(@"[JavaLauncher] Mirror JIT prepare: debugger kept attached, brk 0x6a handler active");
     }
 
-    // Cr4shed known issue: exit after crash dump,
-    // reset signal handler so that JVM can catch them
-    signal(SIGSEGV, SIG_DFL);
-    signal(SIGPIPE, SIG_DFL);
-    signal(SIGBUS, SIG_DFL);
-    signal(SIGILL, SIG_DFL);
-    signal(SIGFPE, SIG_DFL);
+    // Cr4shed known issue: exit after crash dump, reset signal handler so that
+    // JVM can catch them. The reset goes through the diagnostic handler, so a
+    // fault that happens before HotSpot installs its own handlers still leaves
+    // a trace (the old plain SIG_DFL killed the process with no log at all:
+    // the app vanished and iOS dropped the user back on the home screen).
+    installFatalSignalDiagnostics();
 
     // Free split VC
     tmpRootVC = nil;
@@ -1241,15 +1896,36 @@ int launchJVMWithArgs(NSString *username, id launchTarget, int width, int height
     startJVMStartupWatchdog(jit26Handshake, jitNowMs());
 
     // Footprint sampler for Jetsam diagnosis (native + GPU memory invisible
-    // to JVM heap stats). Logs every 5s until the process dies.
+    // to JVM heap stats). Logs every 2s until the process dies.
     // Fully gated by debug.mem_sample_log (Developer switch, default ON):
     // OFF = zero [MemSample]/[MobileGL-MemStats] lines, no timer at all.
     // A missing key (old installs) means ON.
     id memLogPref = getPrefObject(@"debug.mem_sample_log");
-    WitchMemSamplerSetEnabled(memLogPref ? [memLogPref boolValue] : YES);
+    BOOL memLogEnabled = memLogPref ? [memLogPref boolValue] : YES;
+    WitchMemSamplerSetEnabled(memLogEnabled);
     WitchMemSamplerStart();
+    // Tell the Java launcher to emit [JVM-Mem] lines (heap + direct buffer
+    // pools) with the same debug switch; this is what identifies whether the
+    // 30-minute growth is heap, direct ByteBuffers, or native/GPU memory.
+    setenv("WITCH_MEM_PROBE", memLogEnabled ? "1" : "0", 1);
 
-    return pJLI_Launch(++margc, margv,
+    // Desktop launchers run Minecraft with the game directory as the process
+    // working directory. Mods such as LabyMod open relative paths
+    // (labymod-neo/client-jars/<ver>/client-<ver>.jar) through plain
+    // FileInputStream/JarFile, which the JVM resolves against the real process
+    // CWD — NOT against the user.dir system property. iOS leaves the CWD at
+    // "/", so LabyMod's "Client jar prepared" write (resolved via user.dir)
+    // and the later open disagreed and it died with
+    // "Failed to open remapped client jar ... (No such file or directory)".
+    // chdir() once, before the JVM starts, so every relative path a mod uses
+    // behaves exactly like on desktop.
+    if (chdir(gameDir.fileSystemRepresentation) != 0) {
+        NSLog(@"[JavaLauncher] chdir(%@) failed: %s", gameDir, strerror(errno));
+    } else {
+        NSLog(@"[JavaLauncher] Working directory -> %@", gameDir);
+    }
+
+    jint jliResult = pJLI_Launch(++margc, margv,
                    0, NULL, // sizeof(const_jargs) / sizeof(char *), const_jargs,
                    0, NULL, // sizeof(const_appclasspath) / sizeof(char *), const_appclasspath,
                    // These values are ignored in Java 17, so keep it anyways
@@ -1259,6 +1935,12 @@ int launchJVMWithArgs(NSString *username, id launchTarget, int width, int height
                    "java", "openjdk",
                    /* (const_jargs != NULL) ? JNI_TRUE : */ JNI_FALSE,
                    JNI_TRUE, JNI_FALSE, JNI_TRUE);
+    // The JVM is gone once JLI_Launch returns. A later memory warning must not
+    // dial the old JavaVM pointer in WitchMemoryPressure's System.gc() path.
+    runtimeJavaVMPtr = NULL;
+    // The JIT trap guard guarded the whole launch; its scope cleanup restores
+    // the disposition the process had before it.
+    return jliResult;
 }
 
 // ==================== JVM Startup Watchdog ====================
@@ -1322,27 +2004,18 @@ static BOOL instanceHasTouchControllerMod(NSString *gameDir) {
 }
 
 // ==================== Distant Horizons Native Library Fix ====================
-// On iOS, DH mod extracts libzstd-jni_dh-1.5.7-6.dylib to a temp directory,
-// but the relocation process invalidates the code signature, causing crash.
-// Fix: Pre-extract the library from DH jar, sign it with ad-hoc signature,
-// and add its directory to java.library.path
-
-// This function checks if the library exists and is signed; if not, it will
-// be handled by the Java side (Tools.java) via extractDhNativeLibraries()
-// We just check here and add the path if available.
+// Distant Horizons ships its zstd native inside its own jar
+// (darwin/aarch64/libzstd-jni_dh-<version>.dylib). On iOS that library is a
+// macOS binary, so the launcher patches its platform and rebuilds the ad-hoc
+// signature when the library is loaded (see dyld_patch_platform.m). The Java
+// side (Tools.prepareDistantHorizonsNativeLib) extracts the library into the
+// hidden app data directory; that directory is added to java.library.path so
+// zstd-jni finds the library with System.loadLibrary() instead of unpacking
+// an unsigned copy into the temp directory.
 static void checkAndAddDhNativeLibPath(NSString *versionId) {
     if (!versionId) return;
-    
-    NSString *extractDir = [NSString stringWithFormat:@"%s/dh_natives", getenv("POJAV_HOME")];
-    NSString *targetLibPath = [extractDir stringByAppendingPathComponent:@"libzstd-jni_dh-1.5.7-6.dylib"];
-    
-    NSFileManager *fileManager = [NSFileManager defaultManager];
-    if ([fileManager fileExistsAtPath:targetLibPath]) {
-        dhNativeLibPath = extractDir;
-        NSLog(@"[DH Fix] Adding native library path: %@", dhNativeLibPath);
-    } else {
-        // Will be extracted by Java side before JVM launch
-        dhNativeLibPath = extractDir;
-        NSLog(@"[DH Fix] Will use native library path: %@ (extraction by Java)", dhNativeLibPath);
-    }
+
+    NSString *extractDir = amethyst_hidden_path(@"dh_natives");
+    dhNativeLibPath = extractDir;
+    NSLog(@"[DH Fix] Using native library path: %@", dhNativeLibPath);
 }

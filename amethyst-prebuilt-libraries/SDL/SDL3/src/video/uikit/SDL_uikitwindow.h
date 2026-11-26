@@ -40,6 +40,12 @@ extern void UIKit_GetWindowSizeInPixels(SDL_VideoDevice *_this, SDL_Window *wind
 
 extern NSUInteger UIKit_GetSupportedOrientations(SDL_Window *window);
 
+/* Local (non-upstream) bridge: the launcher's game surface UIView, or nil
+ * when SDL is not embedded in the host app. Exposed so the Metal view path
+ * can render into the host CAMetalLayer instead of creating an unattached
+ * SDL_uikitmetalview. */
+extern UIView *UIKit_GetHostView(void);
+
 #define SDL_METALVIEW_TAG 255
 
 @class UIWindow;

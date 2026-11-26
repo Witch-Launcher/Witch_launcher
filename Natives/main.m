@@ -193,32 +193,43 @@ void init_redirectStdio() {
         static BOOL filteredSessionID;
         ssize_t rsize;
         char buf[2048];
+        // This block lives for the whole process and its GCD autorelease pool
+        // is only drained when the block returns, so every per-chunk NSString /
+        // NSData would otherwise accumulate until a Jetsam kill. Keep one pool
+        // per read iteration, and only fsync periodically instead of per chunk.
+        CFAbsoluteTime lastSync = CFAbsoluteTimeGetCurrent();
         while((rsize = read(pfd[0], buf, sizeof(buf)-1)) > 0) {
-            if (rsize < 2048) {
-                buf[rsize] = '\0';
-            }
-            // Filter out Session ID here
-            int index;
-            if (!filteredSessionID) {
-                char *sessionStr = strstr(buf, "(Session ID is ");
-                if (sessionStr) {
-                    char *censorStr = "(Session ID is <censored>)\n\0";
-                    strcpy(sessionStr, censorStr);
-                    rsize = strlen(buf);
-                    filteredSessionID = true;
+            @autoreleasepool {
+                if (rsize < 2048) {
+                    buf[rsize] = '\0';
                 }
+                // Filter out Session ID here
+                if (!filteredSessionID) {
+                    char *sessionStr = strstr(buf, "(Session ID is ");
+                    if (sessionStr) {
+                        char *censorStr = "(Session ID is <censored>)\n\0";
+                        strcpy(sessionStr, censorStr);
+                        rsize = strlen(buf);
+                        filteredSessionID = true;
+                    }
+                }
+                if (canAppendToLog) {
+                    [PLLogOutputView appendToLog:@(buf)];
+                }
+                [file writeData:[NSData dataWithBytes:buf length:rsize]];
+                CFAbsoluteTime now = CFAbsoluteTimeGetCurrent();
+                if (now - lastSync >= 2.0) {
+                    [file synchronizeFile];
+                    lastSync = now;
+                }
+                struct timespec ts;
+                clock_gettime(CLOCK_MONOTONIC_RAW, &ts);
+                atomic_store_explicit(&g_lastLogWriteMs,
+                    (uint64_t)ts.tv_sec * 1000 + (uint64_t)(ts.tv_nsec / 1000000),
+                    memory_order_relaxed);
             }
-            if (canAppendToLog) {
-                [PLLogOutputView appendToLog:@(buf)];
-            }
-            [file writeData:[NSData dataWithBytes:buf length:rsize]];
-            [file synchronizeFile];
-            struct timespec ts;
-            clock_gettime(CLOCK_MONOTONIC_RAW, &ts);
-            atomic_store_explicit(&g_lastLogWriteMs,
-                (uint64_t)ts.tv_sec * 1000 + (uint64_t)(ts.tv_nsec / 1000000),
-                memory_order_relaxed);
         }
+        [file synchronizeFile];
         [file closeFile];
     });
 
@@ -227,13 +238,12 @@ void init_redirectStdio() {
 }
 
 void init_setupAccounts() {
-    NSString *controlPath = [@(getenv("POJAV_HOME")) stringByAppendingPathComponent:@"accounts"];
+    NSString *controlPath = amethyst_hidden_dir(@"accounts");
     [fm createDirectoryAtPath:controlPath withIntermediateDirectories:NO attributes:nil error:nil];
 }
 
 void init_setupCustomControls() {
-    NSString *controlPath = [@(getenv("POJAV_HOME")) stringByAppendingPathComponent:@"controlmap"];
-    [fm createDirectoryAtPath:controlPath withIntermediateDirectories:NO attributes:nil error:nil];
+    NSString *controlPath = amethyst_control_dir(nil);
     generateAndSaveDefaultControl();
     NSString *gamepadControlPath = [controlPath stringByAppendingPathComponent:@"gamepads"];
     [fm createDirectoryAtPath:gamepadControlPath withIntermediateDirectories:NO attributes:nil error:nil];
@@ -330,6 +340,13 @@ int main(int argc, char *argv[]) {
     init_setupHomeDirectory();
     init_redirectStdio();
     init_logDeviceAndVer(argv[0]);
+
+    // Move launcher-owned files into POJAV_HOME/.amethyst before anything
+    // reads them (prefs, accounts, control maps, caches).
+    amethyst_migrate_legacy_home();
+    // The embedded JVM (JavaApp sources) derives jna_tmp/dh_natives from
+    // this env var; keep both sides on the same hidden location.
+    setenv("POJAV_HIDDEN_HOME", amethyst_hidden_dir(nil).UTF8String, 1);
 
     loadPreferences(NO);
     init_hookFunctions();

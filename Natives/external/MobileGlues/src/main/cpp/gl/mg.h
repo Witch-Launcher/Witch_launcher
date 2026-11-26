@@ -141,4 +141,19 @@ extern "C"
 
 void prepareForDraw();
 
+// Diagnostic draw trace, enabled by AMETHYST_RENDER_LOG=1 (the launcher's
+// "Render error logging" toggle). Keeps the last draws of the current frame in
+// a small ring; egl/egl.cpp dumps it at selected swaps. The GUI-missing bug has
+// the GUI's texture work arriving but no pixels, so the pass structure of the
+// tail of a frame -- which framebuffer and program each draw used -- is what
+// tells a GUI drawn nowhere apart from one drawn and then overwritten.
+// mg_draw_trace_note_blit notes blits in the same ring (src/dst from the
+// caller), so a present blit shows its position in the draw sequence.
+void mg_draw_trace_note();
+void mg_draw_trace_note_native(unsigned int count, unsigned int instances, unsigned int mode, char what);
+void mg_draw_trace_note_blit(unsigned int srcFbo, unsigned int dstFbo, unsigned int mask);
+void mg_draw_trace_note_blit_error(unsigned int err);
+void mg_draw_trace_dump(int swap_index);
+void mg_draw_trace_dump_fbo_tables(int swap_index);
+
 #endif // MOBILEGLUES_MG_H

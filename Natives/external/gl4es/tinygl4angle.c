@@ -40,6 +40,14 @@ AliasDecl(glPushDebugGroup, KHR)
 AliasDecl(glBindFragDataLocation, EXT)
 AliasDecl(glBindFragDataLocationIndexed, EXT)
 
+// GL_EXT_buffer_storage (desktop alias used by Sodium/Embeddium GlBufferStorage)
+AliasDecl(glBufferStorage, EXT)
+
+// GL 3.2 core multi-draw used by Sodium/Embeddium's ImmediateDrawCommandList;
+// GLES has no core entry point, but GL_EXT_base_vertex_base_instance provides
+// glMultiDrawElementsBaseVertexEXT with the exact same signature.
+AliasDecl(glMultiDrawElementsBaseVertex, EXT)
+
 // Hidden functions
 // ANGLE dropped its GL_-prefixed desktop exports (GL_DrawBuffer, GL_PolygonMode),
 // so these cannot be branch aliases anymore. Provide local forwarding instead.
@@ -105,23 +113,37 @@ void glShaderSource(GLuint shader, GLsizei count, const GLchar * const *string, 
     }
     // are there #version?
     if (!strncmp(source2, "#version ", 9)) {
-        if (!strncmp(&source2[13], "es", 2)) {
-            // This is for gl4es. TODO: maybe remove 'es' aswell?
+        // Parse "<major><minor>" and detect an existing "es" profile, so both
+        // "#version 310 es" and desktop "#version 330 core" are handled.
+        const char *vp = source2 + 9;
+        while (*vp == ' ' || *vp == '\t') vp++;
+        int ver = 0;
+        while (*vp >= '0' && *vp <= '9') ver = ver * 10 + (*vp++ - '0');
+        while (*vp == ' ' || *vp == '\t') vp++;
+        if (!strncmp(vp, "es", 2)) {
+            gles_glShaderSource(shader, count, string, length);
             return;
         }
         converted = strdup(source2);
-        if (converted[9] == '1') {
-            if (converted[10] - '0' < 2) {
-                // 100, 110 -> 120
-                //converted[10] = '2';
-            } else if (converted[10] - '0' < 6) {
-                // 130, 140, 150 -> 330
-                converted[9] = converted[10] = '3';
+        // ANGLE only accepts ESSL 1.00/3.00/3.10/3.20 and rejects "core",
+        // so rewrite the whole version line for anything >= 120.
+        // 120/130/140/150 and desktop 3.x/4.x (330, 400, 410, 420, 430, 460)
+        // all map to 310 es, the highest version this GLES 3.1 context offers.
+        if (ver >= 120) {
+            const char *newVersion = "#version 310 es\n";
+            char *lineEnd = strchr(converted, '\n');
+            size_t restLen = lineEnd ? strlen(lineEnd + 1) : 0;
+            char *newSource = calloc(1, strlen(newVersion) + restLen + 1);
+            strcpy(newSource, newVersion);
+            if (lineEnd) strcat(newSource, lineEnd + 1);
+            free(converted);
+            converted = newSource;
+        } else {
+            // 100/110: leave the version alone, but drop a desktop "core" token.
+            size_t coreOff = (size_t)(vp - source2);
+            if (!strncmp(&converted[coreOff], "core", 4)) {
+                strncpy(&converted[coreOff], "\n//c", 4);
             }
-        }
-        // remove "core", is it safe?
-        if (!strncmp(&converted[13], "core", 4)) {
-            strncpy(&converted[13], "\n//c", 4);
         }
     } else {
         converted = calloc(1, strlen(source) + 13);
@@ -136,6 +158,17 @@ void glShaderSource(GLuint shader, GLsizei count, const GLchar * const *string, 
     if (FindString(converted, "\nuniform mat4 textureMatrix = mat4(1.0);")) {
         InplaceReplace(converted, &convertedLen, "\nuniform mat4 textureMatrix = mat4(1.0);", "\n#define textureMatrix mat4(1.0)");
     }
+    // MC 1.18.x light.glsl: desktop GLSL implicitly converts ivec2 to vec2 in
+    // "uv / 256.0"; GLSL ES 3.10 rejects ivec2/float, so make it explicit.
+    converted = InplaceReplace(converted, &convertedLen, "uv / 256.0", "vec2(uv) / 256.0");
+    converted = InplaceReplace(converted, &convertedLen, "uv/256.0", "vec2(uv)/256.0");
+    // 1.18.x entity/item translucent cull: implicit ivec2 -> vec2 assignment.
+    converted = InplaceReplace(converted, &convertedLen, "texCoord2 = UV2;", "texCoord2 = vec2(UV2);");
+    // Sodium/Embeddium chunk shaders: desktop GLSL allows uvec3 -> vec3 in
+    // arithmetic, ESSL 3.10 does not (no implicit signedness conversions).
+    converted = InplaceReplace(converted, &convertedLen,
+        "_get_relative_chunk_coord(pos) * vec3(16.0)",
+        "vec3(_get_relative_chunk_coord(pos)) * vec3(16.0)");
 #endif
 
     // Workaround unassigned outputs: use gl_FragData[] instead of separate color outputs
@@ -157,7 +190,8 @@ void glShaderSource(GLuint shader, GLsizei count, const GLchar * const *string, 
         "#extension GL_EXT_blend_func_extended : enable\n"
         "#extension GL_EXT_draw_buffers : enable\n"
         // For OptiFine (see patch above)
-        "#extension GL_EXT_shader_non_constant_global_initializers : enable\n";
+        "#extension GL_EXT_shader_non_constant_global_initializers : enable\n"
+        "precision highp float;\n";
     converted = InplaceInsert(GetLine(converted, 1), extensions, converted, &convertedLen);
 
     //printf("[tinygl4angle] glShaderSource: %s\n", converted);
@@ -207,8 +241,39 @@ void glGetTexLevelParameteriv(GLenum target, GLint level, GLenum pname, GLint *p
     }
 }
 
+static GLenum loggedTexFormats[24][3];
+static int loggedTexFormatCount = 0;
+
+static void logTexImage2D(GLenum internalformat, GLenum format, GLenum type) {
+    for (int i = 0; i < loggedTexFormatCount; i++) {
+        if (loggedTexFormats[i][0] == internalformat && loggedTexFormats[i][1] == format && loggedTexFormats[i][2] == type)
+            return;
+    }
+    if (loggedTexFormatCount < 24) {
+        loggedTexFormats[loggedTexFormatCount][0] = internalformat;
+        loggedTexFormats[loggedTexFormatCount][1] = format;
+        loggedTexFormats[loggedTexFormatCount][2] = type;
+        loggedTexFormatCount++;
+        fprintf(stderr, "[tinygl4angle] glTexImage2D internal=0x%x format=0x%x type=0x%x\n", internalformat, format, type);
+    }
+}
+
 void glTexImage2D(GLenum target, GLint level, GLint internalformat, GLsizei width, GLsizei height, GLint border, GLenum format, GLenum type, const GLvoid *data) {
     LOOKUP_FUNC(glTexImage2D)
+
+    logTexImage2D(internalformat, format, type);
+
+    if (internalformat == GL_DEPTH_COMPONENT) {
+        if (type == GL_FLOAT) {
+            internalformat = GL_DEPTH_COMPONENT32F;
+        } else if (type == GL_UNSIGNED_INT) {
+            internalformat = GL_DEPTH_COMPONENT24;
+        } else if (type == GL_UNSIGNED_SHORT) {
+            internalformat = GL_DEPTH_COMPONENT16;
+        }
+    } else if (internalformat == GL_DEPTH_STENCIL) {
+        internalformat = GL_DEPTH24_STENCIL8;
+    }
 
     if (type == GL_UNSIGNED_INT_8_8_8_8_REV) {
         type = GL_UNSIGNED_BYTE;

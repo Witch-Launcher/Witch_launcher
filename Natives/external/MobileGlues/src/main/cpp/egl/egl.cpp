@@ -9,6 +9,7 @@
 #include "context.h"
 #include "../config/settings.h"
 #include "../gl/FSR1/FSR1.h"
+#include "../gl/envvars.h"
 #include "../gl/log.h"
 #include "../gl/mg.h"
 #include "../gles/loader.h"
@@ -857,6 +858,16 @@ extern "C"
 
     EGL_API EGLBoolean eglSwapBuffers(EGLDisplay dpy, EGLSurface surface) {
         LOG_D("eglSwapBuffers, dpy: %p, surface: %p", dpy, surface);
+        // Diagnostic only (AMETHYST_RENDER_LOG=1): print the drawn tail of this
+        // frame before it is presented. Dumping here rather than in the bridge
+        // keeps it on the render thread, after every draw of the frame.
+        static int swap_index = 0;
+        ++swap_index;
+        if (IsEnvVarTrue("AMETHYST_RENDER_LOG") &&
+            (swap_index <= 5 || swap_index == 10 || swap_index == 20 || swap_index == 50 || swap_index == 100 ||
+             swap_index == 200 || swap_index == 300 || swap_index == 600)) {
+            mg_draw_trace_dump(swap_index);
+        }
         return presentSurface(dpy, surface);
     }
 

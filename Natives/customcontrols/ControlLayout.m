@@ -1,5 +1,6 @@
 #import "ControlButton.h"
 #import "ControlLayout.h"
+#import "ControlLayoutConverter.h"
 #import "ControlSubButton.h"
 #import "CustomControlsUtils.h"
 #import "../LauncherPreferences.h"
@@ -12,6 +13,13 @@
 @implementation ControlLayout
 
 - (void)loadControlLayout:(NSMutableDictionary *)layoutDictionary {
+    self.sourceSyntax = [ControlLayoutConverter syntaxOfLayout:layoutDictionary];
+    if (self.sourceSyntax == ControlLayoutSyntaxZalith) {
+        NSMutableDictionary *converted = [ControlLayoutConverter internalLayoutFromZalith:layoutDictionary];
+        [layoutDictionary removeAllObjects];
+        [layoutDictionary addEntriesFromDictionary:converted];
+    }
+
     self.layoutDictionary = layoutDictionary;
 
     CGFloat currentScale = [self.layoutDictionary[@"scaledAt"] floatValue];
@@ -24,11 +32,19 @@
 - (void)loadControlFile:(NSString *)name {
     [self removeAllButtons];
 
-    NSString *controlFilePath = [NSString stringWithFormat:@"%s/controlmap/%@", getenv("POJAV_HOME"), name];
+    NSString *controlFilePath = amethyst_control_path([NSString stringWithFormat:@"%@", name]);
 
     self.layoutDictionary = parseJSONFromFile(controlFilePath);
-    if (self.layoutDictionary[@"NSErrorObject"] != nil) {
-        showDialog(localize(@"Error", nil), [NSString stringWithFormat:@"Could not open %@: %@", controlFilePath, [self.layoutDictionary[@"NSErrorObject"] localizedDescription]]);
+    NSError *loadError = self.layoutDictionary[@"NSErrorObject"];
+    if (loadError != nil) {
+        // The error must not stay in the layout, as it would be written back
+        // to the file on save. The lists are kept so that the layout stays
+        // valid and editable.
+        [self.layoutDictionary removeObjectForKey:@"NSErrorObject"];
+        self.layoutDictionary[@"mControlDataList"] = [NSMutableArray new];
+        self.layoutDictionary[@"mDrawerDataList"] = [NSMutableArray new];
+        self.layoutDictionary[@"mJoystickDataList"] = [NSMutableArray new];
+        showDialog(localize(@"Error", nil), [NSString stringWithFormat:@"Could not open %@: %@", controlFilePath, [loadError localizedDescription]]);
         return;
     }
     [self loadControlLayout:self.layoutDictionary];

@@ -3,6 +3,7 @@
 #import "utils.h"
 #import "LauncherPreferences.h"
 #import "AmethystBlurView.h"
+#import "UIView+LiquidGlass.h"
 #import "DownloadManager.h"
 #import <objc/runtime.h>
 
@@ -13,6 +14,7 @@
 @property (nonatomic) UIButton *fileManagerButton;
 @property (nonatomic) UIButton *settingsButton;
 @property (nonatomic) UIButton *downloadHubButton;
+@property (nonatomic) UIButton *downloadInfoButton;
 @property (nonatomic) NSTimer *timeTimer;
 @property (nonatomic) NSTimer *jitTimer;
 @end
@@ -67,6 +69,14 @@
     [_downloadHubButton addTarget:self action:@selector(downloadHubTapped) forControlEvents:UIControlEventTouchUpInside];
     [self addSubview:_downloadHubButton];
 
+    // Shown only while downloads are running: opens the detailed task list.
+    _downloadInfoButton = [UIButton buttonWithType:UIButtonTypeSystem];
+    _downloadInfoButton.translatesAutoresizingMaskIntoConstraints = NO;
+    [_downloadInfoButton setImage:[UIImage systemImageNamed:@"info.circle"] forState:UIControlStateNormal];
+    [_downloadInfoButton addTarget:self action:@selector(downloadsInfoTapped) forControlEvents:UIControlEventTouchUpInside];
+    _downloadInfoButton.hidden = YES;
+    [self addSubview:_downloadInfoButton];
+
     [NSLayoutConstraint activateConstraints:@[
         [_jitStatusLabel.leadingAnchor constraintEqualToAnchor:self.leadingAnchor constant:14],
         [_jitStatusLabel.centerYAnchor constraintEqualToAnchor:self.centerYAnchor],
@@ -92,6 +102,11 @@
         [_downloadHubButton.centerYAnchor constraintEqualToAnchor:self.centerYAnchor],
         [_downloadHubButton.widthAnchor constraintEqualToConstant:28],
         [_downloadHubButton.heightAnchor constraintEqualToConstant:28],
+
+        [_downloadInfoButton.trailingAnchor constraintEqualToAnchor:_downloadHubButton.leadingAnchor constant:-4],
+        [_downloadInfoButton.centerYAnchor constraintEqualToAnchor:self.centerYAnchor],
+        [_downloadInfoButton.widthAnchor constraintEqualToConstant:28],
+        [_downloadInfoButton.heightAnchor constraintEqualToConstant:28],
     ]];
 
     [self updateTime];
@@ -103,6 +118,7 @@
 
     [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(updateColors) name:ThemeDidChangeNotification object:nil];
     [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(updateColors) name:AmethystBlurIntensityDidChangeNotification object:nil];
+    [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(updateColors) name:LiquidGlassDidChangeNotification object:nil];
     [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(rebuildProgressRows) name:DownloadTasksDidChangeNotification object:nil];
         [self updateColors];
         [self rebuildProgressRows];
@@ -115,6 +131,7 @@
     BOOL busy = tasks.count > 0;
     _timeLabel.hidden = busy;
     _progressStack.hidden = !busy;
+    _downloadInfoButton.hidden = !busy;
 
     for (UIView *v in _progressStack.arrangedSubviews) [v removeFromSuperview];
     if (!busy) return;
@@ -131,7 +148,7 @@
         nameLabel.translatesAutoresizingMaskIntoConstraints = NO;
         nameLabel.font = [UIFont systemFontOfSize:10 weight:UIFontWeightMedium];
         nameLabel.textColor = theme.primaryTextColor;
-        nameLabel.text = task.name ?: @"Downloading";
+        nameLabel.text = task.name ?: localize(@"Downloading", nil);
         nameLabel.lineBreakMode = NSLineBreakByTruncatingTail;
         [row addSubview:nameLabel];
 
@@ -149,6 +166,14 @@
         pct.text = [NSString stringWithFormat:@"%d%%", (int)(task.progress * 100)];
         [row addSubview:pct];
 
+        UILabel *speed = [[UILabel alloc] init];
+        speed.translatesAutoresizingMaskIntoConstraints = NO;
+        speed.font = [UIFont monospacedDigitSystemFontOfSize:9 weight:UIFontWeightRegular];
+        speed.textColor = theme.secondaryTextColor;
+        speed.textAlignment = NSTextAlignmentRight;
+        speed.text = [self formatSpeed:task.bytesPerSecond];
+        [row addSubview:speed];
+
         UIButton *cancelBtn = [UIButton buttonWithType:UIButtonTypeSystem];
         cancelBtn.translatesAutoresizingMaskIntoConstraints = NO;
         [cancelBtn setImage:[UIImage systemImageNamed:@"xmark"] forState:UIControlStateNormal];
@@ -161,17 +186,22 @@
             [row.heightAnchor constraintEqualToConstant:16],
             [nameLabel.leadingAnchor constraintEqualToAnchor:row.leadingAnchor],
             [nameLabel.centerYAnchor constraintEqualToAnchor:row.centerYAnchor],
-            [nameLabel.widthAnchor constraintEqualToConstant:110],
+            [nameLabel.widthAnchor constraintEqualToConstant:96],
 
             [bar.leadingAnchor constraintEqualToAnchor:nameLabel.trailingAnchor constant:6],
             [bar.centerYAnchor constraintEqualToAnchor:row.centerYAnchor],
-            [bar.widthAnchor constraintEqualToConstant:130],
+            [bar.widthAnchor constraintGreaterThanOrEqualToConstant:90],
+            [bar.widthAnchor constraintLessThanOrEqualToConstant:150],
 
             [pct.leadingAnchor constraintEqualToAnchor:bar.trailingAnchor constant:5],
             [pct.centerYAnchor constraintEqualToAnchor:row.centerYAnchor],
-            [pct.widthAnchor constraintEqualToConstant:30],
+            [pct.widthAnchor constraintEqualToConstant:28],
 
-            [cancelBtn.leadingAnchor constraintEqualToAnchor:pct.trailingAnchor constant:2],
+            [speed.leadingAnchor constraintEqualToAnchor:pct.trailingAnchor constant:4],
+            [speed.centerYAnchor constraintEqualToAnchor:row.centerYAnchor],
+            [speed.widthAnchor constraintEqualToConstant:52],
+
+            [cancelBtn.leadingAnchor constraintEqualToAnchor:speed.trailingAnchor constant:2],
             [cancelBtn.trailingAnchor constraintEqualToAnchor:row.trailingAnchor],
             [cancelBtn.centerYAnchor constraintEqualToAnchor:row.centerYAnchor],
             [cancelBtn.widthAnchor constraintEqualToConstant:20],
@@ -194,6 +224,21 @@
     if (task) [DownloadManager.shared cancelTask:task];
 }
 
+- (NSString *)formatSpeed:(double)bytesPerSecond {
+    if (bytesPerSecond >= 1024 * 1024) {
+        return [NSString stringWithFormat:@"%.1f MB/s", bytesPerSecond / (1024.0 * 1024.0)];
+    } else if (bytesPerSecond >= 1024) {
+        return [NSString stringWithFormat:@"%.0f KB/s", bytesPerSecond / 1024.0];
+    } else if (bytesPerSecond > 0) {
+        return [NSString stringWithFormat:@"%.0f B/s", bytesPerSecond];
+    }
+    return nil;
+}
+
+- (void)downloadsInfoTapped {
+    if (self.delegate) [self.delegate topBarDidTapDownloads];
+}
+
 - (void)fileTapped {
     if (self.delegate) [self.delegate topBarDidTapFileManager];
 }
@@ -212,7 +257,11 @@
     ThemeManager *theme = ThemeManager.shared;
     // When the per-bar frost is enabled, fade the base color so the realtime
     // gaussian material shows through instead of an opaque slab.
-    if ([AmethystBlurView blurEnabledForKey:@"amethyst_topbar_blur"]) {
+    if ([UIView lg_isEnabled]) {
+        // Let the navigation-layer glass sample the launcher content instead
+        // of painting a custom bar background over it.
+        self.backgroundColor = [UIColor clearColor];
+    } else if ([AmethystBlurView blurEnabledForKey:@"amethyst_topbar_blur"]) {
         self.backgroundColor = [theme.topBarBackgroundColor colorWithAlphaComponent:0.25 * theme.uiOpacity];
     } else {
         self.backgroundColor = theme.topBarBackgroundColor;

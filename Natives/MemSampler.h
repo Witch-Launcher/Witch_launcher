@@ -12,6 +12,10 @@
 void WitchMemSamplerSetEnabled(BOOL enabled);
 void WitchMemSamplerStart(void);
 
+// Stop the periodic sampler without crashing. Safe to call repeatedly; the
+// next WitchMemSamplerStart (a new game session) recreates the timer.
+void WitchMemSamplerStop(void);
+
 // Immediate one-shot sample with a tag (e.g. world-join markers).
 void WitchMemSampleMark(const char *tag);
 

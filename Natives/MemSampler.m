@@ -1,4 +1,5 @@
 #import "MemSampler.h"
+#import "WitchMemoryPressure.h"
 #import <Foundation/Foundation.h>
 #import <mach/mach.h>
 #import <dispatch/dispatch.h>
@@ -12,6 +13,7 @@ static uint64_t gMemPeakFootprint = 0;
 static BOOL gMemWarned75 = NO;
 static BOOL gMemWarned90 = NO;
 static unsigned gMemSampleCount = 0;
+static BOOL gMemSamplerRunning = NO;
 // Set from abort/crash paths (see WitchMemSamplerNoteCrash). malloc_zone_statistics
 // and NSLog are not signal-safe; sampling while HotSpot reports a fatal error
 // deadlocks on the malloc zone lock and recurses into JVM_handle_bsd_signal.
@@ -126,17 +128,26 @@ static void WitchLogMemSample(const char *tag) {
           available / 1048576,
           usedPct,
           (unsigned long long)(gMemPeakFootprint / 1048576));
+    // Hysteresis: sau một lần giải phóng (GC/trim/đóng world) mà footprint tụt
+    // về dưới 65% thì arm lại cảnh báo — nếu không, lần chạm trần thứ hai (tắt
+    // rồi bật lại Voxy) không trim gì và process chết vì per-process-limit.
+    if (usedPct < 65.0) {
+        gMemWarned75 = NO;
+        gMemWarned90 = NO;
+    }
     if (!gMemWarned75 && usedPct >= 75.0) {
         gMemWarned75 = YES;
         NSLog(@"[MemSample] WARNING: footprint at %.0f%% of Jetsam allowance — close other apps / lower view distance / reduce MobileGL frames-in-flight", usedPct);
         // Dump MobileGL accounting exactly when crossing into danger: this is
         // the moment that matters if the process dies seconds later.
         WitchMaybeDumpMobileGL();
+        WitchMemoryPressureHandle(NO);
     }
     if (!gMemWarned90 && usedPct >= 90.0) {
         gMemWarned90 = YES;
         NSLog(@"[MemSample] CRITICAL: footprint at %.0f%% of Jetsam allowance — kill imminent, expect jetsam termination", usedPct);
         WitchMaybeDumpMobileGL();
+        WitchMemoryPressureHandle(YES);
     }
 }
 
@@ -195,6 +206,7 @@ void WitchMemSamplerStart(void) {
                               (uint64_t)(2 * NSEC_PER_SEC),
                               (uint64_t)(500 * NSEC_PER_MSEC));
     dispatch_source_set_event_handler(gMemSamplerTimer, ^{
+        if (!gMemSamplerRunning) return;
         WitchLogMemSample(NULL);
         // MobileGL accounting dump every 3rd sample (~15s). No-op unless
         // libMobileGL (with the diagnostic export) is loaded.
@@ -202,13 +214,28 @@ void WitchMemSamplerStart(void) {
             WitchMaybeDumpMobileGL();
         }
     });
+    gMemSamplerRunning = YES;
     dispatch_resume(gMemSamplerTimer);
+}
+
+void WitchMemSamplerStop(void) {
+    gMemSamplerRunning = NO;
+    if (gMemSamplerTimer != NULL) {
+        dispatch_source_cancel(gMemSamplerTimer);
+        gMemSamplerTimer = NULL;
+    }
+    // The next game session should start with a clean danger budget instead
+    // of inheriting the previous session's one-shot 75%/90% warnings.
+    gMemWarned75 = NO;
+    gMemWarned90 = NO;
+    gMemSampleCount = 0;
+    gMemPeakFootprint = 0;
 }
 
 void WitchMemSamplerNoteCrash(void) {
     gMemSamplerCrashing = 1;
     // Best-effort: stop future ticks. dispatch_source_cancel is safe to call
-    // here; the already-queued handler checks gMemSamplerCrashing first.
+    // here; the already-queued handler checks gMemSamplerRunning first.
     if (gMemSamplerTimer != NULL) {
         dispatch_source_cancel(gMemSamplerTimer);
     }

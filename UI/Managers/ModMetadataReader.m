@@ -117,6 +117,24 @@ NSString * const ModContentKindPlugin = @"plugin";
 #pragma mark - Top entry
 
 + (NSDictionary *)metadataForFileAtPath:(NSString *)filePath category:(NSString *)category {
+    if (filePath.length == 0) return @{};
+    NSDictionary *attrs = [[NSFileManager defaultManager] attributesOfItemAtPath:filePath error:nil];
+    NSString *key = [NSString stringWithFormat:@"meta|%@|%@|%llu|%.0f",
+                     category ?: @"",
+                     filePath,
+                     [attrs fileSize],
+                     [attrs[NSFileModificationDate] timeIntervalSince1970]];
+    NSCache *cache = [self shared].memCache;
+    NSDictionary *hit = [cache objectForKey:key];
+    if (hit) return hit;
+    NSDictionary *meta = [self computeMetadataForFileAtPath:filePath category:category];
+    if (meta) [cache setObject:meta forKey:key];
+    return meta ?: @{};
+}
+
+// Parses the archive on every call; always go through
+// metadataForFileAtPath:category: which memoizes by path+mtime+size.
++ (NSDictionary *)computeMetadataForFileAtPath:(NSString *)filePath category:(NSString *)category {
     NSMutableDictionary *meta = [NSMutableDictionary dictionary];
     if (filePath.length == 0) return meta;
     UZKArchive *archive = [self archiveForPath:filePath];
@@ -805,17 +823,24 @@ static void nbtSkipPayload(NBTCursor *c, uint8_t type) {
     if ([category isEqualToString:InstalledItemCategoryResourcePack] ||
         [category isEqualToString:InstalledItemCategoryShaderPack] ||
         [category isEqualToString:ModContentKindDatapack]) {
-        NSData *packPng = [archive extractDataFromFile:@"pack.png" error:nil];
-        if (!packPng) {
-            // Case-insensitive fallback (Pack.png, PACK.PNG, ...).
-            NSString *found = [self findEntry:archive named:@"pack.png"];
-            if (found) packPng = [archive extractDataFromFile:found error:nil];
-        }
-        if (packPng) {
-            UIImage *img = [UIImage imageWithData:packPng];
+        // Root-level, well-known preview names only. The old deep scan could
+        // return a random shader texture (looks like a broken/blank icon) and
+        // blocked the caller's remote icon_url fallback; returning nil now
+        // lets the online project icon show instead.
+        NSArray<NSString *> *candidates = @[@"pack.png", @"icon.png", @"logo.png",
+                                            @"banner.png", @"preview.png", @"screenshot.png"];
+        for (NSString *name in candidates) {
+            NSData *data = [archive extractDataFromFile:name error:nil];
+            if (!data) {
+                // Case-insensitive fallback (Pack.png, PACK.PNG, ...).
+                NSString *found = [self findEntry:archive named:name];
+                if (found) data = [archive extractDataFromFile:found error:nil];
+            }
+            if (!data || data.length == 0 || data.length > 4 * 1024 * 1024) continue;
+            UIImage *img = [UIImage imageWithData:data];
             if (img) return img;
         }
-        return [self scanIcon:archive modId:nil];
+        return nil;
     }
     if ([category isEqualToString:ModContentKindWorld]) {
         NSDictionary *info = [ModMetadataReader worldInfoForWorldZip:filePath];

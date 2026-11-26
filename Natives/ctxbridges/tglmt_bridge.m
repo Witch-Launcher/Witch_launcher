@@ -17,6 +17,26 @@
 #include "utils.h"
 #include "TGLMTConfig.h"
 
+// Game framebuffer size (physical x video.resolution), published bởi
+// SurfaceViewController.updateSavedResolution. CreateWindow/resize phải
+// theo kích thước này: game render windowWidth x windowHeight rồi
+// CAMetalLayer stretch lên full layer. Theo drawable physical sẽ bị viền
+// đen khi hạ reso và méo aspect khi xoay ngang.
+extern int windowWidth, windowHeight;
+
+// Kích thước target TGLMT nên dùng: framebuffer của game nếu đã được
+// publish, ngược lại fallback drawable hiện tại (lúc init chưa có size).
+static void tglmt_wantSize(CAMetalLayer *ml, int *outW, int *outH) {
+    if (windowWidth >= 2 && windowHeight >= 2) {
+        *outW = (int)windowWidth;
+        *outH = (int)windowHeight;
+        return;
+    }
+    CGFloat scale = ml.contentsScale > 0 ? ml.contentsScale : UIScreen.mainScreen.scale;
+    *outW = (int)MAX(2, ml.bounds.size.width * scale);
+    *outH = (int)MAX(2, ml.bounds.size.height * scale);
+}
+
 // TGLMT C API (GLFWShim) — resolve runtime, không link cứng để app vẫn
 // launch khi dylib vắng mặt (chọn renderer khác).
 static void *g_tglmtLib = NULL;
@@ -105,15 +125,13 @@ static basic_render_window_t *tglmt_init_context(basic_render_window_t *share) {
             NSLog(@"[TGLMT] metal layer pixelFormat corrected to RGBA8Unorm");
         }
         ml.framebufferOnly = NO; // glReadPixels/readback diagnostics
-        CGFloat scale = ml.contentsScale > 0 ? ml.contentsScale : UIScreen.mainScreen.scale;
-        CGSize want = CGSizeMake(MAX(2, ml.bounds.size.width * scale),
-                                 MAX(2, ml.bounds.size.height * scale));
+        int w, h;
+        tglmt_wantSize(ml, &w, &h);
+        CGSize want = CGSizeMake(w, h);
         if (ml.drawableSize.width != want.width || ml.drawableSize.height != want.height) {
             ml.drawableSize = want;
             NSLog(@"[TGLMT] drawableSize synced to %.0fx%.0f", want.width, want.height);
         }
-        int w = (int)MAX(2, ml.bounds.size.width * scale);
-        int h = (int)MAX(2, ml.bounds.size.height * scale);
         g_tglmtWin = p_CreateWindow((uint32_t)w, (uint32_t)h, "apple", 1);
         if (!g_tglmtWin) {
             NSLog(@"[TGLMT] TGLMT_CreateWindow(%dx%d) FAILED", w, h);
@@ -146,9 +164,9 @@ static void tglmt_make_current(basic_render_window_t *bundle) {
     if (now && now != g_tglmtLayer && [now isKindOfClass:CAMetalLayer.class]) {
         g_tglmtLayer = now;
         CAMetalLayer *ml = (CAMetalLayer *)now;
-        CGFloat scale = ml.contentsScale > 0 ? ml.contentsScale : UIScreen.mainScreen.scale;
-        tglmt_notify_resize((int)MAX(2, ml.bounds.size.width * scale),
-                            (int)MAX(2, ml.bounds.size.height * scale));
+        int w, h;
+        tglmt_wantSize(ml, &w, &h);
+        tglmt_notify_resize(w, h);
     }
     p_MakeCurrent(g_tglmtWin);
     currentBundle = bundle;

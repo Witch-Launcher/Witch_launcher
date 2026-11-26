@@ -1,10 +1,13 @@
 #import "CustomControlsViewController.h"
+#import "ErrorPresenter.h"
 #import "LauncherPreferences.h"
+#import "PerfRecorder.h"
 #import "SettingsViewController.h"
 #import "PLProfiles.h"
 #import "SurfaceViewController.h"
 #import "utils.h"
 #import "AppSheet.h"
+#import "WitchLogOverlay.h"
 
 @implementation SurfaceViewController(Navigation)
 
@@ -39,6 +42,10 @@ static CGPoint lastCenterPoint;
     self.menuView.layer.cornerRadius = 12;
     self.menuView.scrollEnabled = NO;
     self.menuView.separatorInset = UIEdgeInsetsZero;
+    // Fixed metrics: default cells adopt the device's Dynamic Type body font,
+    // which at accessibility sizes blew the rows up ~3x and wrapped each
+    // menu word onto its own line.
+    self.menuView.rowHeight = 52;
     [self.view addSubview:self.menuView];
 }
 
@@ -67,7 +74,32 @@ static CGPoint lastCenterPoint;
     }];
 }
 
+- (void)refreshMenuItems {
+    NSMutableArray *items = [NSMutableArray arrayWithObject:@"game.menu.force_close"];
+    // Performance recording is togglable from the in-game menu: offer "start"
+    // when idle and "stop" while a session is active.
+    if (PerfRecorder.shared.isRecording) {
+        [items addObject:@"game.menu.perf_stop"];
+    } else {
+        [items addObject:@"game.menu.perf_start"];
+    }
+    [items addObjectsFromArray:@[@"game.menu.log_output", @"game.menu.custom_controls", @"Settings"]];
+    self.menuArray = items;
+    [self.menuView reloadData];
+}
+
 - (void)handleRightEdge:(UIPanGestureRecognizer *)sender {
+    // Widget mode owns the right-edge interaction: its menu is opened by
+    // tapping the widget, and the navigation strip is hidden. The recognizer
+    // can still be re-enabled by loadCustomControls, which used to let the
+    // game slide into the 0.7x menu state with no visible strip to drag it
+    // back. Reject the gesture and recover if that state is already active.
+    if (getPrefBool(@"general.widget_menu")) {
+        if (!self.menuView.hidden || fabs(self.rootView.transform.a - 1.0) > 0.001) {
+            [self animateMenuScale:1 duration:0.25];
+        }
+        return;
+    }
     if (lastCenterPoint.y == 0) {
         lastCenterPoint.x = self.rootView.center.x;
         lastCenterPoint.y = 1;
@@ -79,6 +111,7 @@ static CGPoint lastCenterPoint;
     CGPoint translation = [sender translationInView:sender.view];
 
     if (sender.state == UIGestureRecognizerStateBegan) {
+        [self refreshMenuItems];
         self.menuView.hidden = NO;
     } else if (sender.state == UIGestureRecognizerStateChanged) {
         self.rootView.center = CGPointMake(lastCenterPoint.x + translation.x/2, centerY + translation.y/10.0);
@@ -114,6 +147,7 @@ static CGPoint lastCenterPoint;
             self.rootView.center = CGPointMake(self.rootView.bounds.size.width/-2, self.rootView.center.y);
             self.menuView.frame = CGRectMake(self.view.frame.size.width, 0, 0, 0);
         } completion:^(BOOL finished) {
+            [[PerfRecorder shared] stopWithReason:PerfStopReasonForceClose];
             if (fatalExitGroup == nil) {
                 exit(0);
             } else {
@@ -130,8 +164,11 @@ static CGPoint lastCenterPoint;
     vc.modalPresentationStyle = UIModalPresentationOverFullScreen;
     vc.setDefaultCtrl = ^(NSString *name){
         if (PLProfiles.current.selectedProfile[@"defaultTouchCtrl"]) {
-            // Save default to current profile
+            // Save default to current profile. The profile dictionary is only
+            // written to disk by -save, so without this call the new default
+            // control map is lost on the next launcher start.
             PLProfiles.current.selectedProfile[@"defaultTouchCtrl"] = name;
+            [PLProfiles.current save];
         } else {
             // Save default to preferences
             setPrefObject(@"control.default_ctrl", name);
@@ -145,7 +182,10 @@ static CGPoint lastCenterPoint;
 
 - (void)actionOpenPreferences {
     SettingsViewController *vc = [[SettingsViewController alloc] init];
-    [self presentViewController:vc animated:YES completion:nil];
+    // Wrapped in a navigation controller so the Settings sheet keeps its
+    // title bar with the Done (Xong) button in-game, like the launcher menu.
+    UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:vc];
+    [self presentViewController:nav animated:YES completion:nil];
 }
 
 - (void)actionOpenNavigationMenu {
@@ -181,6 +221,8 @@ static CGPoint lastCenterPoint;
     cell.backgroundColor = UIColor.systemFillColor;
 
     cell.textLabel.text = localize(self.menuArray[indexPath.row], nil);
+    cell.textLabel.font = [UIFont systemFontOfSize:17 weight:UIFontWeightMedium];
+    cell.textLabel.adjustsFontForContentSizeCategory = NO;
 
     return cell;
 }
@@ -191,20 +233,39 @@ static CGPoint lastCenterPoint;
 }
 
 - (void)didSelectMenuItem:(int)item {
-    switch (item) {
-        case 0:
-            [self actionForceClose];
-            break;
-        case 1:
+    NSString *key = (item >= 0 && item < (int)self.menuArray.count) ? self.menuArray[item] : @"";
+    if ([key isEqualToString:@"game.menu.force_close"]) {
+        [self actionForceClose];
+    } else if ([key isEqualToString:@"game.menu.perf_stop"]) {
+        [self actionStopRecording];
+    } else if ([key isEqualToString:@"game.menu.perf_start"]) {
+        [self actionStartRecording];
+    } else if ([key isEqualToString:@"game.menu.log_output"]) {
+        if (getPrefBool(@"general.overlay_log_in_game")) {
+            [[WitchLogOverlay sharedOverlay] toggleInView:self.view];
+        } else {
             [self.logOutputView actionToggleLogOutput];
-            break;
-        case 2:
-            [self actionOpenCustomControls];
-            break;
-        case 3:
-            [self actionOpenPreferences];
-            break;
+        }
+    } else if ([key isEqualToString:@"game.menu.custom_controls"]) {
+        [self actionOpenCustomControls];
+    } else if ([key isEqualToString:@"Settings"]) {
+        [self actionOpenPreferences];
     }
+}
+
+- (void)actionStartRecording {
+    [[PerfRecorder shared] startManuallyWithMetadata:@{
+        @"version": self.metadata[@"id"] ?: @"",
+        @"instance": self.metadata[@"instanceName"] ?: @""
+    }];
+    [self animateMenuScale:1 duration:0.5];
+    [ErrorPresenter showToast:localize(@"perf.toast.started", nil) success:YES];
+}
+
+- (void)actionStopRecording {
+    [[PerfRecorder shared] stopWithReason:PerfStopReasonUser];
+    [self animateMenuScale:1 duration:0.5];
+    [ErrorPresenter showToast:localize(@"perf.toast.saved", nil) success:YES];
 }
 
 - (void)viewWillTransitionToSize_Navigation:(CGRect)frame {

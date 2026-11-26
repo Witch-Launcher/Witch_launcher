@@ -241,6 +241,19 @@ static void mesa_egl_swap_buffers(void) {
     void  *px    = malloc(bytes);
     if (!px) return;
 
+    // Three persistent slots + semaphore: never lap a buffer that the main
+    // queue may still be displaying through layer.contents.
+    enum { kMesaPresentSlots = 3 };
+    static dispatch_semaphore_t presentSem = NULL;
+    static dispatch_once_t presentSemOnce;
+    dispatch_once(&presentSemOnce, ^{
+        presentSem = dispatch_semaphore_create(kMesaPresentSlots);
+    });
+    if (dispatch_semaphore_wait(presentSem, DISPATCH_TIME_NOW) != 0) {
+        free(px);
+        return;
+    }
+
     p_glReadPixels(0, 0, w, h,
                    0x1908 /*GL_RGBA*/, 0x1401 /*GL_UNSIGNED_BYTE*/, px);
 
@@ -248,7 +261,7 @@ static void mesa_egl_swap_buffers(void) {
     size_t row = (size_t)w * 4;
     uint8_t tmp[4096];
     uint8_t *stackBuf = (w <= 1024) ? tmp : malloc(row);
-    if (!stackBuf) { free(px); return; }
+    if (!stackBuf) { free(px); dispatch_semaphore_signal(presentSem); return; }
     uint8_t *buf = (uint8_t *)px;
     for (int y = 0; y < h / 2; y++) {
         uint8_t *top = buf + y * row;
@@ -259,42 +272,54 @@ static void mesa_egl_swap_buffers(void) {
     }
     if (stackBuf != tmp) free(stackBuf);
 
-    // double-buffer the copy dispatched to the main queue
-    static void  *s_buf[2]   = { NULL, NULL };
-    static size_t s_sz[2]    = { 0, 0 };
+    // Persistent slots for the copy dispatched to the main queue.
+    static void  *s_buf[kMesaPresentSlots]   = { NULL, NULL, NULL };
+    static size_t s_sz[kMesaPresentSlots]    = { 0, 0, 0 };
     static int    s_idx       = 0;
 
     int i = s_idx;
-    s_idx = (s_idx + 1) & 1;
+    s_idx = (s_idx + 1) % kMesaPresentSlots;
     if (s_sz[i] < bytes) {
-        s_buf[i] = reallocf(s_buf[i], bytes);
-        s_sz[i]  = bytes;
+        void *newBuf = reallocf(s_buf[i], bytes);
+        if (newBuf) {
+            s_buf[i] = newBuf;
+            s_sz[i]  = bytes;
+        } else {
+            // reallocf freed the old block; do not leave a dangling pointer
+            // that the next frame would reallocf again.
+            s_buf[i] = NULL;
+            s_sz[i]  = 0;
+        }
     }
-    if (!s_buf[i]) { free(px); return; }
+    if (!s_buf[i]) { free(px); dispatch_semaphore_signal(presentSem); return; }
     memcpy(s_buf[i], px, bytes);
     free(px);
 
     CGColorSpaceRef cs = CGColorSpaceCreateDeviceRGB();
 
     dispatch_async(dispatch_get_main_queue(), ^{
-        [CATransaction begin];
-        [CATransaction setDisableActions:YES];
-        CGDataProviderRef dp =
-            CGDataProviderCreateWithData(NULL, s_buf[i], bytes, NULL);
-        if (dp) {
-            CGImageRef img = CGImageCreate(
-                w, h, 8, 32, 4 * w, cs,
-                kCGImageAlphaNoneSkipLast | kCGBitmapByteOrderDefault,
-                dp, NULL, FALSE, kCGRenderingIntentDefault);
-            if (img) {
-                SurfaceViewController.surface.layer.contents =
-                    (__bridge id)img;
-                CGImageRelease(img);
+        @autoreleasepool {
+            [CATransaction begin];
+            [CATransaction setDisableActions:YES];
+            CGDataProviderRef dp =
+                CGDataProviderCreateWithData(NULL, s_buf[i], bytes, NULL);
+            if (dp) {
+                CGImageRef img = CGImageCreate(
+                    w, h, 8, 32, 4 * w, cs,
+                    kCGImageAlphaNoneSkipLast | kCGBitmapByteOrderDefault,
+                    dp, NULL, FALSE, kCGRenderingIntentDefault);
+                if (img) {
+                    SurfaceViewController.surface.layer.contents =
+                        (__bridge id)img;
+                    pojavNoteFinalPresent();
+                    CGImageRelease(img);
+                }
+                CGDataProviderRelease(dp);
             }
-            CGDataProviderRelease(dp);
+            [CATransaction commit];
+            CGColorSpaceRelease(cs);
         }
-        [CATransaction commit];
-        CGColorSpaceRelease(cs);
+        dispatch_semaphore_signal(presentSem);
     });
 }
 

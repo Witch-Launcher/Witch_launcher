@@ -74,7 +74,7 @@ static void UIKit_NoteWindow(SDL_Window *window, int w, int h)
  * should render into (the launcher's game surface). When non-nil, SDL skips
  * creating its own UIWindow so the game stays inside the launcher's view
  * hierarchy and follows its layout (controls, edge-swipe menu, rotation). */
-static UIView *UIKit_GetHostView(void)
+UIView *UIKit_GetHostView(void)
 {
     static UIView *(*GetHostView)(void);
     if (!GetHostView) {
@@ -169,10 +169,24 @@ bool UIKit_CreateWindow(SDL_VideoDevice *_this, SDL_Window *window, SDL_Properti
             SDL_UIKitDisplayData *data = (__bridge SDL_UIKitDisplayData *)display->internal;
             SDL_Window *other;
 
-            // We currently only handle a single window per display on iOS
+            // SDL_CreateWindowWithProperties temporarily marks every new
+            // window as hidden until SDL_FinishWindowCreation(), so
+            // window->flags cannot tell whether the caller requested a hidden
+            // window. Read the creation properties instead.
+            const SDL_WindowFlags requestedFlags =
+                (SDL_WindowFlags)SDL_GetNumberProperty(create_props, SDL_PROP_WINDOW_CREATE_FLAGS_NUMBER, 0);
+            const bool requestedHidden = (requestedFlags & SDL_WINDOW_HIDDEN) ||
+                SDL_GetBooleanProperty(create_props, SDL_PROP_WINDOW_CREATE_HIDDEN_BOOLEAN, false);
+
+            // UIKit only shows one interactive window per display, but
+            // RenderPearl creates hidden utility/test windows before the real
+            // game window. Allow any number of hidden windows and at most one
+            // visible window per display.
             for (other = _this->windows; other; other = other->next) {
-                if (other != window && SDL_GetVideoDisplayForWindow(other) == display) {
-                    ret = SDL_SetError("Only one window allowed per display.");
+                if (other != window && SDL_GetVideoDisplayForWindow(other) == display &&
+                    !requestedHidden &&
+                    !(other->flags & SDL_WINDOW_HIDDEN)) {
+                    ret = SDL_SetError("Only one visible window allowed per display.");
                     return;
                 }
             }
@@ -212,10 +226,20 @@ bool UIKit_CreateWindow(SDL_VideoDevice *_this, SDL_Window *window, SDL_Properti
             BOOL hostWindow = NO;
 
             /* Local bridge: on the main screen, prefer the host app's window so
-             * the game renders inside the launcher's view hierarchy. */
+             * the game renders inside the launcher's view hierarchy. The game
+             * can start before the presenting controller's view is attached;
+             * use the app's key window in that case and let the host surface
+             * attach the view when it appears. */
             UIView *hostView = UIKit_GetHostView();
-            if (data.uiscreen == [UIScreen mainScreen] && hostView != nil && hostView.window != nil) {
-                uiwindow = hostView.window;
+            UIWindow *hostUIWindow = hostView.window;
+            if (!hostUIWindow) {
+                hostUIWindow = [UIApplication sharedApplication].keyWindow;
+            }
+            if (data.uiscreen == [UIScreen mainScreen] &&
+                !(window->flags & (SDL_WINDOW_UTILITY | SDL_WINDOW_NOT_FOCUSABLE)) &&
+                hostView != nil && hostUIWindow != nil &&
+                hostUIWindow.screen == data.uiscreen) {
+                uiwindow = hostUIWindow;
                 hostWindow = YES;
             } else if (@available(iOS 13.0, tvOS 13.0, *)) {
                 UIWindowScene *scene = (__bridge UIWindowScene *)SDL_GetPointerProperty(create_props, SDL_PROP_WINDOW_CREATE_WINDOWSCENE_POINTER, NULL);
@@ -241,6 +265,10 @@ bool UIKit_CreateWindow(SDL_VideoDevice *_this, SDL_Window *window, SDL_Properti
                 [uiwindow setScreen:data.uiscreen];
             }
     #endif
+
+            NSLog(@"[SDL] window '%s' id=%u host=%d hostViewInWindow=%d flags=0x%x",
+                  window->title ?: "", (unsigned)window->id, hostWindow,
+                  hostView.window != nil, (unsigned)window->flags);
 
             if (!SetupWindowData(_this, window, uiwindow, true, hostWindow)) {
                 return;
@@ -291,18 +319,23 @@ void UIKit_ShowWindow(SDL_VideoDevice *_this, SDL_Window *window)
                 data.viewcontroller.view.hidden = NO;
             }
 
-            /* Local bridge: tell the host app the SDL window is live. */
-            UIKit_NoteWindow(window, window->w, window->h);
+            /* Local bridge: only the real game window is live input.
+             * SDL_ShowWindow() calls the driver before it clears
+             * SDL_WINDOW_HIDDEN, so checking HIDDEN here would also skip the
+             * real window. RenderPearl's helpers are UTILITY/NOT_FOCUSABLE. */
+            if (!(window->flags & (SDL_WINDOW_UTILITY | SDL_WINDOW_NOT_FOCUSABLE))) {
+                UIKit_NoteWindow(window, window->w, window->h);
 
-            // Make this window the current mouse focus for touch input
-            SDL_VideoDisplay *display = SDL_GetVideoDisplayForWindow(window);
-            SDL_UIKitDisplayData *displaydata = (__bridge SDL_UIKitDisplayData *)display->internal;
+                // Make this window the current mouse focus for touch input
+                SDL_VideoDisplay *display = SDL_GetVideoDisplayForWindow(window);
+                SDL_UIKitDisplayData *displaydata = (__bridge SDL_UIKitDisplayData *)display->internal;
     #ifndef SDL_PLATFORM_VISIONOS
-            if (displaydata.uiscreen == [UIScreen mainScreen])
+                if (displaydata.uiscreen == [UIScreen mainScreen])
     #endif
-            {
-                SDL_SetMouseFocus(window);
-                SDL_SetKeyboardFocus(window);
+                {
+                    SDL_SetMouseFocus(window);
+                    SDL_SetKeyboardFocus(window);
+                }
             }
         }
     });
@@ -432,8 +465,12 @@ void UIKit_DestroyWindow(SDL_VideoDevice *_this, SDL_Window *window)
                 CFRelease(window->internal);
                 window->internal = NULL;
 
-                /* Local bridge: tell the host app the SDL window is gone. */
-                UIKit_NoteWindow(NULL, 0, 0);
+                /* Local bridge: only the visible game window drives input;
+                 * destroying a hidden utility/test window must not clear the
+                 * host's live window id. */
+                if (!(window->flags & SDL_WINDOW_HIDDEN)) {
+                    UIKit_NoteWindow(NULL, 0, 0);
+                }
             }
         }
     });

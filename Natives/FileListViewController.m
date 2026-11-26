@@ -1,4 +1,6 @@
 #import "FileListViewController.h"
+#import "AppSheet.h"
+#import "utils.h"
 
 @interface FileListViewController () {
 }
@@ -56,17 +58,32 @@
     self.whenItemSelected(self.fileList [indexPath.row]);
 }
 
+- (void)performDeleteAtIndexPath:(NSIndexPath *)indexPath tableView:(UITableView *)tableView {
+    NSString *str = [self.fileList objectAtIndex:indexPath.row];
+    NSFileManager *fm = [NSFileManager defaultManager];
+    NSString *path = [NSString stringWithFormat:@"%@/%@.json", self.listPath, str];
+    if (self.whenDelete != nil) {
+        self.whenDelete(path);
+    }
+    [fm removeItemAtPath:path error:nil];
+    [self.fileList removeObjectAtIndex:indexPath.row];
+    [tableView deleteRowsAtIndexPaths:@[indexPath] withRowAnimation:UITableViewRowAnimationFade];
+}
+
 - (void)tableView:(UITableView *)tableView commitEditingStyle:(UITableViewCellEditingStyle)editingStyle forRowAtIndexPath:(NSIndexPath *)indexPath {
     if (editingStyle == UITableViewCellEditingStyleDelete) {
-        NSString *str = [self.fileList objectAtIndex:indexPath.row];
-        NSFileManager *fm = [NSFileManager defaultManager];
-        NSString *path = [NSString stringWithFormat:@"%@/%@.json", self.listPath, str];
-        if (self.whenDelete != nil) {
-            self.whenDelete(path);
+        if (self.confirmDeleteBeforeRemoving) {
+            NSString *str = [self.fileList objectAtIndex:indexPath.row];
+            [AppSheet showConfirmWithTitle:str
+                                   message:localize(@"custom_controls.control_menu.delete.warn", nil)
+                              confirmTitle:localize(@"Remove", nil)
+                               destructive:YES
+                                 onConfirm:^{
+                [self performDeleteAtIndexPath:indexPath tableView:tableView];
+            }];
+            return;
         }
-        [fm removeItemAtPath:path error:nil];
-        [self.fileList removeObjectAtIndex:indexPath.row];
-        [tableView deleteRowsAtIndexPaths:@[indexPath] withRowAnimation:UITableViewRowAnimationFade];
+        [self performDeleteAtIndexPath:indexPath tableView:tableView];
     }
 }
 

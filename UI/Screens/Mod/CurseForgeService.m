@@ -164,6 +164,22 @@ static NSString* CFLoaderForToken(NSString *token) {
     return instance;
 }
 
++ (NSString *)cdnURLForFileId:(NSNumber *)fileId fileName:(NSString *)fileName {
+    if (![fileId isKindOfClass:[NSNumber class]] ||
+        ![fileName isKindOfClass:[NSString class]] || fileName.length == 0) {
+        return nil;
+    }
+    long long fid = fileId.longLongValue;
+    if (fid <= 0) return nil;
+    NSString *baseName = fileName.lastPathComponent;
+    if (baseName.length == 0) return nil;
+    NSString *encoded = [baseName stringByAddingPercentEncodingWithAllowedCharacters:
+                         NSCharacterSet.URLPathAllowedCharacterSet];
+    if (encoded.length == 0) return nil;
+    return [NSString stringWithFormat:@"https://edge.forgecdn.net/files/%lld/%lld/%@",
+            fid / 1000, fid % 1000, encoded];
+}
+
 - (instancetype)init {
     self = [super init];
     if (self) {
@@ -606,6 +622,33 @@ static NSString* CFLoaderForToken(NSString *token) {
             @"_source": @"curseforge",
         }, nil);
     }];
+}
+
+- (void)loadFileMetadataForProject:(NSString *)projectId
+                            fileId:(NSNumber *)fileId
+                        completion:(void(^)(NSDictionary * _Nullable file, NSError * _Nullable error))completion
+{
+    if (![self isConfigured]) {
+        if (completion) completion(nil, [NSError errorWithDomain:@"CurseForge" code:401 userInfo:@{NSLocalizedDescriptionKey: @"API key not configured"}]);
+        return;
+    }
+    NSString *path = [NSString stringWithFormat:@"/mods/%@/files/%@", projectId, fileId];
+    NSMutableURLRequest *req = [self requestForPath:path];
+    [[NSURLSession.sharedSession dataTaskWithRequest:req completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
+        dispatch_async(dispatch_get_main_queue(), ^{
+            if (error || !data) {
+                if (completion) completion(nil, error ?: [NSError errorWithDomain:@"CurseForge" code:-1 userInfo:@{NSLocalizedDescriptionKey: @"No data received"}]);
+                return;
+            }
+            NSDictionary *json = [NSJSONSerialization JSONObjectWithData:data options:0 error:nil];
+            NSDictionary *file = json[@"data"];
+            if ([file isKindOfClass:[NSDictionary class]]) {
+                if (completion) completion(file, nil);
+            } else {
+                if (completion) completion(nil, [NSError errorWithDomain:@"CurseForge" code:-1 userInfo:@{NSLocalizedDescriptionKey: @"File metadata not found"}]);
+            }
+        });
+    }] resume];
 }
 
 - (void)resolveDownloadURLForProject:(NSString *)projectId

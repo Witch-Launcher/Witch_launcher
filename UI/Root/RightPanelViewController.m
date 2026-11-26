@@ -6,6 +6,7 @@
 #import "PLProfiles.h"
 #import "utils.h"
 #import "AmethystBlurView.h"
+#import "UIView+LiquidGlass.h"
 #import "DownloadManager.h"
 #import "ProfileAvatarManager.h"
 #import <objc/runtime.h>
@@ -20,6 +21,7 @@
 @property (nonatomic) UIStackView *versionsStack;
 @property (nonatomic) UIScrollView *versionsScroll;
 @property (nonatomic) UIButton *addVersionButton;
+@property (nonatomic) UIButton *backupButton;
 @property (nonatomic) NSArray *installedVersions;
 @end
 
@@ -34,6 +36,7 @@
     [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(versionDidChange:) name:@"VersionDidChangeNotification" object:nil];
     [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(updateColors) name:ThemeDidChangeNotification object:nil];
     [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(updateColors) name:AmethystBlurIntensityDidChangeNotification object:nil];
+    [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(updateColors) name:LiquidGlassDidChangeNotification object:nil];
     [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(downloadTasksDidChange) name:DownloadTasksDidChangeNotification object:nil];
     [self updateColors];
     [self downloadTasksDidChange];
@@ -101,6 +104,7 @@
     _versionsScroll = [[UIScrollView alloc] init];
     _versionsScroll.translatesAutoresizingMaskIntoConstraints = NO;
     _versionsScroll.showsVerticalScrollIndicator = NO;
+    _versionsScroll.contentInsetAdjustmentBehavior = UIScrollViewContentInsetAdjustmentNever;
     [contentView addSubview:_versionsScroll];
 
     _versionsStack = [[UIStackView alloc] init];
@@ -108,6 +112,13 @@
     _versionsStack.axis = UILayoutConstraintAxisVertical;
     _versionsStack.spacing = 2;
     [_versionsScroll addSubview:_versionsStack];
+
+    _backupButton = [UIButton buttonWithType:UIButtonTypeSystem];
+    _backupButton.translatesAutoresizingMaskIntoConstraints = NO;
+    [_backupButton setImage:[UIImage systemImageNamed:@"icloud.and.arrow.up"] forState:UIControlStateNormal];
+    _backupButton.accessibilityLabel = localize(@"Backup & Restore", nil);
+    [_backupButton addTarget:self action:@selector(didTapBackup) forControlEvents:UIControlEventTouchUpInside];
+    [contentView addSubview:_backupButton];
 
     _addVersionButton = [UIButton buttonWithType:UIButtonTypeSystem];
     _addVersionButton.translatesAutoresizingMaskIntoConstraints = NO;
@@ -142,6 +153,11 @@
         [_skinPreviewView.widthAnchor constraintEqualToConstant:40],
         [_skinPreviewView.heightAnchor constraintEqualToConstant:40],
 
+        [_backupButton.topAnchor constraintEqualToAnchor:contentView.topAnchor constant:2],
+        [_backupButton.trailingAnchor constraintEqualToAnchor:contentView.trailingAnchor constant:-2],
+        [_backupButton.widthAnchor constraintEqualToConstant:28],
+        [_backupButton.heightAnchor constraintEqualToConstant:28],
+
         [_accountNameLabel.topAnchor constraintEqualToAnchor:_skinPreviewView.bottomAnchor constant:2],
         [_accountNameLabel.leadingAnchor constraintEqualToAnchor:contentView.leadingAnchor],
         [_accountNameLabel.trailingAnchor constraintEqualToAnchor:contentView.trailingAnchor],
@@ -163,13 +179,20 @@
         [_versionsScroll.topAnchor constraintEqualToAnchor:_versionsLabel.bottomAnchor constant:4],
         [_versionsScroll.leadingAnchor constraintEqualToAnchor:contentView.leadingAnchor],
         [_versionsScroll.trailingAnchor constraintEqualToAnchor:contentView.trailingAnchor],
-        [_versionsScroll.heightAnchor constraintEqualToConstant:120],
+        // Flexible height: the panel chain is all fixed sizes, so a hard 120pt
+        // here over-constrains short (landscape) panels and Auto Layout breaks
+        // the top anchor instead, leaving a gap under the header. Letting the
+        // scroll absorb the slack keeps the list flush and scrollable.
+        [_versionsScroll.heightAnchor constraintGreaterThanOrEqualToConstant:80],
 
-        [_versionsStack.topAnchor constraintEqualToAnchor:_versionsScroll.topAnchor],
-        [_versionsStack.leadingAnchor constraintEqualToAnchor:_versionsScroll.leadingAnchor],
-        [_versionsStack.trailingAnchor constraintEqualToAnchor:_versionsScroll.trailingAnchor],
-        [_versionsStack.bottomAnchor constraintEqualToAnchor:_versionsScroll.bottomAnchor],
-        [_versionsStack.widthAnchor constraintEqualToAnchor:_versionsScroll.widthAnchor],
+        // Pin to the content guide (not the frame) so short lists stay flush
+        // under the header instead of being stretched/centred, and long lists
+        // scroll naturally instead of fighting the fixed 120pt frame.
+        [_versionsStack.topAnchor constraintEqualToAnchor:_versionsScroll.contentLayoutGuide.topAnchor],
+        [_versionsStack.leadingAnchor constraintEqualToAnchor:_versionsScroll.contentLayoutGuide.leadingAnchor],
+        [_versionsStack.trailingAnchor constraintEqualToAnchor:_versionsScroll.contentLayoutGuide.trailingAnchor],
+        [_versionsStack.bottomAnchor constraintEqualToAnchor:_versionsScroll.contentLayoutGuide.bottomAnchor],
+        [_versionsStack.widthAnchor constraintEqualToAnchor:_versionsScroll.frameLayoutGuide.widthAnchor],
 
         [_addVersionButton.topAnchor constraintEqualToAnchor:_versionsScroll.bottomAnchor constant:4],
         [_addVersionButton.leadingAnchor constraintEqualToAnchor:contentView.leadingAnchor constant:4],
@@ -191,7 +214,9 @@
 
 - (void)updateColors {
     ThemeManager *theme = ThemeManager.shared;
-    if ([AmethystBlurView blurEnabledForKey:@"amethyst_rightpanel_blur"]) {
+    if ([UIView lg_isEnabled]) {
+        self.view.backgroundColor = [UIColor clearColor];
+    } else if ([AmethystBlurView blurEnabledForKey:@"amethyst_rightpanel_blur"]) {
         self.view.backgroundColor = [theme.rightPanelBackgroundColor colorWithAlphaComponent:0.25 * theme.uiOpacity];
     } else {
         self.view.backgroundColor = theme.rightPanelBackgroundColor;
@@ -200,6 +225,7 @@
     _versionsLabel.textColor = theme.secondaryTextColor;
     _addVersionButton.tintColor = theme.accentColor;
     _addVersionButton.backgroundColor = [theme.accentColor colorWithAlphaComponent:0.12];
+    _backupButton.tintColor = theme.secondaryTextColor;
     _launchButton.backgroundColor = theme.accentColor;
     [_launchButton setTitleColor:theme.buttonTextColor forState:UIControlStateNormal];
 }
@@ -208,6 +234,12 @@
     _accountNameLabel.text = name ?: localize(@"account.no_account", nil);
     if (skin) {
         _skinPreviewView.image = skin;
+        _skinPreviewView.tintColor = [UIColor clearColor];
+    } else {
+        // Reset instead of keeping the previous account's head when the new
+        // account's skin is still loading (or has no skin).
+        _skinPreviewView.image = [UIImage systemImageNamed:@"person.circle"];
+        _skinPreviewView.tintColor = [UIColor lightGrayColor];
     }
 }
 
@@ -418,6 +450,11 @@
 - (void)didTapAccount {
     [HapticManager.shared play:HapticTypeLight];
     if (self.delegate) [self.delegate rightPanelDidTapAccount];
+}
+
+- (void)didTapBackup {
+    [HapticManager.shared play:HapticTypeLight];
+    if (self.delegate) [self.delegate rightPanelDidTapBackup];
 }
 
 - (void)didTapLaunch {

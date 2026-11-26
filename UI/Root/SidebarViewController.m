@@ -3,6 +3,7 @@
 #import "HapticManager.h"
 #import "LauncherPreferences.h"
 #import "AmethystBlurView.h"
+#import "UIView+LiquidGlass.h"
 
 @interface SidebarTabItem : UIView
 @property (nonatomic) UIImageView *iconView;
@@ -135,6 +136,7 @@
         [self.stackContainer addSubview:item];
         [itemArray addObject:item];
     }
+    self.items = itemArray;
     [self rebuildItemConstraints];
 
     [NSLayoutConstraint activateConstraints:@[
@@ -144,11 +146,11 @@
         [self.stackContainer.heightAnchor constraintEqualToAnchor:self.view.heightAnchor multiplier:0.85],
     ]];
 
-    self.items = itemArray;
     self.selectedTab = SidebarTabGame;
 
     [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(updateColors) name:ThemeDidChangeNotification object:nil];
     [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(updateColors) name:AmethystBlurIntensityDidChangeNotification object:nil];
+    [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(updateColors) name:LiquidGlassDidChangeNotification object:nil];
         [self updateColors];
     }
 
@@ -192,7 +194,7 @@
 }
 
 - (void)setHorizontal:(BOOL)horizontal {
-    if (_horizontal == horizontal && _itemConstraints) return;
+    if (_horizontal == horizontal && _itemConstraints.count > 0) return;
     _horizontal = horizontal;
     if (!self.items) return;
     [self rebuildItemConstraints];
@@ -200,7 +202,9 @@
 
 - (void)updateColors {
     ThemeManager *theme = ThemeManager.shared;
-    if ([AmethystBlurView blurEnabledForKey:@"amethyst_sidebar_blur"]) {
+    if ([UIView lg_isEnabled]) {
+        self.view.backgroundColor = [UIColor clearColor];
+    } else if ([AmethystBlurView blurEnabledForKey:@"amethyst_sidebar_blur"]) {
         self.view.backgroundColor = [theme.sidebarBackgroundColor colorWithAlphaComponent:0.25 * theme.uiOpacity];
     } else {
         self.view.backgroundColor = theme.sidebarBackgroundColor;

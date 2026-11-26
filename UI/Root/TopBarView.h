@@ -4,6 +4,7 @@
 - (void)topBarDidTapFileManager;
 - (void)topBarDidTapSettings;
 - (void)topBarDidTapDownloadHub;
+- (void)topBarDidTapDownloads;
 @end
 
 @interface TopBarView : UIView

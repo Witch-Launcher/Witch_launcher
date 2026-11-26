@@ -1258,6 +1258,19 @@ void SDL_FlushEvents(Uint32 minType, Uint32 maxType)
     SDL_EventEntry *entry, *next;
     Uint32 type;
 
+#if defined(SDL_PLATFORM_IOS) || defined(SDL_PLATFORM_TVOS)
+    /* Amethyst: Minecraft 26.3 flushes the whole input range every frame
+     * before polling. The host launcher injects keyboard, mouse button and
+     * wheel events from UIKit/GCMouse callbacks between frames, so that flush
+     * discarded them and broke hotbar switching/scrolling. Keep the queue. */
+    (void)minType;
+    (void)maxType;
+    (void)entry;
+    (void)next;
+    (void)type;
+    return;
+#endif
+
     // Make sure the events are current
 #if 0
     /* Actually, we can't do this since we might be flushing while processing
@@ -1863,7 +1876,20 @@ bool SDL_PushEvent(SDL_Event *event)
     if (event->type == SDL_EVENT_MOUSE_BUTTON_DOWN || event->type == SDL_EVENT_MOUSE_BUTTON_UP) {
         if (!sdl_push_mouse_routing) {
             sdl_push_mouse_routing = true;
-            SDL_SendMouseButton(event->button.timestamp, NULL, SDL_GLOBAL_MOUSE_ID,
+            /* Local fix: route to the window carried by the injected event.
+             * Passing NULL made every button event fall back to mouse->focus,
+             * and once that focus was unset (the SDL view gets re-embedded on
+             * rotation, focus is only restored by UIKit_ShowWindow, i.e. it
+             * can stay lost after a background/foreground cycle) the posted
+             * event carried windowID 0. Minecraft 26.3 drops zero-windowID
+             * input events (same reason as the wheel fix below), so menu
+             * clicks died while drag-camera motion kept working - matching
+             * the "cursor cannot interact in menus on some devices" report.
+             * Routing through the window also reaches
+             * SDL_UpdateMouseFocus(window, ...) while the button is down,
+             * which re-establishes a lost mouse focus on the very next tap. */
+            SDL_Window *w = SDL_GetWindowFromID(event->button.windowID);
+            SDL_SendMouseButton(event->button.timestamp, w, SDL_GLOBAL_MOUSE_ID,
                                 event->button.button, event->type == SDL_EVENT_MOUSE_BUTTON_DOWN);
             sdl_push_mouse_routing = false;
             return true;
@@ -1872,7 +1898,12 @@ bool SDL_PushEvent(SDL_Event *event)
     if (event->type == SDL_EVENT_MOUSE_WHEEL) {
         if (!sdl_push_mouse_routing) {
             sdl_push_mouse_routing = true;
-            SDL_SendMouseWheel(event->wheel.timestamp, NULL, SDL_GLOBAL_MOUSE_ID,
+            /* Amethyst: route to the window carried by the injected event.
+             * SDL_SendMouseWheel(NULL) derives the window from mouse focus,
+             * which can be unset while a menu is open, leaving windowID 0;
+             * Minecraft 26.3 drops wheel events whose window handle is 0. */
+            SDL_Window *w = SDL_GetWindowFromID(event->wheel.windowID);
+            SDL_SendMouseWheel(event->wheel.timestamp, w, SDL_GLOBAL_MOUSE_ID,
                                event->wheel.x, event->wheel.y, event->wheel.direction);
             sdl_push_mouse_routing = false;
             return true;

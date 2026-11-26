@@ -9,12 +9,17 @@
 #import "ThemeManager.h"
 #import "VersionDirectoryManager.h"
 #import "PLProfiles.h"
+#import "WitchPluginRuntime.h"
+#import "WitchRootHost.h"
+#import "MemSampler.h"
 
 #include <objc/runtime.h>
 #include "ios_uikit_bridge.h"
 #import "AppSheet.h"
 #include "utils.h"
 #import "AppErrorDialog.h"
+
+static UIViewController<WitchRootHost> *WitchRootHostForLaunch(void);
 
 void internal_showDialog(NSString* title, NSString* message) {
     NSLog(@"[UI] Dialog shown: %@: %@", title, message);
@@ -102,6 +107,8 @@ void UIKit_launchMinecraftSurfaceVC(UIWindow* window, NSDictionary* metadata) {
             window.alpha = 1;
             window.rootViewController = [[SurfaceViewController alloc] initWithMetadata:metadata];
             [window makeKeyAndVisible];
+            // The launcher UI may be zoomed; the game surface must stay 1:1.
+            [ThemeManager.shared applyUIScaleToAllWindows];
         }];
     });
 }
@@ -141,6 +148,7 @@ void UIKit_launchJarFileWithArgs(UIWindow* window, NSString* jarPath, NSArray<NS
             window.alpha = 1;
             window.rootViewController = [[SurfaceViewController alloc] initWithJarPath:jarPath args:args minJavaVersion:minJavaVersion];
             [window makeKeyAndVisible];
+            [ThemeManager.shared applyUIScaleToAllWindows];
         }];
     });
 }
@@ -167,6 +175,10 @@ UIInterfaceOrientationMask amethyst_orientation_mask(void) {
 // were never in Info.plist, so iOS fell back to the wrong default icon.
 
 void UIKit_returnToSplitView() {
+    // The game session is over (normal exit, crash screen, or installer).
+    // Stop the 2s footprint sampler so it does not keep a timer, a serial
+    // queue and stdout logging alive on the launcher screen.
+    WitchMemSamplerStop();
     dispatch_async(dispatch_get_main_queue(), ^{
         UIWindow *window = UIWindow.mainWindow;
 
@@ -179,12 +191,13 @@ void UIKit_returnToSplitView() {
                 window.rootViewController = tmpRootVC;
                 tmpRootVC = nil;
             } else {
-                AmethystRootViewController *rootVC = [[AmethystRootViewController alloc] init];
+                UIViewController<WitchRootHost> *rootVC = WitchRootHostForLaunch();
                 MainCoordinator *coordinator = [[MainCoordinator alloc] initWithRootVC:rootVC];
                 rootVC.coordinator = coordinator;
                 window.rootViewController = rootVC;
             }
             [window makeKeyAndVisible];
+            [ThemeManager.shared applyUIScaleToAllWindows];
         }];
     });
     // A headless installer run (Forge/NeoForge) writes versions/<id> while the
@@ -192,8 +205,16 @@ void UIKit_returnToSplitView() {
     [[NSNotificationCenter defaultCenter] postNotificationName:@"VersionDidChangeNotification" object:nil userInfo:@{}];
 }
 
+static UIViewController<WitchRootHost> *WitchRootHostForLaunch(void) {
+    UIViewController *customRoot = [WitchPluginRuntime.shared createCustomRootViewController];
+    if (customRoot && [customRoot conformsToProtocol:@protocol(WitchRootHost)]) {
+        return (UIViewController<WitchRootHost> *)customRoot;
+    }
+    return (UIViewController<WitchRootHost> *)[[AmethystRootViewController alloc] init];
+}
+
 void launchInitialViewController(UIWindow *window) {
-    AmethystRootViewController *rootVC = [[AmethystRootViewController alloc] init];
+    UIViewController<WitchRootHost> *rootVC = WitchRootHostForLaunch();
     MainCoordinator *coordinator = [[MainCoordinator alloc] initWithRootVC:rootVC];
     rootVC.coordinator = coordinator;
     window.rootViewController = rootVC;

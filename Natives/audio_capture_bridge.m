@@ -1,7 +1,38 @@
 #include <Foundation/Foundation.h>
 #include <AVFoundation/AVFoundation.h>
 #include <pthread.h>
+#include <dlfcn.h>
 #include "jni.h"
+
+// This dylib is a separate CMake target that does not link the launcher
+// objects, so getPrefObject/getPrefBool are resolved from the main executable
+// at runtime (it is built with a flat namespace). Missing symbols just fall
+// back to the defaults instead of failing the load.
+static id aac_prefObject(NSString *key) {
+    static id (*lookup)(NSString *);
+    static BOOL lookedUp = NO;
+    if (!lookedUp) {
+        lookedUp = YES;
+        lookup = (id (*)(NSString *))dlsym(RTLD_DEFAULT, "getPrefObject");
+        if (!lookup) {
+            NSLog(@"[AudioCapture] getPrefObject unavailable, using defaults");
+        }
+    }
+    return lookup ? lookup(key) : nil;
+}
+
+static BOOL aac_prefBool(NSString *key) {
+    return [aac_prefObject(key) boolValue];
+}
+
+// Number of live capture handles. SurfaceViewController keeps the session in
+// PlayAndRecord while this is > 0, even when the "allow microphone" pref is
+// off, so a mod that opens a line does not get its category reset underneath.
+static volatile int gActiveCaptures = 0;
+
+BOOL aac_isCapturing(void) {
+    return gActiveCaptures > 0;
+}
 
 #define CIRCULAR_BUFFER_SIZE (48000 * 2 * 8)
 
@@ -123,15 +154,147 @@ static void tapCallback(AVAudioPCMBuffer *buffer, AudioCaptureCtx *ctx) {
     free(intData);
 }
 
+static BOOL hasMicrophonePermission(void) {
+    if (@available(iOS 17.0, *)) {
+        return AVAudioApplication.sharedInstance.recordPermission == AVAudioApplicationRecordPermissionGranted;
+    }
+    return AVAudioSession.sharedInstance.recordPermission == AVAudioSessionRecordPermissionGranted;
+}
+
+void aac_requestMicrophonePermission(void) {
+    if (hasMicrophonePermission()) return;
+    if (@available(iOS 17.0, *)) {
+        [AVAudioApplication requestRecordPermissionWithCompletionHandler:^(BOOL granted) {
+            NSLog(@"[AudioCapture] Microphone permission %@", granted ? @"granted" : @"denied");
+        }];
+    } else {
+        [AVAudioSession.sharedInstance requestRecordPermission:^(BOOL granted) {
+            NSLog(@"[AudioCapture] Microphone permission %@", granted ? @"granted" : @"denied");
+        }];
+    }
+}
+
+// Honour the launcher's microphone picker ("auto" / front / bottom / back).
+static void aac_selectInputSource(void) {
+    AVAudioSession *session = AVAudioSession.sharedInstance;
+    AVAudioSessionPortDescription *builtInMic = nil;
+    for (AVAudioSessionPortDescription *input in session.availableInputs) {
+        if ([input.portType isEqualToString:AVAudioSessionPortBuiltInMic]) {
+            builtInMic = input;
+            break;
+        }
+    }
+    if (!builtInMic || builtInMic.dataSources.count == 0) return;
+
+    NSString *source = aac_prefObject(@"video.microphone_source");
+    NSArray<NSString *> *order = nil;
+    if (!source || [source isEqualToString:@"auto"]) {
+        order = @[@"Front", @"Bottom", @"Back"];
+    } else if ([source isEqualToString:@"front"]) {
+        order = @[@"Front"];
+    } else if ([source isEqualToString:@"bottom"]) {
+        order = @[@"Bottom"];
+    } else if ([source isEqualToString:@"back"]) {
+        order = @[@"Back"];
+    } else {
+        return;
+    }
+
+    for (NSString *wanted in order) {
+        for (AVAudioSessionDataSourceDescription *dataSource in builtInMic.dataSources) {
+            if ([dataSource.dataSourceName localizedCaseInsensitiveContainsString:wanted]) {
+                NSError *error = nil;
+                [session setPreferredInput:builtInMic error:&error];
+                [builtInMic setPreferredDataSource:dataSource error:&error];
+                NSLog(@"[AudioCapture] Input source: %@", dataSource.dataSourceName);
+                return;
+            }
+        }
+    }
+}
+
+// A mod can open a capture line while the session is still Playback (the
+// launcher pref is off by default), and AVAudioEngine then has no hardware
+// input format at all. Switch to PlayAndRecord for the lifetime of the
+// capture; SurfaceViewController keeps it there thanks to aac_isCapturing().
+static void aac_configureRecordingSession(void) {
+    AVAudioSession *session = AVAudioSession.sharedInstance;
+    NSString *category = session.category;
+    BOOL recordable = [category isEqualToString:AVAudioSessionCategoryPlayAndRecord]
+                   || [category isEqualToString:AVAudioSessionCategoryRecord];
+    if (!recordable) {
+        NSError *error = nil;
+        AVAudioSessionCategoryOptions options =
+            AVAudioSessionCategoryOptionDefaultToSpeaker
+            | AVAudioSessionCategoryOptionAllowBluetoothA2DP
+            | AVAudioSessionCategoryOptionAllowBluetoothHFP;
+        if (!aac_prefBool(@"video.silence_other_audio")) {
+            options |= AVAudioSessionCategoryOptionMixWithOthers;
+        }
+        [session setActive:NO error:nil];
+        [session setCategory:AVAudioSessionCategoryPlayAndRecord withOptions:options error:&error];
+        [session setPreferredSampleRate:48000.0 error:&error];
+        [session setPreferredIOBufferDuration:0.005 error:&error];
+        [session setActive:YES error:&error];
+        NSLog(@"[AudioCapture] Session switched to PlayAndRecord (error=%@)", error);
+    }
+    aac_selectInputSource();
+}
+
+// Voice chat opens its line during game startup, before the user may have
+// answered the permission prompt. Wait for the answer (the alert is shown by
+// the system, so blocking here does not prevent it) instead of failing the
+// only attempt the mod makes.
+static BOOL waitForMicrophonePermission(void) {
+    if (hasMicrophonePermission()) return YES;
+    dispatch_semaphore_t semaphore = dispatch_semaphore_create(0);
+    if (@available(iOS 17.0, *)) {
+        [AVAudioApplication requestRecordPermissionWithCompletionHandler:^(BOOL granted) {
+            dispatch_semaphore_signal(semaphore);
+        }];
+    } else {
+        [AVAudioSession.sharedInstance requestRecordPermission:^(BOOL granted) {
+            dispatch_semaphore_signal(semaphore);
+        }];
+    }
+    long waited = dispatch_semaphore_wait(semaphore,
+        dispatch_time(DISPATCH_TIME_NOW, 10 * NSEC_PER_SEC));
+    BOOL granted = hasMicrophonePermission();
+    NSLog(@"[AudioCapture] Microphone permission %@ (answered=%d)",
+          granted ? @"granted" : @"not granted", waited == 0);
+    return granted;
+}
+
 static CaptureHandle *createCapture(int sampleRate) {
     AVAudioSession *session = [AVAudioSession sharedInstance];
     if (!session.inputAvailable) {
         NSLog(@"[AudioCapture] No input available");
         return NULL;
     }
+    // AVAudioEngine terminates the process (uncaught AVFAudio exception,
+    // "IsFormatSampleRateAndChannelCountValid(hwFormat)") when the input node
+    // has no hardware format - which is the case until the user grants the
+    // microphone permission, or while the session category is Playback (the
+    // launcher only switches to PlayAndRecord when "allow microphone" is on).
+    // Report failure instead so the caller just sees an unavailable line.
+    if (!waitForMicrophonePermission()) {
+        NSLog(@"[AudioCapture] Microphone permission not granted");
+        return NULL;
+    }
+    if (sampleRate <= 0) sampleRate = 48000;
+
+    aac_configureRecordingSession();
 
     AVAudioEngine *engine = [[AVAudioEngine alloc] init];
     AVAudioInputNode *inputNode = engine.inputNode;
+
+    AVAudioFormat *hwFormat = [inputNode inputFormatForBus:0];
+    if (!hwFormat || hwFormat.sampleRate <= 0 || hwFormat.channelCount == 0) {
+        NSLog(@"[AudioCapture] Input node has no valid hardware format (category=%@, rate=%f, ch=%u)",
+              session.category, hwFormat ? hwFormat.sampleRate : 0.0,
+              hwFormat ? (unsigned)hwFormat.channelCount : 0);
+        return NULL;
+    }
 
     AVAudioFormat *requestedFormat = [[AVAudioFormat alloc]
         initWithCommonFormat:AVAudioPCMFormatFloat32
@@ -142,25 +305,41 @@ static CaptureHandle *createCapture(int sampleRate) {
     AudioCaptureCtx *ctx = ctx_init();
     ctx->running = YES;
 
-    [inputNode installTapOnBus:0
-                    bufferSize:(AVAudioFrameCount)(sampleRate / 10)
-                        format:requestedFormat
-                         block:^(AVAudioPCMBuffer *buffer, AVAudioTime *when) {
-        tapCallback(buffer, ctx);
-        (void)when;
-    }];
-
-    [engine prepare];
+    @try {
+        [inputNode installTapOnBus:0
+                        bufferSize:(AVAudioFrameCount)(sampleRate / 10)
+                            format:requestedFormat
+                             block:^(AVAudioPCMBuffer *buffer, AVAudioTime *when) {
+            tapCallback(buffer, ctx);
+            (void)when;
+        }];
+        [engine prepare];
+    } @catch (NSException *exception) {
+        NSLog(@"[AudioCapture] installTapOnBus failed: %@", exception.reason);
+        ctx->running = NO;
+        ctx_destroy(ctx);
+        return NULL;
+    }
 
     CaptureHandle *handle = calloc(1, sizeof(CaptureHandle));
     handle->engine = (__bridge_retained void*)engine;
     handle->outputFormat = (__bridge_retained void*)requestedFormat;
     handle->ctx = ctx;
+    gActiveCaptures++;
     return handle;
 }
 
 static void destroyCapture(CaptureHandle *handle) {
     if (!handle) return;
+    if (gActiveCaptures > 0) gActiveCaptures--;
+    // Stop the tap and the engine before tearing down the shared context:
+    // the tap callback references it, so destroying it first was a use-after-free.
+    if (handle->engine) {
+        AVAudioEngine *e = (__bridge_transfer AVAudioEngine*)handle->engine;
+        [e.inputNode removeTapOnBus:0];
+        [e stop];
+        handle->engine = NULL;
+    }
     if (handle->ctx) {
         pthread_mutex_lock(&handle->ctx->mutex);
         handle->ctx->running = NO;
@@ -169,12 +348,6 @@ static void destroyCapture(CaptureHandle *handle) {
         pthread_mutex_unlock(&handle->ctx->mutex);
         ctx_destroy(handle->ctx);
         handle->ctx = NULL;
-    }
-    if (handle->engine) {
-        AVAudioEngine *e = (__bridge_transfer AVAudioEngine*)handle->engine;
-        [e.inputNode removeTapOnBus:0];
-        [e stop];
-        handle->engine = NULL;
     }
     if (handle->outputFormat) {
         AVAudioFormat *f = (__bridge_transfer AVAudioFormat*)handle->outputFormat;

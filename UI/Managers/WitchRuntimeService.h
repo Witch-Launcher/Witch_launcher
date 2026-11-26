@@ -23,7 +23,8 @@ typedef NS_ENUM(NSInteger, WitchRuntimeKind) {
 - (NSString *)manifestURL; // pref witch.runtime_manifest hoặc default JDK-Java_iOS
 - (NSArray<WitchRuntimeItem *> *)builtinItems; // 4 JDK + 3 LWJGL, đánh dấu quan trọng theo yêu cầu
 - (void)refreshStatuses:(void(^)(NSArray<WitchRuntimeItem *> *items, NSError *error))completion;
-- (void)downloadItem:(WitchRuntimeItem *)item progress:(void(^)(float))progress completion:(void(^)(BOOL ok, NSError *error))completion;
+// fraction 0..1 + trạng thái hiển thị (tải / giải nén / đăng ký). Gọi trên main queue.
+- (void)downloadItem:(WitchRuntimeItem *)item progress:(void(^)(float fraction, NSString *status))progress completion:(void(^)(BOOL ok, NSError *error))completion;
 - (BOOL)deleteItem:(WitchRuntimeItem *)item error:(NSError **)error;
 - (void)rescanRuntimes; // cài luôn không restart: quét lại java_runtimes
 @end

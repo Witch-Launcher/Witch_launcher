@@ -1,10 +1,11 @@
 #import <UIKit/UIKit.h>
 #import "SidebarViewController.h"
+#import "WitchRootHost.h"
 
 @class MainCoordinator;
 @class RightPanelViewController;
 
-@interface AmethystRootViewController : UIViewController <SidebarDelegate>
+@interface AmethystRootViewController : UIViewController <SidebarDelegate, WitchRootHost>
 
 @property (nonatomic, strong) MainCoordinator *coordinator;
 @property (nonatomic, readonly) SidebarViewController *sidebarVC;

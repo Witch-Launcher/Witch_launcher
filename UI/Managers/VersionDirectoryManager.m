@@ -43,6 +43,16 @@
         return stripped;
     }
 
+    // LabyMod ids look like "LabyMod-4-1.21.4-production"; the real Minecraft
+    // version is the first dotted numeric token.
+    if ([rawVersion rangeOfString:@"labymod" options:NSCaseInsensitiveSearch].location != NSNotFound) {
+        NSRegularExpression *regex = [NSRegularExpression regularExpressionWithPattern:@"[0-9]+(?:\\.[0-9]+)+" options:0 error:nil];
+        NSTextCheckingResult *match = [regex firstMatchInString:rawVersion options:0 range:NSMakeRange(0, rawVersion.length)];
+        if (match) {
+            return [rawVersion substringWithRange:match.range];
+        }
+    }
+
     return rawVersion;
 }
 
@@ -59,7 +69,11 @@
         return profile;
     }
 
-    if (json[@"minecraftVersion"]) {
+    if (json[@"_minecraftVersion"]) {
+        // LabyMod manifests keep the real game version here and have no
+        // "inheritsFrom" entry.
+        profile.mcVersion = json[@"_minecraftVersion"];
+    } else if (json[@"minecraftVersion"]) {
         profile.mcVersion = json[@"minecraftVersion"];
     } else if (json[@"inheritsFrom"]) {
         profile.mcVersion = json[@"inheritsFrom"];
@@ -76,7 +90,13 @@
         }
     }
 
-    if ([versionId.lowercaseString containsString:@"neoforge"]) {
+    NSString *declaredLoader = [json[@"modLoader"] isKindOfClass:[NSString class]] ? json[@"modLoader"] : nil;
+    if (declaredLoader.length > 0) {
+        // Modpack profiles written by MrpackInstaller carry an explicit loader.
+        profile.modLoader = declaredLoader;
+    } else if ([versionId.lowercaseString containsString:@"labymod"]) {
+        profile.modLoader = @"LabyMod";
+    } else if ([versionId.lowercaseString containsString:@"neoforge"]) {
         profile.modLoader = @"NeoForge";
     } else if ([versionId.lowercaseString containsString:@"fabric"]) {
         profile.modLoader = @"Fabric";
@@ -87,16 +107,17 @@
     } else if ([versionId.lowercaseString containsString:@"optifine"]) {
         profile.modLoader = @"OptiFine";
     } else if (json[@"inheritsFrom"] != nil) {
-        NSString *mainClass = json[@"mainClass"] ?: @"";
-        if ([mainClass containsString:@"fabric"]) {
+        NSString *mainClass = [json[@"mainClass"] isKindOfClass:[NSString class]] ? json[@"mainClass"] : @"";
+        NSString *loaderHint = mainClass.lowercaseString;
+        if ([loaderHint containsString:@"fabric"]) {
             profile.modLoader = @"Fabric";
-        } else if ([mainClass containsString:@"forge"]) {
-            profile.modLoader = @"Forge";
-        } else if ([mainClass containsString:@"quilt"]) {
-            profile.modLoader = @"Quilt";
-        } else if ([mainClass containsString:@"neoforged"] || [mainClass containsString:@"neoforge"]) {
+        } else if ([loaderHint containsString:@"neoforged"] || [loaderHint containsString:@"neoforge"]) {
             profile.modLoader = @"NeoForge";
-        } else if ([mainClass containsString:@"optifine"] || [mainClass containsString:@"OptiFine"]) {
+        } else if ([loaderHint containsString:@"forge"]) {
+            profile.modLoader = @"Forge";
+        } else if ([loaderHint containsString:@"quilt"]) {
+            profile.modLoader = @"Quilt";
+        } else if ([loaderHint containsString:@"optifine"]) {
             profile.modLoader = @"OptiFine";
         } else {
             profile.modLoader = @"Vanilla";
@@ -114,6 +135,7 @@
     if ([self.modLoader isEqualToString:@"Quilt"]) return @"square.grid.3x3.fill";
     if ([self.modLoader isEqualToString:@"NeoForge"]) return @"bolt.circle.fill";
     if ([self.modLoader isEqualToString:@"OptiFine"]) return @"sparkles.circle.fill";
+    if ([self.modLoader isEqualToString:@"LabyMod"]) return @"paintpalette.fill";
     return @"cube.box.fill";
 }
 

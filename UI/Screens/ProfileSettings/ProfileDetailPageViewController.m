@@ -341,7 +341,7 @@ typedef NS_ENUM(NSInteger, ProfileContentFilter) {
     [self showTab:ProfileDetailTabOverview];
     [self loadItemsIfNeeded];
     [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(onTheme) name:ThemeDidChangeNotification object:nil];
-    [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(onModsChanged) name:InstalledModsDidChangeNotification object:nil];
+    [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(onModsChanged:) name:InstalledModsDidChangeNotification object:nil];
     [self onTheme];
 }
 
@@ -568,9 +568,13 @@ typedef NS_ENUM(NSInteger, ProfileContentFilter) {
     [_contentTable reloadData];
 }
 
-- (void)onModsChanged {
+- (void)onModsChanged:(NSNotification *)note {
+    BOOL enabledOnly = [note.userInfo[@"reason"] isEqualToString:@"enabled"];
     [self updateTabCounts];
-    if (_currentTab != ProfileDetailTabOverview) [self loadItemsIfNeeded];
+    // "enabled" only moves a file on/off; the embedded list VCs already
+    // re-apply their filter, so re-loading every tab here was pure overhead
+    // (and re-parsed archives on large profiles).
+    if (!enabledOnly && _currentTab != ProfileDetailTabOverview) [self loadItemsIfNeeded];
     [self refreshHeader];
 }
 
@@ -649,9 +653,9 @@ typedef NS_ENUM(NSInteger, ProfileContentFilter) {
 - (void)loadSettingLists {
     _rendererKeys = getRendererKeys(YES);
     _rendererNames = getRendererNames(YES);
-    NSString *ctrlPath = [NSString stringWithFormat:@"%s/controlmap", getenv("POJAV_HOME")];
+    NSString *ctrlPath = amethyst_control_path(nil);
     _touchControlList = [self listFilesAtPath:ctrlPath];
-    NSString *gamepadPath = [NSString stringWithFormat:@"%s/controlmap/gamepads", getenv("POJAV_HOME")];
+    NSString *gamepadPath = amethyst_control_path(@"gamepads");
     _gamepadControlList = [self listFilesAtPath:gamepadPath];
     _lwjglList = getLwjglVersions(YES);
     NSMutableArray *java = [getPrefObject(@"java.java_homes") allKeys].mutableCopy ?: [NSMutableArray array];
@@ -1471,7 +1475,7 @@ typedef NS_ENUM(NSInteger, ProfileContentFilter) {
     NSString *mc = [self profileMcVersion];
     NSString *loader = [self profileLoader];
 
-    UIAlertController *loading = [UIAlertController alertControllerWithTitle:@"Resolving dependencies" message:nil preferredStyle:UIAlertControllerStyleAlert];
+    UIAlertController *loading = [UIAlertController alertControllerWithTitle:localize(@"mod.resolving_dependencies", nil) message:nil preferredStyle:UIAlertControllerStyleAlert];
     UIActivityIndicatorView *spinner = [[UIActivityIndicatorView alloc] initWithActivityIndicatorStyle:UIActivityIndicatorViewStyleLarge];
     spinner.translatesAutoresizingMaskIntoConstraints = NO;
     [spinner startAnimating];
@@ -1491,7 +1495,7 @@ typedef NS_ENUM(NSInteger, ProfileContentFilter) {
         dispatch_async(dispatch_get_main_queue(), ^{
             [loading dismissViewControllerAnimated:YES completion:^{
                 if (error) {
-                    [ErrorPresenter showError:@"Error" message:[NSString stringWithFormat:@"Could not resolve dependencies: %@", error.localizedDescription]];
+                    [ErrorPresenter showError:localize(@"Error", nil) message:[NSString stringWithFormat:localize(@"mod.resolve_deps_failed", nil), error.localizedDescription]];
                     if (done) done();
                     return;
                 }
@@ -1663,8 +1667,14 @@ typedef NS_ENUM(NSInteger, ProfileContentFilter) {
         }
     }
     NSMutableDictionary *profiles = PLProfiles.current.profiles;
+    // A newly created profile is already in PLProfiles when its editor opens,
+    // so "isNew" must not treat the profile's own entry as a duplicate:
+    // keeping the name untouched saves it back over itself. Only a rename
+    // onto a different existing profile (or a create with a taken name) is
+    // an error.
     BOOL isRename = _originalName && ![name isEqualToString:_originalName];
-    if ((isRename && profiles[name]) || (_isNewProfile && profiles[name])) {
+    BOOL keepingName = _originalName && [name isEqualToString:_originalName];
+    if (profiles[name] && !keepingName) {
         [ErrorPresenter showError:@"Error" message:@"A profile with this name already exists."];
         return;
     }

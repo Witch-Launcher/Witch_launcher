@@ -1,0 +1,39 @@
+// Witch patch: converts the FSR1 upscale result into the 8-bit output the
+// present path blits into the swapchain.
+//
+// The FSR1 EASU/RCAS shaders write their result through an `rgba32f` UAV, so
+// the upscale result has to live in a VK_FORMAT_R32G32B32A32_SFLOAT image (a
+// UNORM8 view would not match the format the shader declares). The swapchain
+// image is 8-bit, so this pass converts the float result down to UNORM8
+// before it reaches the present blit.
+//
+// The destination image is declared without a format qualifier: that maps to
+// SPIR-V's "Unknown" image format, which lets the app pick the swapchain's
+// own format (BGRA8_UNORM) - the same convention the FidelityFX accumulate
+// and RCAS passes use for their output.
+//
+// Regenerate the SPIR-V header: ./generate_fsr1_resolve.sh
+
+#version 450
+
+layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
+
+layout(set = 0, binding = 0, rgba32f) uniform readonly image2D srcFloat;
+layout(set = 0, binding = 1) uniform writeonly image2D dstUnorm;
+
+layout(push_constant) uniform PushConstants {
+    vec4 dims;   // x=width, y=height
+} pc;
+
+void main()
+{
+    uvec2 gid = gl_GlobalInvocationID.xy;
+    if (gid.x >= uint(pc.dims.x) || gid.y >= uint(pc.dims.y)) {
+        return;
+    }
+
+    // The FSR1 output is an LDR result in [0,1]; clamp so a rounding
+    // overshoot cannot wrap around to the opposite end of the range.
+    vec4 color = imageLoad(srcFloat, ivec2(gid));
+    imageStore(dstUnorm, ivec2(gid), clamp(color, vec4(0.0), vec4(1.0)));
+}

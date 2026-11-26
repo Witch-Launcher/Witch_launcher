@@ -82,9 +82,9 @@ static const NSTimeInterval NewsRefreshInterval = 300.0; // 5 minutes
     }
     setPrefObject(@"witch.runtime_onboarded", @YES);
     __weak typeof(self) weakSelf = self;
-    [AppSheet showConfirmWithTitle:@"Bản Simple: chưa có Runtime"
-                           message:@"Bản Simple không kèm JDK/LWJGL để nhẹ. Bạn muốn mở bảng tải ngay (có đánh dấu [quan trọng]) hay để sau trong Settings → Tải Runtime JDK/LWJGL?"
-                      confirmTitle:@"Mở bảng tải"
+    [AppSheet showConfirmWithTitle:localize(@"mainmenu.runtime_onboarding.title", nil)
+                           message:localize(@"mainmenu.runtime_onboarding.message", nil)
+                      confirmTitle:localize(@"mainmenu.runtime_onboarding.confirm", nil)
                        destructive:NO
                          onConfirm:^{
         Class cls = NSClassFromString(@"RuntimeDownloadViewController");

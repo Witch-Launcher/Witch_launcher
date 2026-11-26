@@ -213,10 +213,17 @@
 
     if ([category isEqualToString:InstalledItemCategoryResourcePack] ||
         [category isEqualToString:InstalledItemCategoryShaderPack]) {
-        NSData *packPng = [archive extractDataFromFile:@"pack.png" error:nil];
-        if (packPng) {
-            UIImage *img = [UIImage imageWithData:packPng];
-            if (img) return img;
+        // Same root-name contract as ModMetadataReader: a missing preview
+        // returns nil so the caller can show the remote project icon.
+        NSArray<NSString *> *candidates = @[@"pack.png", @"icon.png", @"logo.png",
+                                            @"banner.png", @"preview.png", @"screenshot.png"];
+        for (NSString *c in candidates) {
+            NSData *d = [archive extractDataFromFile:c error:nil];
+            if (!d) d = [archive extractDataFromFile:c.lowercaseString error:nil];
+            if (d) {
+                UIImage *img = [UIImage imageWithData:d];
+                if (img) return img;
+            }
         }
         return nil;
     }

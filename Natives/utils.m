@@ -12,6 +12,7 @@
 
 #include "utils.h"
 #import "LauncherPreferences.h"
+#import "PLProfiles.h"
 
 CFTypeRef SecTaskCopyValueForEntitlement(void* task, NSString* entitlement, CFErrorRef  _Nullable *error);
 void* SecTaskCreateFromSelf(CFAllocatorRef allocator);
@@ -23,8 +24,9 @@ BOOL getEntitlementValue(NSString *key) {
     if (value == nil) {
         return NO;
     }
+    BOOL result = ![(__bridge id)value isKindOfClass:NSNumber.class] || [(__bridge id)value boolValue];
     CFRelease(value);
-    return ![(__bridge id)value isKindOfClass:NSNumber.class] || [(__bridge id)value boolValue];
+    return result;
 }
 
 BOOL processIsCurrentlyDebugged(void) {
@@ -379,6 +381,18 @@ void JIT26PrepareRegionForPatching(void *addr, size_t size) {
        "brk #0xf00d \n"
        "ret");
 }
+__attribute__((noinline,optnone,naked))
+void JIT26OfferMirrorRegion(void *addr, size_t size) {
+   asm("mov x16, #5 \n"
+       "brk #0xf00d \n"
+       "ret");
+}
+__attribute__((noinline,optnone,naked))
+void* JIT26VerifyMirrorOffer(void *sentinel) {
+   asm("mov x16, #6 \n"
+       "brk #0xf00d \n"
+       "ret");
+}
 void JIT26SendJITScript(NSString* script) {
     NSCAssert(script, @"Script must not be nil");
     // script.length counts UTF-16 units; the debugger reads raw bytes, so use
@@ -423,6 +437,27 @@ NSString* WitchHardwareMachine(void) {
         return @"unknown";
     }
     return @(buffer);
+}
+
+NSString* WitchChipName(void) {
+    NSUInteger (*MGGetSInt64Answer)(NSString *) = dlsym(RTLD_DEFAULT, "MGGetSint64Answer");
+    if (MGGetSInt64Answer == NULL) return nil;
+
+    long long chip = (long long)MGGetSInt64Answer(@"ChipID");
+    switch (chip) {
+        case 0x8010: return @"A10 Fusion";
+        case 0x8011: return @"A10X Fusion";
+        case 0x8015: return @"A11 Bionic";
+        case 0x8020: return @"A12 Bionic";
+        case 0x8027: return @"A12X / A12Z";
+        case 0x8030: return @"A13 Bionic";
+        case 0x8101: return @"A14 Bionic";
+        case 0x8103: return @"M1";
+        case 0x8110: return @"A15 Bionic";
+        case 0x8112: return @"A16 Bionic";
+        case 0x8120: return @"A17 Pro";
+        default: return [NSString stringWithFormat:@"Unknown (0x%llx)", chip];
+    }
 }
 
 BOOL DeviceCanCreateRXMap(void) {
@@ -631,4 +666,192 @@ BOOL DeviceNeedsDebugJITMapping(void) {
 
 BOOL JIT26IsLikelyDebuggerKeepAttached(void) {
     return processIsCurrentlyDebugged();
+}
+
+#pragma mark - Hidden home (.amethyst)
+
+static NSString *amethyst_hidden_root(void) {
+    const char *home = getenv("POJAV_HOME");
+    if (!home) return nil;
+    NSString *root = [@(home) stringByAppendingPathComponent:@".amethyst"];
+    [[NSFileManager defaultManager] createDirectoryAtPath:root withIntermediateDirectories:YES attributes:nil error:nil];
+    return root;
+}
+
+NSString *amethyst_hidden_path(NSString *subpath) {
+    NSString *root = amethyst_hidden_root();
+    if (!root) return nil;
+    if (subpath.length == 0) return root;
+    return [root stringByAppendingPathComponent:subpath];
+}
+
+NSString *amethyst_hidden_dir(NSString *subpath) {
+    NSString *path = amethyst_hidden_path(subpath);
+    if (path.length > 0) {
+        [[NSFileManager defaultManager] createDirectoryAtPath:path withIntermediateDirectories:YES attributes:nil error:nil];
+    }
+    return path;
+}
+
+#pragma mark - Control maps (visible folder)
+
+// Control maps are user content, not launcher support files: they stay in a
+// visible POJAV_HOME/controlmap folder so the Files app can reach them and
+// the user can copy their own layouts in without a hidden-folder dance.
+static NSString *amethyst_control_root(void) {
+    const char *home = getenv("POJAV_HOME");
+    if (!home) return nil;
+    return [@(home) stringByAppendingPathComponent:@"controlmap"];
+}
+
+NSString *amethyst_control_path(NSString *subpath) {
+    NSString *root = amethyst_control_root();
+    if (!root) return nil;
+    if (subpath.length == 0) return root;
+    return [root stringByAppendingPathComponent:subpath];
+}
+
+NSString *amethyst_control_dir(NSString *subpath) {
+    NSString *path = amethyst_control_path(subpath);
+    if (path.length > 0) {
+        [[NSFileManager defaultManager] createDirectoryAtPath:path withIntermediateDirectories:YES attributes:nil error:nil];
+    }
+    return path;
+}
+
+static void amethyst_move_legacy_item(NSString *root, NSString *hidden, NSString *name) {
+    NSFileManager *fm = [NSFileManager defaultManager];
+    NSString *from = [root stringByAppendingPathComponent:name];
+    NSString *to = [hidden stringByAppendingPathComponent:name];
+    if (![fm fileExistsAtPath:from]) return;
+    if ([fm fileExistsAtPath:to]) return; // new location already populated
+    NSError *error = nil;
+    if (![fm moveItemAtPath:from toPath:to error:&error]) {
+        NSLog(@"[AmethystHome] migrate %@ failed: %@", name, error);
+    } else {
+        NSLog(@"[AmethystHome] migrated %@ -> .amethyst/%@", name, name);
+    }
+}
+
+void amethyst_migrate_legacy_home(void) {
+    const char *home = getenv("POJAV_HOME");
+    if (!home) return;
+    NSString *root = @(home);
+    NSString *hidden = amethyst_hidden_root();
+    if (!hidden) return;
+    NSFileManager *fm = [NSFileManager defaultManager];
+
+    NSArray<NSString *> *items = @[
+        @"accounts", @"cursors", @"cursor_types",
+        @"fontconfig", @"MG", @"dh_natives",
+        @"credits_cache.md", @"servers.json",
+        @"amethyst_bg.png", @"amethyst_bg.mp4",
+        @"launcher_preferences_v2.plist",
+    ];
+    for (NSString *name in items) {
+        amethyst_move_legacy_item(root, hidden, name);
+    }
+
+    // Control maps belong to the user, not the launcher: they live in the
+    // VISIBLE POJAV_HOME/controlmap folder. Older builds parked them in the
+    // hidden .amethyst folder, so move them back out (and pick up the
+    // pre-.amethyst root-level folder too). Existing files win over the
+    // migrated ones so a user's edits are never overwritten.
+    NSString *controlRoot = amethyst_control_root();
+    if (controlRoot) {
+        NSArray<NSString *> *controlSources = @[
+            [hidden stringByAppendingPathComponent:@"controlmap"],
+            [root stringByAppendingPathComponent:@"controlmap"],
+        ];
+        for (NSString *source in controlSources) {
+            if (![fm fileExistsAtPath:source]) continue;
+            if ([source isEqualToString:controlRoot]) continue;
+            if ([fm fileExistsAtPath:controlRoot]) {
+                // Target already exists: merge the source files in without
+                // clobbering anything the user already has.
+                NSArray<NSString *> *entries = [fm contentsOfDirectoryAtPath:source error:nil];
+                for (NSString *entry in entries) {
+                    NSString *from = [source stringByAppendingPathComponent:entry];
+                    NSString *to = [controlRoot stringByAppendingPathComponent:entry];
+                    if ([fm fileExistsAtPath:to]) continue;
+                    NSError *error = nil;
+                    if ([fm moveItemAtPath:from toPath:to error:&error]) {
+                        NSLog(@"[AmethystHome] migrated controlmap/%@ -> controlmap/%@", entry, entry);
+                    }
+                }
+                [fm removeItemAtPath:source error:nil];
+            } else {
+                NSError *error = nil;
+                if ([fm moveItemAtPath:source toPath:controlRoot error:&error]) {
+                    NSLog(@"[AmethystHome] migrated %@ -> controlmap", source.lastPathComponent);
+                } else {
+                    NSLog(@"[AmethystHome] migrate controlmap failed: %@", error);
+                }
+            }
+        }
+    }
+
+    // The background image preference stores an absolute path; repoint it at
+    // the migrated file so custom backgrounds keep loading.
+    NSString *bgPref = [[NSUserDefaults standardUserDefaults] stringForKey:@"amethyst_bg_image"];
+    if ([bgPref isKindOfClass:NSString.class] && bgPref.length > 0 && ![bgPref containsString:@"/.amethyst/"]) {
+        NSString *newPath = [hidden stringByAppendingPathComponent:bgPref.lastPathComponent];
+        if ([fm fileExistsAtPath:newPath]) {
+            [[NSUserDefaults standardUserDefaults] setObject:newPath forKey:@"amethyst_bg_image"];
+        }
+    }
+
+    // Obsolete staging folders: old runtime staging and JNA temp copies are
+    // recreated under their new hidden locations on demand.
+    for (NSString *name in @[@"runtimes", @"jna_tmp"]) {
+        [fm removeItemAtPath:[root stringByAppendingPathComponent:name] error:nil];
+    }
+}
+
+/*
+ * True when the FidelityFX upscaler will actually run for the current
+ * profile (the launcher's setting AND a game/backend the agent can patch).
+ *
+ * The values are the ones the settings screen writes: 0 = off, 1 = FSR1,
+ * 2 = FSR2, 3 = FSR3. The frame generation switch is independent of them.
+ *
+ * The agent only patches MC 26.x's VulkanGpuSurface (RenderPearl's Vulkan
+ * backend). RenderPearl picks that backend from options.txt
+ * (PojavLauncher.java): only the MoltenVK renderer gets Vulkan, every GL
+ * renderer (GL4ES, TinyANGLE, LTW, TGLMT, ...) gets OpenGL, where the agent
+ * is inert. The graphics_backend_forcing pref can override the choice:
+ * "vulkan"/"opengl" force the API, "auto"/"none" follow the renderer (the
+ * launcher writes the renderer-derived value to options.txt on every
+ * launch). On any other backend the drawable has to follow the render
+ * resolution: with a physical-size drawable and a windowWidth-sized
+ * render, the whole window shrinks (res < 100%) or crops/magnifies
+ * (res > 100%) instead of only changing render resolution.
+ */
+BOOL fsrUpscalerActive(void) {
+    NSInteger upscaler = getPrefInt(@"fsr3.upscaler");
+    if (upscaler < 1 || upscaler > 3) {
+        return NO;
+    }
+    NSString *versionId = [PLProfiles resolveKeyForCurrentProfile:@"lastVersionId"];
+    NSInteger major = [[versionId componentsSeparatedByString:@"."].firstObject integerValue];
+    if (major < 26) {
+        return NO;
+    }
+    id forcingObj = getPrefObject(@"video.graphics_backend_forcing");
+    NSString *forcing = [forcingObj isKindOfClass:NSString.class] ? (NSString *)forcingObj : @"auto";
+    if ([forcing isEqualToString:@"opengl"]) {
+        return NO;
+    }
+    NSString *renderer = [PLProfiles resolveKeyForCurrentProfile:@"renderer"];
+    // The Metal renderers replace the GPU backend with a mod: there is no
+    // RenderPearl and thus no VulkanGpuSurface for the agent to patch,
+    // whatever --graphicsBackend says.
+    if ([renderer isEqualToString:@ RENDERER_NAME_METAL] ||
+        [renderer isEqualToString:@ RENDERER_NAME_METAL_MACOS]) {
+        return NO;
+    }
+    if ([forcing isEqualToString:@"vulkan"]) {
+        return YES;
+    }
+    return [renderer isEqualToString:@ RENDERER_NAME_MOLTENVK];
 }

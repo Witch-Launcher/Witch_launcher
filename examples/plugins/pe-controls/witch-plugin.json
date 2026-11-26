@@ -1,0 +1,15 @@
+{
+  "id": "com.witch.example.pe-controls",
+  "name": "PE Controls",
+  "version": "1.0.0",
+  "author": "Witch Examples",
+  "description": "Bộ điều khiển cảm ứng phong cách Minecraft PE, vẽ hoàn toàn bằng vector và tự co giãn theo màn hình.",
+  "details": "PE Controls thay giao diện nút và joystick hiện có bằng nút kính mờ, icon vector và phản hồi khi nhấn. Không dùng hoặc sao chép texture của Minecraft.",
+  "license": "MIT",
+  "source": "https://github.com/example/witch-pe-controls",
+  "api": 1,
+  "entrypoints": {
+    "native": "PEControls.dylib"
+  },
+  "permissions": []
+}

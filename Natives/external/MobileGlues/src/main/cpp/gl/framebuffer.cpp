@@ -7,12 +7,15 @@
 
 #include "framebuffer.h"
 #include "../egl/context.h"
+#include "texture.h"
+#include "mg.h"
 #include <mutex>
 #include <memory>
 #include <ska/flat_hash_map.hpp>
 #include "log.h"
 #include "../config/settings.h"
 #include "FSR1/FSR1.h"
+#include "envvars.h"
 
 #define DEBUG 0
 
@@ -266,6 +269,25 @@ void update_attachment(GLenum target, GLenum attachment, const attachment_t& wha
 // anything that skips it has to put things back first.
 void restore_home_attachments(framebuffer_t& fbo);
 
+// glFramebufferTexture only exists in ES 3.2. ANGLE's Vulkan backend gives an
+// ES 3.1 context on this device, and its entry point records GL_INVALID_OPERATION
+// without attaching anything -- so an application that reached us through the
+// DSA wrapper looked attached in the shadow while the driver framebuffer stayed
+// incomplete. A flat 2D texture is the whole-texture case this layer actually
+// sees; glFramebufferTexture2D is the ES 3.1 equivalent for it (including the
+// detach when texture is 0). Layered and cube textures still need the 3.2 entry
+// point and keep their previous behaviour.
+void attach_texture_all(GLenum target, GLenum attachment, GLuint texture, GLint level) {
+    if (hardware != nullptr && hardware->es_version < 320) {
+        TextureObject* tex = texture != 0 ? mgGetTexObjectByID(texture) : nullptr;
+        if (tex == nullptr || tex->target == TextureTarget::TEXTURE_2D) {
+            GLES.glFramebufferTexture2D(target, attachment, GL_TEXTURE_2D, texture, level);
+            return;
+        }
+    }
+    GLES.glFramebufferTexture(target, attachment, texture, level);
+}
+
 // Put a recorded attachment onto a (possibly different) attachment point, the
 // same way it originally arrived.
 //
@@ -281,7 +303,7 @@ void reattach(GLenum target, GLenum attachment, const attachment_t& a) {
         GLES.glFramebufferTextureLayer(target, attachment, a.texture, a.level, a.layer);
         break;
     case attach_kind_t::TextureAll:
-        GLES.glFramebufferTexture(target, attachment, a.texture, a.level);
+        attach_texture_all(target, attachment, a.texture, a.level);
         break;
     case attach_kind_t::Renderbuffer:
         GLES.glFramebufferRenderbuffer(target, attachment, a.textarget, a.texture);
@@ -302,7 +324,7 @@ void glFramebufferTexture(GLenum target, GLenum attachment, GLuint texture, GLin
     // whole texture, whatever its target is, and recording it as a 2D attachment
     // meant a replay re-attached an array or 3D texture as if it were flat.
     update_attachment(target, attachment, {attach_kind_t::TextureAll, 0, texture, level, 0});
-    GLES.glFramebufferTexture(target, attachment, texture, level);
+    attach_texture_all(target, attachment, texture, level);
 }
 // Wrapped rather than passed straight through, so the record knows about them.
 // While these bypassed the table, the record for an attachment they wrote stayed
@@ -347,11 +369,27 @@ void restore_home_attachments(framebuffer_t& fbo) {
 // library exports. An application that resolves glDeleteFramebuffersARB, as
 // anything written against EXT_framebuffer_object does, got a null pointer.
 extern "C" {
+#if defined(__APPLE__)
+// Mach-O does not support alias attributes, so the ARB spellings are real
+// forwarding definitions here (same pattern as gl/enable.cpp and
+// gl/multidraw.cpp). The names must exist: glXGetProcAddress is a bare dlsym,
+// so a missing symbol would be a silently null function pointer.
 GLAPI GLAPIENTRY void glDeleteFramebuffersARB(GLsizei n, const GLuint* names) { glDeleteFramebuffers(n, names); }
 GLAPI GLAPIENTRY void glFramebufferRenderbufferARB(GLenum target, GLenum attachment, GLenum renderbuffertarget,
-                                                   GLuint renderbuffer) { glFramebufferRenderbuffer(target, attachment, renderbuffertarget, renderbuffer); }
+                                                   GLuint renderbuffer) {
+    glFramebufferRenderbuffer(target, attachment, renderbuffertarget, renderbuffer);
+}
 GLAPI GLAPIENTRY void glFramebufferTextureLayerARB(GLenum target, GLenum attachment, GLuint texture, GLint level,
-                                                   GLint layer) { glFramebufferTextureLayer(target, attachment, texture, level, layer); }
+                                                   GLint layer) {
+    glFramebufferTextureLayer(target, attachment, texture, level, layer);
+}
+#else
+GLAPI GLAPIENTRY void glDeleteFramebuffersARB(GLsizei n, const GLuint* names) __attribute__((alias("glDeleteFramebuffers")));
+GLAPI GLAPIENTRY void glFramebufferRenderbufferARB(GLenum target, GLenum attachment, GLenum renderbuffertarget,
+                                                   GLuint renderbuffer) __attribute__((alias("glFramebufferRenderbuffer")));
+GLAPI GLAPIENTRY void glFramebufferTextureLayerARB(GLenum target, GLenum attachment, GLuint texture, GLint level,
+                                                   GLint layer) __attribute__((alias("glFramebufferTextureLayer")));
+#endif
 }
 
 // Wrapped for the same reason glReadPixels is: the source is the read framebuffer,
@@ -361,11 +399,88 @@ GLAPI GLAPIENTRY void glFramebufferTextureLayerARB(GLenum target, GLenum attachm
 // blitting from framebuffer 0 -- which is how most post-processing gets its
 // input, and the only way to reach the depth buffer that lives on the FSR target
 // and never on the surface -- still read the window.
+// Diagnostic truth at swap time (AMETHYST_RENDER_LOG): what this layer's shadow
+// says per framebuffer record, and what the DRIVER says when the same name is
+// actually bound (status, draw/read buffers, the object attached at colour
+// attach points 0-2). Called from mg_draw_trace_dump inside eglSwapBuffers, so
+// the bindings it changes are untouchable-in-flight state between frames and
+// every swing it makes is restored before returning.
+//
+// The shadow and the driver agreeing is the baseline; where they disagree there
+// is a bug, and where the driver itself does not look like the frame just drew
+// (empty attachments on a framebuffer the trace shows drawing into) the shadow
+// is describing an attachment call that quietly failed.
+void mg_draw_trace_dump_fbo_tables(int swap_index) {
+    if (!IsEnvVarTrue("AMETHYST_RENDER_LOG")) return;
+
+    for (GLuint id = 1; id <= 8; ++id) {
+        framebuffer_t& fb = get_framebuffer(id);
+        if (!fb.initialized) continue;
+        size_t moved = 0;
+        for (size_t i = 0; i < fb.draw_buffer_map.size(); ++i)
+            if (fb.draw_buffer_map[i] != 0) ++moved;
+        LOG_W_FORCE("[MGFBO] swap=%d fb=%u rec: nAtts=%zu mapHits=%zu none=%d", swap_index, id, fb.color_attachments.size(),
+                    moved, fb.color_attachments_all_none ? 1 : 0)
+        for (size_t i = 0; i < fb.color_attachments.size() && i < 3; ++i) {
+            const attachment_t& a = fb.color_attachments[i];
+            LOG_W_FORCE("[MGFBO] swap=%d fb=%u a%zu: kind=%d tex=%u lvl=%d layer=%d", swap_index, id, i, (int)a.kind, a.texture,
+                        a.level, a.layer)
+        }
+    }
+
+    // Driver side: bind each of the two framebuffers the frame traffic actually
+    // names, ask for its state, put everything back.
+    GLint prev_draw = 0, prev_read = 0;
+    GLES.glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, &prev_draw);
+    GLES.glGetIntegerv(GL_READ_FRAMEBUFFER_BINDING, &prev_read);
+    const GLuint targets[3] = {1, 2, 4};
+    for (int t = 0; t < 3; ++t) {
+        const GLuint id = targets[t];
+        GLES.glBindFramebuffer(GL_FRAMEBUFFER, id);
+        const GLenum status = GLES.glCheckFramebufferStatus(GL_FRAMEBUFFER);
+        GLint read_buf = 0, db0 = 0, t0 = 0, n0 = 0, t1 = 0, n1 = 0;
+        GLES.glGetIntegerv(GL_READ_BUFFER, &read_buf);
+        GLES.glGetIntegerv(GL_DRAW_BUFFER0, &db0);
+        GLES.glGetFramebufferAttachmentParameteriv(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_FRAMEBUFFER_ATTACHMENT_OBJECT_TYPE,
+                                                   &t0);
+        GLES.glGetFramebufferAttachmentParameteriv(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_FRAMEBUFFER_ATTACHMENT_OBJECT_NAME,
+                                                   &n0);
+        GLES.glGetFramebufferAttachmentParameteriv(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT1, GL_FRAMEBUFFER_ATTACHMENT_OBJECT_TYPE,
+                                                   &t1);
+        GLES.glGetFramebufferAttachmentParameteriv(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT1, GL_FRAMEBUFFER_ATTACHMENT_OBJECT_NAME,
+                                                   &n1);
+        LOG_W_FORCE("[MGFBO] swap=%d fb=%u drv: status=0x%x readBuf=0x%x db0=0x%x t0=0x%x n0=%u t1=0x%x n1=%u", swap_index, id,
+                    status, read_buf, db0, t0, n0, t1, n1)
+    }
+    GLES.glBindFramebuffer(GL_DRAW_FRAMEBUFFER, prev_draw);
+    GLES.glBindFramebuffer(GL_READ_FRAMEBUFFER, prev_read);
+    {
+        GLenum leak = GLES.glGetError();
+        if (leak != 0) LOG_W_FORCE("[MGFBO] swap=%d leaked err=0x%x", swap_index, leak)
+    }
+}
+
 void glBlitFramebuffer(GLint srcX0, GLint srcY0, GLint srcX1, GLint srcY1, GLint dstX0, GLint dstY0, GLint dstX1,
                        GLint dstY1, GLbitfield mask, GLenum filter) {
     LOG()
     mg_fsr_read_scope_t fsr_read;
+    // Trace the blit: the present pass is a blit, so its position relative to
+    // the GUI draws (before or after) is the frame-ordering question.
+    mg_draw_trace_note_blit(current_read_fbo, current_draw_fbo, mask);
     GLES.glBlitFramebuffer(srcX0, srcY0, srcX1, srcY1, dstX0, dstY0, dstX1, dstY1, mask, filter);
+    const GLenum blit_err = GLES.glGetError();
+    mg_draw_trace_note_blit_error(blit_err);
+    if (blit_err != 0) {
+        FB_WARN_ONCE("[MGBLIT] error 0x%x: src fbo %u -> dst fbo %u, mask 0x%x, rect (%d,%d)-(%d,%d)->(%d,%d), filter 0x%x",
+                     blit_err, current_read_fbo, current_draw_fbo, mask, srcX0, srcY0, srcX1, srcY1, dstX0, dstY0, dstX1,
+                     dstY1, filter);
+    } else if (current_draw_fbo == 0 && current_read_fbo != 0) {
+        // A successful present blit, logged once per signature so a change of
+        // source framebuffer is visible without flooding the log with one line
+        // per frame.
+        FB_WARN_ONCE("[MGBLIT] ok: src fbo %u -> dst fbo 0, mask 0x%x, rect (%d,%d)-(%d,%d)->(%d,%d)", current_read_fbo,
+                     mask, srcX0, srcY0, srcX1, srcY1, dstX0, dstY0, dstX1, dstY1);
+    }
     CHECK_GL_ERROR
 }
 

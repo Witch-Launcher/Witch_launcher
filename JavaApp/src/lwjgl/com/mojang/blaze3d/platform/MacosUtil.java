@@ -9,10 +9,15 @@ package com.mojang.blaze3d.platform;
  * through GLFWNativeCocoa, also macOS-only.
  *
  * IS_MACOS=false makes every macOS-gated call site take the non-macOS path
- * (verified against 26.2's Window/GlStateManager/GlBackend bytecode), so the
- * weblite/GLFW-Cocoa entry points are never reached. disableCloseWindowMenuItem
+ * (verified against 26.3's Window/GlStateManager/GlBackend bytecode), so the
+ * weblite/GLFW/SDL entry points are never reached. disableCloseWindowMenuItem
  * is guarded by Util.getPlatform() == OSX (true on this port since os.name
  * reports "Mac OS X"), so it still needs a no-op body.
+ *
+ * 26.3 also calls setCtrlClickEmulatesRightClick from Options.<init> and
+ * setFullscreenMenuVisibility from the window code. Their real bodies are
+ * SDL_SetHint calls behind IS_MACOS, which cannot resolve on this port
+ * (LWJGL 3.4.1 SDL is only loaded for the SDL backend), so both are no-ops.
  */
 public final class MacosUtil {
 
@@ -22,5 +27,11 @@ public final class MacosUtil {
     }
 
     public static void disableCloseWindowMenuItem() {
+    }
+
+    public static void setFullscreenMenuVisibility(boolean visible) {
+    }
+
+    public static void setCtrlClickEmulatesRightClick(boolean enabled) {
     }
 }

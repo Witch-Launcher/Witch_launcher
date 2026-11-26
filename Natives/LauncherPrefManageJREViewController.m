@@ -630,8 +630,14 @@ styleForMenuWithConfiguration:(UIContextMenuConfiguration *)configuration
                         [currFileOut open];
                     } break;
                     case '2': { // Symlink
-                        symlink(currFileHeader.linkname, currFileHeader.name);
-                        //NSLog(@"%s -> %s", currFileHeader.name, currFileHeader.linkname);
+                        // Destination must be the real on-disk path; passing the
+                        // header name created the link in the process CWD (or
+                        // failed outright) instead of inside the runtime dir.
+                        [NSFileManager.defaultManager createDirectoryAtPath:[absPath stringByDeletingLastPathComponent] withIntermediateDirectories:YES attributes:nil error:nil];
+                        [NSFileManager.defaultManager removeItemAtPath:absPath error:nil];
+                        if (symlink(currFileHeader.linkname, [absPath fileSystemRepresentation]) != 0) {
+                            NSLog(@"[RuntimeUnpack] symlink %s -> %s failed: %s", currFileHeader.name, currFileHeader.linkname, strerror(errno));
+                        }
                     } break;
                     case '5': { // Folder
                         [NSFileManager.defaultManager createDirectoryAtPath:absPath withIntermediateDirectories:YES attributes:nil error:&error];

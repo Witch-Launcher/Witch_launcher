@@ -284,9 +284,9 @@
 - (void)loadSettingLists {
     _rendererKeys = getRendererKeys(YES);
     _rendererNames = getRendererNames(YES);
-    NSString *ctrlPath = [NSString stringWithFormat:@"%s/controlmap", getenv("POJAV_HOME")];
+    NSString *ctrlPath = amethyst_control_path(nil);
     _touchControlList = [self listFilesAtPath:ctrlPath];
-    NSString *gamepadPath = [NSString stringWithFormat:@"%s/controlmap/gamepads", getenv("POJAV_HOME")];
+    NSString *gamepadPath = amethyst_control_path(@"gamepads");
     _gamepadControlList = [self listFilesAtPath:gamepadPath];
     _lwjglList = getLwjglVersions(YES);
     NSMutableArray *java = [getPrefObject(@"java.java_homes") allKeys].mutableCopy ?: [NSMutableArray array];
@@ -488,37 +488,70 @@
     }];
 }
 
+- (NSArray *)versionsForPickerType:(NSString *)type {
+    if ([type isEqualToString:@"installed"]) return localVersionList;
+    return remoteVersionList ? [remoteVersionList filteredArrayUsingPredicate:[NSPredicate predicateWithFormat:@"(type == %@)", type]] : nil;
+}
+
+- (NSString *)versionIdForPickerEntry:(NSObject *)obj {
+    return [obj isKindOfClass:[NSString class]] ? (NSString *)obj : [obj valueForKey:@"id"];
+}
+
+// The profile may store "latest-release"/"latest-snapshot" (the launcher
+// resolves those while downloading). Resolve to the concrete version so the
+// list can mark and scroll to what the user is actually running.
+- (NSString *)currentVersionForPicker {
+    NSString *version = self.pendingVersion ?: self.profile[@"lastVersionId"];
+    if (![version isKindOfClass:[NSString class]] || version.length == 0) return nil;
+    if ([version isEqualToString:@"latest-release"] || [version isEqualToString:@"latest-snapshot"]) {
+        NSString *key = [version isEqualToString:@"latest-release"] ? @"internal.latest_version.release" : @"internal.latest_version.snapshot";
+        id latest = getPrefObject(key);
+        if ([latest isKindOfClass:[NSString class]] && [(NSString *)latest length] > 0) return latest;
+    }
+    return version;
+}
+
+- (NSInteger)typeIndexForCurrentVersionInTypes:(NSArray *)types {
+    NSString *current = [self currentVersionForPicker];
+    if (current.length == 0) return NSNotFound;
+    for (NSUInteger i = 0; i < types.count; i++) {
+        for (NSObject *obj in [self versionsForPickerType:types[i]] ?: @[]) {
+            NSString *verId = [self versionIdForPickerEntry:obj];
+            if ([verId isKindOfClass:[NSString class]] && [verId isEqualToString:current]) return (NSInteger)i;
+        }
+    }
+    return NSNotFound;
+}
+
 - (void)showVersionPicker {
     NSArray *types = @[@"installed", @"release", @"snapshot", @"old_beta", @"old_alpha"];
     NSMutableArray *opts = [NSMutableArray array];
     for (NSString *t in types) {
         [opts addObject:@{@"title": t, @"icon": @"archivebox"}];
     }
-    [AppSheet showOptionsWithTitle:localize(@"Select Version", nil) message:nil options:opts selectedIndex:NSNotFound selection:^(NSInteger idx) {
+    NSInteger sel = [self typeIndexForCurrentVersionInTypes:types];
+    [AppSheet showOptionsWithTitle:localize(@"Select Version", nil) message:nil options:opts selectedIndex:sel selection:^(NSInteger idx) {
         [self showVersionSubPicker:types[idx]];
     }];
 }
 
 - (void)showVersionSubPicker:(NSString *)type {
-    NSArray *list;
-    if ([type isEqualToString:@"installed"]) list = localVersionList;
-    else list = remoteVersionList ? [remoteVersionList filteredArrayUsingPredicate:[NSPredicate predicateWithFormat:@"(type == %@)", type]] : nil;
+    NSArray *list = [self versionsForPickerType:type];
     if (!list || list.count == 0) {
         [ErrorPresenter showInfo:@"No Versions" message:[NSString stringWithFormat:@"No %@ versions found.", type]];
         return;
     }
     NSMutableArray *opts = [NSMutableArray array];
     NSMutableArray *ids = [NSMutableArray array];
-    NSInteger max = MIN((NSInteger)list.count, 60);
-    for (NSInteger i = 0; i < max; i++) {
-        NSObject *obj = list[i];
-        NSString *verId = [obj isKindOfClass:[NSString class]] ? (NSString *)obj : [obj valueForKey:@"id"];
-        if (verId.length == 0) continue;
+    for (NSObject *obj in list) {
+        NSString *verId = [self versionIdForPickerEntry:obj];
+        if (![verId isKindOfClass:[NSString class]] || verId.length == 0) continue;
         [opts addObject:@{@"title": verId}];
         [ids addObject:verId];
     }
-    NSInteger sel = [ids indexOfObject:self.pendingVersion];
-    [AppSheet showOptionsWithTitle:type message:nil options:opts selectedIndex:(sel == NSNotFound ? NSNotFound : (NSInteger)sel) selection:^(NSInteger idx) {
+    NSString *current = [self currentVersionForPicker];
+    NSInteger sel = current.length > 0 ? [ids indexOfObject:current] : NSNotFound;
+    [AppSheet showOptionsWithTitle:type message:nil options:opts selectedIndex:sel selection:^(NSInteger idx) {
         self.pendingVersion = ids[idx];
         [self setProfileValue:ids[idx] forKey:@"lastVersionId"];
         [self.tableView reloadData];
@@ -551,8 +584,12 @@
         }
     }
     NSMutableDictionary *profiles = PLProfiles.current.profiles;
+    // Same guard as the detail editor: a freshly created profile is already
+    // stored, so its own entry must not count as a duplicate when the user
+    // opens the editor and saves without renaming.
     BOOL isRename = _originalName && ![name isEqualToString:_originalName];
-    if ((isRename && profiles[name]) || (_isNewProfile && profiles[name])) {
+    BOOL keepingName = _originalName && [name isEqualToString:_originalName];
+    if (profiles[name] && !keepingName) {
         [ErrorPresenter showError:@"Error" message:@"A profile with this name already exists."];
         return NO;
     }

@@ -1,0 +1,366 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Cursor redraw — Witch launcher</title>
+<style>
+  :root {
+    --paper: #F4F4F6;
+    --card: #FFFFFF;
+    --ink: #17171A;
+    --muted: #6B6B73;
+    --line: rgba(0,0,0,0.09);
+    --blue: #0A84FF;
+    --green: #30D158;
+    --radius: 18px;
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", sans-serif;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --paper: #131316;
+      --card: #1C1C1F;
+      --ink: #F5F5F7;
+      --muted: #9A9AA2;
+      --line: rgba(255,255,255,0.10);
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background:
+      radial-gradient(1100px 600px at 12% -10%, rgba(10,132,255,0.10), transparent 60%),
+      radial-gradient(900px 500px at 100% 0%, rgba(255,159,10,0.08), transparent 55%),
+      var(--paper);
+    color: var(--ink);
+    padding: 42px 32px 56px;
+  }
+  header { max-width: 1180px; margin: 0 auto 28px; }
+  .eyebrow {
+    font-size: 11px; font-weight: 700; letter-spacing: 0.14em;
+    text-transform: uppercase; color: var(--blue); margin-bottom: 10px;
+  }
+  h1 { margin: 0 0 8px; font-size: 34px; line-height: 1.1; letter-spacing: -0.02em; }
+  .lede { margin: 0; color: var(--muted); font-size: 15px; line-height: 1.55; max-width: 760px; }
+  .grid {
+    max-width: 1180px; margin: 0 auto;
+    display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 18px;
+  }
+  @media (max-width: 980px) { .grid { grid-template-columns: 1fr; } }
+  .card {
+    background: var(--card); border: 1px solid var(--line);
+    border-radius: var(--radius); padding: 20px 20px 18px;
+    box-shadow: 0 18px 45px rgba(0,0,0,0.06);
+    display: flex; flex-direction: column; gap: 15px;
+  }
+  .card-head h2 { margin: 0 0 4px; font-size: 17px; letter-spacing: -0.01em; display: flex; align-items: center; gap: 8px; }
+  .card-head p { margin: 0; color: var(--muted); font-size: 12.5px; line-height: 1.45; min-height: 36px; }
+  .badge {
+    font-size: 9.5px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase;
+    color: #fff; background: var(--blue); padding: 3px 7px; border-radius: 999px;
+  }
+  .hero {
+    position: relative; height: 176px; border-radius: 14px; overflow: hidden;
+    border: 1px solid var(--line); display: flex; align-items: center; justify-content: center;
+  }
+  .hero .half { position: absolute; inset-block: 0; width: 50%; }
+  .hero .light { left: 0; background: linear-gradient(135deg, #FFFFFF, #E9E9EE); }
+  .hero .dark  { right: 0; background: linear-gradient(135deg, #2B2B30, #111114); }
+  .hero .midline { position: absolute; inset-block: 0; left: 50%; width: 1px; background: rgba(127,127,127,0.35); }
+  .hero .cursor-wrap { position: relative; z-index: 2; filter: drop-shadow(0 8px 14px rgba(0,0,0,0.16)); }
+  .strip {
+    display: grid; grid-template-columns: repeat(5, 1fr); gap: 6px;
+  }
+  .swatch {
+    height: 58px; border-radius: 9px; display: flex; align-items: center; justify-content: center;
+    border: 1px solid var(--line);
+  }
+  .swatch.light { background: #FFFFFF; }
+  .swatch.paper { background: #E9E9EE; }
+  .swatch.gray  { background: #8E8E93; }
+  .swatch.dark  { background: #1C1C1E; }
+  .swatch.blue  { background: #0A84FF; }
+  .section-label {
+    font-size: 10px; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase;
+    color: var(--muted); margin: 0 0 -6px;
+  }
+  .ladder {
+    display: flex; align-items: flex-end; justify-content: space-between; gap: 4px;
+    min-height: 140px; padding: 12px 8px 10px; border-radius: 12px;
+    background:
+      linear-gradient(180deg, rgba(127,127,127,0.06), rgba(127,127,127,0.02));
+    border: 1px solid var(--line);
+  }
+  .step { display: flex; flex-direction: column; align-items: center; justify-content: flex-end; gap: 8px; }
+  .step span { font-size: 9.5px; color: var(--muted); font-variant-numeric: tabular-nums; }
+  .actual {
+    display: flex; align-items: flex-end; justify-content: space-around; gap: 8px;
+    padding: 12px 8px 10px; border-radius: 12px;
+    background: linear-gradient(180deg, rgba(127,127,127,0.06), rgba(127,127,127,0.02));
+    border: 1px solid var(--line); min-height: 168px;
+  }
+  .actual .step span { font-size: 9px; text-align: center; line-height: 1.25; }
+  .pixel-row { display: flex; align-items: center; gap: 14px; }
+  .pixel {
+    border-radius: 9px; border: 1px solid var(--line); padding: 8px;
+    background-color: #fff;
+    background-image:
+      linear-gradient(45deg, #E6E6E9 25%, transparent 25%),
+      linear-gradient(-45deg, #E6E6E9 25%, transparent 25%),
+      linear-gradient(45deg, transparent 75%, #E6E6E9 75%),
+      linear-gradient(-45deg, transparent 75%, #E6E6E9 75%);
+    background-size: 12px 12px;
+    background-position: 0 0, 0 6px, 6px -6px, -6px 0;
+    line-height: 0;
+  }
+  canvas.raster { display: block; image-rendering: pixelated; }
+  .pixel-copy { font-size: 11px; color: var(--muted); line-height: 1.45; }
+  .pixel-copy strong { color: var(--ink); font-weight: 600; }
+  footer {
+    max-width: 1180px; margin: 26px auto 0; padding-top: 18px;
+    border-top: 1px solid var(--line); color: var(--muted); font-size: 12px; line-height: 1.6;
+  }
+  .h16 { height: 16px; width: 11.43px; }
+  .h24 { height: 24px; width: 17.14px; }
+  .h32 { height: 32px; width: 22.86px; }
+  .h48 { height: 48px; width: 34.29px; }
+  .h64 { height: 64px; width: 45.71px; }
+  .h96 { height: 96px; width: 68.57px; }
+  .h128 { height: 128px; width: 91.43px; }
+  .h27 { height: 27px; width: 19.29px; }
+  .h40 { height: 40.5px; width: 28.93px; }
+  .h81 { height: 81px; width: 57.86px; }
+  .h135 { height: 135px; width: 96.43px; }
+  .c { display: block; overflow: visible; }
+</style>
+</head>
+<body>
+
+<svg width="0" height="0" aria-hidden="true" style="position:absolute">
+  <defs>
+    <symbol id="slate" viewBox="0 0 20 28">
+      <filter id="slateShadow" x="-30%" y="-30%" width="160%" height="160%">
+        <feDropShadow dx="0" dy="0.55" stdDeviation="0.55" flood-color="#000000" flood-opacity="0.32"/>
+      </filter>
+      <path d="M1.5 1.5 L1.5 20.4 L6.8 15.4 L10.5 23.5 L13.4 22.1 L9.8 14.2 L16.5 14.2 Z"
+            fill="#FFFFFF" stroke="#111114" stroke-width="1.1"
+            stroke-linejoin="round" stroke-linecap="round" filter="url(#slateShadow)"/>
+    </symbol>
+    <symbol id="feather" viewBox="0 0 20 28">
+      <filter id="featherShadow" x="-30%" y="-30%" width="160%" height="160%">
+        <feDropShadow dx="0" dy="0.5" stdDeviation="0.5" flood-color="#000000" flood-opacity="0.30"/>
+      </filter>
+      <path d="M1.6 1.6 L1.6 21.0 L6.4 16.2 L9.8 23.6 L12.4 22.4 L9.1 15.3 L15.0 15.3 Z"
+            fill="#FFFFFF" stroke="#141416" stroke-width="1.0"
+            stroke-linejoin="round" stroke-linecap="round" filter="url(#featherShadow)"/>
+    </symbol>
+    <symbol id="soft" viewBox="0 0 20 28">
+      <filter id="softShadow" x="-30%" y="-30%" width="160%" height="160%">
+        <feDropShadow dx="0" dy="0.45" stdDeviation="0.45" flood-color="#000000" flood-opacity="0.28"/>
+      </filter>
+      <path d="M1.5 1.5 L1.5 20.7 L6.9 15.8 L10.6 23.7 L13.6 22.3 L10.0 14.4 L16.5 14.4 Z"
+            fill="#FFFFFF" stroke="#1C1C1E" stroke-width="1.35"
+            stroke-linejoin="round" stroke-linecap="round" filter="url(#softShadow)"/>
+    </symbol>
+  </defs>
+</svg>
+
+<header>
+  <div class="eyebrow">Design preview · Witch launcher</div>
+  <h1>Cursor redraw</h1>
+  <p class="lede">
+    Three minimal SVG directions for the default pointer, shown on light and dark backgrounds.
+    Slate keeps the familiar Aero silhouette with a cleaner outline; Feather is slimmer;
+    Soft is slightly rounder and calmer. Choose one and it will be rendered as a vector at the
+    exact on-screen pixel size, so it stays sharp at 100–500% mouse scale.
+  </p>
+</header>
+
+<main class="grid">
+
+  <section class="card">
+    <div class="card-head">
+      <h2>Slate <span class="badge">Recommended</span></h2>
+      <p>Familiar arrow, balanced weight. Reads instantly at small sizes without looking heavy.</p>
+    </div>
+
+    <div class="hero">
+      <div class="half light"></div>
+      <div class="half dark"></div>
+      <div class="midline"></div>
+      <div class="cursor-wrap"><svg class="h128 c" viewBox="0 0 20 28"><use href="#slate"/></svg></div>
+    </div>
+
+    <div class="strip">
+      <div class="swatch light"><svg class="h32 c" viewBox="0 0 20 28"><use href="#slate"/></svg></div>
+      <div class="swatch paper"><svg class="h32 c" viewBox="0 0 20 28"><use href="#slate"/></svg></div>
+      <div class="swatch gray"><svg class="h32 c" viewBox="0 0 20 28"><use href="#slate"/></svg></div>
+      <div class="swatch dark"><svg class="h32 c" viewBox="0 0 20 28"><use href="#slate"/></svg></div>
+      <div class="swatch blue"><svg class="h32 c" viewBox="0 0 20 28"><use href="#slate"/></svg></div>
+    </div>
+
+    <p class="section-label">Size ladder</p>
+    <div class="ladder">
+      <div class="step"><svg class="h16 c" viewBox="0 0 20 28"><use href="#slate"/></svg><span>16</span></div>
+      <div class="step"><svg class="h24 c" viewBox="0 0 20 28"><use href="#slate"/></svg><span>24</span></div>
+      <div class="step"><svg class="h32 c" viewBox="0 0 20 28"><use href="#slate"/></svg><span>32</span></div>
+      <div class="step"><svg class="h48 c" viewBox="0 0 20 28"><use href="#slate"/></svg><span>48</span></div>
+      <div class="step"><svg class="h64 c" viewBox="0 0 20 28"><use href="#slate"/></svg><span>64</span></div>
+      <div class="step"><svg class="h96 c" viewBox="0 0 20 28"><use href="#slate"/></svg><span>96</span></div>
+      <div class="step"><svg class="h128 c" viewBox="0 0 20 28"><use href="#slate"/></svg><span>128</span></div>
+    </div>
+
+    <p class="section-label">Launcher scale (100–500%)</p>
+    <div class="actual">
+      <div class="step"><svg class="h27 c" viewBox="0 0 20 28"><use href="#slate"/></svg><span>100%<br>27 pt</span></div>
+      <div class="step"><svg class="h40 c" viewBox="0 0 20 28"><use href="#slate"/></svg><span>150%<br>40.5 pt</span></div>
+      <div class="step"><svg class="h81 c" viewBox="0 0 20 28"><use href="#slate"/></svg><span>300%<br>81 pt</span></div>
+      <div class="step"><svg class="h135 c" viewBox="0 0 20 28"><use href="#slate"/></svg><span>500%<br>135 pt</span></div>
+    </div>
+
+    <div class="pixel-row">
+      <div class="pixel"><canvas class="raster" data-symbol="slate" data-size="32"></canvas></div>
+      <div class="pixel-copy"><strong>32 px raster, 6× zoom.</strong><br>Shows the actual anti-aliasing at cursor size — no stair-stepped nearest-neighbor edges.</div>
+    </div>
+  </section>
+
+  <section class="card">
+    <div class="card-head">
+      <h2>Feather</h2>
+      <p>Slimmer and longer. The most delicate option; slightly less forgiving at 16 px.</p>
+    </div>
+
+    <div class="hero">
+      <div class="half light"></div>
+      <div class="half dark"></div>
+      <div class="midline"></div>
+      <div class="cursor-wrap"><svg class="h128 c" viewBox="0 0 20 28"><use href="#feather"/></svg></div>
+    </div>
+
+    <div class="strip">
+      <div class="swatch light"><svg class="h32 c" viewBox="0 0 20 28"><use href="#feather"/></svg></div>
+      <div class="swatch paper"><svg class="h32 c" viewBox="0 0 20 28"><use href="#feather"/></svg></div>
+      <div class="swatch gray"><svg class="h32 c" viewBox="0 0 20 28"><use href="#feather"/></svg></div>
+      <div class="swatch dark"><svg class="h32 c" viewBox="0 0 20 28"><use href="#feather"/></svg></div>
+      <div class="swatch blue"><svg class="h32 c" viewBox="0 0 20 28"><use href="#feather"/></svg></div>
+    </div>
+
+    <p class="section-label">Size ladder</p>
+    <div class="ladder">
+      <div class="step"><svg class="h16 c" viewBox="0 0 20 28"><use href="#feather"/></svg><span>16</span></div>
+      <div class="step"><svg class="h24 c" viewBox="0 0 20 28"><use href="#feather"/></svg><span>24</span></div>
+      <div class="step"><svg class="h32 c" viewBox="0 0 20 28"><use href="#feather"/></svg><span>32</span></div>
+      <div class="step"><svg class="h48 c" viewBox="0 0 20 28"><use href="#feather"/></svg><span>48</span></div>
+      <div class="step"><svg class="h64 c" viewBox="0 0 20 28"><use href="#feather"/></svg><span>64</span></div>
+      <div class="step"><svg class="h96 c" viewBox="0 0 20 28"><use href="#feather"/></svg><span>96</span></div>
+      <div class="step"><svg class="h128 c" viewBox="0 0 20 28"><use href="#feather"/></svg><span>128</span></div>
+    </div>
+
+    <p class="section-label">Launcher scale (100–500%)</p>
+    <div class="actual">
+      <div class="step"><svg class="h27 c" viewBox="0 0 20 28"><use href="#feather"/></svg><span>100%<br>27 pt</span></div>
+      <div class="step"><svg class="h40 c" viewBox="0 0 20 28"><use href="#feather"/></svg><span>150%<br>40.5 pt</span></div>
+      <div class="step"><svg class="h81 c" viewBox="0 0 20 28"><use href="#feather"/></svg><span>300%<br>81 pt</span></div>
+      <div class="step"><svg class="h135 c" viewBox="0 0 20 28"><use href="#feather"/></svg><span>500%<br>135 pt</span></div>
+    </div>
+
+    <div class="pixel-row">
+      <div class="pixel"><canvas class="raster" data-symbol="feather" data-size="32"></canvas></div>
+      <div class="pixel-copy"><strong>32 px raster, 6× zoom.</strong><br>The slimmer silhouette stays readable, but the tail is lighter at small sizes.</div>
+    </div>
+  </section>
+
+  <section class="card">
+    <div class="card-head">
+      <h2>Soft</h2>
+      <p>Rounder joins and a touch more weight. Friendly, but slightly less “system cursor”.</p>
+    </div>
+
+    <div class="hero">
+      <div class="half light"></div>
+      <div class="half dark"></div>
+      <div class="midline"></div>
+      <div class="cursor-wrap"><svg class="h128 c" viewBox="0 0 20 28"><use href="#soft"/></svg></div>
+    </div>
+
+    <div class="strip">
+      <div class="swatch light"><svg class="h32 c" viewBox="0 0 20 28"><use href="#soft"/></svg></div>
+      <div class="swatch paper"><svg class="h32 c" viewBox="0 0 20 28"><use href="#soft"/></svg></div>
+      <div class="swatch gray"><svg class="h32 c" viewBox="0 0 20 28"><use href="#soft"/></svg></div>
+      <div class="swatch dark"><svg class="h32 c" viewBox="0 0 20 28"><use href="#soft"/></svg></div>
+      <div class="swatch blue"><svg class="h32 c" viewBox="0 0 20 28"><use href="#soft"/></svg></div>
+    </div>
+
+    <p class="section-label">Size ladder</p>
+    <div class="ladder">
+      <div class="step"><svg class="h16 c" viewBox="0 0 20 28"><use href="#soft"/></svg><span>16</span></div>
+      <div class="step"><svg class="h24 c" viewBox="0 0 20 28"><use href="#soft"/></svg><span>24</span></div>
+      <div class="step"><svg class="h32 c" viewBox="0 0 20 28"><use href="#soft"/></svg><span>32</span></div>
+      <div class="step"><svg class="h48 c" viewBox="0 0 20 28"><use href="#soft"/></svg><span>48</span></div>
+      <div class="step"><svg class="h64 c" viewBox="0 0 20 28"><use href="#soft"/></svg><span>64</span></div>
+      <div class="step"><svg class="h96 c" viewBox="0 0 20 28"><use href="#soft"/></svg><span>96</span></div>
+      <div class="step"><svg class="h128 c" viewBox="0 0 20 28"><use href="#soft"/></svg><span>128</span></div>
+    </div>
+
+    <p class="section-label">Launcher scale (100–500%)</p>
+    <div class="actual">
+      <div class="step"><svg class="h27 c" viewBox="0 0 20 28"><use href="#soft"/></svg><span>100%<br>27 pt</span></div>
+      <div class="step"><svg class="h40 c" viewBox="0 0 20 28"><use href="#soft"/></svg><span>150%<br>40.5 pt</span></div>
+      <div class="step"><svg class="h81 c" viewBox="0 0 20 28"><use href="#soft"/></svg><span>300%<br>81 pt</span></div>
+      <div class="step"><svg class="h135 c" viewBox="0 0 20 28"><use href="#soft"/></svg><span>500%<br>135 pt</span></div>
+    </div>
+
+    <div class="pixel-row">
+      <div class="pixel"><canvas class="raster" data-symbol="soft" data-size="32"></canvas></div>
+      <div class="pixel-copy"><strong>32 px raster, 6× zoom.</strong><br>More weight and softer corners; the most visible option on busy scenes.</div>
+    </div>
+  </section>
+
+</main>
+
+<footer>
+  Hotspot is the outer tip (1.5, 1.5 in a 20 × 28 canvas). Preview — launcher is changed assets and code.
+  Approval: the chosen path will be rasterized at the exact on-screen pixel size (including 3× Retina),
+  and imported PNG/GIF/.ani cursors will use high-quality linear filtering instead of nearest-neighbor scaling.
+</footer>
+
+<script>
+  async function rasterize(canvas) {
+    const id = canvas.dataset.symbol;
+    const symbol = document.getElementById(id);
+    if (!symbol) return;
+    const markup = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 28" width="20" height="28">'
+      + symbol.innerHTML + '</svg>';
+    const blob = new Blob([markup], { type: 'image/svg+xml' });
+    const url = URL.createObjectURL(blob);
+    const img = new Image();
+    try {
+      await new Promise((resolve, reject) => {
+        img.onload = resolve;
+        img.onerror = reject;
+        img.src = url;
+      });
+      const h = parseInt(canvas.dataset.size || '32', 10);
+      const w = Math.round(h * 20 / 28);
+      canvas.width = w;
+      canvas.height = h;
+      const ctx = canvas.getContext('2d');
+      ctx.clearRect(0, 0, w, h);
+      ctx.imageSmoothingEnabled = true;
+      ctx.imageSmoothingQuality = 'high';
+      ctx.drawImage(img, 0, 0, w, h);
+      canvas.style.width = (w * 6) + 'px';
+      canvas.style.height = (h * 6) + 'px';
+    } catch (e) {
+      canvas.replaceWith(Object.assign(document.createElement('div'), {
+        textContent: 'raster preview unavailable',
+        style: 'font: 11px -apple-system; color: #8E8E93; padding: 20px;'
+      }));
+    } finally {
+      URL.revokeObjectURL(url);
+    }
+  }
+  document.querySelectorAll('canvas.raster').forEach(rasterize);
+</script>
+</body>
+</html>

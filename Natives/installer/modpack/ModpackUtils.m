@@ -4,12 +4,21 @@
 @implementation ModpackUtils
 
 + (void)archive:(UZKArchive *)archive extractDirectory:(NSString *)dir toPath:(NSString *)path error:(NSError *__autoreleasing*)error {
+    NSString *normalized = [dir stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceCharacterSet];
+    while ([normalized hasPrefix:@"./"]) normalized = [normalized substringFromIndex:2];
+    while ([normalized hasSuffix:@"/"]) normalized = [normalized substringToIndex:normalized.length - 1];
+    if (normalized.length == 0) return;
     [archive performOnFilesInArchive:^(UZKFileInfo *fileInfo, BOOL *stop) {
-        if (![fileInfo.filename hasPrefix:dir] ||
-            fileInfo.filename.length <= dir.length) {
+        NSString *prefix = [normalized stringByAppendingString:@"/"];
+        if (![fileInfo.filename hasPrefix:prefix] ||
+            fileInfo.filename.length <= prefix.length) {
             return;
         }
-        NSString *fileName = [fileInfo.filename substringFromIndex:dir.length+1];
+        NSString *fileName = [fileInfo.filename substringFromIndex:prefix.length];
+        // Never let an archive entry escape the destination directory.
+        for (NSString *component in [fileName componentsSeparatedByString:@"/"]) {
+            if ([component isEqualToString:@".."]) return;
+        }
         NSString *destItemPath = [path stringByAppendingPathComponent:fileName];
         NSString *destDirPath = fileInfo.isDirectory ? destItemPath : destItemPath.stringByDeletingLastPathComponent;
         BOOL createdDir = [NSFileManager.defaultManager createDirectoryAtPath:destDirPath

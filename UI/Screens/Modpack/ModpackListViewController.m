@@ -65,7 +65,7 @@
 
     _importButton = [UIButton buttonWithType:UIButtonTypeSystem];
     _importButton.translatesAutoresizingMaskIntoConstraints = NO;
-    [_importButton setTitle:localize(@"Import .mrpack", nil) forState:UIControlStateNormal];
+    [_importButton setTitle:localize(@"modpack.import_button", nil) forState:UIControlStateNormal];
     [_importButton setImage:[UIImage systemImageNamed:@"square.and.arrow.down"] forState:UIControlStateNormal];
     _importButton.titleLabel.font = [UIFont systemFontOfSize:13 weight:UIFontWeightSemibold];
     [_importButton addTarget:self action:@selector(importMrpack) forControlEvents:UIControlEventTouchUpInside];
@@ -198,10 +198,10 @@
     NSError *error = nil;
     if ([[NSFileManager defaultManager] copyItemAtURL:url toURL:[NSURL fileURLWithPath:destPath] error:&error]) {
         [url stopAccessingSecurityScopedResource];
-        // The installer parses modrinth.index.json and downloads every file listed
-        // inside, extracts overrides and sets up loaders, exactly like a Modrinth
-        // download. The imported copy is deleted on completion.
-        [MrpackInstaller installMrpackAtPath:destPath title:nil hostVC:self removeOnCompletion:YES];
+        // The installer accepts both Modrinth .mrpack (modrinth.index.json) and
+        // CurseForge .zip (manifest.json), downloads every listed file, extracts
+        // overrides and sets up the loader. The imported copy is deleted when done.
+        [MrpackInstaller installModpackAtPath:destPath title:nil hostVC:self removeOnCompletion:YES];
     } else {
         [url stopAccessingSecurityScopedResource];
         showDialog(@"Import Failed", error.localizedDescription ?: @"Unknown error");

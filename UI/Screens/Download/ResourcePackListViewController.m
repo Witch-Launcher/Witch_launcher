@@ -60,6 +60,7 @@
     _searchBar.delegate = self;
     _searchBar.placeholder = localize(@"download.search.resource_packs", nil);
     _searchBar.searchBarStyle = UISearchBarStyleMinimal;
+    [ThemeManager.shared styleSearchBar:_searchBar];
     [self.view addSubview:_searchBar];
 
     _sourceControl = [[UISegmentedControl alloc] initWithItems:@[@"Modrinth", @"CurseForge"]];
@@ -70,6 +71,7 @@
     _sourceControl.clipsToBounds = YES;
     [_sourceControl setTitleTextAttributes:@{NSForegroundColorAttributeName: ThemeManager.shared.primaryTextColor, NSFontAttributeName: [UIFont systemFontOfSize:11 weight:UIFontWeightMedium]} forState:UIControlStateNormal];
     [_sourceControl setTitleTextAttributes:@{NSForegroundColorAttributeName: ThemeManager.shared.buttonTextColor, NSFontAttributeName: [UIFont systemFontOfSize:11 weight:UIFontWeightSemibold]} forState:UIControlStateSelected];
+    [ThemeManager.shared styleSegmentedControl:_sourceControl];
     [_sourceControl addTarget:self action:@selector(sourceChanged) forControlEvents:UIControlEventValueChanged];
     [self.view addSubview:_sourceControl];
 
@@ -146,13 +148,10 @@
     } else {
         self.view.backgroundColor = theme.contentBackgroundColor;
     }
-    _searchBar.searchTextField.textColor = theme.primaryTextColor;
-    _searchBar.tintColor = theme.accentColor;
+    [theme styleSearchBar:_searchBar];
     _emptyLabel.textColor = theme.secondaryTextColor;
     _errorLabel.textColor = theme.errorColor;
-    _sourceControl.selectedSegmentTintColor = theme.accentColor;
-    [_sourceControl setTitleTextAttributes:@{NSForegroundColorAttributeName: theme.primaryTextColor, NSFontAttributeName: [UIFont systemFontOfSize:11 weight:UIFontWeightMedium]} forState:UIControlStateNormal];
-    [_sourceControl setTitleTextAttributes:@{NSForegroundColorAttributeName: theme.buttonTextColor, NSFontAttributeName: [UIFont systemFontOfSize:11 weight:UIFontWeightSemibold]} forState:UIControlStateSelected];
+    [theme styleSegmentedControl:_sourceControl];
 }
 
 - (void)sourceChanged {

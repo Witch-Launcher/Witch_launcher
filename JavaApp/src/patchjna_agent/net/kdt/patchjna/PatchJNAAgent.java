@@ -151,5 +151,8 @@ public class PatchJNAAgent implements ClassFileTransformer {
     public static void premain(String args, Instrumentation instrumentation) {
         System.out.println("PatchJNAAgent: premain called");
         instrumentation.addTransformer(new PatchJNAAgent());
+        instrumentation.addTransformer(new MetalCompatTransformer());
+        instrumentation.addTransformer(new Vulkan14Transformer());
+        instrumentation.addTransformer(new ShadercSyncTransformer());
     }
 }

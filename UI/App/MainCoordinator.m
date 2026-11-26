@@ -12,6 +12,7 @@
 #import "SettingsViewController.h"
 #import "AccountViewController.h"
 #import "DownloadHubViewController.h"
+#import "DownloadTasksViewController.h"
 #import "VersionBrowserViewController.h"
 #import "ResourcePackListViewController.h"
 #import "MapListViewController.h"
@@ -34,6 +35,13 @@
 #import "PLProfiles.h"
 #import "MinecraftResourceUtils.h"
 #import "ElySkinHead.h"
+#import "SkinTextureManager.h"
+#import "WitchJITCoordinator.h"
+#import "WitchJITSettingsViewController.h"
+#import "BackupManager.h"
+#import "BackupHistoryViewController.h"
+
+static const NSTimeInterval kLaunchAutoHideDelay = 3.0;
 
 @interface MainCoordinator () <UIAlertViewDelegate> {
     CGFloat _lastMsTime;
@@ -46,7 +54,9 @@
 @property (nonatomic) NSMutableDictionary<NSNumber *, UIViewController *> *tabViewControllers;
 @property (nonatomic) MainMenuViewController *mainMenuVC;
 @property (nonatomic) MinecraftResourceDownloadTask *downloadTask;
+@property (nonatomic) DownloadTask *launchProgressTask;
 @property (nonatomic, strong) DownloadProgressOverlay *progressOverlay;
+@property (nonatomic) NSTimer *autoHideLaunchTimer;
 @property (nonatomic) UIAlertController *jitAlert;
 
 @property (nonatomic) ModListViewController *modListVC;
@@ -58,7 +68,7 @@
 
 @implementation MainCoordinator
 
-- (instancetype)initWithRootVC:(AmethystRootViewController *)rootVC {
+- (instancetype)initWithRootVC:(id<WitchRootHost>)rootVC {
     self = [super init];
     if (self) {
         _rootVC = rootVC;
@@ -107,24 +117,41 @@
 }
 
 - (void)accountDidChange {
-    NSString *name = BaseAuthenticator.current.authData[@"username"] ?: nil;
-    UIImage *skin = nil;
-    NSString *profileId = BaseAuthenticator.current.authData[@"profileId"];
-    BOOL isEly = [BaseAuthenticator.current.authData[@"accountType"] isEqualToString:@"elyby"];
+    NSDictionary *authData = BaseAuthenticator.current.authData;
+    NSString *name = authData[@"username"];
+    BOOL isEly = [authData[@"accountType"] isEqualToString:@"elyby"];
+    RightPanelViewController *panel = self.rootVC.rightPanelVC;
+    if (!panel) return;
+
     if (isEly && name.length > 0) {
+        UIImage *cached = [ElySkinHead cachedHeadForUsername:name size:60];
+        [panel updateAccountWithName:name skin:cached];
         __weak typeof(self) weakSelf = self;
         [ElySkinHead headForUsername:name size:60 completion:^(UIImage *head) {
             if (!head) return;
             MainCoordinator *strongSelf = weakSelf;
             if (!strongSelf) return;
+            NSString *currentName = BaseAuthenticator.current.authData[@"username"];
+            if (![name isEqualToString:currentName]) return;
             [strongSelf.rootVC.rightPanelVC updateAccountWithName:name skin:head];
         }];
-    } else if (profileId && [profileId length] > 0 && ![profileId isEqualToString:@"00000000-0000-0000-0000-000000000000"]) {
-        NSString *skinURL = [NSString stringWithFormat:@"https://mc-heads.net/head/%@/60", profileId];
-        NSData *imgData = [NSData dataWithContentsOfURL:[NSURL URLWithString:skinURL]];
-        if (imgData) skin = [UIImage imageWithData:imgData];
+        return;
     }
-    [self.rootVC.rightPanelVC updateAccountWithName:name skin:skin];
+
+    // Local, demo and Microsoft accounts all use the same resolver. Microsoft
+    // goes through the official sessionserver + texture URL (cached on disk),
+    // so the real custom skin head is shown instead of Steve/Alex.
+    [panel updateAccountWithName:name skin:nil];
+    if (name.length == 0 || !authData) return;
+    __weak typeof(self) weakSelf = self;
+    [[SkinTextureManager shared] headImageForAccount:authData size:60 completion:^(UIImage *head) {
+        if (!head) return;
+        MainCoordinator *strongSelf = weakSelf;
+        if (!strongSelf) return;
+        NSString *currentName = BaseAuthenticator.current.authData[@"username"];
+        if (![name isEqualToString:currentName]) return;
+        [strongSelf.rootVC.rightPanelVC updateAccountWithName:name skin:head];
+    }];
 }
 
 - (void)switchToTab:(SidebarTab)tab {
@@ -184,11 +211,12 @@
 }
 
 - (void)showAccount {
+    // Full-screen page: no navigation bar / sheet chrome, so the account
+    // manager uses the whole display (the panel has its own close button).
     AccountViewController *vc = [[AccountViewController alloc] init];
     vc.coordinator = self;
-    UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:vc];
-    vc.navigationItem.rightBarButtonItem = [[UIBarButtonItem alloc] initWithTitle:localize(@"Done", nil) style:UIBarButtonItemStyleDone target:self action:@selector(dismissTopSheet)];
-    [self.rootVC presentContentAsSheet:nav];
+    vc.modalPresentationStyle = UIModalPresentationFullScreen;
+    [self.rootVC presentViewController:vc animated:YES completion:nil];
 }
 
 - (void)dismissTopSheet {
@@ -198,6 +226,12 @@
 - (void)showSettings {
     SettingsViewController *vc = [[SettingsViewController alloc] init];
     vc.coordinator = self;
+    UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:vc];
+    [self.rootVC presentContentAsSheet:nav];
+}
+
+- (void)showBackupHistory {
+    BackupHistoryViewController *vc = [[BackupHistoryViewController alloc] init];
     UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:vc];
     [self.rootVC presentContentAsSheet:nav];
 }
@@ -239,6 +273,22 @@
     UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:vc];
     nav.modalPresentationStyle = UIModalPresentationFormSheet;
     [self.rootVC presentViewController:nav animated:YES completion:nil];
+}
+
+- (void)showDownloadTasks {
+    DownloadTasksViewController *vc = [[DownloadTasksViewController alloc] initWithHubTasks];
+    UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:vc];
+    nav.modalPresentationStyle = UIModalPresentationFormSheet;
+    [self.rootVC presentViewController:nav animated:YES completion:nil];
+}
+
+- (void)showDownloadTasksForLaunch {
+    if (!self.downloadTask) return;
+    DownloadTasksViewController *vc = [[DownloadTasksViewController alloc] initWithLaunchTask:self.downloadTask];
+    UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:vc];
+    nav.modalPresentationStyle = UIModalPresentationFormSheet;
+    UIViewController *presenter = self.rootVC.presentedViewController ?: (UIViewController *)self.rootVC;
+    [presenter presentViewController:nav animated:YES completion:nil];
 }
 
 #pragma mark - Version Management
@@ -302,6 +352,8 @@
 #pragma mark - Launch
 
 - (void)launchGame {
+    if (self.launchProgressTask) return;
+
     NSString *accountName = BaseAuthenticator.current.authData[@"username"];
     if (!accountName) {
         __weak typeof(self) weakSelf = self;
@@ -322,37 +374,78 @@
         return;
     }
 
-    [self refreshCurrentAccountIfNeeded:^{
+    [self runPreLaunchBackupIfNeeded:^{
+        [self refreshCurrentAccountIfNeeded:^{
+            [self showProgressAlert:localize(@"launcher.checking", nil)];
+            [self downloadAndLaunchVersion:versionStr];
+        }];
+    }];
+}
+
+- (void)launchWithServer:(NSDictionary *)server {
+    if (self.launchProgressTask) return;
+
+    NSString *accountName = BaseAuthenticator.current.authData[@"username"];
+    if (!accountName) {
+        __weak typeof(self) weakSelf = self;
+        [ErrorPresenter showMissingAccountWithAction:^{
+            [weakSelf showAccount];
+        }];
+        return;
+    }
+
+    if ([accountName hasPrefix:@"Demo."]) {
+        [ErrorPresenter showDemoAccount];
+        return;
+    }
+
+    NSString *versionStr = VersionDirectoryManager.shared.currentVersion;
+    if (versionStr.length == 0) {
+        [ErrorPresenter showMissingVersion];
+        return;
+    }
+    setPrefObject(@"internal.last_server", server);
+
+    [self runPreLaunchBackupIfNeeded:^{
         [self showProgressAlert:localize(@"launcher.checking", nil)];
         [self downloadAndLaunchVersion:versionStr];
     }];
 }
 
-- (void)launchWithServer:(NSDictionary *)server {
-    NSString *accountName = BaseAuthenticator.current.authData[@"username"];
-    if (!accountName) {
-        __weak typeof(self) weakSelf = self;
-        [ErrorPresenter showMissingAccountWithAction:^{
-            [weakSelf showAccount];
+- (void)runPreLaunchBackupIfNeeded:(void (^)(void))completion {
+    BackupManager *manager = [BackupManager shared];
+    if (!manager.isEnabled || ![manager isTriggerEnabled:@"launch"] || manager.isRunningGame) {
+        completion();
+        return;
+    }
+    DownloadProgressOverlay *overlay = [DownloadProgressOverlay showBlurredInView:self.rootVC.view title:localize(@"Backing up...", nil) blurred:YES];
+    [overlay updateProgress:0.15 message:localize(@"Preparing backup...", nil)];
+    [self waitForBackupIdleThen:^{
+        if ([BackupManager shared].busy) {
+            [overlay dismiss];
+            completion();
+            return;
+        }
+        [overlay updateProgress:0.35 message:localize(@"Compressing game data", nil)];
+        [[BackupManager shared] backupIfNeededForTrigger:@"launch" completion:^(BackupRecord *record, NSError *error) {
+            (void)record;
+            [overlay dismiss];
+            if (error) {
+                [ErrorPresenter showWarning:localize(@"Backup", nil) message:error.localizedDescription];
+            }
+            completion();
         }];
+    } attempts:600];
+}
+
+- (void)waitForBackupIdleThen:(void (^)(void))block attempts:(NSInteger)attempts {
+    if (![BackupManager shared].busy || attempts <= 0) {
+        block();
         return;
     }
-
-    if ([accountName hasPrefix:@"Demo."]) {
-        [ErrorPresenter showDemoAccount];
-        return;
-    }
-
-    NSString *versionStr = VersionDirectoryManager.shared.currentVersion;
-    if (versionStr.length == 0) {
-        [ErrorPresenter showMissingVersion];
-        return;
-    }
-    [self showProgressAlert:localize(@"launcher.checking", nil)];
-
-    setPrefObject(@"internal.last_server", server);
-
-    [self downloadAndLaunchVersion:versionStr];
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        [self waitForBackupIdleThen:block attempts:attempts - 1];
+    });
 }
 
 - (void)refreshCurrentAccountIfNeeded:(void (^)(void))completion {
@@ -386,6 +479,8 @@
     [[NSURLSession.sharedSession dataTaskWithURL:manifestURL completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
         if (error || !data) {
             dispatch_async(dispatch_get_main_queue(), ^{
+                NSError *launchError = error ?: [NSError errorWithDomain:@"WitchLaunch" code:-1 userInfo:@{NSLocalizedDescriptionKey: @"Failed to fetch version manifest"}];
+                [self completeLaunchProgressTaskWithError:launchError];
                 [self dismissProgressAlert];
                 [ErrorPresenter showNetworkError:error message:@"Failed to fetch version manifest"];
             });
@@ -394,6 +489,8 @@
         NSDictionary *json = [NSJSONSerialization JSONObjectWithData:data options:0 error:nil];
         if (!json[@"versions"]) {
             dispatch_async(dispatch_get_main_queue(), ^{
+                NSError *launchError = [NSError errorWithDomain:@"WitchLaunch" code:-2 userInfo:@{NSLocalizedDescriptionKey: @"Invalid version manifest."}];
+                [self completeLaunchProgressTaskWithError:launchError];
                 [self dismissProgressAlert];
                 [ErrorPresenter showError:@"Error" message:@"Invalid version manifest."];
             });
@@ -424,6 +521,8 @@
         }
         if (!versionObj) {
             dispatch_async(dispatch_get_main_queue(), ^{
+                NSError *launchError = [NSError errorWithDomain:@"WitchLaunch" code:-3 userInfo:@{NSLocalizedDescriptionKey: @"Cannot find version data."}];
+                [self completeLaunchProgressTaskWithError:launchError];
                 [self dismissProgressAlert];
                 [ErrorPresenter showError:@"Error" message:@"Cannot find version data."];
             });
@@ -439,6 +538,8 @@
                 dispatch_async(dispatch_get_main_queue(), ^{
                     [strongSelf safeRemoveProgressObserver];
                     strongSelf.downloadTask = nil;
+                    NSError *launchError = [NSError errorWithDomain:@"WitchLaunch" code:-4 userInfo:@{NSLocalizedDescriptionKey: @"Failed to download Minecraft resources."}];
+                    [strongSelf completeLaunchProgressTaskWithError:launchError];
                     [strongSelf dismissProgressAlert];
                     [ErrorPresenter showError:@"Download Error" message:@"Failed to download Minecraft resources."];
                 });
@@ -472,6 +573,7 @@
         if (progress.finished) {
             [self safeRemoveProgressObserver];
             dispatch_async(dispatch_get_main_queue(), ^{
+                [self completeLaunchProgressTaskWithError:nil];
                 [self.progressOverlay finishWithMessage:localize(@"progress.msg.verifying", nil)];
                 [self performJITCheckAndLaunch];
             });
@@ -522,6 +624,9 @@
         }
 
         dispatch_async(dispatch_get_main_queue(), ^{
+            if (self.launchProgressTask) {
+                [self.downloadManager updateProgress:progress.fractionCompleted forTask:self.launchProgressTask];
+            }
             [self.progressOverlay updateWithFraction:progress.fractionCompleted
                                          description:description
                               additionalDescription:additional
@@ -532,8 +637,6 @@
 }
 
 - (void)performJITCheckAndLaunch {
-    BOOL hasTrollStoreJIT = getEntitlementValue(@"com.apple.private.local.sandboxed-jit");
-
     if (isJITEnabled(false)) {
         [self finishLaunch];
         return;
@@ -544,10 +647,22 @@
         return;
     }
 
-    requestExternalJITEnable();
+    NSString *method = WitchJITCoordinator.shared.resolvedMethod;
+    NSLog(@"[JIT] Launch method: %@ (selected=%@)", method, WitchJITCoordinator.shared.selectedMethod);
+    if ([method isEqualToString:@"builtin"]) {
+        [self performBuiltInJITAndLaunch];
+        return;
+    }
+    if (![method isEqualToString:@"wait"]) {
+        [WitchJITCoordinator.shared requestExternalJITEnable];
+    }
+    [self presentWaitJITAlertForMethod:method];
+}
 
+- (void)presentWaitJITAlertForMethod:(NSString *)method {
+    BOOL hasTrollStoreJIT = getEntitlementValue(@"com.apple.private.local.sandboxed-jit");
     NSString *waitMessage;
-    if (hasTrollStoreJIT) {
+    if ([method isEqualToString:@"trollstore"] || hasTrollStoreJIT) {
         waitMessage = localize(@"launcher.wait_jit_trollstore.message", nil);
     } else if (DeviceNeedsDebugJITMapping()) {
         waitMessage = localize(@"launcher.wait_jit_stikdebug.message", nil);
@@ -572,7 +687,53 @@
     });
 }
 
+- (void)performBuiltInJITAndLaunch {
+    self.jitAlert = [UIAlertController alertControllerWithTitle:localize(@"jit.starting.title", nil)
+        message:localize(@"jit.starting.message", nil)
+        preferredStyle:UIAlertControllerStyleAlert];
+    [self.rootVC presentViewController:self.jitAlert animated:YES completion:nil];
+
+    __weak typeof(self) weakSelf = self;
+    [WitchJITCoordinator.shared enableBuiltInJITWithCompletion:^(BOOL success, NSString *errorMessage) {
+        MainCoordinator *strongSelf = weakSelf;
+        if (!strongSelf) return;
+        [strongSelf.jitAlert dismissViewControllerAnimated:YES completion:^{
+            strongSelf.jitAlert = nil;
+            if (success) {
+                [strongSelf finishLaunch];
+            } else {
+                [strongSelf presentBuiltInJITFailure:errorMessage];
+            }
+        }];
+    }];
+}
+
+- (void)presentBuiltInJITFailure:(NSString *)message {
+    UIAlertController *alert = [UIAlertController alertControllerWithTitle:localize(@"jit.failed.title", nil)
+        message:message ?: localize(@"jit.failed.message", nil)
+        preferredStyle:UIAlertControllerStyleAlert];
+    [alert addAction:[UIAlertAction actionWithTitle:localize(@"jit.open_settings", nil)
+                                              style:UIAlertActionStyleDefault
+                                            handler:^(UIAlertAction *action) {
+        WitchJITSettingsViewController *vc = [WitchJITSettingsViewController new];
+        UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:vc];
+        nav.modalPresentationStyle = UIModalPresentationFormSheet;
+        [self.rootVC presentViewController:nav animated:YES completion:nil];
+    }]];
+    [alert addAction:[UIAlertAction actionWithTitle:localize(@"jit.use_stikdebug", nil)
+                                              style:UIAlertActionStyleDefault
+                                            handler:^(UIAlertAction *action) {
+        [WitchJITCoordinator.shared requestExternalJITEnable];
+        [self presentWaitJITAlertForMethod:@"stikdebug"];
+    }]];
+    [alert addAction:[UIAlertAction actionWithTitle:localize(@"Cancel", nil)
+                                              style:UIAlertActionStyleCancel
+                                            handler:nil]];
+    [self.rootVC presentViewController:alert animated:YES completion:nil];
+}
+
 - (void)finishLaunch {
+    [self completeLaunchProgressTaskWithError:nil];
     [self dismissProgressAlert];
     if (self.downloadTask.metadata) {
         // Prepare version directory: set POJAV_GAME_DIR to instance root + symlink → version dir
@@ -600,23 +761,9 @@
 #pragma mark - Progress Alert helpers
 
 - (void)showProgressAlert:(NSString *)message {
-    self.progressOverlay = [DownloadProgressOverlay showBlurredInView:self.rootVC.view title:@"Launching" blurred:YES];
-    self.progressOverlay.statusLabel.text = message;
-    __weak typeof(self) weakSelf = self;
-    self.progressOverlay.cancelBlock = ^{
-        MainCoordinator *strongSelf = weakSelf;
-        if (!strongSelf) return;
-        [strongSelf safeRemoveProgressObserver];
-        if (strongSelf.downloadTask) {
-            @try {
-                [strongSelf.downloadTask cancelAll];
-            } @catch (NSException *e) {
-                NSLog(@"[MainCoordinator] cancelAll exception: %@", e);
-            }
-            strongSelf.downloadTask = nil;
-        }
-        [strongSelf dismissProgressAlert];
-    };
+    [self presentProgressOverlayWithMessage:message];
+    [self scheduleAutoHideLaunchOverlay];
+
     struct timeval tv;
     gettimeofday(&tv, NULL);
     CGFloat startTime = tv.tv_sec + tv.tv_usec / 1000000.0;
@@ -627,13 +774,113 @@
     _cachedEta = @"--";
 }
 
+- (void)presentProgressOverlayWithMessage:(NSString *)message {
+    self.progressOverlay = [DownloadProgressOverlay showBlurredInView:self.rootVC.view title:localize(@"launcher.launching", nil) blurred:YES];
+    self.progressOverlay.statusLabel.text = message;
+
+    __weak typeof(self) weakSelf = self;
+    self.progressOverlay.cancelBlock = ^{
+        MainCoordinator *strongSelf = weakSelf;
+        if (!strongSelf) return;
+        [strongSelf cancelLaunchProgress];
+    };
+    self.progressOverlay.hideBlock = ^{
+        MainCoordinator *strongSelf = weakSelf;
+        if (!strongSelf) return;
+        [strongSelf hideProgressAlert];
+    };
+    self.progressOverlay.infoBlock = ^{
+        MainCoordinator *strongSelf = weakSelf;
+        if (!strongSelf) return;
+        [strongSelf showDownloadTasksForLaunch];
+    };
+}
+
 - (void)updateProgressAlert:(NSString *)message {
     if (self.progressOverlay) {
         [self.progressOverlay updateProgress:self.downloadTask.progress.fractionCompleted message:message];
     }
+    if (self.launchProgressTask) {
+        [self.downloadManager updateProgress:self.downloadTask.progress.fractionCompleted forTask:self.launchProgressTask];
+    }
+}
+
+- (void)scheduleAutoHideLaunchOverlay {
+    [self.autoHideLaunchTimer invalidate];
+    self.autoHideLaunchTimer = nil;
+    if (!getPrefBool(@"general.auto_hide_launching")) return;
+
+    __weak typeof(self) weakSelf = self;
+    NSTimer *timer = [NSTimer timerWithTimeInterval:kLaunchAutoHideDelay repeats:NO block:^(NSTimer *timer) {
+        MainCoordinator *strongSelf = weakSelf;
+        if (!strongSelf) return;
+        strongSelf.autoHideLaunchTimer = nil;
+        if (!getPrefBool(@"general.auto_hide_launching")) return;
+        [strongSelf hideProgressAlert];
+    }];
+    self.autoHideLaunchTimer = timer;
+    [[NSRunLoop mainRunLoop] addTimer:timer forMode:NSRunLoopCommonModes];
+}
+
+- (void)hideProgressAlert {
+    [self.autoHideLaunchTimer invalidate];
+    self.autoHideLaunchTimer = nil;
+    if (!self.progressOverlay) return;
+
+    [self ensureLaunchProgressTask];
+    [self.progressOverlay dismiss];
+    self.progressOverlay = nil;
+}
+
+- (void)ensureLaunchProgressTask {
+    if (self.launchProgressTask) return;
+
+    self.launchProgressTask = [self.downloadManager beginTaskWithName:localize(@"launcher.launching", nil) type:DownloadTypeLaunch];
+    __weak typeof(self) weakSelf = self;
+    self.launchProgressTask.cancelBlock = ^{
+        MainCoordinator *strongSelf = weakSelf;
+        if (!strongSelf) return;
+        strongSelf.launchProgressTask = nil;
+        [strongSelf cancelLaunchDownload];
+    };
+    if (self.downloadTask) {
+        [self.downloadManager updateProgress:self.downloadTask.progress.fractionCompleted forTask:self.launchProgressTask];
+    }
+}
+
+- (void)cancelLaunchProgress {
+    DownloadTask *task = self.launchProgressTask;
+    self.launchProgressTask = nil;
+    if (task) {
+        [self.downloadManager cancelTask:task];
+    } else {
+        [self cancelLaunchDownload];
+    }
+}
+
+- (void)cancelLaunchDownload {
+    [self safeRemoveProgressObserver];
+    if (self.downloadTask) {
+        @try {
+            [self.downloadTask cancelAll];
+        } @catch (NSException *e) {
+            NSLog(@"[MainCoordinator] cancelAll exception: %@", e);
+        }
+        self.downloadTask = nil;
+    }
+    [self dismissProgressAlert];
+}
+
+- (void)completeLaunchProgressTaskWithError:(NSError *)error {
+    DownloadTask *task = self.launchProgressTask;
+    if (!task) return;
+    self.launchProgressTask = nil;
+    [self.downloadManager completeTask:task error:error];
 }
 
 - (void)dismissProgressAlert {
+    [self.autoHideLaunchTimer invalidate];
+    self.autoHideLaunchTimer = nil;
     if (self.progressOverlay) {
         [self.progressOverlay dismiss];
         self.progressOverlay = nil;
@@ -694,6 +941,7 @@
 }
 
 - (void)dealloc {
+    [self.autoHideLaunchTimer invalidate];
     [[NSNotificationCenter defaultCenter] removeObserver:self];
 }
 

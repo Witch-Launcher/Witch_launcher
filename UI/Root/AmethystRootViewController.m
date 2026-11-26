@@ -7,6 +7,7 @@
 #import "LauncherPreferences.h"
 #import "ios_uikit_bridge.h"
 #import "AmethystBlurView.h"
+#import "UIView+LiquidGlass.h"
 #import "DownloadManager.h"
 #import "HapticManager.h"
 #import "PLProfiles.h"
@@ -48,7 +49,13 @@
 - (void)viewDidLoad {
     [super viewDidLoad];
     [self setupViews];
+    // Escape hatch for an over-zoomed launcher whose gear button is off-screen.
+    UITapGestureRecognizer *resetScale = [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(resetUIScaleGesture:)];
+    resetScale.numberOfTapsRequired = 2;
+    resetScale.numberOfTouchesRequired = 2;
+    [self.view addGestureRecognizer:resetScale];
     [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(updateColors) name:ThemeDidChangeNotification object:nil];
+    [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(updateShellBorderPath) name:ShellBorderDidChangeNotification object:nil];
     [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(updateColors) name:AmethystBlurIntensityDidChangeNotification object:nil];
     [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(updateFloatingLaunch) name:DownloadTasksDidChangeNotification object:nil];
     [self updateColors];
@@ -59,7 +66,7 @@
     _topBar = [[TopBarView alloc] initWithFrame:CGRectZero];
     _topBar.delegate = self;
     [self.view addSubview:_topBar];
-    [AmethystBlurView installInView:_topBar prefKey:@"amethyst_topbar_blur"];
+    [AmethystBlurView installInView:_topBar prefKey:@"amethyst_topbar_blur" glassEligible:YES];
 
     _backgroundImageView = [[UIImageView alloc] init];
     _backgroundImageView.contentMode = UIViewContentModeScaleAspectFill;
@@ -83,7 +90,7 @@
     [self addChildViewController:_sidebarVC];
     [self.view addSubview:_sidebarVC.view];
     [_sidebarVC didMoveToParentViewController:self];
-    [AmethystBlurView installInView:_sidebarVC.view prefKey:@"amethyst_sidebar_blur"];
+    [AmethystBlurView installInView:_sidebarVC.view prefKey:@"amethyst_sidebar_blur" glassEligible:YES];
 
     _sidebarBorder = [[UIView alloc] init];
     _sidebarBorder.hidden = YES; // superseded by floating borders
@@ -98,7 +105,7 @@
     [self addChildViewController:_rightPanelVC];
     [self.view addSubview:_rightPanelVC.view];
     [_rightPanelVC didMoveToParentViewController:self];
-    [AmethystBlurView installInView:_rightPanelVC.view prefKey:@"amethyst_rightpanel_blur"];
+    [AmethystBlurView installInView:_rightPanelVC.view prefKey:@"amethyst_rightpanel_blur" glassEligible:YES];
 
     // Portrait floating launch: single circle overlay (panel hidden in portrait).
     _floatingLaunchBtn = [UIButton buttonWithType:UIButtonTypeSystem];
@@ -134,6 +141,7 @@
     _quickPanelBtn.accessibilityLabel = @"Versions and account";
     _quickPanelBtn.hidden = YES;
     [_quickPanelBtn addTarget:self action:@selector(toggleQuickPanel) forControlEvents:UIControlEventTouchUpInside];
+    [_quickPanelBtn lg_enableLiquidGlassWithTint:nil cornerRadius:24.0 maskedCorners:kCALayerMinXMinYCorner | kCALayerMaxXMinYCorner | kCALayerMinXMaxYCorner | kCALayerMaxXMaxYCorner];
     [self.view addSubview:_quickPanelBtn];
 
     // Quick panel: dim + card sliding from the right edge.
@@ -151,6 +159,7 @@
     _quickPanel.layer.borderWidth = 1;
     _quickPanel.layer.borderColor = [ThemeManager.shared.accentColor colorWithAlphaComponent:0.30].CGColor;
     _quickPanel.hidden = YES;
+    [_quickPanel lg_enableLiquidGlassWithTint:nil cornerRadius:18.0 maskedCorners:kCALayerMinXMinYCorner | kCALayerMaxXMinYCorner | kCALayerMinXMaxYCorner | kCALayerMaxXMaxYCorner];
     [self.view addSubview:_quickPanel];
 
     UILabel *quickTitle = [[UILabel alloc] init];
@@ -210,6 +219,8 @@
     _shellBorder.fillColor = UIColor.clearColor.CGColor;
     _shellBorder.fillRule = kCAFillRuleEvenOdd;
     _shellBorder.lineJoin = kCALineJoinRound;
+    // Keep the stroke above every panel regardless of subview add order.
+    _shellBorder.zPosition = 100;
     [self.view.layer addSublayer:_shellBorder];
 }
 
@@ -226,16 +237,19 @@
     return isPortrait ? @"bottom" : @"left";
 }
 
-- (CGRect)sidebarFrameForPosition:(NSString *)pos frameX:(CGFloat)frameX frameW:(CGFloat)frameW contentTop:(CGFloat)contentTop contentHeight:(CGFloat)contentHeight safeArea:(UIEdgeInsets)safeArea bounds:(CGRect)bounds {
+- (CGRect)sidebarFrameForPosition:(NSString *)pos frameX:(CGFloat)frameX frameW:(CGFloat)frameW contentTop:(CGFloat)contentTop contentHeight:(CGFloat)contentHeight rightPanelWidth:(CGFloat)rightPanelWidth safeArea:(UIEdgeInsets)safeArea bounds:(CGRect)bounds {
     const CGFloat rail = 48.0;
     const CGFloat barH = 64.0;
     BOOL bottom = [pos isEqualToString:@"bottom"];
     _sidebarVC.horizontal = bottom;
+    // The right panel is a fixed overlay on the right edge of the shell; the
+    // sidebar must never render under it (bottom bar would lose its last
+    // tabs, a right rail would slide behind the panel).
     if (bottom) {
-        return CGRectMake(frameX, bounds.size.height - safeArea.bottom - barH, frameW, barH);
+        return CGRectMake(frameX, bounds.size.height - safeArea.bottom - barH, frameW - rightPanelWidth, barH);
     }
     if ([pos isEqualToString:@"right"]) {
-        return CGRectMake(frameX + frameW - rail, contentTop, rail, contentHeight);
+        return CGRectMake(frameX + frameW - rightPanelWidth - rail, contentTop, rail, contentHeight);
     }
     return CGRectMake(frameX, contentTop, rail, contentHeight);
 }
@@ -297,6 +311,10 @@
     // Portrait: collapse the 180pt right panel (it squeezes content down to
     // ~150pt on phones) and show the floating circular launch button instead.
     // Landscape keeps the exact current layout.
+    // Re-assert the UI-scale zoom first: the window rewrites the root view's
+    // frame on rotation/resize, which can drop the enlarged bounds; the
+    // helper is idempotent, so this only fires when something drifted.
+    [ThemeManager.shared applyUIScaleToRootView:self.view inWindow:self.view.window];
     CGRect bounds = self.view.bounds;
     if (bounds.size.width == 0 || bounds.size.height == 0) return;
     BOOL isPortrait = bounds.size.width < bounds.size.height;
@@ -339,7 +357,8 @@
     _sidebarVC.view.frame = [self sidebarFrameForPosition:[self sidebarPositionForPortrait:isPortrait]
                                                                                  frameX:frameX frameW:frameW
                                                                               contentTop:contentTop contentHeight:contentHeight
-                                                                                 safeArea:safeArea bounds:bounds];
+                                                                         rightPanelWidth:rightPanelWidth
+                                                                                safeArea:safeArea bounds:bounds];
     // Square top corners: the bar sits flush under the top bar — rounding the
     // T-junction leaves ugly notches.
     if ([[self sidebarPositionForPortrait:isPortrait] isEqualToString:@"right"]) {
@@ -396,26 +415,32 @@
 
 - (void)updateShellBorderPath {
     if (!_shellBorder) return;
-    if (!ThemeManager.shared.uiBorderEnabled) {
+    ThemeManager *theme = ThemeManager.shared;
+    CGFloat w = MAX(0.0f, MIN(theme.uiBorderWidth, 4.0f));
+    if (!theme.uiBorderEnabled || w <= 0.0f) {
         _shellBorder.hidden = YES;
         _shellBorder.path = NULL;
         return;
     }
     _shellBorder.hidden = NO;
-    CGFloat w = MAX(0.0f, MIN([[NSUserDefaults standardUserDefaults] floatForKey:@"amethyst_bar_border_width"], 4.0f));
     _shellBorder.lineWidth = w;
-    _shellBorder.strokeColor = [ThemeManager.shared.accentColor colorWithAlphaComponent:0.45].CGColor;
+    _shellBorder.strokeColor = theme.uiBorderColor.CGColor;
     _shellBorder.frame = self.view.bounds;
+
+    // The outline follows the user's border radius so 0 keeps the shell
+    // perfectly square (previously hardcoded 16/12 left it rounded).
+    CGFloat radius = MAX(0.0f, theme.uiBorderCornerRadius);
+    CGFloat innerRadius = MAX(0.0f, radius - 4.0f);
 
     CGRect outer = CGRectMake(_topBar.frame.origin.x, _topBar.frame.origin.y,
                               _topBar.frame.size.width,
                               MAX(CGRectGetMaxY(_rightPanelVC.view.frame), CGRectGetMaxY(_sidebarVC.view.frame)) - _topBar.frame.origin.y);
     UIBezierPath *outerPath = [UIBezierPath bezierPathWithRoundedRect:outer
                                                    byRoundingCorners:UIRectCornerTopLeft | UIRectCornerTopRight | UIRectCornerBottomRight | UIRectCornerBottomLeft
-                                                         cornerRadii:CGSizeMake(16, 16)];
+                                                         cornerRadii:CGSizeMake(radius, radius)];
     UIBezierPath *innerPath = [UIBezierPath bezierPathWithRoundedRect:_contentContainer.frame
                                                     byRoundingCorners:UIRectCornerAllCorners
-                                                          cornerRadii:CGSizeMake(12, 12)];
+                                                          cornerRadii:CGSizeMake(innerRadius, innerRadius)];
     UIBezierPath *combined = [UIBezierPath bezierPath];
     [combined appendPath:outerPath];
     [combined appendPath:innerPath];
@@ -431,6 +456,7 @@
     v.layer.maskedCorners = corners;
     // User-adjustable border thickness (Appearance > Bar Border Thickness).
     v.clipsToBounds = YES;
+    [v setNeedsLayout];
 }
 
 - (void)viewSafeAreaInsetsDidChange {
@@ -452,8 +478,15 @@
     [self updateShellBorderPath];
     [self.view setNeedsLayout];
     [self updateFloatingLaunch];
-    _quickPanel.backgroundColor = ThemeManager.shared.cardBackgroundColor;
-    _quickPanelBtn.tintColor = ThemeManager.shared.accentColor;
+    _quickPanel.backgroundColor = theme.cardBackgroundColor;
+    _quickPanelBtn.backgroundColor = theme.cardBackgroundColor;
+    _quickPanelBtn.tintColor = theme.accentColor;
+    _quickPanel.layer.borderColor = [theme.accentColor colorWithAlphaComponent:0.30].CGColor;
+    _quickPanelBtn.layer.borderColor = [theme.accentColor colorWithAlphaComponent:0.35].CGColor;
+    [_quickPanel lg_setLiquidGlassBaseColor:theme.cardBackgroundColor];
+    [_quickPanelBtn lg_setLiquidGlassBaseColor:theme.cardBackgroundColor];
+    [_quickPanel lg_refreshLiquidGlass];
+    [_quickPanelBtn lg_refreshLiquidGlass];
     [_quickTable reloadData];
     if (theme.backgroundVideoURL) {
         [self setupBackgroundVideo:theme.backgroundVideoURL];
@@ -509,7 +542,12 @@
     [coordinator animateAlongsideTransition:^(id<UIViewControllerTransitionCoordinatorContext> context) {
         [self.view setNeedsLayout];
         [self.view layoutIfNeeded];
-    } completion:nil];
+    } completion:^(id<UIViewControllerTransitionCoordinatorContext> context) {
+        // Open sheets rotate with the window and their system-managed frames
+        // drift away from the zoomed layout; re-assert the scale once the
+        // rotation settles.
+        [ThemeManager.shared applyUIScaleToAllWindows];
+    }];
 }
 
 - (void)switchContentTo:(UIViewController *)vc animated:(BOOL)animated {
@@ -580,7 +618,13 @@
 
 - (void)pushContent:(UIViewController *)vc animated:(BOOL)animated {
     UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:vc];
-    nav.modalPresentationStyle = UIModalPresentationFullScreen;
+    // OverFullScreen, not FullScreen: UIKit removes the presenting view for
+    // plain FullScreen presentations, so pages whose backdrop is transparent
+    // (custom background image / UI Opacity / panel blur) had nothing behind
+    // them and rendered over the raw window — pitch black in dark mode with
+    // every appearance slider feeling dead. OverFullScreen keeps the launcher
+    // underneath, so the backdrop and all its theme sliders come back.
+    nav.modalPresentationStyle = UIModalPresentationOverFullScreen;
     nav.transitioningDelegate = self.coordinator;
     [self presentViewController:nav animated:animated completion:nil];
 }
@@ -605,6 +649,10 @@
     [self.coordinator showDownloadHub];
 }
 
+- (void)topBarDidTapDownloads {
+    [self.coordinator showDownloadTasks];
+}
+
 #pragma mark - RightPanelDelegate
 
 - (void)rightPanelDidTapAccount {
@@ -625,6 +673,10 @@
 
 - (void)rightPanelDidTapSettings {
     [self.coordinator showSettings];
+}
+
+- (void)rightPanelDidTapBackup {
+    [self.coordinator showBackupHistory];
 }
 
 - (void)rightPanelDidAddVersion {
@@ -836,6 +888,13 @@
         _floatingLaunchBtn.accessibilityLabel = @"Play (long-press for account)";
     }
     _floatingLaunchBtn.tintColor = theme.buttonTextColor;
+}
+
+- (void)resetUIScaleGesture:(UITapGestureRecognizer *)gesture {
+    if (ThemeManager.shared.uiScale == 1.0) return;
+    ThemeManager.shared.uiScale = 1.0;
+    [ThemeManager.shared applyUIScaleToAllWindows];
+    [[HapticManager shared] play:HapticTypeMedium];
 }
 
 - (void)dealloc {

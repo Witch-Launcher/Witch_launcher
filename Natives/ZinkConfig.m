@@ -281,8 +281,8 @@ static AppleGPUGeneration _cachedGPUGeneration = AppleGPUGenerationUnknown;
             return v;
         }
     }
-    NSLog(@"[ZinkConfig] selectedMesaVersion: default = 26.2.2");
-    return @"26.2.2";
+    NSLog(@"[ZinkConfig] selectedMesaVersion: default = 25.0.7");
+    return @"25.0.7";
 }
 
 + (NSString *)zinkLibraryName {
@@ -388,7 +388,11 @@ static AppleGPUGeneration _cachedGPUGeneration = AppleGPUGenerationUnknown;
     // since Mesa 21.0.0 Zink does not expose it by default on Metal/MoltenVK.
     // If compatibility issues arise, users can set zink.gl_override to 3.3 or 4.0.
     NSString *extOverrides = @"";
-    BOOL enableGLThread = YES;
+    // mesa_glthread keeps a second OSMesa context plus a full-resolution
+    // framebuffer on the GL worker thread. On 4 GB iPhones that is pure
+    // overhead and pushes the process closer to Jetsam; only enable it by
+    // default on devices with enough RAM, and let the user override below.
+    BOOL enableGLThread = NSProcessInfo.processInfo.physicalMemory >= (6ULL * 1024 * 1024 * 1024);
     int glslCacheSize = 32;
 
     ZinkAPIFeatures supported = [self supportedAPIFeatures];
@@ -398,7 +402,6 @@ static AppleGPUGeneration _cachedGPUGeneration = AppleGPUGenerationUnknown;
             extOverrides = [self extensionDisableStringForLevel:
                             supported & ~ZinkAPIFeatureTransformFeedback];
             glslCacheSize = 128;
-            enableGLThread = YES;
             break;
 
         case ZinkOptimizationLevelSafe:
@@ -631,9 +634,12 @@ static AppleGPUGeneration _cachedGPUGeneration = AppleGPUGenerationUnknown;
     if (enableGLThread) {
         setenv("mesa_glthread", [enableGLThread boolValue] ? "true" : "false", 1);
     } else {
-        // Disable glthread on A11 and older to reduce memory pressure
+        // Disable glthread on A11 and older, and on any device below 6 GB:
+        // the worker thread keeps an extra OSMesa context and a full-size
+        // pixel buffer, which is exactly the memory the Jetsam budget lacks.
         AppleGPUGeneration gen = [self deviceGPUGeneration];
-        if (gen <= AppleGPUGenerationA11) {
+        BOOL lowRAM = NSProcessInfo.processInfo.physicalMemory < (6ULL * 1024 * 1024 * 1024);
+        if (gen <= AppleGPUGenerationA11 || lowRAM) {
             setenv("mesa_glthread", "false", 1);
         }
     }

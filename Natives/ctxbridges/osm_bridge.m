@@ -35,7 +35,10 @@ bool osm_init() {
 }
 
 osm_render_window_t* osm_init_context(osm_render_window_t* share) {
-    osm_render_window_t* render_window = calloc(1, sizeof(osm_render_window_t));
+    // br_init_context hands this back as basic_render_window_t*, so allocate
+    // the full union. The old sizeof(osm_render_window_t) allocation was
+    // smaller than the type other bridge code believes it owns.
+    osm_render_window_t* render_window = calloc(1, sizeof(basic_render_window_t));
     OSMesaContext context = handle.OSMesaCreateContext(GL_RGBA, share ? share->context : NULL);
     if(!context) {
         NSLog(@"OSMBridge: FAILED to create context");
@@ -43,6 +46,7 @@ osm_render_window_t* osm_init_context(osm_render_window_t* share) {
         return NULL;
     }
     render_window->context = context;
+    render_window->color_space = CGColorSpaceCreateDeviceRGB();
     return render_window;
 }
 
@@ -154,7 +158,9 @@ void osm_make_current(osm_render_window_t* bundle) {
     }
 
     currentBundle = (basic_render_window_t *)bundle;
-    currentBundle->osm.color_space = CGColorSpaceCreateDeviceRGB();
+    if (!currentBundle->osm.color_space) {
+        currentBundle->osm.color_space = CGColorSpaceCreateDeviceRGB();
+    }
     osm_apply_current_ll_locked();
     pthread_mutex_unlock(&osm_render_lock);
 }
@@ -168,9 +174,26 @@ void osm_swap_buffers() {
     }
     osm_thread_entry_t* e = pthread_getspecific(osm_thread_entry_key);
 
-    static void* staticBufs[2] = {0};
-    static size_t staticBufSizes[2] = {0};
+    // Three persistent slots + a semaphore: the main queue owns a slot until
+    // it has installed the CGImage in layer.contents. Two slots were not
+    // enough when the main queue fell behind (the render thread could
+    // realloc/memcpy a buffer an in-flight CGImage still referenced).
+    enum { kPresentSlots = 3 };
+    static void* staticBufs[kPresentSlots] = {0};
+    static size_t staticBufSizes[kPresentSlots] = {0};
     static int bufIdx = 0;
+    static dispatch_semaphore_t presentSem = NULL;
+    static dispatch_once_t presentSemOnce;
+    dispatch_once(&presentSemOnce, ^{
+        presentSem = dispatch_semaphore_create(kPresentSlots);
+    });
+
+    if (dispatch_semaphore_wait(presentSem, DISPATCH_TIME_NOW) != 0) {
+        // Main queue is behind; dropping this frame is safer than lapping a
+        // buffer that layer.contents may still be displaying.
+        pthread_mutex_unlock(&osm_render_lock);
+        return;
+    }
 
     size_t pixelBytes = 0;
     void* copy = NULL;
@@ -182,7 +205,7 @@ void osm_swap_buffers() {
         pixelBytes = (size_t)e->width * (size_t)e->height * 4;
 
         int myIdx = bufIdx;
-        bufIdx = (bufIdx + 1) % 2;
+        bufIdx = (bufIdx + 1) % kPresentSlots;
 
         if (staticBufSizes[myIdx] < pixelBytes) {
             void *newBuf = reallocf(staticBufs[myIdx], pixelBytes);
@@ -190,6 +213,11 @@ void osm_swap_buffers() {
                 staticBufs[myIdx] = newBuf;
                 staticBufSizes[myIdx] = pixelBytes;
             } else {
+                // reallocf already freed the old block; leaving the old
+                // pointer in staticBufs made every later frame call reallocf
+                // on a dangling address (heap corruption).
+                staticBufs[myIdx] = NULL;
+                staticBufSizes[myIdx] = 0;
                 NSLog(@"[OSMBridge] ✗ swap buffer reallocf failed for %zu bytes", pixelBytes);
             }
         }
@@ -201,27 +229,32 @@ void osm_swap_buffers() {
     osm_render_window_t bundle = currentBundle ? currentBundle->osm : (osm_render_window_t){0};
     pthread_mutex_unlock(&osm_render_lock);
     if (copy == NULL) {
+        dispatch_semaphore_signal(presentSem);
         return;
     }
 
     CGColorSpaceRef cs = bundle.color_space ? CGColorSpaceRetain(bundle.color_space) : CGColorSpaceCreateDeviceRGB();
 
     dispatch_async(dispatch_get_main_queue(), ^{
-        [CATransaction begin];
-        [CATransaction setDisableActions:YES];
-        CGDataProviderRef provider = CGDataProviderCreateWithData(NULL, copy, pixelBytes, NULL);
-        if (provider) {
-            CGImageRef bitmap = CGImageCreate(copyWidth, copyHeight, 8, 32, 4 * copyWidth, cs,
-                                              kCGImageAlphaNoneSkipLast | kCGBitmapByteOrderDefault,
-                                              provider, NULL, FALSE, kCGRenderingIntentDefault);
-            if (bitmap) {
-                SurfaceViewController.surface.layer.contents = (__bridge id)bitmap;
-                CGImageRelease(bitmap);
+        @autoreleasepool {
+            [CATransaction begin];
+            [CATransaction setDisableActions:YES];
+            CGDataProviderRef provider = CGDataProviderCreateWithData(NULL, copy, pixelBytes, NULL);
+            if (provider) {
+                CGImageRef bitmap = CGImageCreate(copyWidth, copyHeight, 8, 32, 4 * copyWidth, cs,
+                                                  kCGImageAlphaNoneSkipLast | kCGBitmapByteOrderDefault,
+                                                  provider, NULL, FALSE, kCGRenderingIntentDefault);
+                if (bitmap) {
+                    SurfaceViewController.surface.layer.contents = (__bridge id)bitmap;
+                    pojavNoteFinalPresent();
+                    CGImageRelease(bitmap);
+                }
+                CGDataProviderRelease(provider);
             }
-            CGDataProviderRelease(provider);
+            [CATransaction commit];
+            if (cs) CGColorSpaceRelease(cs);
         }
-        [CATransaction commit];
-        if (cs) CGColorSpaceRelease(cs);
+        dispatch_semaphore_signal(presentSem);
     });
 }
 
@@ -236,15 +269,24 @@ void osm_terminate() {
         pthread_setspecific(osm_thread_entry_key, NULL);
         osm_destroy_thread_entry(e);
     }
+    // Unbind before destroying the master context.
+    if (handle.OSMesaMakeCurrent) {
+        handle.OSMesaMakeCurrent(NULL, NULL, 0, 0, 0);
+    }
     if (currentBundle) {
-        if (currentBundle->osm.color_space) {
-            CGColorSpaceRelease(currentBundle->osm.color_space);
-            currentBundle->osm.color_space = NULL;
+        osm_render_window_t *master = &currentBundle->osm;
+        if (master->color_space) {
+            CGColorSpaceRelease(master->color_space);
+            master->color_space = NULL;
         }
+        if (master->context && handle.OSMesaDestroyContext) {
+            handle.OSMesaDestroyContext(master->context);
+            master->context = NULL;
+        }
+        free(currentBundle);
         currentBundle = NULL;
     }
     pthread_mutex_unlock(&osm_render_lock);
-    handle.OSMesaMakeCurrent(NULL, NULL, 0, 0, 0);
     NSLog(@"[OSMBridge] ✓ OSMesa bridge terminated");
 }
 

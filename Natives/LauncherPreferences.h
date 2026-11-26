@@ -23,6 +23,7 @@ void setSafeArea(CGSize screenSize, CGRect safeArea);
 
 NSString* getSelectedJavaHome(NSString* defaultJRETag, int minVersion);
 
+BOOL isExperimentalMetalRendererEnabled(void);
 NSArray* getRendererKeys(BOOL containsDefault);
 NSArray* getRendererNames(BOOL containsDefault);
 NSArray* getLwjglVersions(BOOL containsDefault);

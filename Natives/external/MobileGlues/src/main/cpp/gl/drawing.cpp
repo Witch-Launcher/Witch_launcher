@@ -9,6 +9,7 @@
 #include "restart.h"
 #include "buffer.h"
 #include "framebuffer.h"
+#include "envvars.h"
 #include "mg.h"
 #include "texture.h"
 #include "../egl/context.h"
@@ -193,8 +194,397 @@ void setupBufferTextureUniforms(GLuint program) {
     GLES.glUniform1i(info.locHeight, texObject->height);
 }
 
+// ---- Diagnostic draw trace (see mg.h) --------------------------------------
+//
+// Only active while AMETHYST_RENDER_LOG=1. One record per draw, kept in a ring
+// so a frame's tail can be printed at swap time without buffering the whole
+// frame. The unit-0 texture is read from this layer's own shadow, so noting a
+// draw never touches the driver. Blits are recorded too: the present pass is a
+// blit, and whether the GUI draws land before or after it is exactly the
+// question the first version of this trace could not answer.
+// get_framebuffer lives in gl/framebuffer.cpp and carries the per-FBO colour
+// attachment records this trace reports. Global-scope declaration so the local
+// definition of get_framebuffer links.
+framebuffer_t& get_framebuffer(GLuint id);
+
+namespace {
+// 512 because the world draws now share the ring with the GUI's: a frame of
+// terrain plus HUD is comfortably over the old 96.
+constexpr unsigned kDrawTraceRing = 512;
+
+struct mg_draw_trace_rec_t {
+    GLuint program; // draw: bound program; blit: 0
+    GLuint fbo;     // draw: draw fbo (this layer's shadow); blit: dst fbo
+    GLuint drvFbo;  // driver-side binding at the call (write fbo; blit: read fbo)
+    GLuint tex0;
+    GLuint att0; // texture of the fbo's GL_COLOR_ATTACHMENT0 per this layer's shadow
+    unsigned char kind; // 0 = draw, 1 = blit, 2 = passthrough draw (gl_native)
+    char what;          // native draws: which entry point
+    GLuint srcFbo;
+    GLuint mask; // blit: GLbitfield mask
+    GLuint err;  // blit: driver error after the call
+    GLint count;     // native draws: vertex/index count (-1 unknown)
+    GLint instances; // native draws: instance count
+    GLuint mode;     // native draws: GL enum
+};
+
+static GLuint mg_draw_trace_drv_draw_fbo() {
+    GLint v = 0;
+    GLES.glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, &v);
+    return (GLuint)v;
+}
+
+static GLuint mg_draw_trace_drv_read_fbo() {
+    GLint v = 0;
+    GLES.glGetIntegerv(GL_READ_FRAMEBUFFER_BINDING, &v);
+    return (GLuint)v;
+}
+
+static GLuint mg_draw_trace_att0(GLuint fbo) {
+    if (fbo == 0) return 0;
+    framebuffer_t& fb = get_framebuffer(fbo);
+    if (!fb.initialized || fb.color_attachments.empty()) return 0;
+    return fb.color_attachments[0].texture;
+}
+
+thread_local mg_draw_trace_rec_t g_draw_ring[kDrawTraceRing];
+thread_local unsigned g_draw_ring_pos = 0;
+thread_local unsigned g_draw_ring_count = 0;
+thread_local unsigned long long g_draw_frame_total = 0;
+thread_local int g_draw_trace_cached = -1;
+
+bool mg_draw_trace_on() {
+    if (g_draw_trace_cached < 0) g_draw_trace_cached = IsEnvVarTrue("AMETHYST_RENDER_LOG") ? 1 : 0;
+    return g_draw_trace_cached == 1;
+}
+} // namespace
+
+// The link status and the active attribute list say whether the program the
+// draw will use is the shader the game compiled, or a failed link that leaves
+// the draw a no-op. The Metal GUI programs are the only ones that look wrong
+// while the same draw works on Vulkan, so their link logs matter more than the
+// VAO state that was already checked.
+static void mg_ui_program_diag(GLuint program) {
+    GLint link = 0, validate = 0, infoLen = 0;
+    GLES.glGetProgramiv(program, GL_LINK_STATUS, &link);
+    GLES.glGetProgramiv(program, GL_VALIDATE_STATUS, &validate);
+    GLES.glGetProgramiv(program, GL_INFO_LOG_LENGTH, &infoLen);
+    LOG_W_FORCE("[MGUIDIAG]   link=%d validate=%d infoLen=%d", link, validate, infoLen);
+    if (infoLen > 1) {
+        char info[512] = {};
+        GLsizei written = 0;
+        GLES.glGetProgramInfoLog(program, (GLsizei)sizeof(info), &written, info);
+        LOG_W_FORCE("[MGUIDIAG]   linklog: %s", info);
+    }
+
+    GLint attached = 0;
+    GLES.glGetProgramiv(program, GL_ATTACHED_SHADERS, &attached);
+    GLuint shaders[8] = {};
+    if (attached > 8) attached = 8;
+    if (attached > 0) GLES.glGetAttachedShaders(program, attached, nullptr, shaders);
+    for (GLint i = 0; i < attached; ++i) {
+        GLint type = 0, compiled = 0, shaderInfoLen = 0;
+        GLES.glGetShaderiv(shaders[i], GL_SHADER_TYPE, &type);
+        GLES.glGetShaderiv(shaders[i], GL_COMPILE_STATUS, &compiled);
+        GLES.glGetShaderiv(shaders[i], GL_INFO_LOG_LENGTH, &shaderInfoLen);
+        LOG_W_FORCE("[MGUIDIAG]   shader=%u type=0x%X compile=%d infoLen=%d", shaders[i], type, compiled,
+                    shaderInfoLen);
+        if (shaderInfoLen > 1) {
+            char info[512] = {};
+            GLsizei written = 0;
+            GLES.glGetShaderInfoLog(shaders[i], (GLsizei)sizeof(info), &written, info);
+            LOG_W_FORCE("[MGUIDIAG]   shaderlog: %s", info);
+        }
+    }
+
+    GLint attribs = 0;
+    GLES.glGetProgramiv(program, GL_ACTIVE_ATTRIBUTES, &attribs);
+    for (GLint i = 0; i < attribs && i < 16; ++i) {
+        GLchar name[128] = {};
+        GLsizei nameLen = 0;
+        GLint size = 0;
+        GLenum type = 0;
+        GLES.glGetActiveAttrib(program, (GLuint)i, (GLsizei)sizeof(name), &nameLen, &size, &type, name);
+        LOG_W_FORCE("[MGUIDIAG]   attrib %s loc=%d type=0x%X size=%d", name,
+                    GLES.glGetAttribLocation(program, name), type, size);
+    }
+}
+
+// The pipeline state at the draw, not at swap: cull mode and winding decide
+// whether the GUI quad is rasterized at all, and blend decides whether a
+// transparent texel disappears. Swap-time state is set for the next frame and
+// cannot answer either.
+static void mg_ui_draw_state_diag() {
+    const GLboolean blend = GLES.glIsEnabled(GL_BLEND);
+    const GLboolean cull = GLES.glIsEnabled(GL_CULL_FACE);
+    const GLboolean depth = GLES.glIsEnabled(GL_DEPTH_TEST);
+    const GLboolean scissor = GLES.glIsEnabled(GL_SCISSOR_TEST);
+    GLint eqRGB = 0, eqA = 0, srcRGB = 0, dstRGB = 0, srcA = 0, dstA = 0;
+    GLES.glGetIntegerv(GL_BLEND_EQUATION_RGB, &eqRGB);
+    GLES.glGetIntegerv(GL_BLEND_EQUATION_ALPHA, &eqA);
+    GLES.glGetIntegerv(GL_BLEND_SRC_RGB, &srcRGB);
+    GLES.glGetIntegerv(GL_BLEND_DST_RGB, &dstRGB);
+    GLES.glGetIntegerv(GL_BLEND_SRC_ALPHA, &srcA);
+    GLES.glGetIntegerv(GL_BLEND_DST_ALPHA, &dstA);
+    GLint cullMode = 0, frontFace = 0, depthFunc = 0;
+    GLES.glGetIntegerv(GL_CULL_FACE_MODE, &cullMode);
+    GLES.glGetIntegerv(GL_FRONT_FACE, &frontFace);
+    GLES.glGetIntegerv(GL_DEPTH_FUNC, &depthFunc);
+    GLboolean depthMask = GL_FALSE;
+    GLES.glGetBooleanv(GL_DEPTH_WRITEMASK, &depthMask);
+    GLint box[4] = {}, vp[4] = {};
+    GLES.glGetIntegerv(GL_SCISSOR_BOX, box);
+    GLES.glGetIntegerv(GL_VIEWPORT, vp);
+    GLboolean colorMask[4] = {};
+    GLES.glGetBooleanv(GL_COLOR_WRITEMASK, colorMask);
+    GLint sampler = 0;
+    GLES.glGetIntegerv(GL_SAMPLER_BINDING, &sampler);
+    LOG_W_FORCE("[MGUIDIAG]   state blend=%d eq=0x%X/0x%X src=0x%X/0x%X dst=0x%X/0x%X cull=%d mode=0x%X front=0x%X "
+                "depth=%d func=0x%X mask=%d scissor=%d box=%d,%d %dx%d vp=%d,%d %dx%d colorMask=%d,%d,%d,%d "
+                "sampler=%d",
+                blend ? 1 : 0, eqRGB, eqA, srcRGB, dstRGB, srcA, dstA, cull ? 1 : 0, cullMode, frontFace,
+                depth ? 1 : 0, depthFunc, depthMask ? 1 : 0, scissor ? 1 : 0, box[0], box[1], box[2], box[3], vp[0],
+                vp[1], vp[2], vp[3], colorMask[0] ? 1 : 0, colorMask[1] ? 1 : 0, colorMask[2] ? 1 : 0,
+                colorMask[3] ? 1 : 0, sampler);
+}
+
+// One-shot per GUI program. The loading screen's logo/text are the only draws
+// that use the GUI programs but show no texture, so the shader's sampler unit,
+// the VAO's attribute formats and the bound buffers are what distinguish a
+// missing upload from a bad UV stream. Queried through GLES (the driver), not
+// this layer's wrappers, so the answer is the state the draw will actually use.
+static void mg_ui_state_diag(GLuint program) {
+    if (!mg_draw_trace_on()) return;
+
+    GLint vao = 0;
+    GLES.glGetIntegerv(GL_VERTEX_ARRAY_BINDING, &vao);
+    LOG_W_FORCE("[MGUIDIAG] prog=%u vao=%d appVao=%u realVao=%u", program, vao, find_bound_array(),
+                find_real_array(find_bound_array()));
+    mg_ui_draw_state_diag();
+    mg_ui_program_diag(program);
+
+    for (GLuint i = 0; i < 4; ++i) {
+        GLint en = 0, size = 0, type = 0, stride = 0, norm = 0, buf = 0, bind = 0, rel = 0;
+        GLES.glGetVertexAttribiv(i, GL_VERTEX_ATTRIB_ARRAY_ENABLED, &en);
+        GLES.glGetVertexAttribiv(i, GL_VERTEX_ATTRIB_ARRAY_SIZE, &size);
+        GLES.glGetVertexAttribiv(i, GL_VERTEX_ATTRIB_ARRAY_TYPE, &type);
+        GLES.glGetVertexAttribiv(i, GL_VERTEX_ATTRIB_ARRAY_STRIDE, &stride);
+        GLES.glGetVertexAttribiv(i, GL_VERTEX_ATTRIB_ARRAY_NORMALIZED, &norm);
+        GLES.glGetVertexAttribiv(i, GL_VERTEX_ATTRIB_ARRAY_BUFFER_BINDING, &buf);
+        GLES.glGetVertexAttribiv(i, GL_VERTEX_ATTRIB_BINDING, &bind);
+        GLES.glGetVertexAttribiv(i, GL_VERTEX_ATTRIB_RELATIVE_OFFSET, &rel);
+        GLfloat cur[4] = {0, 0, 0, 0};
+        GLES.glGetVertexAttribfv(i, GL_CURRENT_VERTEX_ATTRIB, cur);
+        LOG_W_FORCE("[MGUIDIAG]   a%u en=%d size=%d type=0x%X stride=%d norm=%d buf=%d bind=%d rel=%d "
+                    "cur=%.3f,%.3f,%.3f,%.3f",
+                    i, en, size, type, stride, norm, buf, bind, rel, cur[0], cur[1], cur[2], cur[3]);
+    }
+
+    GLint maxBindings = 0;
+    GLES.glGetIntegerv(GL_MAX_VERTEX_ATTRIB_BINDINGS, &maxBindings);
+    if (maxBindings > 4) maxBindings = 4;
+    for (GLint b = 0; b < maxBindings; ++b) {
+        GLint buf = 0, offset = 0, stride = 0, divisor = 0;
+        GLES.glGetIntegeri_v(GL_VERTEX_BINDING_BUFFER, b, &buf);
+        GLES.glGetIntegeri_v(GL_VERTEX_BINDING_OFFSET, b, &offset);
+        GLES.glGetIntegeri_v(GL_VERTEX_BINDING_STRIDE, b, &stride);
+        GLES.glGetIntegeri_v(GL_VERTEX_BINDING_DIVISOR, b, &divisor);
+        LOG_W_FORCE("[MGUIDIAG]   binding %d buf=%d off=%d stride=%d div=%d", b, buf, offset, stride, divisor);
+    }
+
+    // The GUI programs share the interleaved position/UV/colour stream. Reading
+    // the first vertices of binding 0 says whether the UVs the shader will
+    // consume are actually there, which the attribute queries above cannot
+    // answer: with glVertexArrayAttribFormat the per-attribute stride is always
+    // 0 and the binding's stride/offset carry the layout. Four vertices are
+    // enough to see a whole quad; the old eight words only covered two and a
+    // half, so an all-zero UV pair in vertices 2/3 was invisible.
+    {
+        GLint bindBuf = 0, bindOff = 0, bindStride = 0;
+        GLES.glGetIntegeri_v(GL_VERTEX_BINDING_BUFFER, 0, &bindBuf);
+        GLES.glGetIntegeri_v(GL_VERTEX_BINDING_OFFSET, 0, &bindOff);
+        GLES.glGetIntegeri_v(GL_VERTEX_BINDING_STRIDE, 0, &bindStride);
+        const GLuint real = bindBuf ? find_real_buffer(static_cast<GLuint>(bindBuf)) : 0;
+        if (real && bindStride > 0 && bindStride <= 256) {
+            GLint prevArray = 0;
+            GLES.glGetIntegerv(GL_ARRAY_BUFFER_BINDING, &prevArray);
+            GLES.glBindBuffer(GL_ARRAY_BUFFER, real);
+            const GLsizeiptr mapBytes = static_cast<GLsizeiptr>(bindStride) * 4;
+            void* map = GLES.glMapBufferRange(GL_ARRAY_BUFFER, bindOff, mapBytes, GL_MAP_READ_BIT);
+            if (map) {
+                unsigned int w[32] = {};
+                const size_t copy = mapBytes < static_cast<GLsizeiptr>(sizeof(w)) ? static_cast<size_t>(mapBytes)
+                                                                                   : sizeof(w);
+                memcpy(w, map, copy);
+                LOG_W_FORCE("[MGUIDIAG]   vbuf real=%u off=%d stride=%d bytes=%u w0=%08X w1=%08X w2=%08X w3=%08X "
+                            "w4=%08X w5=%08X w6=%08X w7=%08X",
+                            real, bindOff, bindStride, static_cast<unsigned>(copy), w[0], w[1], w[2], w[3], w[4], w[5],
+                            w[6], w[7]);
+                if (copy > 32) {
+                    LOG_W_FORCE("[MGUIDIAG]   vbuf2 w8=%08X w9=%08X w10=%08X w11=%08X w12=%08X w13=%08X w14=%08X "
+                                "w15=%08X w16=%08X w17=%08X w18=%08X w19=%08X w20=%08X w21=%08X w22=%08X w23=%08X",
+                                w[8], w[9], w[10], w[11], w[12], w[13], w[14], w[15], w[16], w[17], w[18], w[19],
+                                w[20], w[21], w[22], w[23]);
+                }
+                GLES.glUnmapBuffer(GL_ARRAY_BUFFER);
+            } else {
+                LOG_W_FORCE("[MGUIDIAG]   vbuf real=%u off=%d stride=%d map failed err=0x%X", real, bindOff, bindStride,
+                            GLES.glGetError());
+            }
+            GLES.glBindBuffer(GL_ARRAY_BUFFER, static_cast<GLuint>(prevArray));
+        } else {
+            LOG_W_FORCE("[MGUIDIAG]   vbuf real=%u off=%d stride=%d unusable", real, bindOff, bindStride);
+        }
+    }
+
+    GLint uniforms = 0;
+    GLES.glGetProgramiv(program, GL_ACTIVE_UNIFORMS, &uniforms);
+    for (GLint i = 0; i < uniforms; ++i) {
+        GLchar name[128];
+        GLsizei nameLen = 0;
+        GLint arraySize = 0;
+        GLenum type = 0;
+        GLES.glGetActiveUniform(program, (GLuint)i, sizeof(name), &nameLen, &arraySize, &type, name);
+        if (type != GL_SAMPLER_2D && type != GL_INT_SAMPLER_2D && type != GL_UNSIGNED_INT_SAMPLER_2D) continue;
+        const GLint loc = GLES.glGetUniformLocation(program, name);
+        GLint unit = -1;
+        if (loc >= 0) GLES.glGetUniformiv(program, loc, &unit);
+        GLuint tex = 0;
+        if (unit >= 0) mg_driver_texture_binding_at_unit(unit, GL_TEXTURE_2D, &tex);
+        LOG_W_FORCE("[MGUIDIAG]   sampler %s loc=%d unit=%d tex=%u", name, loc, unit, tex);
+    }
+}
+
+void mg_draw_trace_note() {
+    if (!mg_draw_trace_on()) return;
+    mg_draw_trace_rec_t& rec = g_draw_ring[g_draw_ring_pos];
+    rec.program = gl_state->current_program;
+    rec.fbo = gl_state->current_draw_fbo;
+    rec.drvFbo = mg_draw_trace_drv_draw_fbo();
+    GLuint tex0 = 0;
+    if (!mg_driver_texture_binding_at_unit(0, GL_TEXTURE_2D, &tex0)) tex0 = 0;
+    rec.tex0 = tex0;
+    rec.att0 = mg_draw_trace_att0(rec.fbo);
+    rec.kind = 0;
+    rec.what = 0;
+    rec.srcFbo = 0;
+    rec.count = rec.instances = 0;
+    rec.mode = 0;
+
+    // FBO 4 is the GUI's. Log the first draw of each program that reaches it
+    // once, while the state is the state that draw is about to use.
+    if (rec.fbo == 4) {
+        static GLuint loggedPrograms[8] = {};
+        static int loggedCount = 0;
+        bool seen = false;
+        for (int i = 0; i < loggedCount; ++i) {
+            if (loggedPrograms[i] == rec.program) {
+                seen = true;
+                break;
+            }
+        }
+        if (!seen && loggedCount < 8) {
+            loggedPrograms[loggedCount++] = rec.program;
+            mg_ui_state_diag(rec.program);
+        }
+    }
+
+    g_draw_ring_pos = (g_draw_ring_pos + 1) % kDrawTraceRing;
+    if (g_draw_ring_count < kDrawTraceRing) ++g_draw_ring_count;
+    ++g_draw_frame_total;
+}
+
+// Notes a draw that reaches the driver through a gl_native.cpp passthrough
+// (glDrawArrays and its instanced/indirect forms, glDrawElementsIndirect).
+// Nothing is emulated for those, but they are where the world's geometry goes,
+// so without them in the ring the GUI's position relative to the terrain --
+// before it, after it, on top of it -- cannot be seen.
+void mg_draw_trace_note_native(unsigned int count, unsigned int instances, unsigned int mode, char what) {
+    if (!mg_draw_trace_on()) return;
+    mg_draw_trace_rec_t& rec = g_draw_ring[g_draw_ring_pos];
+    rec.program = gl_state->current_program;
+    rec.fbo = gl_state->current_draw_fbo;
+    rec.drvFbo = mg_draw_trace_drv_draw_fbo();
+    GLuint tex0 = 0;
+    if (!mg_driver_texture_binding_at_unit(0, GL_TEXTURE_2D, &tex0)) tex0 = 0;
+    rec.tex0 = tex0;
+    rec.att0 = mg_draw_trace_att0(rec.fbo);
+    rec.kind = 2;
+    rec.what = what;
+    rec.srcFbo = 0;
+    rec.mask = 0;
+    rec.err = 0;
+    rec.count = (GLint)count;
+    rec.instances = (GLint)instances;
+    rec.mode = mode;
+    g_draw_ring_pos = (g_draw_ring_pos + 1) % kDrawTraceRing;
+    if (g_draw_ring_count < kDrawTraceRing) ++g_draw_ring_count;
+    ++g_draw_frame_total;
+}
+
+void mg_draw_trace_note_blit(unsigned int srcFbo, unsigned int dstFbo, unsigned int mask) {
+    if (!mg_draw_trace_on()) return;
+    mg_draw_trace_rec_t& rec = g_draw_ring[g_draw_ring_pos];
+    rec.kind = 1;
+    rec.what = 0;
+    rec.srcFbo = srcFbo;
+    rec.fbo = dstFbo;
+    rec.program = 0;
+    rec.tex0 = 0;
+    rec.drvFbo = mg_draw_trace_drv_read_fbo();
+    rec.count = rec.instances = 0;
+    rec.mode = 0;
+    rec.mask = mask;
+    rec.err = 0; // filled a moment later via mg_draw_trace_note_blit_error
+    // att0 of the src: the texture being copied toward the window. A mismatch
+    // against the draws just before it is the present-reading-a-different-
+    // texture case.
+    rec.att0 = mg_draw_trace_att0(srcFbo);
+    g_draw_ring_pos = (g_draw_ring_pos + 1) % kDrawTraceRing;
+    if (g_draw_ring_count < kDrawTraceRing) ++g_draw_ring_count;
+    ++g_draw_frame_total;
+}
+
+// Called by glBlitFramebuffer after the driver call so the dumped record carries
+// the real error rather than a placeholder.
+void mg_draw_trace_note_blit_error(unsigned int err) {
+    if (!mg_draw_trace_on()) return;
+    // The ring position was already advanced; the blit record is the previous
+    // slot (or the very last one when the ring is full-ish).
+    unsigned idx = (g_draw_ring_pos + kDrawTraceRing - 1) % kDrawTraceRing;
+    if (g_draw_ring[idx].kind == 1) g_draw_ring[idx].err = err;
+}
+
+void mg_draw_trace_dump(int swap_index) {
+    if (!mg_draw_trace_on()) return;
+    const unsigned total = (unsigned)g_draw_frame_total;
+    const unsigned count = g_draw_ring_count;
+    LOG_W_FORCE("[MGDRAW] frame before swap #%d: draws=%u (tail %u)", swap_index, total, count)
+    // Oldest first: the ring wraps, so the oldest of `count` entries is
+    // pos-count for a full ring and 0 otherwise.
+    const unsigned start = (count == kDrawTraceRing) ? g_draw_ring_pos : 0;
+    for (unsigned i = 0; i < count; ++i) {
+        const mg_draw_trace_rec_t& r = g_draw_ring[(start + i) % kDrawTraceRing];
+        if (r.kind == 1) {
+            LOG_W_FORCE("[MGDRAW]   %u: BLIT src=%u att0=%u drv=%u -> dst=%u mask=0x%x err=0x%x", i, r.srcFbo, r.att0,
+                        r.drvFbo, r.fbo, r.mask, r.err)
+        } else if (r.kind == 2) {
+            LOG_W_FORCE("[MGDRAW]   %u: NATIVE(%c) prog=%u fbo=%u drv=%u tex0=%u att0=%u n=%d i=%d m=0x%x", i, r.what,
+                        r.program, r.fbo, r.drvFbo, r.tex0, r.att0, r.count, r.instances, r.mode)
+        } else {
+            LOG_W_FORCE("[MGDRAW]   %u: prog=%u fbo=%u drv=%u tex0=%u att0=%u", i, r.program, r.fbo, r.drvFbo, r.tex0,
+                        r.att0)
+        }
+    }
+    mg_draw_trace_dump_fbo_tables(swap_index);
+    g_draw_ring_pos = 0;
+    g_draw_ring_count = 0;
+    g_draw_frame_total = 0;
+}
+
 void prepareForDraw() {
     LOG_D("prepareForDraw...")
+    mg_draw_trace_note();
     if (hardware->emulate_texture_buffer) {
         setupBufferTextureUniforms(gl_state->current_program);
     }

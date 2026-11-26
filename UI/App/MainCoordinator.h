@@ -1,24 +1,25 @@
 #import <UIKit/UIKit.h>
 #import "SidebarViewController.h"
 #import "DownloadManager.h"
-
-@class AmethystRootViewController;
+#import "WitchRootHost.h"
 
 @interface MainCoordinator : NSObject <UIViewControllerTransitioningDelegate>
 
-@property (nonatomic, weak) AmethystRootViewController *rootVC;
+@property (nonatomic, weak) id<WitchRootHost> rootVC;
 @property (nonatomic) DownloadManager *downloadManager;
 
-- (instancetype)initWithRootVC:(AmethystRootViewController *)rootVC;
+- (instancetype)initWithRootVC:(id<WitchRootHost>)rootVC;
 - (void)start;
 
 - (void)switchToTab:(SidebarTab)tab;
 - (void)showAccount;
 - (void)showSettings;
+- (void)showBackupHistory;
 - (void)showFileManager;
 - (void)showVersionPicker;
 - (void)showModLoaderPicker;
 - (void)showDownloadHub;
+- (void)showDownloadTasks;
 - (void)showAddVersion;
 - (void)removeVersion:(NSString *)versionName;
 - (void)selectVersion:(NSString *)versionName;

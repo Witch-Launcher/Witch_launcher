@@ -1,6 +1,7 @@
 #import "LauncherPreferences.h"
 #import "PLPreferences.h"
 #import "UIKit+hook.h"
+#import "WitchBranchDefaults.h"
 #import "config.h"
 #import "utils.h"
 #import "ZinkConfig.h"
@@ -16,8 +17,9 @@
         @"general": @{
             @"check_sha": @YES,
             @"cosmetica": @YES,
-            @"debug_logging": @(!CONFIG_RELEASE),
+            @"debug_logging": @(WitchFeatureDefaultEnabled(@"logs")),
             @"liquid_glass": @NO,
+            @"auto_hide_launching": @YES,
             @"widget_menu": @NO,
             @"widget_show_fps": @NO,
             @"widget_show_cpu": @NO,
@@ -33,11 +35,28 @@
             @"widget_cpu_style": @"percent",
             @"widget_scale": @(100),
             @"widget_position": @"",
+            @"mainsidebar_portrait": @"bottom",
+            @"mainsidebar_landscape": @"left",
+            @"profile_tabbar_portrait": @"bottom",
+            @"profile_tabbar_landscape": @"left",
+            @"profile_tabbar": @"",
+            @"orientation_lock": @"off",
+            @"lock_landscape": @NO,
+            @"overlay_log_in_game": @NO,
+            // Slow auto-roll of the log text (splash panel + in-game overlay).
+            @"log_auto_scroll": @YES,
+            @"log_scroll_speed": @(1.0),
+        }.mutableCopy,
+        @"profile": @{
+            // Legacy tab-bar position. The live setting is the per-orientation
+            // general.profile_tabbar_portrait / _landscape pair; this key is
+            // kept so old configs migrate without missing-preference warnings.
+            @"tabbar_position": @""
         }.mutableCopy,
         @"video": @{ // Video & Audio
             @"renderer": @"auto",
             @"resolution": @(100),
-            @"max_framerate": @YES,
+            @"graphics_backend_forcing": @"auto",
             @"performance_hud": @NO,
             @"fullscreen_airplay": @YES,
             @"silence_other_audio": @NO,
@@ -45,7 +64,15 @@
             @"allow_microphone": @NO,
             @"microphone_source": @"auto",
             @"moltenvk_version": @"1.4",
-            @"ltw_angle_backend": @"metal"
+            @"ltw_angle_backend": @"vulkan",
+            // Frame pacing. Both default OFF = no launcher-side lock, so the
+            // game is free to run up to the hardware/display ceiling.
+            @"vsync": @NO,
+            @"max_framerate": @"0",
+            // Uncapped present: lets the render loop run faster than the panel
+            // refresh (the extra frames are dropped at present time). Default
+            // OFF so the stock behaviour stays display-paced.
+            @"uncapped": @NO
         }.mutableCopy,
         @"control": @{
             @"default_ctrl": @"default.json",
@@ -56,12 +83,20 @@
             @"recording_hide": @YES,
             @"gesture_mouse": @YES,
             @"gesture_hotbar": @YES,
+            @"gesture_hold": @YES,
+            @"doubletap_offhand": @YES,
+            @"keyboard_editing_toolbar": @NO,
+            // Language of the hardware keyboard: "auto" follows the layout the
+            // system reports, "vi" always applies the Vietnamese (Telex) rules
+            // and "en" never does.
+            @"keyboard_input_mode": @"auto",
             @"disable_haptics": @NO,
-            @"slideable_hotbar": @NO,
+            @"slideable_hotbar": @YES,
             @"press_duration": @(400),
             @"button_scale": @(100),
             @"mouse_scale": @(100),
             @"mouse_speed": @(100),
+            @"camera_sensitivity": @(100),
             @"virtmouse_enable": @NO,
             @"virtmouse_cursor": @"default",
             @"gyroscope_enable": @NO,
@@ -96,6 +131,9 @@
             @"cursortype_hidden_enabled": @YES,
             @"cursortype_hidden_cursor": @"default"
         }.mutableCopy,
+        @"appearance": @{
+            @"launch_splash": @NO,
+        }.mutableCopy,
         @"java": @{
             @"java_homes": @{
                 @"0": @{
@@ -115,8 +153,12 @@
             @"allocated_memory": [NSNumber numberWithFloat:roundf((NSProcessInfo.processInfo.physicalMemory / 1048576) * 0.25)]
         }.mutableCopy,
         @"mobileglues": @{
-            @"enable_angle": @NO,
-            @"angle_backend": @"metal",
+            // Backend picker is the single source of truth:
+            // tgles = TGLES (off), metal = ANGLE Metal, vulkan = ANGLE Vulkan.
+            // enable_angle is kept as a mirrored legacy key for old configs.
+            // Default = ANGLE Vulkan (the only working backend right now).
+            @"enable_angle": @YES,
+            @"angle_backend": @"vulkan",
             @"enable_no_error": @(2),
             @"enable_ext_timer_query": @YES,
             @"enable_ext_compute_shader": @NO,
@@ -128,13 +170,39 @@
             @"custom_gl_version": @(0),
             @"fsr1_setting": @(0)
         }.mutableCopy,
+        // FidelityFX bridge (Natives/upscaler/ + fsr3-agent). Section and every
+        // key MUST exist here or setObject silently drops writes (see the tglmt
+        // note above) — the picker then always reverts to Off.
+        @"fsr3": @{
+            // 0 = off, 1 = FSR1, 2 = FSR2, 3 = FSR3 Upscaler.
+            @"upscaler": @(0),
+            // Frame generation is independent and can run together with the
+            // upscaler (upscale first, then interpolate the upscaled frame).
+            @"framegen": @NO,
+            // Frame generation multiplier: frames displayed per real frame
+            // (2 = classic x2, one generated frame; supports 2/3/4/6).
+            @"framegen_multiplier": @(2),
+            // Render resolution scale 0.25..1.0 (only used by the upscaler).
+            @"resolution_scale": @(1.0),
+            // RCAS sharpening 0..1 for the FSR1/FSR2/FSR3 dispatches.
+            @"sharpness": @(0.6),
+            // Perf measurement probe bitmask for the FidelityFX bridge
+            // (1=skip OF, 2=OF every frame, 4=skip interpolation,
+            // 8=skip gen present, 12=FG GPU bypass). 0 = production.
+            @"probe": @(0),
+            // Sub-pixel TAA jitter for the FidelityFX temporal accumulation:
+            // the scene is rendered at a different sub-pixel position every
+            // frame so the accumulation can resolve the aliasing instead of
+            // blurring it. Only used by FSR2 / FSR3 Upscaler.
+            @"jitter": @YES
+        }.mutableCopy,
         @"zink": @{
             @"optimization_level": @(-1),
             @"gl_override": @(0),
             @"enable_gl_thread": @YES,
             @"glsl_cache_size": @(32),
             @"api_features": @(0xFFFFFFFF),
-            @"mesa_version": @"26.2.2"
+            @"mesa_version": @"25.0.7"
         }.mutableCopy,
         @"mobilegl": @{
             @"backend_type": @"DirectVulkan",
@@ -173,6 +241,25 @@
             @"ai_own_model": @"",
             @"ai_language": @"auto"
         }.mutableCopy,
+        @"backup": @{
+            @"enabled": @NO,
+            @"auto_interval_hours": @(24),
+            @"auto_launch": @YES,
+            @"auto_exit": @YES,
+            @"auto_open": @NO,
+            @"auto_schedule": @YES,
+            @"retention": @(10),
+            @"scope_paths": @[],
+            @"folder_bookmark": @"",
+            @"webdav_url": @"",
+            @"webdav_username": @"",
+            @"gdrive_folderID": @"",
+            @"dest_folder_enabled": @NO,
+            @"dest_webdav_enabled": @NO,
+            @"dest_gdrive_enabled": @NO,
+            @"dest_onedrive_enabled": @NO,
+            @"dest_dropbox_enabled": @NO
+        }.mutableCopy,
         @"internal": @{
             @"isolated": @NO,
             @"latest_version": [NSDictionary new]
@@ -194,18 +281,46 @@
             @"debug_hide_home_indicator": @NO,
             @"debug_ipad_ui": @(realUIIdiom == UIUserInterfaceIdiomPad),
             @"debug_auto_correction": @YES,
-            @"debug_render_log": @NO,
-            @"mem_sample_log": @YES,
+            @"debug_render_log": @(WitchFeatureDefaultEnabled(@"logs")),
+            @"mem_sample_log": @(WitchFeatureDefaultEnabled(@"logs")),
             @"debug_server_enabled": @NO,
             @"debug_server_port": @(9090),
             @"debug_server_token": @"",
             @"debug_server_localhost_only": @NO
         }.mutableCopy;
+        defaults[@"perf"] = @{
+            // Auto-recording defaults OFF; manual recording from the in-game
+            // menu is always available.
+            @"record": @NO,
+            @"metric_fps": @YES,
+            @"metric_cpu": @YES,
+            @"metric_gpu": @YES,
+            @"metric_ram": @YES,
+            @"metric_devram": @YES,
+            @"metric_battery": @YES,
+            @"metric_battemp": @YES,
+            @"metric_thermal": @YES
+        }.mutableCopy;
+        // F3 debug overlay metadata (javaagent patches the game's debug screen
+        // so the launcher cannot set these at runtime; all feed JVM -D flags).
+        defaults[@"f3"] = @{
+            @"enabled": @YES,
+            @"show_chip": @YES,
+            @"show_ios": @YES,
+            @"show_launcher_name": @YES,
+            @"show_launcher_version": @YES,
+            @"show_build": @YES,
+            @"show_build_type": @YES
+        }.mutableCopy;
         defaults[@"launcher"] = @{
             @"language": @"auto",
             @"theme": @"System",
-            @"logo_style": (CONFIG_RELEASE ? @"purple" : @"dev")
+            @"logo_style": (CONFIG_RELEASE ? @"purple" : @"dev"),
+            @"update_channel": @(0)
         }.mutableCopy;
+        defaults[@"witch"][@"update_last_prompt"] = @(0);
+        defaults[@"witch"][@"update_repo"] = @"";
+        defaults[@"witch"][@"update_auto_check"] = @YES;
         defaults[@"curseforge"] = @{
             @"api_key": @""
         }.mutableCopy;
@@ -215,6 +330,7 @@
         // TODO: isolate this or add account picker into profile editor(?)
         defaults[@"internal"][@"selected_account"] = @"";
         defaults[@"internal"][@"ely_client_token"] = @"";
+        defaults[@"internal"][@"mod_loader"] = @"Vanilla";
     }
 
     return defaults;
@@ -252,7 +368,7 @@
 
 - (id)initWithAutomaticMigrator {
     self = [super init];
-    self.globalPath = [@(getenv("POJAV_HOME")) stringByAppendingPathComponent:@"launcher_preferences_v2.plist"];
+    self.globalPath = amethyst_hidden_path(@"launcher_preferences_v2.plist");
     NSMutableDictionary *pref = [NSMutableDictionary dictionaryWithContentsOfFile:self.globalPath];
 
     NSString *oldPath = [@(getenv("POJAV_HOME")) stringByAppendingPathComponent:@"launcher_preferences.plist"];
@@ -297,6 +413,41 @@
             id value = defaults[section][key];
             NSDebugLog(@"[PLPreferences] Set default vaule: %@: %@", key, value);
             pref[section][key] = value;
+        }
+    }
+
+    // MobileGlues backend used to be a switch (enable_angle) plus a picker
+    // that defaulted to "metal". That made "backend=Vulkan + switch off" look
+    // like a Vulkan selection but still run TGLES. Normalize the legacy pair
+    // once: off+metal meant the TGLES default, while an old ON switch or any
+    // Vulkan value was an explicit ANGLE choice.
+    NSMutableDictionary *mgPref = pref[@"mobileglues"];
+    NSMutableDictionary *internalPref = pref[@"internal"];
+    if ([mgPref isKindOfClass:[NSMutableDictionary class]] &&
+        [internalPref isKindOfClass:[NSMutableDictionary class]] &&
+        ![internalPref[@"mg_backend_picker_v1"] boolValue]) {
+        NSString *backend = mgPref[@"angle_backend"];
+        if (![backend isKindOfClass:[NSString class]] || [backend isEqualToString:@"metal"]) {
+            mgPref[@"angle_backend"] = [mgPref[@"enable_angle"] boolValue] ? @"metal" : @"tgles";
+        }
+        mgPref[@"enable_angle"] = @([mgPref[@"angle_backend"] isEqualToString:@"tgles"] ? NO : YES);
+        internalPref[@"mg_backend_picker_v1"] = @YES;
+    }
+
+    // Branch-scoped feature defaults are applied once per branch switch:
+    // beta builds enable the log options while main (and any other branch)
+    // turns them off. Stored values are only replaced on that transition, so
+    // manual toggles made on the same branch survive relaunches.
+    if (global) {
+        NSString *branch = WitchBuildBranch();
+        NSMutableDictionary *internal = pref[@"internal"];
+        if ([internal isKindOfClass:NSMutableDictionary.class] &&
+            ![branch isEqualToString:internal[@"branch_defaults_branch"]]) {
+            BOOL logs = WitchFeatureDefaultEnabled(@"logs");
+            pref[@"general"][@"debug_logging"] = @(logs);
+            pref[@"debug"][@"debug_render_log"] = @(logs);
+            pref[@"debug"][@"mem_sample_log"] = @(logs);
+            internal[@"branch_defaults_branch"] = branch;
         }
     }
 
@@ -381,16 +532,17 @@
         NSString *section = [key substringToIndex:dotRange.location];
         NSString *keyName = [key substringFromIndex:dotRange.location + 1];
         NSMutableDictionary *target = self.instancePref ?: self.globalPref;
-        if (target[section]) {
-            target[section][keyName] = value;
-            if (target == self.instancePref) {
-                [self saveInstancePref];
-            } else {
-                [self saveGlobalPref];
-            }
-            NSLog(@"[PLPreferences] Created new preference %@ = %@", key, value);
-            return YES;
+        if (!target[section]) {
+            target[section] = [NSMutableDictionary dictionary];
         }
+        target[section][keyName] = value;
+        if (target == self.instancePref) {
+            [self saveInstancePref];
+        } else {
+            [self saveGlobalPref];
+        }
+        NSLog(@"[PLPreferences] Created new preference %@ = %@", key, value);
+        return YES;
     }
     NSLog(@"[PLPreferences] Setter could not find preference %@", key);
     return NO;

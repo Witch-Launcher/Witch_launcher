@@ -170,7 +170,16 @@ static NSString * const kResourceManifestName = @"installed_resourcepacks.json";
 }
 
 - (void)postChange {
-    [[NSNotificationCenter defaultCenter] postNotificationName:InstalledModsDidChangeNotification object:nil];
+    [self postChangeWithReason:@"files"];
+}
+
+// reason == "enabled" means only an on/off file move happened (manifest and
+// parsed metadata are still valid), so observers can take a cheap path
+// instead of re-enriching every row.
+- (void)postChangeWithReason:(NSString *)reason {
+    [[NSNotificationCenter defaultCenter] postNotificationName:InstalledModsDidChangeNotification
+                                                        object:nil
+                                                      userInfo:@{@"reason": reason ?: @"files"}];
 }
 
 #pragma mark - Reads
@@ -458,7 +467,7 @@ static NSString * const kResourceManifestName = @"installed_resourcepacks.json";
         }
     }
     if (!ok) NSLog(@"[InstalledMods] setEnabled=%d %@ failed: %@", enabled, filename, err);
-    else [self postChange];
+    else [self postChangeWithReason:@"enabled"];
     return ok;
 }
 

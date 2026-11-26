@@ -1,0 +1,4 @@
+Premain-Class: net.vda.witchlaunch.fsr3.Fsr3Agent
+Agent-Class: net.vda.witchlaunch.fsr3.Fsr3Agent
+Can-Retransform-Classes: true
+Can-Redefine-Classes: true

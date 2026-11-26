@@ -178,7 +178,7 @@ typedef NS_ENUM(NSInteger, ProfileListFilter) {
         [_emptyLabel.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor constant:-40],
     ]];
     [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(onTheme) name:ThemeDidChangeNotification object:nil];
-    [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(onExternalChange) name:InstalledModsDidChangeNotification object:nil];
+    [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(onExternalChange:) name:InstalledModsDidChangeNotification object:nil];
     [self onTheme];
 }
 
@@ -226,7 +226,17 @@ typedef NS_ENUM(NSInteger, ProfileListFilter) {
     [_tableView reloadData];
 }
 
-- (void)onExternalChange { [self reloadContent]; }
+- (void)onExternalChange:(NSNotification *)note {
+    NSString *reason = note.userInfo[@"reason"];
+    if ([reason isEqualToString:@"enabled"]) {
+        // Toggle on/off: manifest, enrichment and update results are still
+        // valid — just re-evaluate visibility. Reloading here re-parsed every
+        // archive and froze the UI on large profiles.
+        [self applyFilter];
+        return;
+    }
+    [self reloadContent];
+}
 
 - (void)dealloc { [[NSNotificationCenter defaultCenter] removeObserver:self]; }
 
@@ -494,7 +504,8 @@ typedef NS_ENUM(NSInteger, ProfileListFilter) {
     if (!ok) {
         [ErrorPresenter showFileError:enabled ? @"Enable" : @"Disable" path:base error:nil];
     }
-    // setEnabled posts InstalledModsDidChangeNotification -> onExternalChange reloads.
+    // setEnabled posts InstalledModsDidChangeNotification (reason "enabled")
+    // -> onExternalChange skips the heavy reload and just re-applies the filter.
 }
 
 #pragma mark - Import / share / rename / delete / browse
@@ -733,7 +744,7 @@ typedef NS_ENUM(NSInteger, ProfileListFilter) {
         if (done) done();
         return;
     }
-    UIAlertController *loading = [UIAlertController alertControllerWithTitle:@"Resolving dependencies" message:nil preferredStyle:UIAlertControllerStyleAlert];
+    UIAlertController *loading = [UIAlertController alertControllerWithTitle:localize(@"mod.resolving_dependencies", nil) message:nil preferredStyle:UIAlertControllerStyleAlert];
     UIActivityIndicatorView *spinner = [[UIActivityIndicatorView alloc] initWithActivityIndicatorStyle:UIActivityIndicatorViewStyleLarge];
     spinner.translatesAutoresizingMaskIntoConstraints = NO;
     [spinner startAnimating];
@@ -752,7 +763,7 @@ typedef NS_ENUM(NSInteger, ProfileListFilter) {
         dispatch_async(dispatch_get_main_queue(), ^{
             [loading dismissViewControllerAnimated:YES completion:^{
                 if (error) {
-                    [ErrorPresenter showError:@"Error" message:[NSString stringWithFormat:@"Could not resolve dependencies: %@", error.localizedDescription]];
+                    [ErrorPresenter showError:localize(@"Error", nil) message:[NSString stringWithFormat:localize(@"mod.resolve_deps_failed", nil), error.localizedDescription]];
                     if (done) done();
                     return;
                 }
@@ -818,21 +829,32 @@ typedef NS_ENUM(NSInteger, ProfileListFilter) {
 }
 
 - (void)downloadJobQueue:(NSArray *)jobs index:(NSUInteger)index done:(void(^)(void))done {
-    if (index >= jobs.count) {
-        [HapticManager.shared play:HapticTypeSuccess];
-        [self reloadContent];
+    if (jobs.count == 0) {
         if (done) done();
         return;
     }
-    NSDictionary *job = jobs[index];
+    // Parallel fan-out: every job (main file + dependencies) downloads at the
+    // same time and reports into the download hub, so the launch button shows
+    // the cancel ✕ until the whole batch finishes.
+    __block NSUInteger failures = 0;
+    dispatch_group_t group = dispatch_group_create();
+    for (NSDictionary *job in jobs) {
+        dispatch_group_enter(group);
+        [self downloadSingleJob:job completion:^(BOOL ok) {
+            if (!ok) failures++;
+            dispatch_group_leave(group);
+        }];
+    }
     __weak typeof(self) weakSelf = self;
-    [self downloadSingleJob:job completion:^(BOOL ok) {
-        if (!ok && index == 0) {
-            if (done) done();
-            return;
+    dispatch_group_notify(group, dispatch_get_main_queue(), ^{
+        if (failures == 0) {
+            [HapticManager.shared play:HapticTypeSuccess];
+        } else {
+            [HapticManager.shared play:HapticTypeError];
         }
-        [weakSelf downloadJobQueue:jobs index:index + 1 done:done];
-    }];
+        [weakSelf reloadContent];
+        if (done) done();
+    });
 }
 
 - (void)downloadSingleJob:(NSDictionary *)job completion:(void(^)(BOOL ok))completion {
@@ -844,10 +866,9 @@ typedef NS_ENUM(NSInteger, ProfileListFilter) {
     if ([recordCategory isEqualToString:InstalledItemCategoryShaderPack]) dtype = DownloadTypeShader;
     else if ([recordCategory isEqualToString:InstalledItemCategoryResourcePack]) dtype = DownloadTypeResourcePack;
     DownloadTask *hubTask = [[DownloadManager shared] beginTaskWithName:job[@"title"] ?: filename type:dtype];
-    [hubTask setCancelBlock:^{}];
     __weak typeof(self) weakSelf = self;
-    [ModSourceService downloadVersion:job[@"versionDict"] ofMod:job[@"modRef"] progress:^(float p) {
-        [[DownloadManager shared] updateProgress:p forTask:hubTask];
+    NSURLSessionDownloadTask *dlTask = [ModSourceService downloadVersion:job[@"versionDict"] ofMod:job[@"modRef"] progressBytes:^(float p, long long received, long long total) {
+        [[DownloadManager shared] updateProgressBytes:p received:received total:total forTask:hubTask];
     } completion:^(NSString *dlPath, NSError *dlError) {
         [[DownloadManager shared] completeTask:hubTask error:dlError];
         dispatch_async(dispatch_get_main_queue(), ^{
@@ -878,6 +899,9 @@ typedef NS_ENUM(NSInteger, ProfileListFilter) {
                                                    profile:weakSelf.profile];
             if (completion) completion(YES);
         });
+    }];
+    [hubTask setCancelBlock:^{
+        [dlTask cancel];
     }];
 }
 

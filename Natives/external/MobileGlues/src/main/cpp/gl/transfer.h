@@ -63,6 +63,11 @@ struct mg_upload_fix_t {
     // rewritten freely.
     bool has_data() const { return has_data_; }
 
+    // True when `pixels` points at client memory the caller can dereference.
+    // With an unpack PBO bound `pixels` is a buffer offset, not an address;
+    // diagnostic code must not read through it.
+    bool has_client_pointer() const { return prev_pbo_ == 0 && pixels != nullptr; }
+
     // want_format, when non-zero, is the client format the destination is going
     // to be labelled with. The conversion emits that many channels, so the enum
     // handed to the driver always describes the bytes behind it. Pass 0 (the

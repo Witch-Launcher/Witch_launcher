@@ -20,6 +20,21 @@
 #include "libraryinternal.h"
 #include "env.h"
 
+static unsigned int gl_major = 3;
+static unsigned int gl_minor = 3;
+
+static bool extract_gl_version(const char* version) {
+    if(!version) return false;
+    unsigned int major, minor;
+    sscanf(version, "%u.%u", &major, &minor);
+    if((major < 2 || major > 4) || minor > 9) {
+        return false;
+    }
+    gl_major = major;
+    gl_minor = minor;
+    return true;
+}
+
 void glClearDepth(GLdouble depth) {
     if(!current_context) return;
     es3_functions.glClearDepthf((GLfloat) depth);
@@ -59,10 +74,26 @@ void *glMapBuffer(GLenum target, GLenum access) {
         case GL_READ_WRITE:
             access_range = GL_MAP_READ_BIT | GL_MAP_WRITE_BIT;
             break;
+
+        default:
+            // Desktop GL callers (Minecraft's AutoStorageIndexBuffer) sometimes
+            // pass a usage enum here. Map as read/write instead of using an
+            // uninitialised flag word, which made the mapping fail.
+            access_range = GL_MAP_READ_BIT | GL_MAP_WRITE_BIT;
+            break;
     }
 
+    length = 0;
     es3_functions.glGetBufferParameteriv(target, GL_BUFFER_SIZE, &length);
-    return es3_functions.glMapBufferRange(target, 0, length, access_range);
+    void* ret = length > 0 ? es3_functions.glMapBufferRange(target, 0, length, access_range) : NULL;
+    if(!ret) {
+        static int maplog = 0;
+        if(maplog++ < 40) {
+            printf("LTWMB: map FAILED target=0x%x access=0x%x size=%d flags=0x%x err=0x%x\n",
+                   target, access, (int)length, access_range, es3_functions.glGetError());
+        }
+    }
+    return ret;
 }
 
 INTERNAL int isProxyTexture(GLenum target) {
@@ -160,6 +191,22 @@ void glGetTexLevelParameteriv(GLenum target, GLint level, GLenum pname, GLint *p
 
 }
 
+// Texture bring-up tracing (same bounded budget as the framebuffer trace).
+static int ltwtx_budget = 400;
+#define LTWTX_LOG(...) do { if(ltwtx_budget > 0) { ltwtx_budget--; printf(__VA_ARGS__); } } while(0)
+
+void glGenTextures(GLsizei n, GLuint* textures) {
+    if(!current_context) { LTWTX_LOG("LTWTX: genTextures NOCTX n=%d\n", (int)n); return; }
+    es3_functions.glGenTextures(n, textures);
+    LTWTX_LOG("LTWTX: genTextures n=%d -> %u\n", (int)n, n > 0 ? textures[0] : 0);
+}
+
+void glBindTexture(GLenum target, GLuint texture) {
+    if(!current_context) { LTWTX_LOG("LTWTX: bindTexture NOCTX target=0x%x tex=%u\n", target, texture); return; }
+    LTWTX_LOG("LTWTX: bindTexture target=0x%x tex=%u\n", target, texture);
+    es3_functions.glBindTexture(target, texture);
+}
+
 void glTexImage2D(GLenum target, GLint level, GLint internalformat, GLsizei width, GLsizei height, GLint border, GLenum format, GLenum type, const GLvoid *data) {
     if(!current_context) return;
     if (isProxyTexture(target)) {
@@ -169,6 +216,8 @@ void glTexImage2D(GLenum target, GLint level, GLint internalformat, GLsizei widt
     } else {
         if(data != NULL) swizzle_process_upload(target, &format, &type);
         pick_internalformat(&internalformat, &type, &format, &data);
+        LTWTX_LOG("LTWTX: texImage2D target=0x%x level=%d internal=0x%x %dx%d format=0x%x type=0x%x data=%p\n",
+               target, level, (unsigned)internalformat, (int)width, (int)height, format, type, data);
         es3_functions.glTexImage2D(target, level, internalformat, width, height, border, format, type, data);
     }
 }
@@ -263,12 +312,33 @@ void glRenderbufferStorage(	GLenum target,
 
 static bool never_flush_buffers;
 static bool coherent_dynamic_storage;
+static bool debug;
+
+static GLint debug_query_bound_buffer(GLenum target) {
+    GLint binding = -1;
+    switch(target) {
+        case GL_ARRAY_BUFFER: es3_functions.glGetIntegerv(GL_ARRAY_BUFFER_BINDING, &binding); break;
+        case GL_ELEMENT_ARRAY_BUFFER: es3_functions.glGetIntegerv(GL_ELEMENT_ARRAY_BUFFER_BINDING, &binding); break;
+        case GL_UNIFORM_BUFFER: es3_functions.glGetIntegerv(GL_UNIFORM_BUFFER_BINDING, &binding); break;
+        case GL_PIXEL_PACK_BUFFER: es3_functions.glGetIntegerv(GL_PIXEL_PACK_BUFFER_BINDING, &binding); break;
+        case GL_PIXEL_UNPACK_BUFFER: es3_functions.glGetIntegerv(GL_PIXEL_UNPACK_BUFFER_BINDING, &binding); break;
+        case GL_COPY_READ_BUFFER: es3_functions.glGetIntegerv(GL_COPY_READ_BUFFER_BINDING, &binding); break;
+        case GL_COPY_WRITE_BUFFER: es3_functions.glGetIntegerv(GL_COPY_WRITE_BUFFER_BINDING, &binding); break;
+        case GL_TRANSFORM_FEEDBACK_BUFFER: es3_functions.glGetIntegerv(GL_TRANSFORM_FEEDBACK_BUFFER_BINDING, &binding); break;
+        default: binding = -2; break;
+    }
+    return binding;
+}
 
 void glBufferStorage(GLenum target,
                      GLsizeiptr size,
                      const void * data,
                      GLbitfield flags) {
-    if(!current_context || !current_context->buffer_storage) return;
+    if(!current_context || !current_context->buffer_storage) {
+        if(debug) printf("LTW: glBufferStorage target=0x%x size=%ld data=%p flags=0x%x SKIPPED (buffer_storage unsupported)\n",
+                         target, (long)size, data, flags);
+        return;
+    }
     // Enable coherence to make sure the buffers are synced without flushing.
     if(never_flush_buffers && ((flags & GL_MAP_PERSISTENT_BIT) != 0)) {
         flags |= GL_MAP_COHERENT_BIT;
@@ -277,7 +347,16 @@ void glBufferStorage(GLenum target,
     if(coherent_dynamic_storage && (flags & GL_DYNAMIC_STORAGE_BIT) != 0) {
         flags |= (GL_MAP_WRITE_BIT | GL_MAP_PERSISTENT_BIT | GL_MAP_COHERENT_BIT);
     }
+    GLenum preerr = 0;
+    if(debug) preerr = es3_functions.glGetError();
     es3_functions.glBufferStorageEXT(target, size, data, flags);
+    if(debug) {
+        int bidx = get_buffer_index(target);
+        printf("LTW: glBufferStorage target=0x%x size=%ld flags=0x%x preerr=0x%x err=0x%x hostbound=%d ltwbound=%d\n",
+               target, (long)size, flags, preerr, es3_functions.glGetError(),
+               debug_query_bound_buffer(target),
+               bidx < 0 ? -1 : (int)current_context->bound_buffers[bidx]);
+    }
 }
 
 void *glMapBufferRange( 	GLenum target,
@@ -285,7 +364,18 @@ void *glMapBufferRange( 	GLenum target,
                            GLsizeiptr length,
                            GLbitfield access) {
     if(never_flush_buffers) access &= ~GL_MAP_FLUSH_EXPLICIT_BIT;
-    return es3_functions.glMapBufferRange(target, offset, length, access);
+    GLenum preerr = 0;
+    if(debug) preerr = es3_functions.glGetError();
+    void* ret = es3_functions.glMapBufferRange(target, offset, length, access);
+    if(debug) {
+        int bidx = get_buffer_index(target);
+        printf("LTW: glMapBufferRange target=0x%x offset=%ld length=%ld access=0x%x -> %p preerr=0x%x err=0x%x hostbound=%d ltwbound=%d\n",
+               target, (long)offset, (long)length, access, ret, preerr,
+               ret ? 0 : es3_functions.glGetError(),
+               debug_query_bound_buffer(target),
+               bidx < 0 ? -1 : (int)current_context->bound_buffers[bidx]);
+    }
+    return ret;
 }
 
 void glFlushMappedBufferRange( 	GLenum target,
@@ -303,15 +393,22 @@ const GLubyte* glGetStringi(GLenum name, GLuint index) {
     }
 }
 
+#define GL_VERSION_STRING "%u.%u OpenLTW (Built on: " __DATE__ "/" __TIME__ ")"
+
+static char* gl_version;
+
 const GLubyte* glGetString(GLenum name) {
     if(!current_context) return NULL;
     switch(name) {
         case GL_VERSION:
-            return (const GLubyte*)"3.3 OpenLTW (Built on: "__DATE__"/"__TIME__")";
+            if(!gl_version) {
+                asprintf(&gl_version, GL_VERSION_STRING, gl_major, gl_minor);
+            }
+            return (const GLubyte*)gl_version;
         case GL_SHADING_LANGUAGE_VERSION:
             return (const GLubyte*)"4.60 LTW";
         case GL_VENDOR:
-            return (const GLubyte*)"artDev, SerpentSpirale, CADIndie";
+            return (const GLubyte*)"MojoLauncher";
         case GL_EXTENSIONS:
             if(current_context->extensions_string != NULL) return (const GLubyte*)current_context->extensions_string;
             return (const GLubyte*)es3_functions.glGetString(GL_EXTENSIONS);
@@ -418,10 +515,10 @@ void glGetIntegerv(GLenum pname, GLint* data) {
     if(!current_context) return;
     switch (pname) {
         case GL_MAJOR_VERSION:
-            *data = 3;
+            *data = (GLint) gl_major;
             return;
         case GL_MINOR_VERSION:
-            *data = 3;
+            *data = (GLint) gl_minor;
             return;
         case GL_NUM_EXTENSIONS:
             es3_functions.glGetIntegerv(pname, data);
@@ -445,6 +542,12 @@ void glGetIntegerv(GLenum pname, GLint* data) {
         default:
             es3_functions.glGetIntegerv(pname, data);
     }
+}
+
+void glGetFloatv(GLenum pname, GLfloat* data) {
+    if(!current_context) return;
+    es3_functions.glGetFloatv(pname, data);
+    if(debug) printf("LTW: glGetFloatv pname=0x%x -> %f\n", pname, *data);
 }
 
 void glDepthRange(GLdouble nearVal,
@@ -492,6 +595,55 @@ void glTexBufferRangeARB(GLenum target, GLenum internalFormat, GLuint buffer, GL
     glTexBufferRange(target, internalFormat, buffer, offset, size);
 }
 
+void glClearTexImage(GLuint texture,
+                     GLint level,
+                     GLenum format,
+                     GLenum type,
+                     const void * data) {
+    if(!current_context) return;
+    if(current_context->clear_texture) {
+        es3_functions.glClearTexImageEXT(texture, level, format, type, data);
+        return;
+    }
+    framebuffer_copier_t* copier = &current_context->framebuffer_copier;
+    if(!copier->ready) return;
+
+    es3_functions.glBindFramebuffer(GL_DRAW_FRAMEBUFFER, copier->tempfb);
+    es3_functions.glFramebufferTexture2D(GL_DRAW_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, texture, level);
+    es3_functions.glClearBufferiv(GL_COLOR, 0, data);
+    es3_functions.glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
+}
+
+void glClearTexImageARB(GLuint texture, GLint level, GLenum format, GLenum type, const void * data) {
+    glClearTexImage(texture, level, format, type, data);
+}
+
+// TODO: implement this
+static bool user_warned = false;
+void glClearTexSubImage(GLuint texture, int level,
+                      int xoffset, int yoffset, int zoffset,
+                      GLsizei width, GLsizei height, GLsizei depth,
+                      GLenum format, GLenum type,
+                      const void * data) {
+    if(current_context && current_context->clear_texture) {
+        es3_functions.glClearTexSubImageEXT(texture, level, xoffset, yoffset, zoffset, width, height, depth, format, type, data);
+        return;
+    }
+    if(!user_warned) {
+        printf("LTW: glClearTexSubImage emulation is currently not supported\n");
+        user_warned = true;
+
+    }
+}
+
+void glClearTexSubImageARB(GLuint texture, int level,
+                        int xoffset, int yoffset, int zoffset,
+                        GLsizei width, GLsizei height, GLsizei depth,
+                        GLenum format, GLenum type,
+                        const void * data) {
+    glClearTexSubImage(texture, level, xoffset, yoffset, zoffset, width, height, depth, format, type, data);
+}
+
 static bool noerror;
 
 __attribute((constructor)) void init_noerror() {
@@ -499,6 +651,8 @@ __attribute((constructor)) void init_noerror() {
     debug = env_istrue("LTW_DEBUG");
     never_flush_buffers = env_istrue_d("LTW_NEVER_FLUSH_BUFFERS", true);
     coherent_dynamic_storage = env_istrue_d("LTW_COHERENT_DYNAMIC_STORAGE", true);
+    bool version_overriden = extract_gl_version(getenv("MESA_GL_VERSION_OVERRIDE"));
+    if(version_overriden) printf("LTW will override exposed OpenGL version to %u.%u\n", gl_major, gl_minor);
     if(!noerror) printf("LTW will NOT ignore GL errors. This may break mods, consider yourself warned.\n");
     if(coherent_dynamic_storage) printf("LTW will force dynamic storage buffers to be coherent.\n");
     if(debug) printf("LTW will allow GL_DEBUG_OUTPUT to be enabled. Expect massive logs.\n");

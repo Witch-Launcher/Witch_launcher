@@ -1,0 +1,85 @@
+#import <Foundation/Foundation.h>
+#import <UIKit/UIKit.h>
+#import "WitchPluginRisk.h"
+#import "WitchPluginSandbox.h"
+
+NS_ASSUME_NONNULL_BEGIN
+
+// How much the launcher trusts the publisher of a build. Trust says nothing
+// about what the plugin does, that is the risk level.
+typedef NS_ENUM(NSInteger, WitchPluginTrust) {
+    // Only the signature and the checksums are valid. The publisher is unknown.
+    WitchPluginTrustNone = 0,
+    // The publisher is trusted: the registry verified this exact build, or the
+    // package hash is the one the catalog publishes.
+    WitchPluginTrustPublisher = 1
+};
+
+typedef NS_ENUM(NSInteger, WitchPluginVerificationState) {
+    WitchPluginVerificationStateUnverified = 0,
+    WitchPluginVerificationStateVerified = 1,
+    WitchPluginVerificationStateRevoked = 2,
+    WitchPluginVerificationStateInvalid = 3
+};
+
+@interface WitchPlugin : NSObject
+
+@property (nonatomic, readonly) NSString *pluginID;
+@property (nonatomic, readonly) NSString *name;
+@property (nonatomic, readonly) NSString *version;
+@property (nonatomic, readonly) NSString *summaryText;
+@property (nonatomic, readonly) NSString *detailsText;
+@property (nonatomic, readonly) NSString *author;
+@property (nonatomic, readonly) NSString *license;
+@property (nonatomic, readonly, nullable) NSString *sourceURL;
+@property (nonatomic, readonly, nullable) NSString *iconPath;
+@property (nonatomic, readonly, nullable) NSString *bannerPath;
+@property (nonatomic, readonly) NSString *installPath;
+@property (nonatomic, readonly) NSDictionary *manifest;
+@property (nonatomic, readonly) NSDictionary *state;
+@property (nonatomic, readonly) NSArray<NSString *> *permissions;
+@property (nonatomic, readonly) NSArray<NSDictionary *> *settingsSchema;
+@property (nonatomic, readonly) NSDictionary *entrypoints;
+@property (nonatomic, readonly) NSInteger apiVersion;
+@property (nonatomic, readonly) BOOL enabled;
+@property (nonatomic, readonly) BOOL trustedSignature;
+@property (nonatomic, readonly) BOOL developerSigned;
+@property (nonatomic, readonly) WitchPluginVerificationState verificationState;
+@property (nonatomic, readonly) NSString *verificationMessage;
+@property (nonatomic, readonly, nullable) NSString *signatureKeyID;
+@property (nonatomic, readonly, nullable) NSString *publicKeyBase64;
+@property (nonatomic, readonly, nullable) NSString *checksumsSha256;
+@property (nonatomic, readonly, nullable) NSString *artifactSha256;
+@property (nonatomic, readonly, nullable) NSString *verifiedAt;
+@property (nonatomic, readonly) NSInteger crashCount;
+// Behavioural risk computed from the manifest and the files that run.
+@property (nonatomic, readonly) WitchPluginRiskLevel riskLevel;
+@property (nonatomic, readonly) NSArray<NSDictionary *> *riskFindings;
+@property (nonatomic, readonly) NSArray<NSString *> *riskSummary;
+@property (nonatomic, readonly) BOOL sandboxRequired;
+// YES when the plugin runs inside the launcher sandbox.
+@property (nonatomic, readonly) BOOL sandboxed;
+// Trust in the publisher of this build.
+@property (nonatomic, readonly) WitchPluginTrust trust;
+@property (nonatomic, readonly, copy) NSString *trustMessage;
+// The package hash the catalog publishes for this plugin, when it came from a
+// catalog. The launcher compares it with the hash of the installed build.
+@property (nonatomic, readonly, nullable) NSString *publishedSha256;
+// What the sandbox rehearsal found while the package was verified.
+@property (nonatomic, readonly) WitchPluginSandboxVerdict sandboxVerdict;
+@property (nonatomic, readonly) NSArray<NSString *> *sandboxObservations;
+@property (nonatomic, readonly) NSArray<NSString *> *sandboxBlocked;
+@property (nonatomic, readonly) NSArray<NSString *> *sandboxErrors;
+@property (nonatomic, readonly) NSArray<NSString *> *sandboxCapabilities;
+
+- (instancetype)initWithInstallPath:(NSString *)installPath
+                           manifest:(NSDictionary *)manifest
+                              state:(NSDictionary *)state;
+- (void)updateState:(NSDictionary *)state;
+- (NSDictionary *)settings;
+- (nullable UIImage *)iconImage;
+- (nullable UIImage *)bannerImage;
+
+@end
+
+NS_ASSUME_NONNULL_END

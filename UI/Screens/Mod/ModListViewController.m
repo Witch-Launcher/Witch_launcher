@@ -449,6 +449,7 @@
 @property (nonatomic) NSArray *downloadDependencies;
 @property (nonatomic) NSMutableArray *dependencyInstallTasks;
 @property (nonatomic) DownloadProgressOverlay *dependencyOverlay;
+- (void)presentDependencyPopupForVersion:(NSDictionary *)version downloadMod:(NSDictionary *)downloadMod requiredDeps:(NSArray *)requiredDeps titles:(NSDictionary *)titles;
 @end
 
 @implementation ModListViewController
@@ -494,6 +495,10 @@
 
 - (void)viewWillAppear:(BOOL)animated {
     [super viewWillAppear:animated];
+    // The Mod tab's root page has no title and no back button, so the stock
+    // nav bar only renders as an empty slab covering the search area. Hide it
+    // here; the pushed detail page shows it again for "Quay lại".
+    [self.navigationController setNavigationBarHidden:YES animated:animated];
     _selectedMod = nil;
     _downloadBtn.hidden = YES;
     _installBtn.hidden = YES;
@@ -507,6 +512,7 @@
     _searchBar.delegate = self;
     _searchBar.placeholder = @"Search mods...";
     _searchBar.searchBarStyle = UISearchBarStyleMinimal;
+    [ThemeManager.shared styleSearchBar:_searchBar];
     [self.view addSubview:_searchBar];
 
     _spinner = [[UIActivityIndicatorView alloc] initWithActivityIndicatorStyle:UIActivityIndicatorViewStyleLarge];
@@ -541,6 +547,7 @@
     [_sourceControl setTitleTextAttributes:@{NSForegroundColorAttributeName: ThemeManager.shared.primaryTextColor, NSFontAttributeName: [UIFont systemFontOfSize:11 weight:UIFontWeightMedium]} forState:UIControlStateNormal];
     [_sourceControl setTitleTextAttributes:@{NSForegroundColorAttributeName: ThemeManager.shared.buttonTextColor, NSFontAttributeName: [UIFont systemFontOfSize:11 weight:UIFontWeightSemibold]} forState:UIControlStateSelected];
     [_sourceControl addTarget:self action:@selector(sourceChanged) forControlEvents:UIControlEventValueChanged];
+    [ThemeManager.shared styleSegmentedControl:_sourceControl];
     [self.view addSubview:_sourceControl];
 
     _tableView = [[UITableView alloc] init];
@@ -603,14 +610,11 @@
         self.view.backgroundColor = theme.contentBackgroundColor;
     }
     if (@available(iOS 13.0, *)) {
-        _searchBar.searchTextField.textColor = theme.primaryTextColor;
+        [theme styleSearchBar:_searchBar];
     }
-    _searchBar.tintColor = theme.accentColor;
     _emptyLabel.textColor = theme.secondaryTextColor;
     _errorLabel.textColor = theme.errorColor;
-    _sourceControl.selectedSegmentTintColor = theme.accentColor;
-    [_sourceControl setTitleTextAttributes:@{NSForegroundColorAttributeName: theme.primaryTextColor, NSFontAttributeName: [UIFont systemFontOfSize:11 weight:UIFontWeightMedium]} forState:UIControlStateNormal];
-    [_sourceControl setTitleTextAttributes:@{NSForegroundColorAttributeName: theme.buttonTextColor, NSFontAttributeName: [UIFont systemFontOfSize:11 weight:UIFontWeightSemibold]} forState:UIControlStateSelected];
+    [theme styleSegmentedControl:_sourceControl];
 }
 
 - (NSString *)selectedVersion {
@@ -1211,7 +1215,8 @@ static const NSInteger kModActionLoadingTag = 9001;
 
 - (void)showDependencyPopupWithVersion:(NSDictionary *)version {
     __weak typeof(self) weakSelf = self;
-    
+    NSDictionary *downloadMod = _downloadMod;
+
     NSArray *deps = version[@"dependencies"];
     NSMutableArray *requiredDeps = [NSMutableArray array];
     for (NSDictionary *dep in deps) {
@@ -1219,26 +1224,59 @@ static const NSInteger kModActionLoadingTag = 9001;
             [requiredDeps addObject:dep];
         }
     }
-    
-    NSString *modTitle = _downloadMod[@"title"] ?: @"Mod";
+
+    NSString *source = [ModSourceService isCurseForgeMod:downloadMod] ? @"curseforge" : @"modrinth";
+    NSMutableDictionary *titles = [NSMutableDictionary dictionary];
+    dispatch_group_t group = dispatch_group_create();
+    for (NSDictionary *dep in requiredDeps) {
+        NSString *projectId = dep[@"project_id"];
+        if (![projectId isKindOfClass:[NSString class]] || projectId.length == 0) continue;
+        dispatch_group_enter(group);
+        [ModSourceService loadDetailsForProjectId:projectId source:source completion:^(NSDictionary *project, NSError *error) {
+            NSString *title = project[@"title"];
+            @synchronized(titles) {
+                titles[projectId] = [title isKindOfClass:[NSString class]] && title.length > 0 ? title : projectId;
+            }
+            dispatch_group_leave(group);
+        }];
+    }
+
+    dispatch_group_notify(group, dispatch_get_main_queue(), ^{
+        [weakSelf presentDependencyPopupForVersion:version downloadMod:downloadMod requiredDeps:requiredDeps titles:titles];
+    });
+}
+
+- (void)presentDependencyPopupForVersion:(NSDictionary *)version downloadMod:(NSDictionary *)downloadMod requiredDeps:(NSArray *)requiredDeps titles:(NSDictionary *)titles {
+    __weak typeof(self) weakSelf = self;
+
+    NSString *modTitle = downloadMod[@"title"] ?: localize(@"Mod", nil);
     NSString *versionNumber = version[@"version_number"] ?: @"";
-    NSString *message = [NSString stringWithFormat:@"Install %@ %@ to current profile?", modTitle, versionNumber];
-    
+    NSString *message = [NSString stringWithFormat:localize(@"mod.install_prompt", nil), modTitle, versionNumber];
+
     if (requiredDeps.count > 0) {
-        message = [message stringByAppendingString:[NSString stringWithFormat:@"\n\nThis mod requires %ld dependencies:", (long)requiredDeps.count]];
+        message = [message stringByAppendingString:@"\n\n"];
+        message = [message stringByAppendingString:[NSString stringWithFormat:localize(@"mod.requires_dependencies", nil), (long)requiredDeps.count]];
+        NSString *modsDir = [self dependencyModsDirectory];
         for (NSDictionary *dep in requiredDeps) {
-            message = [message stringByAppendingString:[NSString stringWithFormat:@"\n• %@", dep[@"project_id"] ?: @"Unknown"]];
+            NSString *projectId = [dep[@"project_id"] isKindOfClass:[NSString class]] ? dep[@"project_id"] : nil;
+            NSString *title = projectId.length > 0 ? titles[projectId] : nil;
+            if (title.length == 0) title = localize(@"Unknown", nil);
+            BOOL installed = [self isDependencyInstalled:projectId inModsDir:modsDir];
+            NSString *status = installed ? localize(@"mod.dependency_installed", nil) : localize(@"mod.dependency_missing", nil);
+            message = [message stringByAppendingString:@"\n"];
+            message = [message stringByAppendingString:[NSString stringWithFormat:localize(@"mod.dependency_row", nil), title, status]];
         }
     }
-    
+
     // Check if mod is already installed
     BOOL isInstalled = [self isModInstalled:version];
     NSString *installTitle = isInstalled ? localize(@"mod.reinstall", nil) : localize(@"mod.install_to_profile", nil);
-    
+
     [AppSheet showOptionsWithTitle:modTitle message:message options:@[
         @{@"title": installTitle, @"icon": @"tray.and.arrow.down"},
         @{@"title": localize(@"mod.download_only", nil), @"icon": @"arrow.down.circle"},
     ] selectedIndex:NSNotFound selection:^(NSInteger idx) {
+        weakSelf.downloadMod = downloadMod;
         if (idx == 0) [weakSelf installModWithDependencies:version];
         else [weakSelf downloadModOnly:version];
     }];
@@ -1261,6 +1299,30 @@ static const NSInteger kModActionLoadingTag = 9001;
     }
     
     return [[NSFileManager defaultManager] fileExistsAtPath:modPath];
+}
+
+- (NSString *)dependencyModsDirectory {
+    NSString *version = VersionDirectoryManager.shared.currentVersion;
+    if (version.length == 0) {
+        version = VersionDirectoryManager.shared.currentProfile.mcVersion ?: @"1.21.4";
+    }
+    return [VersionDirectoryManager.shared modsPathForVersion:version];
+}
+
+- (BOOL)isDependencyInstalled:(NSString *)projectId inModsDir:(NSString *)modsDir {
+    if (projectId.length == 0 || modsDir.length == 0) return NO;
+
+    // The tracker is keyed by project id, so renamed jars are still found.
+    NSDictionary *info = [[InstalledModsManager shared] infoForProjectId:projectId
+                                                               category:InstalledItemCategoryMod];
+    NSString *filename = [info[@"filename"] isKindOfClass:[NSString class]] ? info[@"filename"] : nil;
+    if (filename.length == 0) return NO;
+
+    NSFileManager *fm = [NSFileManager defaultManager];
+    if ([fm fileExistsAtPath:[modsDir stringByAppendingPathComponent:filename]]) return YES;
+    // Disabled mods live in <mods>/off; still installed, just turned off.
+    NSString *offPath = [[modsDir stringByAppendingPathComponent:@"off"] stringByAppendingPathComponent:filename];
+    return [fm fileExistsAtPath:offPath];
 }
 
 - (void)installModWithDependencies:(NSDictionary *)version {
@@ -1293,37 +1355,54 @@ static const NSInteger kModActionLoadingTag = 9001;
 }
 
 - (void)installDependencies:(NSArray *)deps index:(NSInteger)index version:(NSDictionary *)mainVersion completion:(void(^)(BOOL))completion {
-    if (index >= deps.count) {
+    if (deps.count == 0) {
         completion(YES);
         return;
     }
-    
-    NSDictionary *dep = deps[index];
+    // Parallel fan-out: every required dependency resolves and downloads on
+    // its own, reporting into the top-bar hub so the launch button morphs to
+    // cancel and the download list shows live progress and speeds.
+    dispatch_group_t group = dispatch_group_create();
+    for (NSDictionary *dep in deps) {
+        if (![dep isKindOfClass:[NSDictionary class]]) continue;
+        NSString *depProjectId = dep[@"project_id"];
+        if (![depProjectId isKindOfClass:[NSString class]] || depProjectId.length == 0) continue;
+        dispatch_group_enter(group);
+        [self installSingleDependency:dep completion:^{
+            dispatch_group_leave(group);
+        }];
+    }
+    dispatch_group_notify(group, dispatch_get_main_queue(), ^{
+        completion(YES);
+    });
+}
+
+- (void)installSingleDependency:(NSDictionary *)dep completion:(void(^)(void))completion {
     NSString *depProjectId = dep[@"project_id"];
-    if (!depProjectId) {
-        [self installDependencies:deps index:index + 1 version:mainVersion completion:completion];
+    NSString *depSource = [ModSourceService isCurseForgeMod:_downloadMod] ? @"curseforge" : @"modrinth";
+
+    // Skip before any network work when the dependency is already present.
+    if ([self isDependencyInstalled:depProjectId inModsDir:[self dependencyModsDirectory]]) {
+        if (completion) completion();
         return;
     }
-    
-    __weak typeof(self) weakSelf = self;
-    NSString *depSource = [ModSourceService isCurseForgeMod:_downloadMod] ? @"curseforge" : @"modrinth";
     [ModSourceService loadDetailsForProjectId:depProjectId source:depSource completion:^(NSDictionary *project, NSError *error) {
         if (error || !project) {
-            [weakSelf installDependencies:deps index:index + 1 version:mainVersion completion:completion];
+            if (completion) completion();
             return;
         }
 
         NSDictionary *depMod = @{@"project_id": depProjectId, @"_source": depSource};
         [ModSourceService loadVersionsForMod:depMod completion:^(NSArray<NSDictionary *> *depVersions, NSError *vError) {
             if (vError || depVersions.count == 0) {
-                [weakSelf installDependencies:deps index:index + 1 version:mainVersion completion:completion];
+                if (completion) completion();
                 return;
             }
-            
+
             VersionProfile *profile = VersionDirectoryManager.shared.currentProfile;
             NSString *targetVersion = profile.mcVersion ?: VersionDirectoryManager.shared.currentVersion ?: @"";
             NSString *targetLoader = [profile.modLoader lowercaseString] ?: @"";
-            
+
             NSDictionary *bestVer = nil;
             for (NSDictionary *dv in depVersions) {
                 BOOL vm = targetVersion.length == 0 || [dv[@"game_versions"] containsObject:targetVersion];
@@ -1334,42 +1413,59 @@ static const NSInteger kModActionLoadingTag = 9001;
                 }
             }
             if (!bestVer) bestVer = depVersions.firstObject;
-            
+
             dispatch_async(dispatch_get_main_queue(), ^{
                 NSString *depTitle = project[@"title"] ?: @"Unknown";
-                [_dependencyOverlay updateProgress:(float)index / deps.count message:[NSString stringWithFormat:localize(@"progress.msg.installing_item", nil), depTitle]];
+                if (_dependencyOverlay) {
+                    [_dependencyOverlay dismiss];
+                    _dependencyOverlay = nil;
+                }
 
                 NSString *filename = bestVer[@"filename"] ?: @"mod.jar";
                 NSString *mcVersion = VersionDirectoryManager.shared.currentVersion;
                 if (mcVersion.length == 0) {
                     mcVersion = VersionDirectoryManager.shared.currentProfile.mcVersion ?: @"1.21.4";
                 }
+                NSString *modsDir = [VersionDirectoryManager.shared modsPathForVersion:mcVersion];
+                NSString *targetPath = [modsDir stringByAppendingPathComponent:filename];
+                if (![targetPath hasSuffix:@".jar"]) targetPath = [targetPath stringByAppendingPathExtension:@"jar"];
+                // Untracked but already on disk (manual install or old
+                // manifest): keep it and skip the redundant download.
+                NSString *offPath = [[modsDir stringByAppendingPathComponent:@"off"] stringByAppendingPathComponent:targetPath.lastPathComponent];
+                if ([[NSFileManager defaultManager] fileExistsAtPath:targetPath] ||
+                    [[NSFileManager defaultManager] fileExistsAtPath:offPath]) {
+                    if (completion) completion();
+                    return;
+                }
 
+                __weak typeof(self) weakSelf = self;
                 NSDictionary *depVerMod = @{@"project_id": depProjectId, @"_source": depSource};
-                NSURLSessionDownloadTask *task = [ModSourceService downloadVersion:bestVer ofMod:depVerMod progress:^(float p) {
-                    // Progress handled by overlay
+                DownloadTask *hubTask = [[DownloadManager shared] beginTaskWithName:depTitle type:DownloadTypeMod];
+                NSURLSessionDownloadTask *task = [ModSourceService downloadVersion:bestVer ofMod:depVerMod progressBytes:^(float p, long long received, long long total) {
+                    [[DownloadManager shared] updateProgressBytes:p received:received total:total forTask:hubTask];
                 } completion:^(NSString *path, NSError *dlError) {
+                    [[DownloadManager shared] completeTask:hubTask error:dlError];
                     if (path) {
-                        NSString *modsDir = [VersionDirectoryManager.shared modsPathForVersion:mcVersion];
-                        NSString *targetPath = [modsDir stringByAppendingPathComponent:filename];
-                        if (![targetPath hasSuffix:@".jar"]) targetPath = [targetPath stringByAppendingPathExtension:@"jar"];
                         [[NSFileManager defaultManager] createDirectoryAtPath:modsDir withIntermediateDirectories:YES attributes:nil error:nil];
                         [[NSFileManager defaultManager] removeItemAtPath:targetPath error:nil];
                         [[NSFileManager defaultManager] moveItemAtPath:path toPath:targetPath error:nil];
                         NSString *depIcon = [project[@"icon_url"] isKindOfClass:[NSString class]] ? project[@"icon_url"] : @"";
                         [[InstalledModsManager shared] recordProjectId:depProjectId
                                                                  title:depTitle
-                                                        versionNumber:bestVer[@"version_number"]
-                                                              filename:targetPath.lastPathComponent
-                                                               iconURL:depIcon
-                                                                source:depSource
-                                                              category:InstalledItemCategoryMod
-                                                             mcVersion:mcVersion
-                                                                loader:targetLoader
+                                                         versionNumber:bestVer[@"version_number"]
+                                                               filename:targetPath.lastPathComponent
+                                                                iconURL:depIcon
+                                                                 source:depSource
+                                                               category:InstalledItemCategoryMod
+                                                              mcVersion:mcVersion
+                                                                 loader:targetLoader
                                                            projectType:@"mod"
                                                                profile:nil];
                     }
-                    [weakSelf installDependencies:deps index:index + 1 version:mainVersion completion:completion];
+                    if (completion) completion();
+                }];
+                [hubTask setCancelBlock:^{
+                    [task cancel];
                 }];
                 if (task) [weakSelf.dependencyInstallTasks addObject:task];
             });
@@ -1397,8 +1493,8 @@ static const NSInteger kModActionLoadingTag = 9001;
         for (NSURLSessionDownloadTask *t in weakSelf.dependencyInstallTasks) [t cancel];
     }];
 
-    NSURLSessionDownloadTask *task = [ModSourceService downloadVersion:version ofMod:_downloadMod progress:^(float p) {
-        [[DownloadManager shared] updateProgress:p forTask:hubTask];
+    NSURLSessionDownloadTask *task = [ModSourceService downloadVersion:version ofMod:_downloadMod progressBytes:^(float p, long long received, long long total) {
+        [[DownloadManager shared] updateProgressBytes:p received:received total:total forTask:hubTask];
     } completion:^(NSString *path, NSError *dlError) {
         [[DownloadManager shared] completeTask:hubTask error:dlError];
         if (!path) return;

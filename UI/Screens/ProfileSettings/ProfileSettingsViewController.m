@@ -48,10 +48,10 @@
     _rendererNames = getRendererNames(YES);
     _lwjglList = getLwjglVersions(YES);
 
-    NSString *ctrlPath = [NSString stringWithFormat:@"%s/controlmap", getenv("POJAV_HOME")];
+    NSString *ctrlPath = amethyst_control_path(nil);
     _touchControlList = [self listFilesAtPath:ctrlPath];
 
-    NSString *gamepadPath = [NSString stringWithFormat:@"%s/controlmap/gamepads", getenv("POJAV_HOME")];
+    NSString *gamepadPath = amethyst_control_path(@"gamepads");
     _gamepadControlList = [self listFilesAtPath:gamepadPath];
 
     NSMutableArray *java = [getPrefObject(@"java.java_homes") allKeys].mutableCopy;

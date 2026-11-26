@@ -46,10 +46,25 @@
         _actionButton = [UIButton buttonWithType:UIButtonTypeSystem];
         _actionButton.translatesAutoresizingMaskIntoConstraints = NO;
         _actionButton.titleLabel.font = [UIFont systemFontOfSize:12 weight:UIFontWeightSemibold];
+        _actionButton.titleLabel.lineBreakMode = NSLineBreakByTruncatingMiddle;
+        _actionButton.titleLabel.adjustsFontSizeToFitWidth = YES;
+        _actionButton.titleLabel.minimumScaleFactor = 0.8;
         _actionButton.layer.cornerRadius = 8;
         _actionButton.contentEdgeInsets = UIEdgeInsetsMake(5, 10, 5, 10);
         [_actionButton addTarget:self action:@selector(actionTapped) forControlEvents:UIControlEventTouchUpInside];
         [self.contentView addSubview:_actionButton];
+
+        // Fixed-width action column: titles differ in length ("Update" vs
+        // "Installed"), so an intrinsic-size button made the text/button
+        // boundary jump from row to row (looked misaligned, worst with long
+        // descriptions). Long titles shrink instead of resizing the column.
+        [_actionButton.widthAnchor constraintEqualToConstant:88].active = YES;
+
+        // Truncate titles before the badge row pushes into the action column.
+        [_nameLabel setContentCompressionResistancePriority:UILayoutPriorityDefaultLow + 1 forAxis:UILayoutConstraintAxisHorizontal];
+        [_detailLabel setContentCompressionResistancePriority:UILayoutPriorityDefaultLow + 1 forAxis:UILayoutConstraintAxisHorizontal];
+        [_sourceBadge setContentCompressionResistancePriority:UILayoutPriorityDefaultLow + 3 forAxis:UILayoutConstraintAxisHorizontal];
+        [_statusBadge setContentCompressionResistancePriority:UILayoutPriorityDefaultLow + 2 forAxis:UILayoutConstraintAxisHorizontal];
 
         [NSLayoutConstraint activateConstraints:@[
             [_iconView.leadingAnchor constraintEqualToAnchor:self.contentView.leadingAnchor constant:12],
@@ -72,6 +87,7 @@
 
             [_statusBadge.centerYAnchor constraintEqualToAnchor:_sourceBadge.centerYAnchor],
             [_statusBadge.leadingAnchor constraintEqualToAnchor:_sourceBadge.trailingAnchor constant:6],
+            [_statusBadge.trailingAnchor constraintLessThanOrEqualToAnchor:_actionButton.leadingAnchor constant:-6],
             [_statusBadge.heightAnchor constraintEqualToConstant:16],
 
             [_actionButton.centerYAnchor constraintEqualToAnchor:self.contentView.centerYAnchor],
@@ -92,6 +108,9 @@
     b.font = [UIFont systemFontOfSize:10 weight:UIFontWeightMedium];
     b.textColor = UIColor.whiteColor;
     b.textAlignment = NSTextAlignmentCenter;
+    b.lineBreakMode = NSLineBreakByTruncatingTail;
+    b.adjustsFontSizeToFitWidth = YES;
+    b.minimumScaleFactor = 0.75;
     b.layer.cornerRadius = 4;
     b.clipsToBounds = YES;
     [self.contentView addSubview:b];
